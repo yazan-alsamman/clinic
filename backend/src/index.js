@@ -73,4 +73,6 @@ connectDb()
   })
   .catch((err) => {
     console.error('MongoDB connection failed:', err?.message || err)
+    const code = err?.code ?? err?.cause?.code
+    if (code != null) console.error('MongoDB error code:', code)
   })
