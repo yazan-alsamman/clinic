@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useClinic } from '../context/ClinicContext'
 import { useAuth } from '../context/AuthContext'
@@ -12,13 +12,44 @@ export function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const [closeOpen, setCloseOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
   const role = user?.role
   const nav = role ? visibleNavForRole(role) : []
   const gated = !dayActive && role !== 'super_admin'
 
+  useEffect(() => {
+    setNavOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!navOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [navOpen])
+
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNavOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navOpen])
+
   return (
-    <div className="app-layout">
-      <aside className="sidebar">
+    <div className={`app-layout${navOpen ? ' app-layout--nav-open' : ''}`}>
+      {navOpen ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="إغلاق القائمة"
+          onClick={() => setNavOpen(false)}
+        />
+      ) : null}
+      <aside className="sidebar" id="app-sidebar" aria-label="التنقل">
         <div className="sidebar-brand">
           <div className="sidebar-brand-mark">ED</div>
           <div className="sidebar-brand-title">مركز الدكتور إلياس دحدل</div>
@@ -33,6 +64,7 @@ export function AppShell() {
               className={({ isActive }) =>
                 `sidebar-link${isActive ? ' active' : ''}`
               }
+              onClick={() => setNavOpen(false)}
             >
               {item.label}
             </NavLink>
@@ -54,9 +86,21 @@ export function AppShell() {
 
       <div className="main-wrap">
         <header className="topbar">
-          <div className="topbar-meta">
-            <span style={{ fontWeight: 600 }}>{user?.name ?? '—'}</span>
-            {role ? <span className="role-pill">{roleLabel(role)}</span> : null}
+          <div className="topbar-leading">
+            <button
+              type="button"
+              className="sidebar-menu-btn"
+              aria-expanded={navOpen}
+              aria-controls="app-sidebar"
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              <span className="sidebar-menu-btn__bars" aria-hidden />
+              <span className="sr-only">القائمة</span>
+            </button>
+            <div className="topbar-meta">
+              <span style={{ fontWeight: 600 }}>{user?.name ?? '—'}</span>
+              {role ? <span className="role-pill">{roleLabel(role)}</span> : null}
+            </div>
           </div>
           <button
             type="button"

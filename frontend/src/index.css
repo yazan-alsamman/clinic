@@ -64,6 +64,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text);
   position: relative;
   overflow-x: hidden;
@@ -128,6 +129,11 @@ button {
   display: flex;
   min-height: 100vh;
   position: relative;
+}
+
+.login-page {
+  padding: max(1.25rem, env(safe-area-inset-top, 0px)) max(1.25rem, env(safe-area-inset-right, 0px))
+    max(1.25rem, env(safe-area-inset-bottom, 0px)) max(1.25rem, env(safe-area-inset-left, 0px));
 }
 
 .sidebar {
@@ -239,6 +245,9 @@ button {
   background: var(--surface-elevated);
   border-bottom: 1px solid var(--border);
   padding: 0.75rem 1.5rem;
+  padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -249,11 +258,64 @@ button {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
+.topbar-leading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-menu-btn {
+  display: none;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.2s var(--ease-out-expo),
+    border-color 0.2s;
+}
+
+.sidebar-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(34, 211, 238, 0.35);
+}
+
+.sidebar-menu-btn__bars {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  box-shadow:
+    0 -6px 0 currentColor,
+    0 6px 0 currentColor;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
 .topbar-meta {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.topbar-meta > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(42vw, 14rem);
 }
 
 .role-pill {
@@ -305,6 +367,9 @@ button {
 .main-content {
   flex: 1;
   padding: 1.35rem 1.5rem 2.5rem;
+  padding-left: max(1.25rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+  padding-bottom: max(2.5rem, env(safe-area-inset-bottom, 0px));
   max-width: 1440px;
   width: 100%;
   margin: 0 auto;
@@ -459,7 +524,7 @@ button {
 
 .grid-2 {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 1.1rem;
 }
 
@@ -692,16 +757,95 @@ button {
   .area-layout {
     grid-template-columns: 1fr;
   }
-  .sidebar {
-    width: 100%;
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    border-inline-end: none;
-    border-bottom: 1px solid var(--border);
+}
+
+/* Phones, tablets, iPad portrait — drawer nav + full-width main */
+@media (max-width: 1023px) {
+  .sidebar-menu-btn {
+    display: inline-flex;
   }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 280;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: rgba(3, 4, 10, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    cursor: pointer;
+    animation: fadeIn 0.2s var(--ease-out-expo);
+  }
+
   .app-layout {
-    flex-direction: column;
+    flex-direction: row;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset-block: 0;
+    /* RTL: inline-start = physical right (same side as column sidebar on desktop) */
+    inset-inline-start: 0;
+    width: min(292px, calc(100vw - 3rem));
+    max-width: 100%;
+    z-index: 290;
+    transform: translateX(100%);
+    transition: transform 0.3s var(--ease-out-expo);
+    box-shadow: -12px 0 48px rgba(0, 0, 0, 0.45);
+    border-inline-end: none;
+    border-inline-start: 1px solid var(--border);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-layout--nav-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .main-wrap {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .topbar-meta > span:first-of-type {
+    max-width: min(52vw, 16rem);
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding-top: 1rem;
+    padding-left: max(0.85rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.85rem, env(safe-area-inset-right, 0px));
+  }
+
+  .topbar {
+    padding: 0.65rem 0.85rem;
+    padding-left: max(0.65rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.65rem, env(safe-area-inset-right, 0px));
+  }
+
+  .card {
+    padding: 1.05rem;
+  }
+
+  .page-desc {
+    font-size: 0.88rem;
+  }
+
+  .search-hero .input {
+    font-size: 1rem;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.8rem;
   }
 }
 
@@ -878,9 +1022,22 @@ button {
 /* ─── Dental chart ─── */
 .tooth-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 0.4rem;
-  max-width: 380px;
+  max-width: min(380px, 100%);
+  width: 100%;
+}
+
+@media (max-width: 380px) {
+  .tooth-grid {
+    gap: 0.28rem;
+  }
+
+  .tooth-btn {
+    min-height: 34px;
+    font-size: 0.62rem;
+    padding: 0;
+  }
 }
 
 .tooth-btn {
@@ -931,7 +1088,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px)) max(0.75rem, env(safe-area-inset-right, 0px))
+    max(0.75rem, env(safe-area-inset-bottom, 0px)) max(0.75rem, env(safe-area-inset-left, 0px));
   animation: fadeIn 0.25s var(--ease-out-expo);
 }
 
@@ -950,6 +1108,9 @@ button {
   padding: 1.65rem;
   max-width: 420px;
   width: 100%;
+  max-height: min(88dvh, calc(100vh - 1.5rem));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border-bright);
   box-shadow: var(--glow-cyan), var(--shadow-elevated);
   animation: riseIn 0.35s var(--ease-out-expo);
@@ -992,7 +1153,7 @@ button {
 }
 
 .page-title {
-  font-size: 1.55rem;
+  font-size: clamp(1.2rem, 2.8vw + 0.65rem, 1.55rem);
   font-weight: 800;
   margin: 0 0 0.35rem;
   letter-spacing: -0.03em;

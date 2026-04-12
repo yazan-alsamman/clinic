@@ -100,8 +100,8 @@ export function Login() {
 
   return (
     <div
-      className="app-layout"
-      style={{ minHeight: '100vh', placeItems: 'center', display: 'grid', padding: '2rem' }}
+      className="app-layout login-page"
+      style={{ minHeight: '100vh', placeItems: 'center', display: 'grid' }}
     >
       <div className="card" style={{ maxWidth: 420, width: '100%' }}>
         <div className="sidebar-brand" style={{ marginBottom: '1.25rem' }}>
