@@ -1,0 +1,67 @@
+# Builds the Vite frontend on every push (validates TypeScript + bundle).
+# Optional: manual run with "Upload to Hostinger via FTP" uploads frontend/dist after build.
+#
+# Repository secrets (Settings → Secrets → Actions), when using FTP upload:
+#   VITE_API_BASE_URL          e.g. https://YOUR-API.hostingersite.com  (no trailing slash)
+#   HOSTINGER_FTP_HOST         FTP hostname from hPanel (e.g. ftp.hostinger.com)
+#   HOSTINGER_FTP_USERNAME     FTP username
+#   HOSTINGER_FTP_PASSWORD     FTP password
+#   HOSTINGER_FTP_SERVER_DIR   Remote folder with trailing slash, e.g. public_html/ or domains/site/public_html/
+
+name: Frontend build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-build.yml'
+  workflow_dispatch:
+    inputs:
+      ftp_upload:
+        description: 'After build, upload dist to Hostinger via FTP (needs FTP secrets)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build
+        working-directory: frontend
+        run: npm ci && npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+  ftp-deploy:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.ftp_upload == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+
+      - name: Upload to Hostinger (FTP)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
+        with:
+          server: ${{ secrets.HOSTINGER_FTP_HOST }}
+          username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
+          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          local-dir: ./dist/
+          server-dir: ${{ secrets.HOSTINGER_FTP_SERVER_DIR }}
