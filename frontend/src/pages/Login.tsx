@@ -80,7 +80,12 @@ export function Login() {
       } else {
         const msg = String((e as Error)?.message || '')
         if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-          setErr('تعذر الاتصال بالخادم — شغّل الـ API (المنفذ 5000) أو تحقق من الوكيل في Vite.')
+          const apiBase = import.meta.env.VITE_API_BASE_URL?.trim()
+          setErr(
+            apiBase
+              ? `تعذر الاتصال بـ API (${apiBase}). تحقق أن الباكند يعمل وأن المتصفح يسمح بالطلبات (CORS/HTTPS).`
+              : 'تعذر الاتصال بالخادم. للتطوير المحلي: شغّل الباكند من مجلد backend بـ npm run dev (منفذ 5000). أو أنشئ ملف .env في مجلد الواجهة يحتوي VITE_API_BASE_URL=https://رابط-الباكند',
+          )
         } else {
           setErr('فشل تسجيل الدخول — تحقق من البيانات')
         }
