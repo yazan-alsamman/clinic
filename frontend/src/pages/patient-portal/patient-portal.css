@@ -1,0 +1,207 @@
+/* Patient portal — same tokens as main app, calmer hero + readable cards */
+
+.patient-portal-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(
+    165deg,
+    rgba(8, 12, 28, 0.94) 0%,
+    rgba(6, 8, 20, 0.98) 50%,
+    rgba(4, 6, 16, 1) 100%
+  );
+}
+
+.patient-portal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(12, 16, 32, 0.75);
+  backdrop-filter: var(--blur-glass);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.patient-portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.patient-portal-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: var(--primary-fg);
+  background: var(--primary);
+  box-shadow: var(--glow-cyan);
+}
+
+.patient-portal-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.patient-portal-nav a {
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  transition:
+    color 0.2s var(--ease-out-expo),
+    background 0.2s var(--ease-out-expo),
+    border-color 0.2s var(--ease-out-expo);
+}
+
+.patient-portal-nav a:hover {
+  color: var(--text);
+  background: var(--cyan-dim);
+}
+
+.patient-portal-nav a.active {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  border-color: rgba(34, 211, 238, 0.25);
+}
+
+.patient-portal-main {
+  flex: 1;
+  padding: 1.25rem;
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.patient-hero {
+  border-radius: var(--radius);
+  padding: 1.35rem 1.5rem;
+  margin-bottom: 1.25rem;
+  background: linear-gradient(
+    125deg,
+    rgba(34, 211, 238, 0.1) 0%,
+    rgba(129, 140, 248, 0.08) 45%,
+    rgba(168, 85, 247, 0.06) 100%
+  );
+  border: 1px solid var(--border-bright);
+  box-shadow: var(--shadow-elevated);
+}
+
+.patient-hero h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.patient-hero p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.patient-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.patient-stat {
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.patient-stat .n {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--cyan);
+}
+
+.patient-stat .l {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.patient-updates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.patient-updates li {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.patient-updates li:last-child {
+  border-bottom: none;
+}
+
+.patient-updates .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 0.35rem;
+  flex-shrink: 0;
+  background: var(--violet);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.5);
+}
+
+.patient-login-split {
+  display: grid;
+  gap: 2rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .patient-login-split {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.patient-login-visual {
+  border-radius: var(--radius);
+  padding: 2rem;
+  min-height: 280px;
+  border: 1px solid var(--border-bright);
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(34, 211, 238, 0.2), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(168, 85, 247, 0.18), transparent 50%),
+    var(--surface-solid);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.patient-login-visual h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+.patient-login-visual p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 28ch;
+}

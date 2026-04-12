@@ -1,0 +1,62 @@
+import type { NavKey, Role } from '../types'
+
+export const navItems: { key: NavKey; path: string; label: string }[] = [
+  { key: 'dashboard', path: '/', label: 'لوحة التحكم' },
+  { key: 'patients', path: '/patients', label: 'المرضى' },
+  { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
+  { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
+  { key: 'dermatology', path: '/dermatology', label: 'الجلدية' },
+  { key: 'dental', path: '/dental', label: 'الأسنان' },
+  { key: 'billing_queue', path: '/billing', label: 'التحصيل' },
+  { key: 'inventory', path: '/inventory', label: 'المستودع' },
+  { key: 'reports_daily', path: '/reports/daily', label: 'تقرير الجرد اليومي' },
+  { key: 'reports_insights', path: '/reports/insights', label: 'ذكاء الأعمال' },
+  { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
+  { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
+  { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
+  { key: 'admin_accounting', path: '/admin/accounting', label: 'المحاسبة والترحيل' },
+]
+
+const roleNav: Record<Role, NavKey[]> = {
+  super_admin: navItems.map((n) => n.key),
+  reception: [
+    'dashboard',
+    'patients',
+    'appointments_booked',
+    'reception_appointment',
+    'billing_queue',
+    'inventory',
+  ],
+  laser: ['dashboard', 'patients', 'appointments_booked'],
+  dermatology: ['dashboard', 'patients', 'appointments_booked', 'dermatology'],
+  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental'],
+}
+
+export function visibleNavForRole(role: Role) {
+  const keys = new Set(roleNav[role])
+  return navItems.filter((n) => keys.has(n.key))
+}
+
+export function roleLabel(role: Role): string {
+  const map: Record<Role, string> = {
+    super_admin: 'مدير النظام',
+    reception: 'استقبال',
+    laser: 'ليزر',
+    dermatology: 'جلدية',
+    dental_branch: 'أسنان — فرع',
+  }
+  return map[role]
+}
+
+export function canAccessTab(
+  role: Role,
+  tab: 'laser' | 'dermatology' | 'dental',
+): boolean {
+  if (role === 'super_admin') return true
+  /** الاستقبال: نظرة عامة + الحساب فقط — بدون تبويبات ليزر/جلدية/أسنان */
+  if (role === 'reception') return false
+  if (role === 'laser') return tab === 'laser'
+  if (role === 'dermatology') return tab === 'dermatology'
+  if (role === 'dental_branch') return tab === 'dental'
+  return false
+}

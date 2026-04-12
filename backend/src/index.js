@@ -1,0 +1,62 @@
+import express from 'express'
+import cors from 'cors'
+import { config } from './config.js'
+import { connectDb } from './db.js'
+import { authRouter } from './routes/auth.js'
+import { systemRouter } from './routes/system.js'
+import { patientsRouter } from './routes/patients.js'
+import { laserRouter } from './routes/laser.js'
+import { usersRouter } from './routes/users.js'
+import { auditRouter } from './routes/audit.js'
+import { roomsRouter } from './routes/rooms.js'
+import { dentalRouter } from './routes/dental.js'
+import { inventoryRouter } from './routes/inventory.js'
+import { scheduleRouter } from './routes/schedule.js'
+import { dermatologyRouter } from './routes/dermatology.js'
+import { reportsRouter } from './routes/reports.js'
+import { accountingRouter } from './routes/accounting.js'
+import { clinicalRouter } from './routes/clinical.js'
+import { billingRouter } from './routes/billing.js'
+import { patientAuthRouter } from './routes/patientAuth.js'
+import { patientPortalRouter } from './routes/patientPortal.js'
+
+const app = express()
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  }),
+)
+app.use(express.json())
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true })
+})
+
+app.use('/api/auth', authRouter)
+app.use('/api/patient-auth', patientAuthRouter)
+app.use('/api/patient-portal', patientPortalRouter)
+app.use('/api/system', systemRouter)
+app.use('/api/patients', patientsRouter)
+app.use('/api/laser', laserRouter)
+app.use('/api/users', usersRouter)
+app.use('/api/audit', auditRouter)
+app.use('/api/rooms', roomsRouter)
+app.use('/api/dental', dentalRouter)
+app.use('/api/inventory', inventoryRouter)
+app.use('/api/schedule', scheduleRouter)
+app.use('/api/dermatology', dermatologyRouter)
+app.use('/api/reports', reportsRouter)
+app.use('/api/accounting', accountingRouter)
+app.use('/api/clinical', clinicalRouter)
+app.use('/api/billing', billingRouter)
+
+app.use((err, _req, res, _next) => {
+  console.error(err)
+  res.status(500).json({ error: 'خطأ في الخادم' })
+})
+
+await connectDb()
+app.listen(config.port, () => {
+  console.log(`API listening on http://localhost:${config.port}`)
+})

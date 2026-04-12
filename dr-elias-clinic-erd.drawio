@@ -1,0 +1,276 @@
+<mxfile host="app.diagrams.net" agent="VegaCore-ERD" version="22.1.0" type="device">
+  <diagram id="erd-dr-elias" name="Dr Elias Clinic ERD">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="2400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Dr. Elias Dahdal Medical Center — Logical ERD&#xa;(from requirements-specification-dr-elias-backend.md)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="80" y="20" width="900" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== RBAC & Users ========== -->
+        <mxCell id="role" value="&lt;b&gt;Role&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;name&#xa;description" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="100" width="160" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="permission" value="&lt;b&gt;Permission&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;code (e.g. laser:read)&#xa;description" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="230" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="role_permission" value="&lt;b&gt;RolePermission&lt;/b&gt;&#xa;────────────&#xa;PK (role_id, permission_id)&#xa;FK role_id → Role&#xa;FK permission_id → Permission" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="160" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="user" value="&lt;b&gt;User&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK role_id → Role&#xa;full_name, email, phone&#xa;password_hash&#xa;is_frozen&#xa;created_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="540" y="100" width="200" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="user_dept_access" value="&lt;b&gt;UserDepartmentAccess&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK user_id → User&#xa;department_code&#xa;(laser | dermatology | dental)" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="540" y="260" width="220" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== System day & FX ========== -->
+        <mxCell id="daily_system_state" value="&lt;b&gt;DailySystemState&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;business_date (UK)&#xa;status (open | closed)&#xa;opened_at, closed_at&#xa;FK opened_by → User&#xa;FK closed_by → User" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="420" width="220" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="exchange_rate_daily" value="&lt;b&gt;ExchangeRateDaily&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;business_date&#xa;rate_usd_syp&#xa;FK set_by_user_id → User&#xa;set_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="420" width="210" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Patient core ========== -->
+        <mxCell id="patient" value="&lt;b&gt;Patient&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;full_name (indexed)&#xa;dob&#xa;marital_status&#xa;occupation&#xa;phone (WhatsApp)&#xa;created_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="820" y="100" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="patient_general_history" value="&lt;b&gt;PatientGeneralHistory&lt;/b&gt;&#xa;────────────&#xa;PK/FK patient_id → Patient&#xa;medical_history&#xa;surgical_history&#xa;allergies" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="820" y="270" width="220" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Visit / assignment ========== -->
+        <mxCell id="visit" value="&lt;b&gt;Visit&lt;/b&gt; (Appointment)&#xa;────────────&#xa;PK id&#xa;FK patient_id → Patient&#xa;FK business_date → calendar link&#xa;FK daily_system_state_id?&#xa;department (enum)&#xa;status&#xa;started_at, ended_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="100" width="240" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="visit_provider_assignment" value="&lt;b&gt;VisitProviderAssignment&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK visit_id → Visit&#xa;FK provider_user_id → User&#xa;role_on_visit" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="270" width="250" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Laser ========== -->
+        <mxCell id="room" value="&lt;b&gt;Room&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;name / code" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="620" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="room_assignment" value="&lt;b&gt;RoomAssignment&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK room_id → Room&#xa;FK user_id → User&#xa;effective_from, effective_to" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="250" y="600" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="laser_type" value="&lt;b&gt;LaserType&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;code (Mix, Yag, Alex)" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="740" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="laser_area_catalog" value="&lt;b&gt;LaserAreaCatalog&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK parent_id → self&#xa;category, gender_segment&#xa;name&#xa;duration_minutes&#xa;active" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="270" y="730" width="200" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="laser_session" value="&lt;b&gt;LaserSession&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;treatment_number (seq)&#xa;FK visit_id → Visit&#xa;FK patient_id → Patient&#xa;FK operator_user_id → User&#xa;FK laser_type_id → LaserType&#xa;FK room_id → Room&#xa;session_date, pw, pulse&#xa;shot_count, notes" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="500" y="600" width="240" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="laser_session_area" value="&lt;b&gt;LaserSessionArea&lt;/b&gt;&#xa;────────────&#xa;PK (laser_session_id, area_id)&#xa;FK laser_session_id&#xa;FK laser_area_catalog_id" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffcccc;strokeColor=#cc0000;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="500" y="800" width="220" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Dermatology & catalog ========== -->
+        <mxCell id="service_catalog" value="&lt;b&gt;ServiceCatalog&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;code, name&#xa;department = dermatology&#xa;vip_flag&#xa;base_price_usd" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="620" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="package_rule" value="&lt;b&gt;PackageRule&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK service_catalog_id&#xa;rule_type (5+1, duration…)&#xa;sessions_count, duration_min&#xa;free_sessions" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="760" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="dermatology_procedure" value="&lt;b&gt;DermatologyProcedure&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK visit_id → Visit&#xa;FK patient_id → Patient&#xa;total_amount, discount&#xa;material_cost_snapshot&#xa;doctor_share_snapshot&#xa;net_profit_snapshot&#xa;FK exchange context" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="620" width="240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="dermatology_procedure_line" value="&lt;b&gt;DermatologyProcedureLine&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK procedure_id&#xa;FK service_catalog_id&#xa;qty, unit_price" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="800" width="250" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="dermatology_consumption" value="&lt;b&gt;DermatologyConsumption&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK procedure_id&#xa;FK inventory_item_id&#xa;quantity_deducted" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="920" width="250" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Inventory ========== -->
+        <mxCell id="inventory_item" value="&lt;b&gt;InventoryItem&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;sku, name, unit&#xa;safety_stock_level&#xa;current_quantity (or ledger)" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fad9d5;strokeColor=#ae4132;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="920" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="stock_movement" value="&lt;b&gt;StockMovement&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK inventory_item_id&#xa;type (deduct|adj|purchase)&#xa;quantity&#xa;reference_type, reference_id&#xa;FK user_id → User&#xa;created_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fad9d5;strokeColor=#ae4132;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="1060" width="220" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Dental ========== -->
+        <mxCell id="dental_master_plan" value="&lt;b&gt;DentalMasterPlan&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK patient_id → Patient&#xa;status (draft|approved)&#xa;FK created_by → User&#xa;FK approved_by → User&#xa;approved_at&#xa;plan_notes (full text)&#xa;version" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="100" width="240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="dental_master_plan_item" value="&lt;b&gt;DentalMasterPlanItem&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK master_plan_id&#xa;sequence_no&#xa;description&#xa;tooth_numbers (optional)" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="280" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="dental_tooth_record" value="&lt;b&gt;DentalToothRecord&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK patient_id → Patient&#xa;tooth_number (1-32)&#xa;state (healthy|planned|treated)&#xa;notes" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1680" y="100" width="220" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="dental_procedure" value="&lt;b&gt;DentalProcedure&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK visit_id → Visit&#xa;FK patient_id → Patient&#xa;procedure_kind (general|ortho)&#xa;amount_collected&#xa;material_cost (ortho)&#xa;doctor_share_amt&#xa;net_profit_snapshot" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1680" y="250" width="240" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Financial & config ========== -->
+        <mxCell id="doctor_share_config" value="&lt;b&gt;DoctorShareConfig&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK user_id → User (doctor)&#xa;department&#xa;percentage&#xa;effective_from" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff4c3;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="540" y="420" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="invoice" value="&lt;b&gt;Invoice&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK patient_id, visit_id&#xa;business_date&#xa;subtotal_usd, discount&#xa;total_usd&#xa;exchange_rate_used&#xa;total_local_after_fx&#xa;status" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff4c3;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="450" width="220" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="invoice_line" value="&lt;b&gt;InvoiceLine&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK invoice_id → Invoice&#xa;description&#xa;quantity, unit_price_usd&#xa;line_total_usd" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff4c3;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1650" y="450" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="payment" value="&lt;b&gt;Payment&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK invoice_id → Invoice&#xa;amount, currency&#xa;method, paid_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff4c3;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="620" width="180" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Daily report line (materialized / view) ========== -->
+        <mxCell id="daily_operation_line" value="&lt;b&gt;DailyOperationLine&lt;/b&gt;&#xa;(report / snapshot)&#xa;────────────&#xa;PK id&#xa;FK daily_archive_id / business_date&#xa;op_number&#xa;patient_name denorm&#xa;area_or_treatment&#xa;procedure_type&#xa;total_cost, discount&#xa;provider_name denorm&#xa;final_price_after_fx&#xa;notes" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#cccccc;strokeColor=#666666;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1680" y="620" width="260" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Cross-cutting ========== -->
+        <mxCell id="audit_log" value="&lt;b&gt;AuditLog&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK user_id → User&#xa;action, entity_type&#xa;entity_id&#xa;payload_json (opt)&#xa;created_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1980" y="100" width="200" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="notification" value="&lt;b&gt;Notification&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK user_id (target)&#xa;type (low_stock, …)&#xa;message, read_at&#xa;created_at" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1980" y="250" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="whatsapp_message_job" value="&lt;b&gt;WhatsAppMessageJob&lt;/b&gt;&#xa;────────────&#xa;PK id&#xa;FK patient_id, visit_id&#xa;phone&#xa;status, sent_at&#xa;delivery_status" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1980" y="390" width="220" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="user_session" value="&lt;b&gt;UserSession&lt;/b&gt; (optional)&#xa;────────────&#xa;PK id&#xa;FK user_id&#xa;expires_at (6h reception)&#xa;refresh_token…" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#eeeeee;strokeColor=#999999;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="800" y="420" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- ========== Relationships (Crow's foot style) ========== -->
+        <mxCell id="e_user_role" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.35;entryX=1;entryY=0.5;strokeWidth=1;" edge="1" parent="1" source="user" target="role">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_rp_role" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.25;" edge="1" parent="1" source="role_permission" target="role">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_rp_perm" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="role_permission" target="permission">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_uda_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="user_dept_access" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_hist_patient" style="endArrow=ERone;startArrow=ERone;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="patient_general_history" target="patient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_visit_patient" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.35;" edge="1" parent="1" source="visit" target="patient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_vpa_visit" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="visit_provider_assignment" target="visit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_vpa_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.6;" edge="1" parent="1" source="visit_provider_assignment" target="user">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1050" y="315" /><mxPoint x="1050" y="180" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_ex_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.75;" edge="1" parent="1" source="exchange_rate_daily" target="user">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="500" y="475" /><mxPoint x="500" y="200" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_room_asg_room" style="endArrow=ERone;startArrow=ERmany;html=1;" edge="1" parent="1" source="room_assignment" target="room">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_room_asg_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.25;entryY=1;" edge="1" parent="1" source="room_assignment" target="user">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="350" y="560" /><mxPoint x="590" y="560" /><mxPoint x="590" y="230" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_laser_visit" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=1;exitY=0.25;entryX=0;entryY=0.3;" edge="1" parent="1" source="laser_session" target="visit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_laser_patient" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.2;entryX=0.5;entryY=1;" edge="1" parent="1" source="laser_session" target="patient">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="920" y="620" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_laser_op" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.45;entryX=1;entryY=0.5;" edge="1" parent="1" source="laser_session" target="user">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="480" y="680" /><mxPoint x="480" y="165" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_laser_type" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=0.5;entryY=1;" edge="1" parent="1" source="laser_session" target="laser_type">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_laser_room" style="endArrow=ERzeroToOne;startArrow=ERmany;html=1;exitX=0;exitY=0.85;entryX=1;entryY=0.5;" edge="1" parent="1" source="laser_session" target="room">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lsa_session" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="laser_session_area" target="laser_session">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lsa_area" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="laser_session_area" target="laser_area_catalog">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_area_parent" style="endArrow=ERzeroToOne;startArrow=ERmany;html=1;exitX=0;exitY=0.35;entryX=1;entryY=0.35;curved=1;" edge="1" parent="1" source="laser_area_catalog" target="laser_area_catalog">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="770" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_pkg_svc" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="package_rule" target="service_catalog">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_derm_visit" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.35;entryX=1;entryY=0.65;" edge="1" parent="1" source="dermatology_procedure" target="visit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_derm_line" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="dermatology_procedure_line" target="dermatology_procedure">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_derm_line_svc" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="dermatology_procedure_line" target="service_catalog">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_derm_cons" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.25;exitY=0;entryX=0.75;entryY=1;" edge="1" parent="1" source="dermatology_consumption" target="dermatology_procedure">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_derm_inv" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="dermatology_consumption" target="inventory_item">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_stock_inv" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="stock_movement" target="inventory_item">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_stock_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.8;" edge="1" parent="1" source="stock_movement" target="user">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1050" y="1125" /><mxPoint x="1050" y="200" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e_dmp_patient" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.35;entryX=1;entryY=0.2;" edge="1" parent="1" source="dental_master_plan" target="patient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_dmpi_plan" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dental_master_plan_item" target="dental_master_plan">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_tooth_patient" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.15;" edge="1" parent="1" source="dental_tooth_record" target="patient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_dp_visit" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.3;entryX=1;entryY=0.85;" edge="1" parent="1" source="dental_procedure" target="visit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_inv_patient" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="invoice" target="patient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_inv_visit" style="endArrow=ERzeroToOne;startArrow=ERmany;html=1;exitX=0;exitY=0.25;entryX=1;entryY=0.5;" edge="1" parent="1" source="invoice" target="visit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_invline" style="endArrow=ERone;startArrow=ERmany;html=1;" edge="1" parent="1" source="invoice_line" target="invoice">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pay_inv" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="payment" target="invoice">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_doc_share_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.45;" edge="1" parent="1" source="doctor_share_config" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_audit_user" style="endArrow=ERzeroToOne;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.25;" edge="1" parent="1" source="audit_log" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_notif_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.4;" edge="1" parent="1" source="notification" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_wa_patient" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.35;entryX=1;entryY=0.85;" edge="1" parent="1" source="whatsapp_message_job" target="patient">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_wa_visit" style="endArrow=ERzeroToOne;startArrow=ERmany;html=1;exitX=0;exitY=0.65;entryX=1;entryY=0.95;" edge="1" parent="1" source="whatsapp_message_job" target="visit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_session_user" style="endArrow=ERone;startArrow=ERmany;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.55;" edge="1" parent="1" source="user_session" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="&lt;b&gt;Legend&lt;/b&gt;&#xa;Yellow: RBAC / financial config&#xa;Blue: Users &amp; sessions&#xa;Purple: System day &amp; FX&#xa;Green: Patient &amp; visits&#xa;Red/pink: Laser&#xa;Mauve: Dermatology&#xa;Light blue: Dental&#xa;Gray: Audit / messaging&#xa;Dashed: optional / derived&#xa;&#xa;Cardinality: Chen-style arrows (one / many)" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;fillColor=#ffffcc;strokeColor=#999999;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="2280" y="100" width="280" height="220" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

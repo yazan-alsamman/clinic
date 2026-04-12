@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+frontend/dist/
+dist/
+
+# Environment & secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Logs & cache
+*.log
+npm-debug.log*
+.DS_Store
+
+# Duplicate local copy (not part of main app)
+frontend - Copy/
+
+# Editor
+.idea/
+.vscode/*
+!.vscode/extensions.json

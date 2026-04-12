@@ -1,0 +1,43 @@
+import type { Patient } from '../types'
+
+export const mockPatients: Patient[] = [
+  {
+    id: '1',
+    name: 'سارة أحمد المحمد',
+    dob: '1992-03-15',
+    marital: 'متزوجة',
+    occupation: 'مهندسة',
+    medicalHistory: 'ضغط خفيف — تحت المتابعة',
+    surgicalHistory: 'لا يوجد',
+    allergies: 'البنسلين',
+    departments: ['laser', 'dermatology'],
+    lastVisit: '2026-04-10',
+    gender: 'female',
+  },
+  {
+    id: '2',
+    name: 'Lina K. Mansour',
+    dob: '1988-11-02',
+    marital: 'عزباء',
+    occupation: 'محاسبة',
+    medicalHistory: 'سليمة',
+    surgicalHistory: 'استئصال زائدة (2010)',
+    allergies: 'لا يوجد',
+    departments: ['dental', 'laser'],
+    lastVisit: '2026-04-09',
+    gender: 'female',
+  },
+  {
+    id: '3',
+    name: 'خالد يوسف',
+    dob: '1975-07-22',
+    marital: 'متزوج',
+    occupation: 'تاجر',
+    medicalHistory: 'سكري النوع الثاني',
+    surgicalHistory: 'لا يوجد',
+    allergies: 'لا يوجد',
+    departments: ['dermatology'],
+    lastVisit: '2026-04-08',
+    gender: 'male',
+  },
+]
