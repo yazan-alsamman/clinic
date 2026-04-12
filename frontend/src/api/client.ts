@@ -28,6 +28,14 @@ export class ApiError extends Error {
   }
 }
 
+/** In production (separate static host), set VITE_API_BASE_URL to the API origin, no trailing slash. */
+function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  const base = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '')
+  const p = path.startsWith('/') ? path : `/${path}`
+  return base ? `${base}${p}` : p
+}
+
 export async function api<T = unknown>(
   path: string,
   init?: RequestInit,
@@ -39,7 +47,7 @@ export async function api<T = unknown>(
   const t = getToken()
   if (t) headers.Authorization = `Bearer ${t}`
 
-  const res = await fetch(path, { ...init, headers })
+  const res = await fetch(resolveApiUrl(path), { ...init, headers })
   const text = await res.text()
   let body: { error?: string } | null = null
   try {
@@ -72,7 +80,7 @@ export async function patientApi<T = unknown>(
   const t = getPatientToken()
   if (t) headers.Authorization = `Bearer ${t}`
 
-  const res = await fetch(path, { ...init, headers })
+  const res = await fetch(resolveApiUrl(path), { ...init, headers })
   const text = await res.text()
   let body: { error?: string } | null = null
   try {
