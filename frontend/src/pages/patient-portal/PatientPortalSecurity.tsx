@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, patientApi, setPatientToken } from '../../api/client'
 import './patient-portal.css'
@@ -11,6 +11,24 @@ export function PatientPortalSecurity() {
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
   const [pending, setPending] = useState(false)
+  const [forced, setForced] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await patientApi<{ patient: { mustChangePassword?: boolean } }>(
+          '/api/patient-auth/me',
+        )
+        if (!cancelled) setForced(data.patient?.mustChangePassword === true)
+      } catch {
+        if (!cancelled) setForced(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -46,6 +64,24 @@ export function PatientPortalSecurity() {
 
   return (
     <>
+      {forced ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: '1rem',
+            padding: '0.9rem 1.1rem',
+            borderRadius: '10px',
+            background: 'rgba(220, 53, 69, 0.12)',
+            border: '1px solid rgba(220, 53, 69, 0.35)',
+            color: '#f8a8b2',
+            fontSize: '0.92rem',
+            lineHeight: 1.55,
+          }}
+        >
+          <strong>تنبيه أمني:</strong> هذه أول مرة تدخل فيها إلى بوابتك أو تم إعادة تعيين كلمة المرور من العيادة.
+          يجب اختيار كلمة مرور جديدة الآن — لن تتمكن من فتح بقية الصفحات قبل إكمال ذلك.
+        </div>
+      ) : null}
       <div className="patient-hero" style={{ marginBottom: '1rem' }}>
         <h1>الأمان وكلمة المرور</h1>
         <p>يُنصح بكلمة مرور قوية لا تستخدمها في مواقع أخرى.</p>

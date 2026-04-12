@@ -34,7 +34,7 @@ export async function provisionPortalCredentials(patient) {
   patient.portalUsername = username
   patient.portalPasswordHash = portalPasswordHash
   patient.portalEnabled = true
-  patient.portalMustChangePassword = false
+  patient.portalMustChangePassword = true
   await patient.save()
   return { username, plainPassword }
 }

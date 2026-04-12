@@ -54,7 +54,8 @@ export function PatientPortalGuard() {
     return <Navigate to="/login" replace state={{ from: loc.pathname }} />
   }
 
-  const onSecurity = loc.pathname === '/patient/security'
+  const path = loc.pathname.replace(/\/$/, '') || '/'
+  const onSecurity = path === '/patient/security'
   if (mustChangePassword && !onSecurity) {
     return <Navigate to="/patient/security" replace />
   }

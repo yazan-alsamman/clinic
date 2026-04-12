@@ -172,7 +172,7 @@ patientsRouter.post('/:id/portal/regenerate-password', requireActiveDay, async (
     }
     const plain = randomPasswordPlain()
     p.portalPasswordHash = await bcrypt.hash(plain, 10)
-    p.portalMustChangePassword = false
+    p.portalMustChangePassword = true
     await p.save()
     await writeAudit({
       user: req.user,

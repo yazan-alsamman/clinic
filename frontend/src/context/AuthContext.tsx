@@ -18,11 +18,15 @@ export interface AuthUser {
   active: boolean
 }
 
+export type LoginResult =
+  | { accountType: 'staff' }
+  | { accountType: 'patient'; mustChangePassword: boolean }
+
 interface AuthContextValue {
   user: AuthUser | null
   loading: boolean
   sessionMinutesLeft: number | null
-  login: (identifier: string, password: string) => Promise<'staff' | 'patient'>
+  login: (identifier: string, password: string) => Promise<LoginResult>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -66,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accountType: 'staff' | 'patient'
       token: string
       user?: AuthUser
+      mustChangePassword?: boolean
     }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ login: identifier.trim(), password }),
@@ -75,7 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(null)
       setUser(null)
       setSessionMinutesLeft(null)
-      return 'patient'
+      return {
+        accountType: 'patient' as const,
+        mustChangePassword: data.mustChangePassword === true,
+      }
     }
     setPatientToken(null)
     setToken(data.token)
@@ -84,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     )
     setUser(me.user)
     setSessionMinutesLeft(me.sessionMinutesLeft ?? null)
-    return 'staff'
+    return { accountType: 'staff' as const }
   }, [])
 
   const logout = useCallback(() => {

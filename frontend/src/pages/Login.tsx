@@ -71,9 +71,9 @@ export function Login() {
     setErr('')
     setPending(true)
     try {
-      const kind = await login(identifier.trim(), password)
-      if (kind === 'patient') {
-        nav('/patient', { replace: true })
+      const result = await login(identifier.trim(), password)
+      if (result.accountType === 'patient') {
+        nav(result.mustChangePassword ? '/patient/security' : '/patient', { replace: true })
       } else {
         nav('/', { replace: true })
       }

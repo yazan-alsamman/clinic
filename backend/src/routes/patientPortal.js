@@ -7,6 +7,19 @@ import { todayBusinessDate } from '../utils/date.js'
 export const patientPortalRouter = Router()
 patientPortalRouter.use(patientAuthMiddleware)
 
+/** يمنع الوصول لبيانات البوابة حتى يغيّر المريض كلمة المرور الافتراضية/المُعاد إنشاؤها */
+function blockUntilPasswordChanged(req, res, next) {
+  if (req.patient?.portalMustChangePassword === true) {
+    res.status(403).json({
+      error: 'يجب تغيير كلمة مرور البوابة من صفحة الأمان قبل عرض بقية الصفحات.',
+    })
+    return
+  }
+  next()
+}
+
+patientPortalRouter.use(blockUntilPasswordChanged)
+
 patientPortalRouter.get('/profile', async (req, res) => {
   try {
     res.json({ patient: patientToDto(req.patient) })
