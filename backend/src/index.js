@@ -23,12 +23,20 @@ import { patientPortalRouter } from './routes/patientPortal.js'
 let dbConnected = false
 
 const app = express()
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-  }),
-)
+
+// Cross-origin (SPA on another *.hostingersite.com): echo Origin; JWT is in Authorization, not cookies.
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true)
+    callback(null, origin)
+  },
+  credentials: false,
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204,
+}
+app.use(cors(corsOptions))
+app.options('*', cors(corsOptions))
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
