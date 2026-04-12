@@ -1,34 +1,13 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ApiError, patientApi, setPatientToken } from '../../api/client'
-import './patient-portal.css'
+import { useState } from 'react'
+import { api, ApiError } from '../api/client'
 
-export function PatientPortalSecurity() {
-  const nav = useNavigate()
+export function AccountPassword() {
   const [current, setCurrent] = useState('')
   const [nextPwd, setNextPwd] = useState('')
   const [confirm, setConfirm] = useState('')
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
   const [pending, setPending] = useState(false)
-  const [forced, setForced] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const data = await patientApi<{ patient: { mustChangePassword?: boolean } }>(
-          '/api/patient-auth/me',
-        )
-        if (!cancelled) setForced(data.patient?.mustChangePassword === true)
-      } catch {
-        if (!cancelled) setForced(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -44,16 +23,14 @@ export function PatientPortalSecurity() {
     }
     setPending(true)
     try {
-      const data = await patientApi<{ token: string }>('/api/patient-auth/password', {
+      await api('/api/users/me/password', {
         method: 'PATCH',
         body: JSON.stringify({ currentPassword: current, newPassword: nextPwd }),
       })
-      setPatientToken(data.token)
       setOk('تم تحديث كلمة المرور بنجاح.')
       setCurrent('')
       setNextPwd('')
       setConfirm('')
-      setTimeout(() => nav('/patient', { replace: true }), 800)
     } catch (e) {
       if (e instanceof ApiError) setErr(e.message)
       else setErr('تعذر الحفظ')
@@ -64,39 +41,19 @@ export function PatientPortalSecurity() {
 
   return (
     <>
-      {forced ? (
-        <div
-          role="alert"
-          style={{
-            marginBottom: '1rem',
-            padding: '0.9rem 1.1rem',
-            borderRadius: '10px',
-            background: 'rgba(220, 53, 69, 0.12)',
-            border: '1px solid rgba(220, 53, 69, 0.35)',
-            color: '#f8a8b2',
-            fontSize: '0.92rem',
-            lineHeight: 1.55,
-          }}
-        >
-          <strong>تنبيه أمني:</strong> هذه أول مرة تدخل فيها إلى بوابتك أو تم إعادة تعيين كلمة المرور من العيادة.
-          يجب اختيار كلمة مرور جديدة الآن — لن تتمكن من فتح بقية الصفحات قبل إكمال ذلك.
-        </div>
-      ) : null}
-      <div className="patient-hero" style={{ marginBottom: '1rem' }}>
-        <h1>الأمان وكلمة المرور</h1>
-        <p>
-          يمكنك تغيير كلمة المرور في أي وقت. يُنصح بكلمة مرور قوية لا تستخدمها في مواقع أخرى.
-        </p>
-      </div>
+      <h1 className="page-title">كلمة المرور</h1>
+      <p className="page-desc">
+        غيّر كلمة مرور حسابك في أي وقت. لن يُسمح لأحد بتجاوز كلمة المرور الحالية دون معرفتها.
+      </p>
       <div className="card" style={{ maxWidth: 480 }}>
         <h2 className="card-title">تغيير كلمة المرور</h2>
         <form onSubmit={(e) => void onSubmit(e)} style={{ display: 'grid', gap: '0.85rem' }}>
           <div>
-            <label className="form-label" htmlFor="cur">
+            <label className="form-label" htmlFor="staff-cur">
               كلمة المرور الحالية
             </label>
             <input
-              id="cur"
+              id="staff-cur"
               type="password"
               className="input"
               autoComplete="current-password"
@@ -105,11 +62,11 @@ export function PatientPortalSecurity() {
             />
           </div>
           <div>
-            <label className="form-label" htmlFor="nw">
+            <label className="form-label" htmlFor="staff-nw">
               كلمة المرور الجديدة
             </label>
             <input
-              id="nw"
+              id="staff-nw"
               type="password"
               className="input"
               autoComplete="new-password"
@@ -118,11 +75,11 @@ export function PatientPortalSecurity() {
             />
           </div>
           <div>
-            <label className="form-label" htmlFor="cf">
+            <label className="form-label" htmlFor="staff-cf">
               تأكيد الجديدة
             </label>
             <input
-              id="cf"
+              id="staff-cf"
               type="password"
               className="input"
               autoComplete="new-password"

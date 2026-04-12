@@ -15,6 +15,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
   { key: 'admin_accounting', path: '/admin/accounting', label: 'المحاسبة والترحيل' },
+  { key: 'account_password', path: '/account/password', label: 'كلمة المرور' },
 ]
 
 const roleNav: Record<Role, NavKey[]> = {
@@ -26,10 +27,11 @@ const roleNav: Record<Role, NavKey[]> = {
     'reception_appointment',
     'billing_queue',
     'inventory',
+    'account_password',
   ],
-  laser: ['dashboard', 'patients', 'appointments_booked'],
-  dermatology: ['dashboard', 'patients', 'appointments_booked', 'dermatology'],
-  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental'],
+  laser: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
+  dermatology: ['dashboard', 'patients', 'appointments_booked', 'dermatology', 'account_password'],
+  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {

@@ -7,6 +7,44 @@ import { writeAudit } from '../utils/audit.js'
 
 export const usersRouter = Router()
 
+/** أي موظف مسجّل (بما فيه super_admin) يغيّر كلمة مرور حسابه فقط */
+usersRouter.patch('/me/password', authMiddleware, async (req, res) => {
+  try {
+    const current = String(req.body?.currentPassword ?? '')
+    const nextPwd = String(req.body?.newPassword ?? '')
+    if (!current || !nextPwd) {
+      res.status(400).json({ error: 'كلمة المرور الحالية والجديدة مطلوبة' })
+      return
+    }
+    if (nextPwd.length < 8) {
+      res.status(400).json({ error: 'كلمة المرور الجديدة يجب ألا تقل عن ٨ أحرف' })
+      return
+    }
+    const u = await User.findById(req.user._id)
+    if (!u || !u.active) {
+      res.status(401).json({ error: 'حساب غير صالح أو مجمّد' })
+      return
+    }
+    const ok = await bcrypt.compare(current, u.passwordHash)
+    if (!ok) {
+      res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' })
+      return
+    }
+    u.passwordHash = await bcrypt.hash(nextPwd, 10)
+    await u.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تغيير كلمة مرور الحساب الشخصي',
+      entityType: 'User',
+      entityId: u._id,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 usersRouter.use(authMiddleware, requireRoles('super_admin'))
 
 usersRouter.get('/', async (_req, res) => {

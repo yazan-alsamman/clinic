@@ -20,6 +20,7 @@ export type NavKey =
   | 'admin_audit'
   | 'admin_rooms'
   | 'admin_accounting'
+  | 'account_password'
 
 export interface Patient {
   id: string

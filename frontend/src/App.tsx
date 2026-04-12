@@ -18,6 +18,7 @@ import { AdminAudit } from './pages/AdminAudit'
 import { AdminRooms } from './pages/AdminRooms'
 import { AdminAccounting } from './pages/AdminAccounting'
 import { BillingPage } from './pages/BillingPage'
+import { AccountPassword } from './pages/AccountPassword'
 import { PatientPortalGuard } from './components/PatientPortalGuard'
 import { PatientPortalShell } from './components/PatientPortalShell'
 import { PatientPortalDashboard } from './pages/patient-portal/PatientPortalDashboard'
@@ -59,6 +60,7 @@ export default function App() {
               <Route path="/admin/audit" element={<AdminAudit />} />
               <Route path="/admin/rooms" element={<AdminRooms />} />
               <Route path="/admin/accounting" element={<AdminAccounting />} />
+              <Route path="/account/password" element={<AccountPassword />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Route>
