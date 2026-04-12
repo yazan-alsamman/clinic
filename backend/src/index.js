@@ -20,6 +20,8 @@ import { billingRouter } from './routes/billing.js'
 import { patientAuthRouter } from './routes/patientAuth.js'
 import { patientPortalRouter } from './routes/patientPortal.js'
 
+let dbConnected = false
+
 const app = express()
 app.use(
   cors({
@@ -30,7 +32,7 @@ app.use(
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({ ok: true, db: dbConnected })
 })
 
 app.use('/api/auth', authRouter)
@@ -56,7 +58,19 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'خطأ في الخادم' })
 })
 
-await connectDb()
-app.listen(config.port, () => {
-  console.log(`API listening on http://localhost:${config.port}`)
+const host = process.env.HOST || '0.0.0.0'
+
+app.listen(config.port, host, () => {
+  console.log(
+    `API listening on http://${host}:${config.port} (process.env.PORT=${process.env.PORT ?? 'unset'})`,
+  )
 })
+
+connectDb()
+  .then(() => {
+    dbConnected = true
+    console.log('MongoDB connected')
+  })
+  .catch((err) => {
+    console.error('MongoDB connection failed:', err?.message || err)
+  })
