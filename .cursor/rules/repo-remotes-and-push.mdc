@@ -1,0 +1,41 @@
+---
+description: Where to push changes — clinic (backend/monorepo) vs clinic-front (frontend only)
+alwaysApply: true
+---
+
+# Git remotes and push targets (Dr. Elias clinic)
+
+This workspace is a **monorepo** (`frontend/`, `backend/`). Two GitHub repos are used:
+
+| Area | Remote name | URL | What to push |
+|------|-------------|-----|----------------|
+| **Backend** (and repo root docs, workflows, etc.) | `origin` | `https://github.com/yazan-alsamman/clinic.git` | `git push origin main` |
+| **Frontend** (Vite app under `frontend/`) | `clinic-front` | `https://github.com/yazan-alsamman/clinic-front.git` | Subtree push (see below) |
+
+## After you finish a task: push to the correct repo(s)
+
+1. **Only files under `backend/`** (or root files not in `frontend/`): commit in this repo, then run `git push origin main`.
+
+2. **Only files under `frontend/`**: commit in this repo, then push the `frontend/` tree to `clinic-front` (repo root there matches `frontend/` here):
+
+```bash
+git subtree split --prefix=frontend -b _sync-clinic-front
+git push clinic-front _sync-clinic-front:main
+git branch -D _sync-clinic-front
+```
+
+If the remote rejects the push (diverged history), coordinate with the team before using `--force-with-lease`.
+
+3. **Both `frontend/` and `backend/`** (or root + frontend): commit once, then **both** pushes — first `git push origin main`, then the three `subtree split` / `push clinic-front` / `branch -D` lines above.
+
+4. **Syncing for deployment**: If the goal is “everything on the servers is up to date”, ensure **both** remotes have been pushed when either side changed since last deploy.
+
+## Do not
+
+- Push frontend-only work only to `origin` and skip `clinic-front` if Hostinger or CI is wired to **clinic-front** for the UI.
+- Push the whole monorepo to `clinic-front`; that repo must stay the **contents of `frontend/`** at its root (`src/`, `index.html`, etc.).
+
+## Remote setup (once per clone)
+
+If `clinic-front` is missing:  
+`git remote add clinic-front https://github.com/yazan-alsamman/clinic-front.git`
