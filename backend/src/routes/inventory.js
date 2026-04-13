@@ -7,7 +7,7 @@ export const inventoryRouter = Router()
 
 inventoryRouter.use(authMiddleware)
 
-const READ_ROLES = ['super_admin', 'reception']
+const READ_ROLES = ['super_admin', 'reception', 'dermatology']
 
 function itemDto(i) {
   const o = i.toObject ? i.toObject() : i
@@ -15,6 +15,7 @@ function itemDto(i) {
     id: String(o._id),
     sku: o.sku,
     name: o.name,
+    active: o.active !== false,
     unit: o.unit ?? 'unit',
     quantity: o.quantity ?? 0,
     safetyStockLevel: o.safetyStockLevel ?? 0,
@@ -29,7 +30,12 @@ inventoryRouter.get('/items', async (req, res) => {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
-    const items = await InventoryItem.find().sort({ name: 1 })
+    const activeOnly = String(req.query.activeOnly || '') === '1'
+    const inStockOnly = String(req.query.inStockOnly || '') === '1'
+    const q = {}
+    if (activeOnly) q.active = true
+    if (inStockOnly) q.quantity = { $gt: 0 }
+    const items = await InventoryItem.find(q).sort({ name: 1 })
     res.json({ items: items.map(itemDto) })
   } catch (e) {
     console.error(e)
@@ -49,6 +55,7 @@ inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => 
     const doc = await InventoryItem.create({
       sku,
       name,
+      active: body.active !== false,
       unit: String(body.unit || 'unit').trim() || 'unit',
       quantity: Number(body.quantity) || 0,
       safetyStockLevel: Number(body.safetyStockLevel) || 0,
@@ -92,6 +99,7 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin'), async (req, res
       item.sku = next
     }
     if (body.name != null) item.name = String(body.name).trim()
+    if (body.active != null) item.active = body.active !== false
     if (body.unit != null) item.unit = String(body.unit).trim() || 'unit'
     if (body.quantity != null) item.quantity = Math.max(0, Number(body.quantity))
     if (body.safetyStockLevel != null)

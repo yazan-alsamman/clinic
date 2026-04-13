@@ -6,6 +6,7 @@ type Item = {
   id: string
   sku: string
   name: string
+  active: boolean
   unit: string
   quantity: number
   safetyStockLevel: number
@@ -40,6 +41,7 @@ export function InventoryPage() {
     quantity: '',
     safetyStockLevel: '',
     unitCost: '',
+    active: true,
   })
   const [formErr, setFormErr] = useState('')
   const [saving, setSaving] = useState(false)
@@ -74,6 +76,7 @@ export function InventoryPage() {
       quantity: String(r.quantity),
       safetyStockLevel: String(r.safetyStockLevel),
       unitCost: String(r.unitCost),
+      active: r.active !== false,
     })
   }
 
@@ -162,7 +165,11 @@ export function InventoryPage() {
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.quantity}</td>
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.safetyStockLevel}</td>
                   <td>
-                    {r.lowStock ? (
+                    {!r.active ? (
+                      <span className="chip" style={{ background: 'var(--danger-dim)', color: 'var(--danger)' }}>
+                        معطّلة
+                      </span>
+                    ) : r.lowStock ? (
                       <span
                         className="chip"
                         style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}
@@ -364,6 +371,14 @@ export function InventoryPage() {
                       onChange={(e) => setEditForm((f) => ({ ...f, unit: e.target.value }))}
                     />
                   </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editForm.active}
+                      onChange={(e) => setEditForm((f) => ({ ...f, active: e.target.checked }))}
+                    />
+                    <span style={{ fontSize: '0.9rem' }}>المادة فعّالة للاستخدام السريري</span>
+                  </label>
                 </>
               ) : (
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -447,6 +462,7 @@ export function InventoryPage() {
                       body.name = editForm.name.trim()
                       body.unit = editForm.unit.trim()
                       body.unitCost = Number(editForm.unitCost) || 0
+                      body.active = editForm.active
                     }
                     await api(`/api/inventory/items/${editItem.id}`, {
                       method: 'PATCH',

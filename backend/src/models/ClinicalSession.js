@@ -8,6 +8,8 @@ const materialLineSchema = new mongoose.Schema(
     quantity: { type: Number, required: true, min: 0 },
     unitCostUsd: { type: Number, default: 0 },
     lineCostUsd: { type: Number, default: 0 },
+    chargedUnitPriceUsd: { type: Number, default: 0 },
+    lineChargeUsd: { type: Number, default: 0 },
   },
   { _id: false },
 )
@@ -24,6 +26,7 @@ const clinicalSessionSchema = new mongoose.Schema(
     notes: { type: String, default: '' },
     materials: { type: [materialLineSchema], default: [] },
     materialCostUsdTotal: { type: Number, default: 0 },
+    materialChargeUsdTotal: { type: Number, default: 0 },
     billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
     /** ربط بجلسة ليزر عند التسجيل من ملف المريض */
     laserSessionId: {

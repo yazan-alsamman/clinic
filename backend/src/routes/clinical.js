@@ -31,7 +31,7 @@ function departmentFromRequest(req) {
 
 /**
  * خصم المواد مع إرجاع الكميات عند الفشل
- * @param {Array<{ inventoryItemId: string, quantity: number }>} rawLines
+ * @param {Array<{ inventoryItemId: string, quantity: number, chargedUnitPriceUsd?: number }>} rawLines
  */
 async function consumeMaterials(rawLines) {
   const applied = []
@@ -59,6 +59,8 @@ async function consumeMaterials(rawLines) {
         quantity: qty,
         unitCostUsd: unitCost,
         lineCostUsd: round2(unitCost * qty),
+        chargedUnitPriceUsd: round2(Math.max(0, Number(line.chargedUnitPriceUsd) || 0)),
+        lineChargeUsd: round2(Math.max(0, Number(line.chargedUnitPriceUsd) || 0) * qty),
       })
     }
     return snapshot
@@ -122,6 +124,8 @@ clinicalRouter.post(
       }
 
       const materialCostUsdTotal = round2(materialLines.reduce((s, m) => s + (m.lineCostUsd || 0), 0))
+      const materialChargeUsdTotal = round2(materialLines.reduce((s, m) => s + (m.lineChargeUsd || 0), 0))
+      const amountDueUsd = round2(sessionFeeUsd + materialChargeUsdTotal)
 
       let cs = null
       try {
@@ -135,6 +139,7 @@ clinicalRouter.post(
           notes,
           materials: materialLines,
           materialCostUsdTotal,
+          materialChargeUsdTotal,
         })
 
         const bi = await BillingItem.create({
@@ -143,7 +148,7 @@ clinicalRouter.post(
           providerUserId: req.user._id,
           department,
           procedureLabel: procedureDescription || 'إجراء',
-          amountDueUsd: sessionFeeUsd,
+          amountDueUsd,
           currency: 'USD',
           businessDate,
           status: 'pending_payment',
@@ -151,13 +156,18 @@ clinicalRouter.post(
 
         cs.billingItemId = bi._id
         await cs.save()
+        if (!patient.departments.includes(department)) {
+          patient.departments = [...new Set([...patient.departments, department])]
+        }
+        patient.lastVisit = new Date()
+        await patient.save()
 
         await writeAudit({
           user: req.user,
           action: 'تسجيل جلسة سريرية وبند فوترة معلّق',
           entityType: 'ClinicalSession',
           entityId: cs._id,
-          details: { billingItemId: String(bi._id), amountDueUsd: sessionFeeUsd },
+          details: { billingItemId: String(bi._id), amountDueUsd, materialChargeUsdTotal },
         })
 
         res.status(201).json({
@@ -169,6 +179,7 @@ clinicalRouter.post(
             sessionFeeUsd: cs.sessionFeeUsd,
             businessDate: cs.businessDate,
             materialCostUsdTotal: cs.materialCostUsdTotal,
+            materialChargeUsdTotal: cs.materialChargeUsdTotal,
             materials: cs.materials,
           },
           billingItem: {
@@ -213,6 +224,44 @@ clinicalRouter.get('/sessions/mine', requireRoles(...CLINICAL_ROLES), async (req
         businessDate: r.businessDate,
         createdAt: r.createdAt,
         billingItemId: r.billingItemId ? String(r.billingItemId) : null,
+      })),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+clinicalRouter.get('/sessions/patient/:patientId', requireRoles(...CLINICAL_ROLES), async (req, res) => {
+  try {
+    const patientId = String(req.params.patientId || '').trim()
+    if (!mongoose.isValidObjectId(patientId)) {
+      res.status(400).json({ error: 'معرّف المريض غير صالح' })
+      return
+    }
+    const q = { patientId }
+    if (req.user.role !== 'super_admin') q.providerUserId = req.user._id
+    const rows = await ClinicalSession.find(q)
+      .sort({ createdAt: -1 })
+      .limit(120)
+      .populate('providerUserId', 'name')
+      .populate('billingItemId', 'status amountDueUsd')
+      .lean()
+    res.json({
+      sessions: rows.map((r) => ({
+        id: String(r._id),
+        businessDate: r.businessDate,
+        department: r.department,
+        procedureDescription: r.procedureDescription || '',
+        sessionFeeUsd: r.sessionFeeUsd ?? 0,
+        materialCostUsdTotal: r.materialCostUsdTotal ?? 0,
+        materialChargeUsdTotal: r.materialChargeUsdTotal ?? 0,
+        amountDueUsd: r.billingItemId?.amountDueUsd ?? r.sessionFeeUsd ?? 0,
+        billingStatus: r.billingItemId?.status ?? 'pending_payment',
+        providerName: r.providerUserId?.name || '—',
+        notes: r.notes || '',
+        materials: Array.isArray(r.materials) ? r.materials : [],
+        createdAt: r.createdAt,
       })),
     })
   } catch (e) {

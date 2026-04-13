@@ -53,6 +53,43 @@ type ClinicalDermRow = {
   createdAt: string
 }
 
+type DermatologyMaterialOption = {
+  id: string
+  sku: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+  active: boolean
+}
+
+type DermatologySelectedMaterial = {
+  inventoryItemId: string
+  quantity: string
+  chargedUnitPriceUsd: string
+}
+
+type DermatologySessionRow = {
+  id: string
+  businessDate: string
+  department: string
+  procedureDescription: string
+  sessionFeeUsd: number
+  materialCostUsdTotal: number
+  materialChargeUsdTotal: number
+  amountDueUsd: number
+  billingStatus: string
+  providerName: string
+  notes: string
+  createdAt: string
+  materials: Array<{
+    name: string
+    quantity: number
+    chargedUnitPriceUsd?: number
+    lineChargeUsd?: number
+  }>
+}
+
 type ClinicalApptRow = {
   id: string
   businessDate: string
@@ -353,6 +390,16 @@ export function PatientRecord() {
     'تقويم للفكين — حشو 11، 12 — متابعة تنظيف دوري.',
   )
   const [approvingPlan, setApprovingPlan] = useState(false)
+  const [dermProcedureDescription, setDermProcedureDescription] = useState('')
+  const [dermNotes, setDermNotes] = useState('')
+  const [dermSessionFeeUsd, setDermSessionFeeUsd] = useState('')
+  const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
+  const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
+  const [dermSaving, setDermSaving] = useState(false)
+  const [dermErr, setDermErr] = useState('')
+  const [dermOk, setDermOk] = useState('')
+  const [dermSessions, setDermSessions] = useState<DermatologySessionRow[]>([])
+  const [dermSessionsLoading, setDermSessionsLoading] = useState(false)
   const [clinicalHistory, setClinicalHistory] = useState<{
     laserSessions: ClinicalLaserRow[]
     dermatologyVisits: ClinicalDermRow[]
@@ -664,6 +711,35 @@ export function PatientRecord() {
   }, [tab, id, role])
 
   useEffect(() => {
+    if (tab !== 'dermatology' || !id || !role || !canAccessTab(role, 'dermatology')) return
+    let cancelled = false
+    setDermSessionsLoading(true)
+    setDermErr('')
+    ;(async () => {
+      try {
+        const [itemsRes, sessionsRes] = await Promise.all([
+          api<{ items: DermatologyMaterialOption[] }>('/api/inventory/items?activeOnly=1&inStockOnly=1'),
+          api<{ sessions: DermatologySessionRow[] }>(
+            `/api/clinical/sessions/patient/${encodeURIComponent(id)}`,
+          ),
+        ])
+        if (cancelled) return
+        setDermMaterialsCatalog(itemsRes.items)
+        setDermSessions(
+          sessionsRes.sessions.filter((s) => s.department === 'dermatology'),
+        )
+      } catch {
+        if (!cancelled) setDermErr('تعذر تحميل مواد الجلدية أو الجلسات')
+      } finally {
+        if (!cancelled) setDermSessionsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, role, tab])
+
+  useEffect(() => {
     if (!id || tab !== 'account') return
     if (role !== 'super_admin' && role !== 'reception') return
     let cancelled = false
@@ -739,6 +815,43 @@ export function PatientRecord() {
       ?.map((i) => i.label || i.note)
       .filter(Boolean)
       .join(' — ') || '—'
+
+  const dermMaterialChargeTotal = useMemo(
+    () =>
+      Math.round(
+        dermSelectedMaterials.reduce((sum, line) => {
+          const q = Math.max(0, parseFloat(line.quantity) || 0)
+          const p = Math.max(0, parseFloat(line.chargedUnitPriceUsd) || 0)
+          return sum + q * p
+        }, 0) * 100,
+      ) / 100,
+    [dermSelectedMaterials],
+  )
+  const dermGrossTotal = useMemo(() => {
+    const fee = Math.max(0, parseFloat(dermSessionFeeUsd) || 0)
+    return Math.round((fee + dermMaterialChargeTotal) * 100) / 100
+  }, [dermMaterialChargeTotal, dermSessionFeeUsd])
+
+  function toggleDermMaterial(materialId: string, checked: boolean) {
+    setDermSelectedMaterials((prev) => {
+      const exists = prev.some((x) => x.inventoryItemId === materialId)
+      if (checked && !exists) {
+        return [...prev, { inventoryItemId: materialId, quantity: '1', chargedUnitPriceUsd: '0' }]
+      }
+      if (!checked && exists) return prev.filter((x) => x.inventoryItemId !== materialId)
+      return prev
+    })
+  }
+
+  function updateDermMaterialLine(
+    materialId: string,
+    field: 'quantity' | 'chargedUnitPriceUsd',
+    value: string,
+  ) {
+    setDermSelectedMaterials((prev) =>
+      prev.map((line) => (line.inventoryItemId === materialId ? { ...line, [field]: value } : line)),
+    )
+  }
 
   if (loadErr || (!patient && !loadErr)) {
     if (!patient && !loadErr) {
@@ -1720,87 +1833,200 @@ export function PatientRecord() {
 
       {tab === 'dermatology' &&
         (canAccessTab(role, 'dermatology') ? (
-          <div className="grid-2">
-            <div className="card">
-              <h2 className="card-title">سولاريوم</h2>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>
-                  باكج ٥+١
-                </button>
-                <button type="button" className="btn btn-ghost" style={{ fontSize: '0.8rem' }}>
-                  مدة ٦/١٢ د
-                </button>
+          <div className="card">
+            <h2 className="card-title">جلسة جلدية مع مواد مستودع</h2>
+            <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              اختر المواد (متعدد)، أدخل الكمية وسعر التحصيل لكل مادة، ثم احفظ لإنشاء بند التحصيل وخصم المخزون فوراً.
+            </p>
+            <div className="grid-2">
+              <div>
+                <label className="form-label">وصف الإجراء / الجلسة</label>
+                <input
+                  className="input"
+                  value={dermProcedureDescription}
+                  onChange={(e) => setDermProcedureDescription(e.target.value)}
+                  placeholder="مثال: حقن تجميلي للوجه"
+                />
               </div>
-              <div
-                style={{
-                  padding: '0.75rem',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  marginBottom: '0.5rem',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span>جلسة نوع أول</span>
-                <span className="badge-vip">VIP</span>
+              <div>
+                <label className="form-label">رسوم الجلسة الأساسية (USD)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={dermSessionFeeUsd}
+                  onChange={(e) => setDermSessionFeeUsd(e.target.value)}
+                  placeholder="0"
+                />
               </div>
             </div>
-            <div className="card">
-              <h2 className="card-title">مساج — جزء علوي فقط</h2>
-              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input type="checkbox" defaultChecked /> يدان
-              </label>
-              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input type="checkbox" defaultChecked /> رقبة
-              </label>
-              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input type="checkbox" defaultChecked /> أكتاف
-              </label>
+            <div style={{ marginTop: '0.85rem' }}>
+              <label className="form-label">ملاحظات طبية</label>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={dermNotes}
+                onChange={(e) => setDermNotes(e.target.value)}
+                placeholder="ملاحظات مرتبطة بالإجراء..."
+              />
             </div>
-            {role === 'super_admin' ? (
-              <div className="card" style={{ gridColumn: '1 / -1' }}>
-                <h2 className="card-title">تجميل ومستودع</h2>
-                <div className="grid-2">
-                  {[
-                    { name: 'بوتوكس', stock: 24, low: false },
-                    { name: 'فيلر شفاه', stock: 3, low: true },
-                    { name: 'نضارة', stock: 12, low: false },
-                  ].map((m) => (
-                    <label
-                      key={m.name}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '0.65rem',
-                        border: '1px solid var(--border)',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                      }}
+            <h3 className="card-title" style={{ marginTop: '1rem', fontSize: '0.95rem' }}>
+              مواد الجلدية (المستودع المركزي)
+            </h3>
+            {dermMaterialsCatalog.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.88rem' }}>
+                لا توجد مواد فعّالة/متاحة بالمخزون حالياً.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.6rem' }}>
+                {dermMaterialsCatalog.map((item) => {
+                  const selected = dermSelectedMaterials.find((x) => x.inventoryItemId === item.id)
+                  return (
+                    <div
+                      key={item.id}
+                      style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem' }}
                     >
-                      <span>
-                        <input type="checkbox" style={{ marginLeft: '0.5rem' }} />
-                        {m.name}
-                      </span>
-                      <span
-                        className="chip"
-                        style={
-                          m.low
-                            ? { background: 'var(--warning-bg)', color: 'var(--warning)' }
-                            : {}
-                        }
-                      >
-                        {m.stock} متبقي{m.low ? ' — قرب الحد' : ''}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <button type="button" className="btn btn-primary" style={{ marginTop: '1rem' }}>
-                  إتمام الإجراء وخصم المخزون
-                </button>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selected)}
+                          onChange={(e) => toggleDermMaterial(item.id, e.target.checked)}
+                        />
+                        <strong>{item.name}</strong>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          ({item.quantity} {item.unit} متاح)
+                        </span>
+                      </label>
+                      {selected ? (
+                        <div className="grid-2" style={{ marginTop: '0.5rem' }}>
+                          <div>
+                            <label className="form-label">الكمية المستخدمة</label>
+                            <input
+                              className="input"
+                              inputMode="decimal"
+                              value={selected.quantity}
+                              onChange={(e) =>
+                                updateDermMaterialLine(item.id, 'quantity', e.target.value)
+                              }
+                            />
+                          </div>
+                          <div>
+                            <label className="form-label">سعر التحصيل للوحدة (USD)</label>
+                            <input
+                              className="input"
+                              inputMode="decimal"
+                              value={selected.chargedUnitPriceUsd}
+                              onChange={(e) =>
+                                updateDermMaterialLine(item.id, 'chargedUnitPriceUsd', e.target.value)
+                              }
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
-            ) : null}
+            )}
+            <div style={{ marginTop: '0.85rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+              رسوم الجلسة: <strong>{Math.max(0, parseFloat(dermSessionFeeUsd) || 0)} USD</strong> — مواد محصلة:{' '}
+              <strong>{dermMaterialChargeTotal} USD</strong> — الإجمالي للتحصيل: <strong>{dermGrossTotal} USD</strong>
+            </div>
+            {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
+            {dermOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{dermOk}</p> : null}
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ marginTop: '0.9rem' }}
+              disabled={dermSaving}
+              onClick={async () => {
+                if (!id) return
+                setDermErr('')
+                setDermOk('')
+                const fee = Math.max(0, parseFloat(dermSessionFeeUsd) || 0)
+                if (fee <= 0) {
+                  setDermErr('أدخل رسوم الجلسة الأساسية أكبر من صفر.')
+                  return
+                }
+                const payloadMaterials = dermSelectedMaterials
+                  .map((line) => ({
+                    inventoryItemId: line.inventoryItemId,
+                    quantity: Math.max(0, parseFloat(line.quantity) || 0),
+                    chargedUnitPriceUsd: Math.max(0, parseFloat(line.chargedUnitPriceUsd) || 0),
+                  }))
+                  .filter((x) => x.quantity > 0)
+                setDermSaving(true)
+                try {
+                  const created = await api<{
+                    billingItem: { amountDueUsd: number; id: string }
+                  }>('/api/clinical/sessions', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      department: 'dermatology',
+                      patientId: id,
+                      sessionFeeUsd: fee,
+                      procedureDescription: dermProcedureDescription.trim(),
+                      notes: dermNotes.trim(),
+                      materials: payloadMaterials,
+                      businessDate: clinicBusinessDate ?? undefined,
+                    }),
+                  })
+                  const sessionsData = await api<{ sessions: DermatologySessionRow[] }>(
+                    `/api/clinical/sessions/patient/${encodeURIComponent(id)}`,
+                  )
+                  setDermSessions(sessionsData.sessions.filter((s) => s.department === 'dermatology'))
+                  const itemsData = await api<{ items: DermatologyMaterialOption[] }>(
+                    '/api/inventory/items?activeOnly=1&inStockOnly=1',
+                  )
+                  setDermMaterialsCatalog(itemsData.items)
+                  setDermProcedureDescription('')
+                  setDermSessionFeeUsd('')
+                  setDermNotes('')
+                  setDermSelectedMaterials([])
+                  setDermOk(
+                    `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${created.billingItem.amountDueUsd} USD. يظهر في صفحة التحصيل للاستقبال.`,
+                  )
+                } catch (e) {
+                  setDermErr(e instanceof ApiError ? e.message : 'تعذر حفظ جلسة الجلدية')
+                } finally {
+                  setDermSaving(false)
+                }
+              }}
+            >
+              {dermSaving ? 'جاري الحفظ…' : 'تأكيد الجلسة وخصم المواد وإنشاء الفاتورة'}
+            </button>
+            <h3 className="card-title" style={{ marginTop: '1.25rem', fontSize: '0.95rem' }}>
+              آخر جلسات الجلدية لهذا المريض
+            </h3>
+            {dermSessionsLoading ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل السجل…</p>
+            ) : dermSessions.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات جلدية مسجلة حتى الآن.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>الوصف</th>
+                      <th>المعالج</th>
+                      <th>الإجمالي (USD)</th>
+                      <th>حالة التحصيل</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dermSessions.map((s) => (
+                      <tr key={s.id}>
+                        <td>{s.businessDate}</td>
+                        <td>{s.procedureDescription || '—'}</td>
+                        <td>{s.providerName}</td>
+                        <td>{s.amountDueUsd}</td>
+                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'بانتظار التحصيل'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : (
           <div className="no-access">
