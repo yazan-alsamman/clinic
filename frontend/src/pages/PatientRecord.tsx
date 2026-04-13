@@ -1725,19 +1725,23 @@ export function PatientRecord() {
                     onChange={(e) => setLaserCostSyp(e.target.value)}
                   />
                 </div>
-                <div>
-                  <label className="form-label" htmlFor="laser-discount-pct">
-                    حسم %
-                  </label>
-                  <input
-                    id="laser-discount-pct"
-                    className="input"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={laserDiscountPercent}
-                    onChange={(e) => setLaserDiscountPercent(e.target.value)}
-                  />
-                </div>
+              </div>
+              <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                يكفي إدخال المبلغ في أحد الحقلين فقط (دولار أو ليرة).
+              </p>
+              <div style={{ marginTop: '0.75rem' }}>
+                <label className="form-label" htmlFor="laser-discount-pct">
+                  حسم %
+                </label>
+                <input
+                  id="laser-discount-pct"
+                  className="input"
+                  inputMode="numeric"
+                  placeholder="0"
+                  value={laserDiscountPercent}
+                  onChange={(e) => setLaserDiscountPercent(e.target.value)}
+                  style={{ maxWidth: 200 }}
+                />
               </div>
               {laserNetDuePreview != null ? (
                 <p style={{ margin: '0.75rem 0 0', fontSize: '0.9rem', fontVariantNumeric: 'tabular-nums' }}>
@@ -1871,16 +1875,16 @@ export function PatientRecord() {
             <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
               اختر المواد (متعدد) وأدخل الكمية لكل مادة. التحصيل يعتمد فقط على سعر الجلسة، ثم يُخصم المخزون فوراً.
             </p>
-            <div className="grid-2">
-              <div>
-                <label className="form-label">وصف الإجراء / الجلسة</label>
-                <input
-                  className="input"
-                  value={dermProcedureDescription}
-                  onChange={(e) => setDermProcedureDescription(e.target.value)}
-                  placeholder="مثال: حقن تجميلي للوجه"
-                />
-              </div>
+            <div>
+              <label className="form-label">وصف الإجراء / الجلسة</label>
+              <input
+                className="input"
+                value={dermProcedureDescription}
+                onChange={(e) => setDermProcedureDescription(e.target.value)}
+                placeholder="مثال: حقن تجميلي للوجه"
+              />
+            </div>
+            <div className="grid-2" style={{ marginTop: '0.75rem' }}>
               <div>
                 <label className="form-label">رسوم الجلسة الأساسية (USD)</label>
                 <input
@@ -1902,6 +1906,9 @@ export function PatientRecord() {
                 />
               </div>
             </div>
+            <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+              يكفي إدخال السعر في أحد الحقلين فقط.
+            </p>
             <div style={{ marginTop: '0.85rem' }}>
               <label className="form-label">ملاحظات طبية</label>
               <textarea
