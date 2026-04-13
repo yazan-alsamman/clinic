@@ -363,7 +363,7 @@ function openHtmlPrintWindow(html: string) {
 export function PatientRecord() {
   const { id } = useParams()
   const { user } = useAuth()
-  const { businessDate: clinicBusinessDate } = useClinic()
+  const { businessDate: clinicBusinessDate, usdSypRate } = useClinic()
   const role = user?.role as Role | undefined
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
@@ -381,6 +381,7 @@ export function PatientRecord() {
   const [laserSessionErr, setLaserSessionErr] = useState('')
   const [laserSessionOk, setLaserSessionOk] = useState('')
   const [laserCostUsd, setLaserCostUsd] = useState('')
+  const [laserCostSyp, setLaserCostSyp] = useState('')
   const [laserDiscountPercent, setLaserDiscountPercent] = useState('0')
   const [laserPickerKey, setLaserPickerKey] = useState(0)
   const [laserManualAreas, setLaserManualAreas] = useState<string[]>([])
@@ -393,6 +394,7 @@ export function PatientRecord() {
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
   const [dermNotes, setDermNotes] = useState('')
   const [dermSessionFeeUsd, setDermSessionFeeUsd] = useState('')
+  const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
   const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
   const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
   const [dermSaving, setDermSaving] = useState(false)
@@ -803,13 +805,20 @@ export function PatientRecord() {
   }, [])
 
   const laserNetDuePreview = useMemo(() => {
-    const g = parseFloat(laserCostUsd)
+    const usdRaw = parseFloat(laserCostUsd)
+    const sypRaw = parseFloat(laserCostSyp)
+    const g =
+      usdRaw > 0
+        ? usdRaw
+        : sypRaw > 0 && (usdSypRate ?? 0) > 0
+          ? sypRaw / Number(usdSypRate)
+          : 0
     const d = parseFloat(laserDiscountPercent) || 0
     if (!(g > 0)) return null
     const net = g * (1 - Math.min(100, Math.max(0, d)) / 100)
     if (!(net > 0)) return null
     return Math.round(net * 100) / 100
-  }, [laserCostUsd, laserDiscountPercent])
+  }, [laserCostUsd, laserCostSyp, laserDiscountPercent, usdSypRate])
 
   const dentalPlanApproved = dentalPlan?.status === 'approved'
   const dentalPlanSummary =
@@ -823,9 +832,16 @@ export function PatientRecord() {
     [dermSelectedMaterials],
   )
   const dermGrossTotal = useMemo(() => {
-    const fee = Math.max(0, parseFloat(dermSessionFeeUsd) || 0)
+    const usdRaw = parseFloat(dermSessionFeeUsd)
+    const sypRaw = parseFloat(dermSessionFeeSyp)
+    const fee =
+      usdRaw > 0
+        ? usdRaw
+        : sypRaw > 0 && (usdSypRate ?? 0) > 0
+          ? sypRaw / Number(usdSypRate)
+          : 0
     return Math.round((fee + dermMaterialChargeTotal) * 100) / 100
-  }, [dermMaterialChargeTotal, dermSessionFeeUsd])
+  }, [dermMaterialChargeTotal, dermSessionFeeUsd, dermSessionFeeSyp, usdSypRate])
 
   function toggleDermMaterial(materialId: string, checked: boolean) {
     setDermSelectedMaterials((prev) => {
@@ -1697,6 +1713,19 @@ export function PatientRecord() {
                   />
                 </div>
                 <div>
+                  <label className="form-label" htmlFor="laser-cost-syp">
+                    المبلغ الإجمالي (SYP)
+                  </label>
+                  <input
+                    id="laser-cost-syp"
+                    className="input"
+                    inputMode="decimal"
+                    placeholder="مثال: 1500000"
+                    value={laserCostSyp}
+                    onChange={(e) => setLaserCostSyp(e.target.value)}
+                  />
+                </div>
+                <div>
                   <label className="form-label" htmlFor="laser-discount-pct">
                     حسم %
                   </label>
@@ -1743,9 +1772,16 @@ export function PatientRecord() {
                 if (!id) return
                 setLaserSessionErr('')
                 setLaserSessionOk('')
-                const gross = parseFloat(laserCostUsd)
+                const grossUsdRaw = parseFloat(laserCostUsd)
+                const grossSypRaw = parseFloat(laserCostSyp)
+                const gross =
+                  grossUsdRaw > 0
+                    ? grossUsdRaw
+                    : grossSypRaw > 0 && (usdSypRate ?? 0) > 0
+                      ? grossSypRaw / Number(usdSypRate)
+                      : 0
                 if (!(gross > 0)) {
-                  setLaserSessionErr('أدخل المبلغ الإجمالي (USD) أكبر من صفر.')
+                  setLaserSessionErr('أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر).')
                   return
                 }
                 const disc = parseFloat(laserDiscountPercent) || 0
@@ -1771,7 +1807,8 @@ export function PatientRecord() {
                       areaIds: laserAreaIds,
                       manualAreaLabels: laserManualAreas,
                       status: 'in_progress',
-                      costUsd: gross,
+                      costUsd: grossUsdRaw > 0 ? grossUsdRaw : undefined,
+                      costSyp: grossUsdRaw > 0 ? undefined : grossSypRaw,
                       discountPercent: disc,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
@@ -1780,6 +1817,7 @@ export function PatientRecord() {
                     `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${created.billingItem.amountDueUsd} USD (صفحة التحصيل للاستقبال).`,
                   )
                   setLaserCostUsd('')
+                  setLaserCostSyp('')
                   setLaserDiscountPercent('0')
                   setLaserNotes('')
                   setLaserAreaIds([])
@@ -1853,6 +1891,16 @@ export function PatientRecord() {
                   placeholder="0"
                 />
               </div>
+              <div>
+                <label className="form-label">رسوم الجلسة الأساسية (SYP)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={dermSessionFeeSyp}
+                  onChange={(e) => setDermSessionFeeSyp(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
             </div>
             <div style={{ marginTop: '0.85rem' }}>
               <label className="form-label">ملاحظات طبية</label>
@@ -1910,7 +1958,7 @@ export function PatientRecord() {
               </div>
             )}
             <div style={{ marginTop: '0.85rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              رسوم الجلسة: <strong>{Math.max(0, parseFloat(dermSessionFeeUsd) || 0)} USD</strong> — الإجمالي للتحصيل:{' '}
+              رسوم الجلسة: <strong>{dermGrossTotal} USD</strong> — الإجمالي للتحصيل:{' '}
               <strong>{dermGrossTotal} USD</strong>
             </div>
             {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
@@ -1924,9 +1972,16 @@ export function PatientRecord() {
                 if (!id) return
                 setDermErr('')
                 setDermOk('')
-                const fee = Math.max(0, parseFloat(dermSessionFeeUsd) || 0)
+                const feeUsdRaw = Math.max(0, parseFloat(dermSessionFeeUsd) || 0)
+                const feeSypRaw = Math.max(0, parseFloat(dermSessionFeeSyp) || 0)
+                const fee =
+                  feeUsdRaw > 0
+                    ? feeUsdRaw
+                    : feeSypRaw > 0 && (usdSypRate ?? 0) > 0
+                      ? feeSypRaw / Number(usdSypRate)
+                      : 0
                 if (fee <= 0) {
-                  setDermErr('أدخل رسوم الجلسة الأساسية أكبر من صفر.')
+                  setDermErr('أدخل رسوم الجلسة الأساسية بالدولار أو الليرة (قيمة أكبر من صفر).')
                   return
                 }
                 const payloadMaterials = dermSelectedMaterials
@@ -1944,7 +1999,8 @@ export function PatientRecord() {
                     body: JSON.stringify({
                       department: 'dermatology',
                       patientId: id,
-                      sessionFeeUsd: fee,
+                      sessionFeeUsd: feeUsdRaw > 0 ? feeUsdRaw : undefined,
+                      sessionFeeSyp: feeUsdRaw > 0 ? undefined : feeSypRaw,
                       procedureDescription: dermProcedureDescription.trim(),
                       notes: dermNotes.trim(),
                       materials: payloadMaterials,
@@ -1961,6 +2017,7 @@ export function PatientRecord() {
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')
                   setDermSessionFeeUsd('')
+                  setDermSessionFeeSyp('')
                   setDermNotes('')
                   setDermSelectedMaterials([])
                   setDermOk(

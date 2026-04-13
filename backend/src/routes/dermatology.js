@@ -12,6 +12,17 @@ import { postDermatologyVisit } from '../services/postingService.js'
 export const dermatologyRouter = Router()
 
 dermatologyRouter.use(authMiddleware, loadBusinessDay, requireRoles('super_admin', 'dermatology'))
+function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
+  const usd = Number(usdRaw)
+  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return usd
+  const syp = Number(sypRaw)
+  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
+    const rate = Number(exchangeRate)
+    if (!Number.isFinite(rate) || rate <= 0) return null
+    return syp / rate
+  }
+  return null
+}
 
 function startEndOfLocalDay(d = new Date()) {
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0)
@@ -83,14 +94,26 @@ dermatologyRouter.post('/visits', requireActiveDay, async (req, res) => {
       return
     }
     const businessDate = String(body.businessDate || '').trim() || todayBusinessDate()
+    const costUsd = resolveUsdAmount({
+      usdRaw: body.costUsd,
+      sypRaw: body.costSyp,
+      exchangeRate: req.businessDay?.exchangeRate,
+      allowZero: true,
+    })
+    const materialCostUsd = resolveUsdAmount({
+      usdRaw: body.materialCostUsd,
+      sypRaw: body.materialCostSyp,
+      exchangeRate: req.businessDay?.exchangeRate,
+      allowZero: true,
+    })
     const v = await DermatologyVisit.create({
       businessDate,
       patientId: patient._id,
       areaTreatment: String(body.areaTreatment ?? ''),
       sessionType: String(body.sessionType ?? 'جلدية / تجميل'),
-      costUsd: Math.max(0, Number(body.costUsd) || 0),
+      costUsd: Math.max(0, Number(costUsd) || 0),
       discountPercent: Math.min(100, Math.max(0, Number(body.discountPercent) || 0)),
-      materialCostUsd: Math.max(0, Number(body.materialCostUsd) || 0),
+      materialCostUsd: Math.max(0, Number(materialCostUsd) || 0),
       procedureClass: ['cosmetic', 'ortho', 'general'].includes(body.procedureClass)
         ? body.procedureClass
         : 'cosmetic',

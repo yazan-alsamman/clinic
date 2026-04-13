@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { useClinic } from '../context/ClinicContext'
 
 type Item = {
   id: string
@@ -34,6 +35,7 @@ const DEPARTMENT_OPTIONS: Array<{ value: Item['department']; label: string }> = 
 
 export function InventoryPage() {
   const { user } = useAuth()
+  const { usdSypRate } = useClinic()
   const canRead = user?.role === 'super_admin' || user?.role === 'reception'
   const canCreate = user?.role === 'super_admin'
   const canEdit = user?.role === 'super_admin'
@@ -42,6 +44,7 @@ export function InventoryPage() {
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState(emptyCreate)
+  const [createUnitCostSyp, setCreateUnitCostSyp] = useState('')
   const [editItem, setEditItem] = useState<Item | null>(null)
   const [editForm, setEditForm] = useState({
     sku: '',
@@ -53,6 +56,7 @@ export function InventoryPage() {
     active: true,
     department: 'dermatology' as Item['department'],
   })
+  const [editUnitCostSyp, setEditUnitCostSyp] = useState('')
   const [formErr, setFormErr] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -89,6 +93,9 @@ export function InventoryPage() {
       active: r.active !== false,
       department: r.department,
     })
+    setEditUnitCostSyp(
+      usdSypRate && usdSypRate > 0 ? String(Math.round((r.unitCost || 0) * usdSypRate)) : '',
+    )
   }
 
   if (!canRead) {
@@ -131,6 +138,7 @@ export function InventoryPage() {
             onClick={() => {
               setFormErr('')
               setCreateForm(emptyCreate)
+              setCreateUnitCostSyp('')
               setCreateOpen(true)
             }}
           >
@@ -302,7 +310,7 @@ export function InventoryPage() {
               </div>
               <div>
                 <label className="form-label" htmlFor="inv-cost">
-                  تكلفة الوحدة (اختياري)
+                  تكلفة الوحدة (USD) (اختياري)
                 </label>
                 <input
                   id="inv-cost"
@@ -310,6 +318,18 @@ export function InventoryPage() {
                   inputMode="decimal"
                   value={createForm.unitCost}
                   onChange={(e) => setCreateForm((f) => ({ ...f, unitCost: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="inv-cost-syp">
+                  تكلفة الوحدة (SYP) (اختياري)
+                </label>
+                <input
+                  id="inv-cost-syp"
+                  className="input"
+                  inputMode="decimal"
+                  value={createUnitCostSyp}
+                  onChange={(e) => setCreateUnitCostSyp(e.target.value)}
                 />
               </div>
               {formErr ? (
@@ -340,11 +360,13 @@ export function InventoryPage() {
                         department: createForm.department,
                         quantity: Number(createForm.quantity) || 0,
                         safetyStockLevel: Number(createForm.safetyStockLevel) || 0,
-                        unitCost: Number(createForm.unitCost) || 0,
+                        unitCost: Number(createForm.unitCost) || undefined,
+                        unitCostSyp: Number(createUnitCostSyp) || undefined,
                       }),
                     })
                     setCreateOpen(false)
                     setCreateForm(emptyCreate)
+                    setCreateUnitCostSyp('')
                     await load()
                   } catch (e) {
                     setFormErr(e instanceof ApiError ? e.message : 'فشل الحفظ')
@@ -464,7 +486,7 @@ export function InventoryPage() {
               {isAdmin ? (
                 <div>
                   <label className="form-label" htmlFor="ed-cost">
-                    تكلفة الوحدة
+                    تكلفة الوحدة (USD)
                   </label>
                   <input
                     id="ed-cost"
@@ -472,6 +494,20 @@ export function InventoryPage() {
                     inputMode="decimal"
                     value={editForm.unitCost}
                     onChange={(e) => setEditForm((f) => ({ ...f, unitCost: e.target.value }))}
+                  />
+                </div>
+              ) : null}
+              {isAdmin ? (
+                <div>
+                  <label className="form-label" htmlFor="ed-cost-syp">
+                    تكلفة الوحدة (SYP)
+                  </label>
+                  <input
+                    id="ed-cost-syp"
+                    className="input"
+                    inputMode="decimal"
+                    value={editUnitCostSyp}
+                    onChange={(e) => setEditUnitCostSyp(e.target.value)}
                   />
                 </div>
               ) : null}
@@ -512,7 +548,8 @@ export function InventoryPage() {
                       body.name = editForm.name.trim()
                       body.unit = editForm.unit.trim()
                       body.department = editForm.department
-                      body.unitCost = Number(editForm.unitCost) || 0
+                      body.unitCost = Number(editForm.unitCost) || undefined
+                      body.unitCostSyp = Number(editUnitCostSyp) || undefined
                       body.active = editForm.active
                     }
                     await api(`/api/inventory/items/${editItem.id}`, {

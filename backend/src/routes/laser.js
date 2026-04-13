@@ -21,6 +21,17 @@ const LASER_TODAY_PAGE = ['super_admin', 'laser']
 /** تسجيل جلسة من ملف المريض: ليزر + مدير (الاستقبال يعرض السجل فقط من نظرة عامة) */
 const LASER_SESSION_CREATE = ['super_admin', 'laser']
 const LASER_STATUS_VALUES = ['scheduled', 'in_progress', 'completed_pending_collection', 'completed']
+function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
+  const usd = Number(usdRaw)
+  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return round2(usd)
+  const syp = Number(sypRaw)
+  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
+    const rate = Number(exchangeRate)
+    if (!Number.isFinite(rate) || rate <= 0) return null
+    return round2(syp / rate)
+  }
+  return null
+}
 
 laserRouter.get('/catalog', async (req, res) => {
   try {
@@ -174,10 +185,14 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       return
     }
 
-    const costGross = round2(Number(body.costUsd) || 0)
+    const costGross = resolveUsdAmount({
+      usdRaw: body.costUsd,
+      sypRaw: body.costSyp,
+      exchangeRate: req.businessDay?.exchangeRate,
+    })
     const discountPercent = Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
-    if (costGross <= 0) {
-      res.status(400).json({ error: 'المبلغ الإجمالي (USD) مطلوب وأكبر من صفر' })
+    if (!(costGross > 0)) {
+      res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر)' })
       return
     }
     const amountDueUsd = round2(costGross * (1 - discountPercent / 100))

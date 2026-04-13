@@ -15,6 +15,17 @@ export const clinicalRouter = Router()
 clinicalRouter.use(authMiddleware, loadBusinessDay)
 
 const CLINICAL_ROLES = ['super_admin', 'laser', 'dermatology', 'dental_branch']
+function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
+  const usd = Number(usdRaw)
+  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return round2(usd)
+  const syp = Number(sypRaw)
+  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
+    const rate = Number(exchangeRate)
+    if (!Number.isFinite(rate) || rate <= 0) return null
+    return round2(syp / rate)
+  }
+  return null
+}
 
 function departmentFromRequest(req) {
   const role = req.user.role
@@ -104,9 +115,13 @@ clinicalRouter.post(
         return
       }
 
-      const sessionFeeUsd = round2(Number(body.sessionFeeUsd) || 0)
-      if (sessionFeeUsd <= 0) {
-        res.status(400).json({ error: 'رسوم الجلسة يجب أن تكون أكبر من صفر' })
+      const sessionFeeUsd = resolveUsdAmount({
+        usdRaw: body.sessionFeeUsd,
+        sypRaw: body.sessionFeeSyp,
+        exchangeRate: req.businessDay?.exchangeRate,
+      })
+      if (!(sessionFeeUsd > 0)) {
+        res.status(400).json({ error: 'أدخل رسوم الجلسة بالدولار أو الليرة (قيمة أكبر من صفر)' })
         return
       }
 
