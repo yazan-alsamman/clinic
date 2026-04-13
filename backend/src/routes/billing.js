@@ -57,6 +57,25 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
   }
 })
 
+/** عدد البنود المعلّقة (لـ badge في القائمة) */
+billingRouter.get('/pending-count', requireRoles(...BILLING_ROLES), async (req, res) => {
+  try {
+    let filter = { status: 'pending_payment' }
+    if (req.user.role === 'super_admin' && String(req.query.all || '') === '1') {
+      // Super admin can optionally see all pending across dates.
+      filter = { status: 'pending_payment' }
+    } else {
+      const date = String(req.query.date || '').trim() || todayBusinessDate()
+      filter = { status: 'pending_payment', businessDate: date }
+    }
+    const count = await BillingItem.countDocuments(filter)
+    res.json({ count })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 /** كل المعلّقة (أيام) — اختياري لمدير */
 billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) => {
   try {

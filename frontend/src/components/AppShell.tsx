@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { api } from '../api/client'
 import { useClinic } from '../context/ClinicContext'
 import { useAuth } from '../context/AuthContext'
 import { visibleNavForRole, roleLabel } from '../data/nav'
@@ -13,9 +14,11 @@ export function AppShell() {
   const navigate = useNavigate()
   const [closeOpen, setCloseOpen] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
+  const [pendingBillingCount, setPendingBillingCount] = useState(0)
   const role = user?.role
   const nav = role ? visibleNavForRole(role) : []
   const gated = !dayActive && role !== 'super_admin'
+  const canSeeBillingCount = role === 'super_admin' || role === 'reception'
 
   useEffect(() => {
     setNavOpen(false)
@@ -29,6 +32,29 @@ export function AppShell() {
       document.body.style.overflow = prev
     }
   }, [navOpen])
+
+  useEffect(() => {
+    if (!canSeeBillingCount) {
+      setPendingBillingCount(0)
+      return
+    }
+    let cancelled = false
+    const loadCount = async () => {
+      try {
+        const qs = role === 'super_admin' ? '?all=1' : ''
+        const data = await api<{ count?: number }>(`/api/billing/pending-count${qs}`)
+        if (!cancelled) setPendingBillingCount(Number(data.count || 0))
+      } catch {
+        if (!cancelled) setPendingBillingCount(0)
+      }
+    }
+    void loadCount()
+    const id = window.setInterval(() => void loadCount(), 20000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [canSeeBillingCount, role, dayActive])
 
   useEffect(() => {
     if (!navOpen) return
@@ -66,7 +92,12 @@ export function AppShell() {
               }
               onClick={() => setNavOpen(false)}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {item.key === 'billing_queue' && pendingBillingCount > 0 ? (
+                <span className="sidebar-link-badge" aria-label={`${pendingBillingCount} بانتظار التحصيل`}>
+                  {pendingBillingCount > 99 ? '99+' : pendingBillingCount}
+                </span>
+              ) : null}
             </NavLink>
           ))}
         </nav>
