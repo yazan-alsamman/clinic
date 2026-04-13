@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { ApiError, getPatientToken, patientApi, setPatientToken } from '../api/client'
+import logoEliasClinic from '../assets/logo-elias-clinic.png'
 import { useAuth } from '../context/AuthContext'
 
 const prodMissingApiBase =
@@ -105,8 +106,7 @@ export function Login() {
     >
       <div className="card" style={{ maxWidth: 420, width: '100%' }}>
         <div className="sidebar-brand" style={{ marginBottom: '1.25rem' }}>
-          <div className="sidebar-brand-mark">ED</div>
-          <div className="sidebar-brand-title">مركز الدكتور إلياس دحدل</div>
+          <img className="brand-logo-img" src={logoEliasClinic} alt="Elias dahdal clinic" />
           <div className="sidebar-brand-sub">تسجيل الدخول — موظفون ومرضى</div>
         </div>
         {prodMissingApiBase ? (

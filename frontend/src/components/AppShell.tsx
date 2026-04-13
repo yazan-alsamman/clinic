@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import logoEliasClinic from '../assets/logo-elias-clinic.png'
 import { useClinic } from '../context/ClinicContext'
 import { useAuth } from '../context/AuthContext'
 import { visibleNavForRole, roleLabel } from '../data/nav'
@@ -76,8 +77,7 @@ export function AppShell() {
       ) : null}
       <aside className="sidebar" id="app-sidebar" aria-label="التنقل">
         <div className="sidebar-brand">
-          <div className="sidebar-brand-mark">ED</div>
-          <div className="sidebar-brand-title">مركز الدكتور إلياس دحدل</div>
+          <img className="brand-logo-img" src={logoEliasClinic} alt="Elias dahdal clinic" />
           <div className="sidebar-brand-sub">نظام تشغيل العيادة</div>
         </div>
         <nav className="sidebar-nav" aria-label="القائمة الرئيسية">

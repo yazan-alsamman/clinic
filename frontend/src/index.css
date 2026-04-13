@@ -172,6 +172,14 @@ button {
   letter-spacing: 0.02em;
 }
 
+.brand-logo-img {
+  display: block;
+  width: min(190px, 100%);
+  height: auto;
+  margin-bottom: 0.7rem;
+  filter: drop-shadow(0 0 12px rgba(244, 114, 182, 0.26));
+}
+
 .sidebar-brand-title {
   font-weight: 700;
   font-size: 0.98rem;
