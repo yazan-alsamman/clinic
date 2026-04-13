@@ -67,7 +67,6 @@ type DermatologyMaterialOption = {
 type DermatologySelectedMaterial = {
   inventoryItemId: string
   quantity: string
-  chargedUnitPriceUsd: string
 }
 
 type DermatologySessionRow = {
@@ -820,14 +819,7 @@ export function PatientRecord() {
       .join(' — ') || '—'
 
   const dermMaterialChargeTotal = useMemo(
-    () =>
-      Math.round(
-        dermSelectedMaterials.reduce((sum, line) => {
-          const q = Math.max(0, parseFloat(line.quantity) || 0)
-          const p = Math.max(0, parseFloat(line.chargedUnitPriceUsd) || 0)
-          return sum + q * p
-        }, 0) * 100,
-      ) / 100,
+    () => 0,
     [dermSelectedMaterials],
   )
   const dermGrossTotal = useMemo(() => {
@@ -839,7 +831,7 @@ export function PatientRecord() {
     setDermSelectedMaterials((prev) => {
       const exists = prev.some((x) => x.inventoryItemId === materialId)
       if (checked && !exists) {
-        return [...prev, { inventoryItemId: materialId, quantity: '1', chargedUnitPriceUsd: '0' }]
+        return [...prev, { inventoryItemId: materialId, quantity: '1' }]
       }
       if (!checked && exists) return prev.filter((x) => x.inventoryItemId !== materialId)
       return prev
@@ -848,7 +840,7 @@ export function PatientRecord() {
 
   function updateDermMaterialLine(
     materialId: string,
-    field: 'quantity' | 'chargedUnitPriceUsd',
+    field: 'quantity',
     value: string,
   ) {
     setDermSelectedMaterials((prev) =>
@@ -1839,7 +1831,7 @@ export function PatientRecord() {
           <div className="card">
             <h2 className="card-title">جلسة جلدية مع مواد مستودع</h2>
             <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              اختر المواد (متعدد)، أدخل الكمية وسعر التحصيل لكل مادة، ثم احفظ لإنشاء بند التحصيل وخصم المخزون فوراً.
+              اختر المواد (متعدد) وأدخل الكمية لكل مادة. التحصيل يعتمد فقط على سعر الجلسة، ثم يُخصم المخزون فوراً.
             </p>
             <div className="grid-2">
               <div>
@@ -1900,29 +1892,16 @@ export function PatientRecord() {
                         </span>
                       </label>
                       {selected ? (
-                        <div className="grid-2" style={{ marginTop: '0.5rem' }}>
-                          <div>
-                            <label className="form-label">الكمية المستخدمة</label>
-                            <input
-                              className="input"
-                              inputMode="decimal"
-                              value={selected.quantity}
-                              onChange={(e) =>
-                                updateDermMaterialLine(item.id, 'quantity', e.target.value)
-                              }
-                            />
-                          </div>
-                          <div>
-                            <label className="form-label">سعر التحصيل للوحدة (USD)</label>
-                            <input
-                              className="input"
-                              inputMode="decimal"
-                              value={selected.chargedUnitPriceUsd}
-                              onChange={(e) =>
-                                updateDermMaterialLine(item.id, 'chargedUnitPriceUsd', e.target.value)
-                              }
-                            />
-                          </div>
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <label className="form-label">الكمية المستخدمة</label>
+                          <input
+                            className="input"
+                            inputMode="decimal"
+                            value={selected.quantity}
+                            onChange={(e) =>
+                              updateDermMaterialLine(item.id, 'quantity', e.target.value)
+                            }
+                          />
                         </div>
                       ) : null}
                     </div>
@@ -1931,8 +1910,8 @@ export function PatientRecord() {
               </div>
             )}
             <div style={{ marginTop: '0.85rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              رسوم الجلسة: <strong>{Math.max(0, parseFloat(dermSessionFeeUsd) || 0)} USD</strong> — مواد محصلة:{' '}
-              <strong>{dermMaterialChargeTotal} USD</strong> — الإجمالي للتحصيل: <strong>{dermGrossTotal} USD</strong>
+              رسوم الجلسة: <strong>{Math.max(0, parseFloat(dermSessionFeeUsd) || 0)} USD</strong> — الإجمالي للتحصيل:{' '}
+              <strong>{dermGrossTotal} USD</strong>
             </div>
             {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
             {dermOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{dermOk}</p> : null}
@@ -1954,7 +1933,6 @@ export function PatientRecord() {
                   .map((line) => ({
                     inventoryItemId: line.inventoryItemId,
                     quantity: Math.max(0, parseFloat(line.quantity) || 0),
-                    chargedUnitPriceUsd: Math.max(0, parseFloat(line.chargedUnitPriceUsd) || 0),
                   }))
                   .filter((x) => x.quantity > 0)
                 setDermSaving(true)

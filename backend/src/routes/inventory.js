@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { InventoryItem } from '../models/InventoryItem.js'
+import { nextSequence } from '../models/Counter.js'
 import { authMiddleware, requireRoles } from '../middleware/auth.js'
 import { writeAudit } from '../utils/audit.js'
 
@@ -15,6 +16,25 @@ function normalizeDepartment(raw, fallback = 'dermatology') {
     .trim()
     .toLowerCase()
   return ALLOWED_DEPARTMENTS.includes(v) ? v : fallback
+}
+
+const DEPARTMENT_SKU_PREFIX = {
+  laser: 'LAS',
+  dermatology: 'DERM',
+  dental: 'DEN',
+  skin: 'SKIN',
+  solarium: 'SOL',
+}
+
+async function generateInventorySku(department) {
+  const prefix = DEPARTMENT_SKU_PREFIX[department] || 'INV'
+  for (let i = 0; i < 6; i += 1) {
+    const seq = await nextSequence(`inventorySku:${prefix}`)
+    const sku = `${prefix}-${String(seq).padStart(4, '0')}`
+    const exists = await InventoryItem.exists({ sku })
+    if (!exists) return sku
+  }
+  throw new Error('تعذر توليد SKU تلقائي فريد')
 }
 
 function itemDto(i) {
@@ -60,17 +80,18 @@ inventoryRouter.get('/items', async (req, res) => {
 inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => {
   try {
     const body = req.body ?? {}
-    const sku = String(body.sku || '').trim()
     const name = String(body.name || '').trim()
-    if (!sku || !name) {
-      res.status(400).json({ error: 'رمز SKU والاسم مطلوبان' })
+    if (!name) {
+      res.status(400).json({ error: 'اسم المادة مطلوب' })
       return
     }
+    const department = normalizeDepartment(body.department)
+    const sku = await generateInventorySku(department)
     const doc = await InventoryItem.create({
       sku,
       name,
       active: body.active !== false,
-      department: normalizeDepartment(body.department),
+      department,
       unit: String(body.unit || 'unit').trim() || 'unit',
       quantity: Number(body.quantity) || 0,
       safetyStockLevel: Number(body.safetyStockLevel) || 0,

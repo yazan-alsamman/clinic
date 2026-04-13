@@ -31,7 +31,7 @@ function departmentFromRequest(req) {
 
 /**
  * خصم المواد مع إرجاع الكميات عند الفشل
- * @param {Array<{ inventoryItemId: string, quantity: number, chargedUnitPriceUsd?: number }>} rawLines
+ * @param {Array<{ inventoryItemId: string, quantity: number }>} rawLines
  */
 async function consumeMaterials(rawLines) {
   const applied = []
@@ -59,8 +59,8 @@ async function consumeMaterials(rawLines) {
         quantity: qty,
         unitCostUsd: unitCost,
         lineCostUsd: round2(unitCost * qty),
-        chargedUnitPriceUsd: round2(Math.max(0, Number(line.chargedUnitPriceUsd) || 0)),
-        lineChargeUsd: round2(Math.max(0, Number(line.chargedUnitPriceUsd) || 0) * qty),
+        chargedUnitPriceUsd: 0,
+        lineChargeUsd: 0,
       })
     }
     return snapshot

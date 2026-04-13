@@ -16,7 +16,6 @@ type Item = {
 }
 
 const emptyCreate = {
-  sku: '',
   name: '',
   unit: 'وحدة',
   quantity: '0',
@@ -224,15 +223,14 @@ export function InventoryPage() {
             <h3 style={{ marginTop: 0 }}>مادة جديدة</h3>
             <div style={{ display: 'grid', gap: '0.65rem', marginTop: '1rem' }}>
               <div>
-                <label className="form-label" htmlFor="inv-sku">
-                  رمز SKU <span style={{ color: 'var(--danger)' }}>*</span>
+                <label className="form-label" htmlFor="inv-sku-auto">
+                  رمز SKU
                 </label>
                 <input
-                  id="inv-sku"
+                  id="inv-sku-auto"
                   className="input"
-                  dir="ltr"
-                  value={createForm.sku}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, sku: e.target.value }))}
+                  value="يُولَّد تلقائياً عند الحفظ"
+                  readOnly
                 />
               </div>
               <div>
@@ -328,8 +326,8 @@ export function InventoryPage() {
                 disabled={saving}
                 onClick={async () => {
                   setFormErr('')
-                  if (!createForm.sku.trim() || !createForm.name.trim()) {
-                    setFormErr('SKU والاسم مطلوبان')
+                  if (!createForm.name.trim()) {
+                    setFormErr('اسم المادة مطلوب')
                     return
                   }
                   setSaving(true)
@@ -337,7 +335,6 @@ export function InventoryPage() {
                     await api('/api/inventory/items', {
                       method: 'POST',
                       body: JSON.stringify({
-                        sku: createForm.sku.trim(),
                         name: createForm.name.trim(),
                         unit: createForm.unit.trim(),
                         department: createForm.department,
