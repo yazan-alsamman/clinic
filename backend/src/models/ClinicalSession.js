@@ -28,11 +28,10 @@ const clinicalSessionSchema = new mongoose.Schema(
     materialCostUsdTotal: { type: Number, default: 0 },
     materialChargeUsdTotal: { type: Number, default: 0 },
     billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
-    /** ربط بجلسة ليزر عند التسجيل من ملف المريض */
+    /** ربط بجلسة ليزر عند التسجيل من ملف المريض — بدون default: null حتى لا يُخزَّن null مع فهرس unique+sparse (كان يمنع إنشاء أكثر من جلسة غير ليزر) */
     laserSessionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'LaserSession',
-      default: null,
       sparse: true,
       unique: true,
       index: true,

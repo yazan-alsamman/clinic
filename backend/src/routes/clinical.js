@@ -15,6 +15,7 @@ export const clinicalRouter = Router()
 clinicalRouter.use(authMiddleware, loadBusinessDay)
 
 const CLINICAL_ROLES = ['super_admin', 'laser', 'dermatology', 'dental_branch']
+const PATIENT_DEPARTMENT_ENUM = ['laser', 'dermatology', 'dental']
 function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
   const usd = Number(usdRaw)
   if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return round2(usd)
@@ -171,9 +172,9 @@ clinicalRouter.post(
 
         cs.billingItemId = bi._id
         await cs.save()
-        if (!patient.departments.includes(department)) {
-          patient.departments = [...new Set([...patient.departments, department])]
-        }
+        const prevDeps = Array.isArray(patient.departments) ? patient.departments : []
+        const cleaned = prevDeps.filter((d) => PATIENT_DEPARTMENT_ENUM.includes(d))
+        patient.departments = [...new Set([...cleaned, department])]
         patient.lastVisit = new Date()
         await patient.save()
 
@@ -211,6 +212,13 @@ clinicalRouter.post(
         }
         await restoreMaterialsFromSnapshot(materialLines)
         console.error(inner)
+        if (inner && inner.code === 11000) {
+          res.status(409).json({
+            error:
+              'تعارض في قاعدة البيانات (مفتاح مكرر). إن استمرّ الخطأ بعد التحديث، أبلغ المدير لإعادة بناء فهارس الجلسات.',
+          })
+          return
+        }
         res.status(500).json({ error: 'تعذر إنشاء الجلسة أو بند الفوترة' })
       }
     } catch (e) {
