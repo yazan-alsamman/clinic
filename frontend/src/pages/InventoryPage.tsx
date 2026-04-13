@@ -7,6 +7,7 @@ type Item = {
   sku: string
   name: string
   active: boolean
+  department: 'laser' | 'dermatology' | 'dental' | 'skin' | 'solarium'
   unit: string
   quantity: number
   safetyStockLevel: number
@@ -21,7 +22,16 @@ const emptyCreate = {
   quantity: '0',
   safetyStockLevel: '5',
   unitCost: '0',
+  department: 'dermatology' as Item['department'],
 }
+
+const DEPARTMENT_OPTIONS: Array<{ value: Item['department']; label: string }> = [
+  { value: 'laser', label: 'ليزر' },
+  { value: 'dermatology', label: 'جلدية' },
+  { value: 'dental', label: 'أسنان' },
+  { value: 'skin', label: 'بشرة' },
+  { value: 'solarium', label: 'سولاريوم' },
+]
 
 export function InventoryPage() {
   const { user } = useAuth()
@@ -42,6 +52,7 @@ export function InventoryPage() {
     safetyStockLevel: '',
     unitCost: '',
     active: true,
+    department: 'dermatology' as Item['department'],
   })
   const [formErr, setFormErr] = useState('')
   const [saving, setSaving] = useState(false)
@@ -77,6 +88,7 @@ export function InventoryPage() {
       safetyStockLevel: String(r.safetyStockLevel),
       unitCost: String(r.unitCost),
       active: r.active !== false,
+      department: r.department,
     })
   }
 
@@ -134,6 +146,7 @@ export function InventoryPage() {
             <tr>
               <th>المادة</th>
               <th>الوحدة</th>
+              <th>القسم</th>
               <th>الكمية</th>
               <th>حد الأمان</th>
               <th>الحالة</th>
@@ -143,11 +156,11 @@ export function InventoryPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={canEdit ? 6 : 5}>جاري التحميل…</td>
+                <td colSpan={canEdit ? 7 : 6}>جاري التحميل…</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={canEdit ? 6 : 5} style={{ color: 'var(--text-muted)' }}>
+                <td colSpan={canEdit ? 7 : 6} style={{ color: 'var(--text-muted)' }}>
                   لا توجد مواد في المستودع
                   {canCreate ? ' — استخدم «مادة جديدة» أو شغّل seed' : ''}
                 </td>
@@ -162,6 +175,7 @@ export function InventoryPage() {
                     </div>
                   </td>
                   <td>{r.unit}</td>
+                  <td>{DEPARTMENT_OPTIONS.find((d) => d.value === r.department)?.label ?? r.department}</td>
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.quantity}</td>
                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.safetyStockLevel}</td>
                   <td>
@@ -243,6 +257,25 @@ export function InventoryPage() {
                   onChange={(e) => setCreateForm((f) => ({ ...f, unit: e.target.value }))}
                 />
               </div>
+              <div>
+                <label className="form-label" htmlFor="inv-department">
+                  القسم
+                </label>
+                <select
+                  id="inv-department"
+                  className="input"
+                  value={createForm.department}
+                  onChange={(e) =>
+                    setCreateForm((f) => ({ ...f, department: e.target.value as Item['department'] }))
+                  }
+                >
+                  {DEPARTMENT_OPTIONS.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="grid-2" style={{ gap: '0.65rem' }}>
                 <div>
                   <label className="form-label" htmlFor="inv-qty">
@@ -307,6 +340,7 @@ export function InventoryPage() {
                         sku: createForm.sku.trim(),
                         name: createForm.name.trim(),
                         unit: createForm.unit.trim(),
+                        department: createForm.department,
                         quantity: Number(createForm.quantity) || 0,
                         safetyStockLevel: Number(createForm.safetyStockLevel) || 0,
                         unitCost: Number(createForm.unitCost) || 0,
@@ -370,6 +404,25 @@ export function InventoryPage() {
                       value={editForm.unit}
                       onChange={(e) => setEditForm((f) => ({ ...f, unit: e.target.value }))}
                     />
+                  </div>
+                  <div>
+                    <label className="form-label" htmlFor="ed-department">
+                      القسم
+                    </label>
+                    <select
+                      id="ed-department"
+                      className="input"
+                      value={editForm.department}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, department: e.target.value as Item['department'] }))
+                      }
+                    >
+                      {DEPARTMENT_OPTIONS.map((d) => (
+                        <option key={d.value} value={d.value}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                     <input
@@ -461,6 +514,7 @@ export function InventoryPage() {
                       body.sku = editForm.sku.trim()
                       body.name = editForm.name.trim()
                       body.unit = editForm.unit.trim()
+                      body.department = editForm.department
                       body.unitCost = Number(editForm.unitCost) || 0
                       body.active = editForm.active
                     }

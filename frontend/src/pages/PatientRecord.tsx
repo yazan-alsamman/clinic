@@ -57,6 +57,7 @@ type DermatologyMaterialOption = {
   id: string
   sku: string
   name: string
+  department: 'laser' | 'dermatology' | 'dental' | 'skin' | 'solarium'
   unit: string
   quantity: number
   unitCost: number
@@ -718,7 +719,9 @@ export function PatientRecord() {
     ;(async () => {
       try {
         const [itemsRes, sessionsRes] = await Promise.all([
-          api<{ items: DermatologyMaterialOption[] }>('/api/inventory/items?activeOnly=1&inStockOnly=1'),
+          api<{ items: DermatologyMaterialOption[] }>(
+            '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology,skin,solarium',
+          ),
           api<{ sessions: DermatologySessionRow[] }>(
             `/api/clinical/sessions/patient/${encodeURIComponent(id)}`,
           ),
@@ -1975,7 +1978,7 @@ export function PatientRecord() {
                   )
                   setDermSessions(sessionsData.sessions.filter((s) => s.department === 'dermatology'))
                   const itemsData = await api<{ items: DermatologyMaterialOption[] }>(
-                    '/api/inventory/items?activeOnly=1&inStockOnly=1',
+                    '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology,skin,solarium',
                   )
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')

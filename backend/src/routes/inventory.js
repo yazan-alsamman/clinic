@@ -8,6 +8,14 @@ export const inventoryRouter = Router()
 inventoryRouter.use(authMiddleware)
 
 const READ_ROLES = ['super_admin', 'reception', 'dermatology']
+const ALLOWED_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'skin', 'solarium']
+
+function normalizeDepartment(raw, fallback = 'dermatology') {
+  const v = String(raw || '')
+    .trim()
+    .toLowerCase()
+  return ALLOWED_DEPARTMENTS.includes(v) ? v : fallback
+}
 
 function itemDto(i) {
   const o = i.toObject ? i.toObject() : i
@@ -16,6 +24,7 @@ function itemDto(i) {
     sku: o.sku,
     name: o.name,
     active: o.active !== false,
+    department: o.department || 'dermatology',
     unit: o.unit ?? 'unit',
     quantity: o.quantity ?? 0,
     safetyStockLevel: o.safetyStockLevel ?? 0,
@@ -33,6 +42,11 @@ inventoryRouter.get('/items', async (req, res) => {
     const activeOnly = String(req.query.activeOnly || '') === '1'
     const inStockOnly = String(req.query.inStockOnly || '') === '1'
     const q = {}
+    const deptsRaw = String(req.query.departments || '')
+      .split(',')
+      .map((x) => normalizeDepartment(x, ''))
+      .filter(Boolean)
+    if (deptsRaw.length) q.department = { $in: [...new Set(deptsRaw)] }
     if (activeOnly) q.active = true
     if (inStockOnly) q.quantity = { $gt: 0 }
     const items = await InventoryItem.find(q).sort({ name: 1 })
@@ -56,6 +70,7 @@ inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => 
       sku,
       name,
       active: body.active !== false,
+      department: normalizeDepartment(body.department),
       unit: String(body.unit || 'unit').trim() || 'unit',
       quantity: Number(body.quantity) || 0,
       safetyStockLevel: Number(body.safetyStockLevel) || 0,
@@ -100,6 +115,7 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin'), async (req, res
     }
     if (body.name != null) item.name = String(body.name).trim()
     if (body.active != null) item.active = body.active !== false
+    if (body.department != null) item.department = normalizeDepartment(body.department, item.department)
     if (body.unit != null) item.unit = String(body.unit).trim() || 'unit'
     if (body.quantity != null) item.quantity = Math.max(0, Number(body.quantity))
     if (body.safetyStockLevel != null)

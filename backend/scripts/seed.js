@@ -120,13 +120,19 @@ const laserCatalog = [
 ]
 
 const inventorySeed = [
-  { sku: 'FILL-001', name: 'حشوة مركبة', unit: 'جرعة', quantity: 40, safetyStockLevel: 10, unitCost: 12 },
-  { sku: 'BOT-001', name: 'بوتوكس وحدة', unit: 'وحدة', quantity: 24, safetyStockLevel: 6, unitCost: 85 },
-  { sku: 'FILL-LIP-001', name: 'فيلر شفاه (أمبول)', unit: 'أمبول', quantity: 3, safetyStockLevel: 5, unitCost: 120 },
-  { sku: 'GLOW-001', name: 'مادة نضارة', unit: 'جلسة', quantity: 12, safetyStockLevel: 4, unitCost: 35 },
-  { sku: 'LAS-GEL-001', name: 'جيل ليزر', unit: 'عبوة', quantity: 40, safetyStockLevel: 10, unitCost: 8 },
-  { sku: 'WIPES-001', name: 'مناديل تعقيم', unit: 'علبة', quantity: 18, safetyStockLevel: 6, unitCost: 3 },
-  { sku: 'NEEDLE-001', name: 'إبر تعقيم', unit: 'علبة', quantity: 50, safetyStockLevel: 15, unitCost: 2 },
+  { sku: 'LAS-GEL-001', name: 'جيل ليزر', department: 'laser', unit: 'عبوة', quantity: 40, safetyStockLevel: 10, unitCost: 8 },
+  { sku: 'LAS-CRYO-001', name: 'كريم تبريد ليزر', department: 'laser', unit: 'عبوة', quantity: 20, safetyStockLevel: 6, unitCost: 10 },
+  { sku: 'DERM-BOT-001', name: 'بوتوكس وحدة', department: 'dermatology', unit: 'وحدة', quantity: 24, safetyStockLevel: 6, unitCost: 85 },
+  { sku: 'DERM-FILL-001', name: 'فيلر شفاه (أمبول)', department: 'dermatology', unit: 'أمبول', quantity: 12, safetyStockLevel: 5, unitCost: 120 },
+  { sku: 'DERM-GLOW-001', name: 'مادة نضارة', department: 'dermatology', unit: 'جلسة', quantity: 18, safetyStockLevel: 6, unitCost: 35 },
+  { sku: 'SKIN-MASK-001', name: 'ماسك علاجي للبشرة', department: 'skin', unit: 'علبة', quantity: 30, safetyStockLevel: 8, unitCost: 14 },
+  { sku: 'SKIN-PEEL-001', name: 'محلول تقشير بارد', department: 'skin', unit: 'عبوة', quantity: 16, safetyStockLevel: 5, unitCost: 22 },
+  { sku: 'SOL-LOTION-001', name: 'لوشن سولاريوم', department: 'solarium', unit: 'عبوة', quantity: 22, safetyStockLevel: 7, unitCost: 11 },
+  { sku: 'SOL-EYE-001', name: 'نظارات حماية سولاريوم', department: 'solarium', unit: 'قطعة', quantity: 35, safetyStockLevel: 10, unitCost: 4 },
+  { sku: 'DEN-FILL-001', name: 'حشوة مركبة', department: 'dental', unit: 'جرعة', quantity: 40, safetyStockLevel: 10, unitCost: 12 },
+  { sku: 'DEN-BOND-001', name: 'لاصق سنّي', department: 'dental', unit: 'عبوة', quantity: 15, safetyStockLevel: 4, unitCost: 28 },
+  { sku: 'WIPES-001', name: 'مناديل تعقيم', department: 'dermatology', unit: 'علبة', quantity: 18, safetyStockLevel: 6, unitCost: 3 },
+  { sku: 'NEEDLE-001', name: 'إبر تعقيم', department: 'dermatology', unit: 'علبة', quantity: 50, safetyStockLevel: 15, unitCost: 2 },
 ]
 
 async function seed() {
