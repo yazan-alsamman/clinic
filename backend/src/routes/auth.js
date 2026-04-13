@@ -2,9 +2,11 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { User } from '../models/User.js'
 import { Patient } from '../models/Patient.js'
+import { BusinessDay } from '../models/BusinessDay.js'
 import { authMiddleware, signToken } from '../middleware/auth.js'
 import { signPatientToken } from '../middleware/patientAuth.js'
 import { userToPublic } from '../utils/dto.js'
+import { todayBusinessDate } from '../utils/date.js'
 
 export const authRouter = Router()
 
@@ -30,6 +32,18 @@ authRouter.post('/login', async (req, res) => {
       if (!staffOk) {
         res.status(401).json({ error: 'بيانات الدخول غير صحيحة' })
         return
+      }
+      // During Closed Day, only super admin can access staff app.
+      if (user.role !== 'super_admin') {
+        const businessDate = todayBusinessDate()
+        const d = await BusinessDay.findOne({ businessDate }).lean()
+        if (!d?.active) {
+          res.status(403).json({
+            errorCode: 'DAY_CLOSED',
+            error: 'النظام مغلق حالياً. حاول لاحقاً بعد تفعيل اليوم.',
+          })
+          return
+        }
       }
       const token = signToken(user)
       res.json({

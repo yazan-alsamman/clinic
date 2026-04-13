@@ -55,6 +55,14 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     if (user) void refreshSystem()
   }, [user, refreshSystem])
 
+  useEffect(() => {
+    if (!user) return
+    const id = window.setInterval(() => {
+      void refreshSystem()
+    }, 15000)
+    return () => window.clearInterval(id)
+  }, [user, refreshSystem])
+
   const startDay = useCallback(
     async (rate: number) => {
       await api('/api/system/start-day', {
