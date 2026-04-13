@@ -110,7 +110,7 @@ function defaultEndFromStart(timeStr) {
 scheduleRouter.get('/providers', async (_req, res) => {
   try {
     const clinical = await User.find({
-      role: { $in: ['laser', 'dermatology', 'dental_branch'] },
+      role: { $in: ['laser', 'dermatology', 'dental_branch', 'solarium'] },
       active: true,
     })
       .select('name')

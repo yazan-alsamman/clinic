@@ -7,7 +7,7 @@ import { LaserAreaPicker } from '../components/LaserAreaPicker'
 import { api, ApiError } from '../api/client'
 import type { LaserCategory, Patient, Role } from '../types'
 
-type Tab = 'overview' | 'account' | 'laser' | 'dermatology' | 'dental'
+type Tab = 'overview' | 'account' | 'sessions' | 'laser' | 'dermatology' | 'dental' | 'solarium'
 
 const laserTypes = ['Mix', 'Yag', 'Alex'] as const
 
@@ -80,14 +80,40 @@ type DermatologySessionRow = {
   amountDueUsd: number
   billingStatus: string
   providerName: string
+  providerUserId?: string
   notes: string
   createdAt: string
+  createdByReceptionUserId?: string | null
   materials: Array<{
     name: string
     quantity: number
     chargedUnitPriceUsd?: number
     lineChargeUsd?: number
   }>
+}
+
+function clinicalDeptLabelAr(d: string) {
+  const m: Record<string, string> = {
+    laser: 'ليزر',
+    dermatology: 'جلدية',
+    dental: 'أسنان',
+    solarium: 'سولاريوم',
+  }
+  return m[d] || d
+}
+
+function inventoryDepartmentsQueryForClinicalDept(dept: string) {
+  if (dept === 'laser') return 'laser'
+  if (dept === 'dental') return 'dental'
+  if (dept === 'dermatology') return 'dermatology,skin,solarium'
+  if (dept === 'solarium') return 'solarium,skin'
+  return 'dermatology,skin,solarium'
+}
+
+function canEditClinicalSessionRow(me: { id?: string; role?: Role }, row: DermatologySessionRow) {
+  if (!me.id || !me.role) return false
+  if (me.role === 'super_admin' || me.role === 'reception') return true
+  return row.providerUserId === me.id
 }
 
 type ClinicalApptRow = {
@@ -402,6 +428,27 @@ export function PatientRecord() {
   const [dermOk, setDermOk] = useState('')
   const [dermSessions, setDermSessions] = useState<DermatologySessionRow[]>([])
   const [dermSessionsLoading, setDermSessionsLoading] = useState(false)
+  const [recvAllSessions, setRecvAllSessions] = useState<DermatologySessionRow[]>([])
+  const [laserClinSessions, setLaserClinSessions] = useState<DermatologySessionRow[]>([])
+  const [dentalClinSessions, setDentalClinSessions] = useState<DermatologySessionRow[]>([])
+  const [solSessions, setSolSessions] = useState<DermatologySessionRow[]>([])
+  const [recvDept, setRecvDept] = useState<'laser' | 'dermatology' | 'dental' | 'solarium'>('dermatology')
+  const [recvProviders, setRecvProviders] = useState<{ id: string; name: string }[]>([])
+  const [recvProviderId, setRecvProviderId] = useState('')
+  const [recvFeeUsd, setRecvFeeUsd] = useState('')
+  const [recvFeeSyp, setRecvFeeSyp] = useState('')
+  const [recvSaving, setRecvSaving] = useState(false)
+  const [recvErr, setRecvErr] = useState('')
+  const [recvOk, setRecvOk] = useState('')
+  const [sessionEditOpen, setSessionEditOpen] = useState(false)
+  const [sessionEditId, setSessionEditId] = useState<string | null>(null)
+  const [sessionEditDept, setSessionEditDept] = useState('')
+  const [sessionEditProc, setSessionEditProc] = useState('')
+  const [sessionEditNotes, setSessionEditNotes] = useState('')
+  const [sessionEditCatalog, setSessionEditCatalog] = useState<DermatologyMaterialOption[]>([])
+  const [sessionEditSelected, setSessionEditSelected] = useState<DermatologySelectedMaterial[]>([])
+  const [sessionEditSaving, setSessionEditSaving] = useState(false)
+  const [sessionEditErr, setSessionEditErr] = useState('')
   const [clinicalHistory, setClinicalHistory] = useState<{
     laserSessions: ClinicalLaserRow[]
     dermatologyVisits: ClinicalDermRow[]
@@ -437,6 +484,58 @@ export function PatientRecord() {
   })
 
   const canEditPatientProfile = role === 'super_admin' || role === 'reception'
+
+  const refreshClinicalSessionLists = useCallback(async () => {
+    if (!id) return
+    try {
+      const res = await api<{ sessions: DermatologySessionRow[] }>(
+        `/api/clinical/sessions/patient/${encodeURIComponent(id)}`,
+      )
+      const rows = res.sessions
+      if (role === 'super_admin' || role === 'reception') setRecvAllSessions(rows)
+      setDermSessions(rows.filter((s) => s.department === 'dermatology'))
+      setLaserClinSessions(rows.filter((s) => s.department === 'laser'))
+      setDentalClinSessions(rows.filter((s) => s.department === 'dental'))
+      setSolSessions(rows.filter((s) => s.department === 'solarium'))
+    } catch {
+      /* lists unchanged */
+    }
+  }, [id, role])
+
+  async function openSessionEdit(row: DermatologySessionRow) {
+    setSessionEditErr('')
+    setSessionEditId(row.id)
+    setSessionEditDept(row.department)
+    setSessionEditProc(row.procedureDescription || '')
+    setSessionEditNotes(row.notes || '')
+    setSessionEditSelected([])
+    try {
+      const q = inventoryDepartmentsQueryForClinicalDept(row.department)
+      const cat = await api<{ items: DermatologyMaterialOption[] }>(
+        `/api/inventory/items?activeOnly=1&inStockOnly=1&departments=${encodeURIComponent(q)}`,
+      )
+      setSessionEditCatalog(cat.items)
+    } catch {
+      setSessionEditCatalog([])
+    }
+    setSessionEditOpen(true)
+  }
+
+  function toggleSessionEditMaterial(materialId: string, checked: boolean) {
+    setSessionEditSelected((prev) => {
+      const exists = prev.some((x) => x.inventoryItemId === materialId)
+      if (checked && !exists) return [...prev, { inventoryItemId: materialId, quantity: '1' }]
+      if (!checked && exists) return prev.filter((x) => x.inventoryItemId !== materialId)
+      return prev
+    })
+  }
+
+  function updateSessionEditMaterialLine(materialId: string, value: string) {
+    setSessionEditSelected((prev) =>
+      prev.map((line) => (line.inventoryItemId === materialId ? { ...line, quantity: value } : line)),
+    )
+  }
+
   const [overviewEdit, setOverviewEdit] = useState(false)
   const [overviewSaving, setOverviewSaving] = useState(false)
   const [overviewSaveErr, setOverviewSaveErr] = useState('')
@@ -713,25 +812,54 @@ export function PatientRecord() {
   }, [tab, id, role])
 
   useEffect(() => {
+    if (!id || !role) return
+    const needSessions =
+      tab === 'sessions' ||
+      tab === 'dermatology' ||
+      tab === 'laser' ||
+      tab === 'dental' ||
+      tab === 'solarium'
+    if (needSessions) void refreshClinicalSessionLists()
+  }, [tab, id, role, refreshClinicalSessionLists])
+
+  useEffect(() => {
+    if (tab !== 'sessions' || !role || (role !== 'reception' && role !== 'super_admin')) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api<{ providers: { id: string; name: string }[] }>(
+          `/api/clinical/provider-options?department=${encodeURIComponent(recvDept)}`,
+        )
+        if (cancelled) return
+        setRecvProviders(data.providers)
+        setRecvProviderId((prev) => {
+          if (prev && data.providers.some((p) => p.id === prev)) return prev
+          return data.providers[0]?.id ?? ''
+        })
+      } catch {
+        if (!cancelled) {
+          setRecvProviders([])
+          setRecvProviderId('')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [tab, role, recvDept])
+
+  useEffect(() => {
     if (tab !== 'dermatology' || !id || !role || !canAccessTab(role, 'dermatology')) return
     let cancelled = false
     setDermSessionsLoading(true)
     setDermErr('')
     ;(async () => {
       try {
-        const [itemsRes, sessionsRes] = await Promise.all([
-          api<{ items: DermatologyMaterialOption[] }>(
-            '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology,skin,solarium',
-          ),
-          api<{ sessions: DermatologySessionRow[] }>(
-            `/api/clinical/sessions/patient/${encodeURIComponent(id)}`,
-          ),
-        ])
+        const itemsRes = await api<{ items: DermatologyMaterialOption[] }>(
+          '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology,skin,solarium',
+        )
         if (cancelled) return
         setDermMaterialsCatalog(itemsRes.items)
-        setDermSessions(
-          sessionsRes.sessions.filter((s) => s.department === 'dermatology'),
-        )
       } catch {
         if (!cancelled) setDermErr('تعذر تحميل مواد الجلدية أو الجلسات')
       } finally {
@@ -773,21 +901,26 @@ export function PatientRecord() {
     const allTabs: { key: Tab; label: string }[] = [
       { key: 'overview', label: 'نظرة عامة' },
       { key: 'account', label: 'الحساب' },
+      { key: 'sessions', label: 'جلسات / تحصيل' },
       { key: 'laser', label: 'الليزر' },
       { key: 'dermatology', label: 'الجلدية' },
       { key: 'dental', label: 'الأسنان' },
+      { key: 'solarium', label: 'السولاريوم' },
     ]
     if (!role) {
       return allTabs.filter((t) => t.key === 'overview')
     }
     const showAccount = role === 'super_admin' || role === 'reception'
+    const showSessionsTab = role === 'super_admin' || role === 'reception'
     return allTabs.filter(
       (t) =>
         t.key === 'overview' ||
         (t.key === 'account' && showAccount) ||
+        (t.key === 'sessions' && showSessionsTab) ||
         (t.key === 'laser' && canAccessTab(role, 'laser')) ||
         (t.key === 'dermatology' && canAccessTab(role, 'dermatology')) ||
-        (t.key === 'dental' && canAccessTab(role, 'dental')),
+        (t.key === 'dental' && canAccessTab(role, 'dental')) ||
+        (t.key === 'solarium' && canAccessTab(role, 'solarium')),
     )
   }, [role])
 
@@ -1506,6 +1639,159 @@ export function PatientRecord() {
         </div>
       )}
 
+      {tab === 'sessions' &&
+        (role === 'super_admin' || role === 'reception' ? (
+          <div className="card">
+            <h2 className="card-title">جلسات وتحصيل (استقبال)</h2>
+            <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              أنشئ بند تحصيل للمريض بأي قسم مع تحديد المقدّم. يمكن لاحقاً إكمال الوصف الطبي والمواد من الاستقبال أو من
+              المقدّم نفسه. مبلغ التحصيل لا يتغيّر عند إضافة المواد.
+            </p>
+            <div className="grid-2" style={{ marginTop: '0.75rem' }}>
+              <div>
+                <label className="form-label">القسم</label>
+                <select
+                  className="input"
+                  value={recvDept}
+                  onChange={(e) =>
+                    setRecvDept(e.target.value as 'laser' | 'dermatology' | 'dental' | 'solarium')
+                  }
+                >
+                  <option value="laser">ليزر</option>
+                  <option value="dermatology">جلدية</option>
+                  <option value="dental">أسنان</option>
+                  <option value="solarium">سولاريوم</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">المقدّم (أخصائي القسم)</label>
+                <select
+                  className="input"
+                  value={recvProviderId}
+                  onChange={(e) => setRecvProviderId(e.target.value)}
+                  disabled={!recvProviders.length}
+                >
+                  {recvProviders.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">المستحق (USD)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={recvFeeUsd}
+                  onChange={(e) => setRecvFeeUsd(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="form-label">المستحق (SYP)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={recvFeeSyp}
+                  onChange={(e) => setRecvFeeSyp(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+              يكفي إدخال المبلغ بدولار أو ليرة واحدة.
+            </p>
+            {recvErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{recvErr}</p> : null}
+            {recvOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{recvOk}</p> : null}
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ marginTop: '0.85rem' }}
+              disabled={recvSaving || !recvProviderId}
+              onClick={async () => {
+                if (!id) return
+                setRecvErr('')
+                setRecvOk('')
+                const u = Math.max(0, parseFloat(recvFeeUsd) || 0)
+                const sy = Math.max(0, parseFloat(recvFeeSyp) || 0)
+                if (!(u > 0) && !(sy > 0 && (usdSypRate ?? 0) > 0)) {
+                  setRecvErr('أدخل مبلغ التحصيل بالدولار أو الليرة.')
+                  return
+                }
+                setRecvSaving(true)
+                try {
+                  await api('/api/clinical/sessions/reception', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      patientId: id,
+                      department: recvDept,
+                      providerUserId: recvProviderId,
+                      sessionFeeUsd: u > 0 ? u : undefined,
+                      sessionFeeSyp: u > 0 ? undefined : sy,
+                      businessDate: clinicBusinessDate ?? undefined,
+                    }),
+                  })
+                  setRecvOk('تم إنشاء الجلسة وبند التحصيل.')
+                  setRecvFeeUsd('')
+                  setRecvFeeSyp('')
+                  await refreshClinicalSessionLists()
+                } catch (e) {
+                  setRecvErr(e instanceof ApiError ? e.message : 'تعذر الإنشاء')
+                } finally {
+                  setRecvSaving(false)
+                }
+              }}
+            >
+              {recvSaving ? 'جاري الحفظ…' : 'إنشاء بند التحصيل'}
+            </button>
+            <h3 className="card-title" style={{ marginTop: '1.5rem', fontSize: '0.95rem' }}>
+              كل الجلسات السريرية لهذا المريض
+            </h3>
+            {recvAllSessions.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات مسجّلة.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>القسم</th>
+                      <th>الوصف</th>
+                      <th>المقدّم</th>
+                      <th>المستحق</th>
+                      <th>التحصيل</th>
+                      <th>إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recvAllSessions.map((s) => (
+                      <tr key={s.id}>
+                        <td>{s.businessDate}</td>
+                        <td>{clinicalDeptLabelAr(s.department)}</td>
+                        <td>{s.procedureDescription || '—'}</td>
+                        <td>{s.providerName}</td>
+                        <td>{s.amountDueUsd} USD</td>
+                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem' }}
+                            onClick={() => void openSessionEdit(s)}
+                          >
+                            تكميل
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : null)}
+
       {tab === 'laser' &&
         (canAccessTab(role, 'laser') ? (
           <div className="laser-session-workspace">
@@ -1857,6 +2143,58 @@ export function PatientRecord() {
               {savingLaser ? 'جاري الحفظ…' : 'حفظ الجلسة والفوترة'}
             </button>
               </section>
+              <section className="card laser-panel laser-panel--wide" style={{ gridColumn: '1 / -1' }}>
+                <h3 className="card-title" style={{ fontSize: '0.95rem' }}>
+                  بنود التحصيل السريرية (ليزر)
+                </h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 0 }}>
+                  جلسات أنشأها الاستقبال أو سجّلت كإجراء ليزر — أكمل الوصف والمواد عند الحاجة.
+                </p>
+                {laserClinSessions.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.88rem' }}>لا توجد بنود.</p>
+                ) : (
+                  <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>التاريخ</th>
+                          <th>الوصف</th>
+                          <th>المستحق</th>
+                          <th>التحصيل</th>
+                          <th>إجراء</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {laserClinSessions.map((s) => (
+                          <tr key={s.id}>
+                            <td>{s.businessDate}</td>
+                            <td>{s.procedureDescription || '—'}</td>
+                            <td>{s.amountDueUsd} USD</td>
+                            <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                            <td>
+                              {canEditClinicalSessionRow(
+                                { id: user?.id, role },
+                                s,
+                              ) ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: '0.8rem' }}
+                                  onClick={() => void openSessionEdit(s)}
+                                >
+                                  تكميل
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
             </div>
           </div>
         ) : (
@@ -2056,6 +2394,7 @@ export function PatientRecord() {
                       <th>المعالج</th>
                       <th>الإجمالي (USD)</th>
                       <th>حالة التحصيل</th>
+                      <th>إجراء</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2066,6 +2405,20 @@ export function PatientRecord() {
                         <td>{s.providerName}</td>
                         <td>{s.amountDueUsd}</td>
                         <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'بانتظار التحصيل'}</td>
+                        <td>
+                          {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.8rem' }}
+                              onClick={() => void openSessionEdit(s)}
+                            >
+                              تكميل
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -2213,6 +2566,55 @@ export function PatientRecord() {
                 </div>
               </div>
             </div>
+            <h3 className="card-title" style={{ marginTop: '1.5rem', fontSize: '0.95rem' }}>
+              جلسات التحصيل السريرية (أسنان)
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 0 }}>
+              أكمل الوصف والمواد المستخدمة لبنود أنشأها الاستقبال أو سجّلت كجلسة أسنان.
+            </p>
+            {dentalClinSessions.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.88rem' }}>لا توجد جلسات مسجّلة.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>الوصف</th>
+                      <th>المقدّم</th>
+                      <th>المستحق</th>
+                      <th>التحصيل</th>
+                      <th>إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dentalClinSessions.map((s) => (
+                      <tr key={s.id}>
+                        <td>{s.businessDate}</td>
+                        <td>{s.procedureDescription || '—'}</td>
+                        <td>{s.providerName}</td>
+                        <td>{s.amountDueUsd} USD</td>
+                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>
+                          {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.8rem' }}
+                              onClick={() => void openSessionEdit(s)}
+                            >
+                              تكميل
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             </>
             )}
           </div>
@@ -2221,6 +2623,192 @@ export function PatientRecord() {
             <strong>لا تملك صلاحية ملف الأسنان</strong>
           </div>
         ))}
+
+      {tab === 'solarium' &&
+        (canAccessTab(role, 'solarium') ? (
+          <div className="card">
+            <h2 className="card-title">جلسات السولاريوم</h2>
+            <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              تُنشأ بنود التحصيل عادة من الاستقبال. أكمل هنا الوصف الطبي والمواد المستخدمة من المستودع.
+            </p>
+            {solSessions.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات سولاريوم لهذا المريض.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>الوصف</th>
+                      <th>المقدّم</th>
+                      <th>المستحق</th>
+                      <th>التحصيل</th>
+                      <th>إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {solSessions.map((s) => (
+                      <tr key={s.id}>
+                        <td>{s.businessDate}</td>
+                        <td>{s.procedureDescription || '—'}</td>
+                        <td>{s.providerName}</td>
+                        <td>{s.amountDueUsd} USD</td>
+                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>
+                          {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.8rem' }}
+                              onClick={() => void openSessionEdit(s)}
+                            >
+                              تكميل
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="no-access">
+            <strong>لا تملك صلاحية قسم السولاريوم</strong>
+          </div>
+        ))}
+
+      {sessionEditOpen && sessionEditId ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            setSessionEditOpen(false)
+            setSessionEditErr('')
+          }}
+        >
+          <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>تكميل الجلسة</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: 0 }}>
+              القسم: <strong>{clinicalDeptLabelAr(sessionEditDept)}</strong> — لا يتغيّر مبلغ التحصيل عند إضافة المواد.
+            </p>
+            <div style={{ marginTop: '0.75rem' }}>
+              <label className="form-label">وصف الإجراء / الجلسة</label>
+              <input
+                className="input"
+                value={sessionEditProc}
+                onChange={(e) => setSessionEditProc(e.target.value)}
+              />
+            </div>
+            <div style={{ marginTop: '0.65rem' }}>
+              <label className="form-label">ملاحظات</label>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={sessionEditNotes}
+                onChange={(e) => setSessionEditNotes(e.target.value)}
+              />
+            </div>
+            <h4 style={{ margin: '1rem 0 0.35rem', fontSize: '0.95rem' }}>إضافة مواد (خصم مخزون)</h4>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+              حدّد المواد الجديدة فقط؛ تُضاف إلى السجل دون تعديل المبلغ على المريض.
+            </p>
+            <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem', maxHeight: 220, overflowY: 'auto' }}>
+              {sessionEditCatalog.map((item) => {
+                const selected = sessionEditSelected.find((x) => x.inventoryItemId === item.id)
+                return (
+                  <div
+                    key={item.id}
+                    style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '0.5rem' }}
+                  >
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selected)}
+                        onChange={(e) => toggleSessionEditMaterial(item.id, e.target.checked)}
+                      />
+                      <span>
+                        <strong>{item.name}</strong>{' '}
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                          ({item.quantity} {item.unit})
+                        </span>
+                      </span>
+                    </label>
+                    {selected ? (
+                      <div style={{ marginTop: '0.35rem' }}>
+                        <label className="form-label">الكمية</label>
+                        <input
+                          className="input"
+                          inputMode="decimal"
+                          value={selected.quantity}
+                          onChange={(e) => updateSessionEditMaterialLine(item.id, e.target.value)}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+            {sessionEditErr ? (
+              <p style={{ color: 'var(--danger)', fontSize: '0.88rem', marginTop: '0.65rem' }}>{sessionEditErr}</p>
+            ) : null}
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1.1rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={sessionEditSaving}
+                onClick={() => {
+                  setSessionEditOpen(false)
+                  setSessionEditErr('')
+                }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={sessionEditSaving}
+                onClick={async () => {
+                  if (!sessionEditId) return
+                  setSessionEditErr('')
+                  setSessionEditSaving(true)
+                  try {
+                    const appendMaterials = sessionEditSelected
+                      .map((line) => ({
+                        inventoryItemId: line.inventoryItemId,
+                        quantity: Math.max(0, parseFloat(line.quantity) || 0),
+                      }))
+                      .filter((x) => x.quantity > 0)
+                    await api<{ session: DermatologySessionRow }>(
+                      `/api/clinical/sessions/${encodeURIComponent(sessionEditId)}`,
+                      {
+                        method: 'PATCH',
+                        body: JSON.stringify({
+                          procedureDescription: sessionEditProc.trim(),
+                          notes: sessionEditNotes.trim(),
+                          appendMaterials,
+                        }),
+                      },
+                    )
+                    setSessionEditOpen(false)
+                    await refreshClinicalSessionLists()
+                  } catch (e) {
+                    setSessionEditErr(e instanceof ApiError ? e.message : 'تعذر الحفظ')
+                  } finally {
+                    setSessionEditSaving(false)
+                  }
+                }}
+              >
+                {sessionEditSaving ? 'جاري الحفظ…' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {portalRevealCreds ? (
         <div

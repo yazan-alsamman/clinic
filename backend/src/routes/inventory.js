@@ -9,7 +9,7 @@ export const inventoryRouter = Router()
 
 inventoryRouter.use(authMiddleware, loadBusinessDay)
 
-const READ_ROLES = ['super_admin', 'reception', 'dermatology']
+const READ_ROLES = ['super_admin', 'reception', 'dermatology', 'laser', 'dental_branch', 'solarium']
 const ALLOWED_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'skin', 'solarium']
 
 function normalizeDepartment(raw, fallback = 'dermatology') {

@@ -4,6 +4,7 @@ export type Role =
   | 'laser'
   | 'dermatology'
   | 'dental_branch'
+  | 'solarium'
 
 export type NavKey =
   | 'dashboard'
@@ -31,7 +32,7 @@ export interface Patient {
   medicalHistory: string
   surgicalHistory: string
   allergies: string
-  departments: ('laser' | 'dermatology' | 'dental')[]
+  departments: ('laser' | 'dermatology' | 'dental' | 'solarium')[]
   lastVisit: string
   phone?: string
   /** ذكر / أنثى — فارغ إن لم يُحدَّد */

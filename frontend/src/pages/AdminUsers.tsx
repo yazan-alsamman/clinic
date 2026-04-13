@@ -10,6 +10,7 @@ const ROLES: Role[] = [
   'laser',
   'dermatology',
   'dental_branch',
+  'solarium',
 ]
 
 type Row = {
@@ -63,7 +64,8 @@ export function AdminUsers() {
     void load()
   }, [])
 
-  const clinicalRole = (r: Role) => r === 'laser' || r === 'dermatology' || r === 'dental_branch'
+  const clinicalRole = (r: Role) =>
+    r === 'laser' || r === 'dermatology' || r === 'dental_branch' || r === 'solarium'
 
   function openEdit(u: Row) {
     setFormErr('')

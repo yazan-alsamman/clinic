@@ -6,6 +6,7 @@ const ROLES = [
   'laser',
   'dermatology',
   'dental_branch',
+  'solarium',
 ]
 
 const userSchema = new mongoose.Schema(

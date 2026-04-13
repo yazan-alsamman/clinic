@@ -168,6 +168,13 @@ async function seed() {
       doctorSharePercent: 35,
     },
     {
+      email: 'solarium@clinic.local',
+      name: 'أخصائية — سولاريوم',
+      role: 'solarium',
+      active: true,
+      doctorSharePercent: 35,
+    },
+    {
       email: 'frozen@clinic.local',
       name: 'موظف — مجمّد (تجريبي)',
       role: 'reception',

@@ -11,7 +11,7 @@ const patientSchema = new mongoose.Schema(
     allergies: { type: String, default: '' },
     departments: {
       type: [String],
-      enum: ['laser', 'dermatology', 'dental'],
+      enum: ['laser', 'dermatology', 'dental', 'solarium'],
       default: [],
     },
     lastVisit: { type: Date, default: null },
