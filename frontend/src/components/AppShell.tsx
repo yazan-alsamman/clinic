@@ -17,7 +17,6 @@ export function AppShell() {
   const [pendingBillingCount, setPendingBillingCount] = useState(0)
   const role = user?.role
   const nav = role ? visibleNavForRole(role) : []
-  const gated = !dayActive && role !== 'super_admin'
   const canSeeBillingCount = role === 'super_admin' || role === 'reception'
 
   useEffect(() => {
@@ -148,19 +147,7 @@ export function AppShell() {
 
         <main className="main-content">
           <DayBanner />
-          {gated ? (
-            <div className="gate-overlay">
-              <div className="gate-card">
-                <h2 style={{ marginTop: 0 }}>النظام متوقف</h2>
-                <p style={{ color: 'var(--text-muted)' }}>
-                  لم يبدأ يوم العمل بعد. تواصل مع المدير لتفعيل اليوم وإدخال سعر
-                  الصرف.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <Outlet key={location.pathname} />
-          )}
+          <Outlet key={location.pathname} />
         </main>
       </div>
 
