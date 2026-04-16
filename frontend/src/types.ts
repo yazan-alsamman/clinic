@@ -9,6 +9,7 @@ export type Role =
 export type NavKey =
   | 'dashboard'
   | 'patients'
+  | 'patients_intake_fast'
   | 'appointments_booked'
   | 'reception_appointment'
   | 'dermatology'

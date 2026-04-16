@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { PatientSearch } from './pages/PatientSearch'
+import { PatientFastIntakePage } from './pages/PatientFastIntakePage'
 import { PatientRecord } from './pages/PatientRecord'
 import { BookedAppointmentsPage } from './pages/BookedAppointmentsPage'
 import { ReceptionAppointmentPage } from './pages/ReceptionAppointmentPage'
@@ -47,6 +48,7 @@ export default function App() {
             <Route element={<AppShell />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/patients" element={<PatientSearch />} />
+              <Route path="/patients/intake-fast" element={<PatientFastIntakePage />} />
               <Route path="/patients/:id" element={<PatientRecord />} />
               <Route path="/appointments" element={<BookedAppointmentsPage />} />
               <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />

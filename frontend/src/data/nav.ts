@@ -3,6 +3,7 @@ import type { NavKey, Role } from '../types'
 export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'dashboard', path: '/', label: 'لوحة التحكم' },
   { key: 'patients', path: '/patients', label: 'المرضى' },
+  { key: 'patients_intake_fast', path: '/patients/intake-fast', label: 'إدخال سريع للأضابير' },
   { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
   { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
   { key: 'dermatology', path: '/dermatology', label: 'الجلدية' },
@@ -23,6 +24,7 @@ const roleNav: Record<Role, NavKey[]> = {
   reception: [
     'dashboard',
     'patients',
+    'patients_intake_fast',
     'appointments_booked',
     'reception_appointment',
     'billing_queue',
