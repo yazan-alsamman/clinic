@@ -16,6 +16,16 @@ type IntakeForm = {
   surgicalHistory: string
   allergies: string
   departments: Dept[]
+  paperLaserEntries: Array<{
+    therapist: string
+    sessionDate: string
+    area: string
+    laserType: string
+    pw: string
+    pulse: string
+    shots: string
+    notes: string
+  }>
 }
 
 const emptyForm: IntakeForm = {
@@ -30,6 +40,7 @@ const emptyForm: IntakeForm = {
   surgicalHistory: '',
   allergies: '',
   departments: [],
+  paperLaserEntries: [],
 }
 
 function normalizeGender(raw: string): '' | 'male' | 'female' {
@@ -84,6 +95,31 @@ export function PatientFastIntakePage() {
     }))
   }
 
+  function addPaperRow() {
+    setForm((f) => ({
+      ...f,
+      paperLaserEntries: [
+        ...f.paperLaserEntries,
+        { therapist: '', sessionDate: '', area: '', laserType: '', pw: '', pulse: '', shots: '', notes: '' },
+      ],
+    }))
+  }
+
+  function removePaperRow(idx: number) {
+    setForm((f) => ({ ...f, paperLaserEntries: f.paperLaserEntries.filter((_, i) => i !== idx) }))
+  }
+
+  function patchPaperRow(
+    idx: number,
+    key: 'therapist' | 'sessionDate' | 'area' | 'laserType' | 'pw' | 'pulse' | 'shots' | 'notes',
+    value: string,
+  ) {
+    setForm((f) => ({
+      ...f,
+      paperLaserEntries: f.paperLaserEntries.map((r, i) => (i === idx ? { ...r, [key]: value } : r)),
+    }))
+  }
+
   async function saveSingle() {
     setErr('')
     setOk('')
@@ -113,6 +149,7 @@ export function PatientFastIntakePage() {
           surgicalHistory: form.surgicalHistory.trim(),
           allergies: form.allergies.trim(),
           departments: form.departments,
+          paperLaserEntries: form.paperLaserEntries,
         }),
       })
       setLastCreatedId(created.patient.id)
@@ -176,6 +213,7 @@ export function PatientFastIntakePage() {
               surgicalHistory,
               allergies,
               departments: parseDepartments(departmentsRaw),
+              paperLaserEntries: [],
             }),
           })
           okCount += 1
@@ -334,6 +372,68 @@ export function PatientFastIntakePage() {
             value={form.allergies}
             onChange={(e) => setForm((f) => ({ ...f, allergies: e.target.value }))}
           />
+        </div>
+        <div style={{ marginTop: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+            <label className="form-label" style={{ margin: 0 }}>
+              بيانات جلسات ورقية (إدخال يدوي)
+            </label>
+            <button type="button" className="btn btn-secondary" onClick={() => addPaperRow()}>
+              + إضافة صف
+            </button>
+          </div>
+          <p style={{ margin: '0.35rem 0 0.65rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+            مثل الجدول الورقي: المعالج، التاريخ، المنطقة، النوع، P.W، Puls، الضربات، الملاحظات.
+          </p>
+          {form.paperLaserEntries.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>لا يوجد صفوف مُضافة.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.6rem' }}>
+              {form.paperLaserEntries.map((row, idx) => (
+                <div key={idx} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.65rem' }}>
+                  <div className="grid-2">
+                    <div>
+                      <label className="form-label">المعالج</label>
+                      <input className="input" value={row.therapist} onChange={(e) => patchPaperRow(idx, 'therapist', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="form-label">التاريخ</label>
+                      <input className="input" value={row.sessionDate} onChange={(e) => patchPaperRow(idx, 'sessionDate', e.target.value)} placeholder="مثال: 22/1/24" />
+                    </div>
+                    <div>
+                      <label className="form-label">المنطقة</label>
+                      <input className="input" value={row.area} onChange={(e) => patchPaperRow(idx, 'area', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="form-label">Alex / Yag / Mix</label>
+                      <input className="input" value={row.laserType} onChange={(e) => patchPaperRow(idx, 'laserType', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="form-label">P.W</label>
+                      <input className="input" value={row.pw} onChange={(e) => patchPaperRow(idx, 'pw', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="form-label">Puls</label>
+                      <input className="input" value={row.pulse} onChange={(e) => patchPaperRow(idx, 'pulse', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="form-label">الضربات</label>
+                      <input className="input" value={row.shots} onChange={(e) => patchPaperRow(idx, 'shots', e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <label className="form-label">ملاحظات</label>
+                    <textarea className="textarea" rows={2} value={row.notes} onChange={(e) => patchPaperRow(idx, 'notes', e.target.value)} />
+                  </div>
+                  <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button type="button" className="btn btn-secondary" onClick={() => removePaperRow(idx)}>
+                      حذف الصف
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {err ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{err}</p> : null}
         {ok ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{ok}</p> : null}

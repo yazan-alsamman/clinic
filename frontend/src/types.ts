@@ -39,6 +39,16 @@ export interface Patient {
   phone?: string
   /** ذكر / أنثى — فارغ إن لم يُحدَّد */
   gender?: 'male' | 'female' | ''
+  paperLaserEntries?: Array<{
+    therapist: string
+    sessionDate: string
+    area: string
+    laserType: string
+    pw: string
+    pulse: string
+    shots: string
+    notes: string
+  }>
 }
 
 export interface LaserArea {

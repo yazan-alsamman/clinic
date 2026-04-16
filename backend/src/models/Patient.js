@@ -1,5 +1,19 @@
 import mongoose from 'mongoose'
 
+const paperLaserEntrySchema = new mongoose.Schema(
+  {
+    therapist: { type: String, default: '' },
+    sessionDate: { type: String, default: '' },
+    area: { type: String, default: '' },
+    laserType: { type: String, default: '' },
+    pw: { type: String, default: '' },
+    pulse: { type: String, default: '' },
+    shots: { type: String, default: '' },
+    notes: { type: String, default: '' },
+  },
+  { _id: false },
+)
+
 const patientSchema = new mongoose.Schema(
   {
     fileNumber: { type: String, required: true, trim: true, unique: true, index: true },
@@ -18,6 +32,8 @@ const patientSchema = new mongoose.Schema(
     lastVisit: { type: Date, default: null },
     phone: { type: String, default: '' },
     gender: { type: String, default: '' },
+    /** إدخالات أرشيف ورقي (ليزر/جلسات قديمة) */
+    paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
     /** بوابة المريض — تسجيل دخول منفصل عن موظفي العيادة */
     portalUsername: { type: String, trim: true, sparse: true, unique: true },
     portalPasswordHash: { type: String, default: undefined },

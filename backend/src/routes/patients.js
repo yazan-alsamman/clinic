@@ -14,6 +14,23 @@ function canReadPatients(role) {
   return CLINICAL_ROLES.includes(role)
 }
 
+function normalizePaperLaserEntries(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((x) => ({
+      therapist: String(x?.therapist || '').trim().slice(0, 120),
+      sessionDate: String(x?.sessionDate || '').trim().slice(0, 20),
+      area: String(x?.area || '').trim().slice(0, 300),
+      laserType: String(x?.laserType || '').trim().slice(0, 80),
+      pw: String(x?.pw || '').trim().slice(0, 80),
+      pulse: String(x?.pulse || '').trim().slice(0, 80),
+      shots: String(x?.shots || '').trim().slice(0, 80),
+      notes: String(x?.notes || '').trim().slice(0, 500),
+    }))
+    .filter((r) => r.therapist || r.sessionDate || r.area || r.laserType || r.pw || r.pulse || r.shots || r.notes)
+    .slice(0, 300)
+}
+
 export const patientsRouter = Router()
 
 patientsRouter.use(authMiddleware, loadBusinessDay)
@@ -223,6 +240,7 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
     }
     const gRaw = String(body.gender || '').trim()
     const gender = gRaw === 'male' || gRaw === 'female' ? gRaw : ''
+    const paperLaserEntries = normalizePaperLaserEntries(body.paperLaserEntries)
     const p = await Patient.create({
       fileNumber,
       name: String(body.name || '').trim() || 'مريض جديد',
@@ -235,6 +253,7 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
       departments: Array.isArray(body.departments) ? body.departments : [],
       phone: body.phone ?? '',
       gender,
+      paperLaserEntries,
       lastVisit: new Date(),
     })
     let portalCredentials = null
@@ -295,6 +314,7 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
       'departments',
       'phone',
       'gender',
+      'paperLaserEntries',
     ]
     for (const f of fields) {
       if (body[f] === undefined) continue
@@ -307,6 +327,10 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
         const next = String(body.fileNumber || '').trim()
         if (!next) continue
         p.fileNumber = next
+        continue
+      }
+      if (f === 'paperLaserEntries') {
+        p.paperLaserEntries = normalizePaperLaserEntries(body.paperLaserEntries)
         continue
       }
       p[f] = body[f]
