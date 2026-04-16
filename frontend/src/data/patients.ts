@@ -3,6 +3,7 @@ import type { Patient } from '../types'
 export const mockPatients: Patient[] = [
   {
     id: '1',
+    fileNumber: 'D-000001',
     name: 'سارة أحمد المحمد',
     dob: '1992-03-15',
     marital: 'متزوجة',
@@ -16,6 +17,7 @@ export const mockPatients: Patient[] = [
   },
   {
     id: '2',
+    fileNumber: 'D-000002',
     name: 'Lina K. Mansour',
     dob: '1988-11-02',
     marital: 'عزباء',
@@ -29,6 +31,7 @@ export const mockPatients: Patient[] = [
   },
   {
     id: '3',
+    fileNumber: 'D-000003',
     name: 'خالد يوسف',
     dob: '1975-07-22',
     marital: 'متزوج',

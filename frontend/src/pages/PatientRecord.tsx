@@ -239,6 +239,7 @@ function buildPatientRecordPrintHtml(opts: {
   const genderLabel = GENDER_LABELS[g]
 
   const demographicsRows = `
+    <tr><th>رقم الإضبارة</th><td>${escapeHtmlPdf(patient.fileNumber || '—')}</td></tr>
     <tr><th>الاسم الكامل</th><td>${escapeHtmlPdf(patient.name)}</td></tr>
     <tr><th>تاريخ الميلاد</th><td>${escapeHtmlPdf(patient.dob?.trim() ? patient.dob : '—')}</td></tr>
     <tr><th>الحالة الاجتماعية</th><td>${escapeHtmlPdf(patient.marital?.trim() ? patient.marital : '—')}</td></tr>
@@ -541,6 +542,7 @@ export function PatientRecord() {
   const [overviewSaveErr, setOverviewSaveErr] = useState('')
   const [pdfExporting, setPdfExporting] = useState(false)
   const [overviewDraft, setOverviewDraft] = useState({
+    fileNumber: '',
     name: '',
     dob: '',
     marital: '',
@@ -560,6 +562,7 @@ export function PatientRecord() {
   const startOverviewEdit = useCallback(() => {
     if (!patient) return
     setOverviewDraft({
+      fileNumber: patient.fileNumber || '',
       name: patient.name,
       dob: patient.dob || '',
       marital: patient.marital || '',
@@ -581,12 +584,17 @@ export function PatientRecord() {
 
   const saveOverview = useCallback(async () => {
     if (!id || !patient) return
+    if (!overviewDraft.fileNumber.trim()) {
+      setOverviewSaveErr('رقم الإضبارة مطلوب')
+      return
+    }
     setOverviewSaving(true)
     setOverviewSaveErr('')
     try {
       const data = await api<{ patient: Patient }>(`/api/patients/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify({
+          fileNumber: overviewDraft.fileNumber,
           name: overviewDraft.name.trim() || 'مريض',
           dob: overviewDraft.dob,
           marital: overviewDraft.marital,
@@ -1108,6 +1116,17 @@ export function PatientRecord() {
             <>
               <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1.25rem' }}>
                 <div>
+                  <label className="form-label" htmlFor="ov-file-number">
+                    رقم الإضبارة
+                  </label>
+                  <input
+                    id="ov-file-number"
+                    className="input"
+                    value={overviewDraft.fileNumber}
+                    onChange={(e) => setOverviewDraft((d) => ({ ...d, fileNumber: e.target.value }))}
+                  />
+                </div>
+                <div>
                   <label className="form-label" htmlFor="ov-name">
                     الاسم الكامل
                   </label>
@@ -1224,6 +1243,10 @@ export function PatientRecord() {
           ) : (
             <>
               <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <span className="form-label">رقم الإضبارة</span>
+                  <div style={{ fontWeight: 600 }}>{patient.fileNumber || '—'}</div>
+                </div>
                 <div>
                   <span className="form-label">الاسم الكامل</span>
                   <div style={{ fontWeight: 600 }}>{patient.name}</div>

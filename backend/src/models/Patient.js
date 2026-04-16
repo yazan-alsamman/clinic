@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 
 const patientSchema = new mongoose.Schema(
   {
+    fileNumber: { type: String, required: true, trim: true, unique: true, index: true },
     name: { type: String, required: true, trim: true, index: true },
     dob: { type: String, default: '' },
     marital: { type: String, default: '' },

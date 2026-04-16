@@ -4,9 +4,10 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import type { Patient } from '../types'
 
-type Dept = 'laser' | 'dermatology' | 'dental'
+type Dept = 'laser' | 'dermatology' | 'dental' | 'solarium'
 
 const emptyForm = {
+  fileNumber: '',
   name: '',
   dob: '',
   phone: '',
@@ -164,6 +165,9 @@ export function PatientSearch() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{p.name}</div>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  رقم الإضبارة: {p.fileNumber || '—'} ·
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     الميلاد: {p.dob || '—'} · آخر زيارة: {p.lastVisit || '—'}
                   </div>
                   <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
@@ -175,6 +179,9 @@ export function PatientSearch() {
                     )}
                     {p.departments.includes('dental') && (
                       <span className="chip chip-dental">أسنان</span>
+                    )}
+                    {p.departments.includes('solarium') && (
+                      <span className="chip">سولاريوم</span>
                     )}
                   </div>
                 </div>
@@ -261,6 +268,18 @@ export function PatientSearch() {
               البطاقة العامة — يمكن لاحقاً ربط الأقسام عند أول زيارة.
             </p>
             <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <div>
+                <label className="form-label" htmlFor="np-file-number">
+                  رقم الإضبارة <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
+                <input
+                  id="np-file-number"
+                  className="input"
+                  value={form.fileNumber}
+                  onChange={(e) => setForm((f) => ({ ...f, fileNumber: e.target.value }))}
+                  placeholder="مثال: D-000123"
+                />
+              </div>
               <div>
                 <label className="form-label" htmlFor="np-name">
                   الاسم الكامل <span style={{ color: 'var(--danger)' }}>*</span>
@@ -389,6 +408,7 @@ export function PatientSearch() {
                       { key: 'laser' as const, label: 'ليزر', cls: 'chip-laser' },
                       { key: 'dermatology' as const, label: 'جلدية', cls: 'chip-derm' },
                       { key: 'dental' as const, label: 'أسنان', cls: 'chip-dental' },
+                      { key: 'solarium' as const, label: 'سولاريوم', cls: 'chip' },
                     ] as const
                   ).map((d) => (
                     <button
@@ -436,6 +456,11 @@ export function PatientSearch() {
                 onClick={async () => {
                   setFormErr('')
                   const name = form.name.trim()
+                  const fileNumber = form.fileNumber.trim()
+                  if (!fileNumber) {
+                    setFormErr('رقم الإضبارة مطلوب')
+                    return
+                  }
                   if (!name) {
                     setFormErr('الاسم مطلوب')
                     return
@@ -448,6 +473,7 @@ export function PatientSearch() {
                     }>('/api/patients', {
                       method: 'POST',
                       body: JSON.stringify({
+                        fileNumber,
                         name,
                         dob: form.dob,
                         phone: form.phone.trim(),

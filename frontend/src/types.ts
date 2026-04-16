@@ -25,6 +25,7 @@ export type NavKey =
 
 export interface Patient {
   id: string
+  fileNumber: string
   name: string
   dob: string
   marital: string

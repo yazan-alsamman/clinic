@@ -3,6 +3,7 @@ export function patientToDto(p) {
   const o = p.toObject ? p.toObject() : p
   return {
     id: String(o._id),
+    fileNumber: o.fileNumber ?? '',
     name: o.name,
     dob: o.dob ?? '',
     marital: o.marital ?? '',

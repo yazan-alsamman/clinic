@@ -8,7 +8,7 @@ import { writeAudit } from '../utils/audit.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 
-const CLINICAL_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch']
+const CLINICAL_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
 
 function canReadPatients(role) {
   return CLINICAL_ROLES.includes(role)
@@ -28,7 +28,7 @@ patientsRouter.get('/', async (req, res) => {
     let query = {}
     if (q) {
       const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      query = { name: new RegExp(safe, 'i') }
+      query = { $or: [{ name: new RegExp(safe, 'i') }, { fileNumber: new RegExp(safe, 'i') }] }
     }
     const list = await Patient.find(query).sort({ updatedAt: -1 }).limit(200)
     res.json({ patients: list.map(patientToDto) })
@@ -216,9 +216,15 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
       return
     }
     const body = req.body ?? {}
+    const fileNumber = String(body.fileNumber || '').trim()
+    if (!fileNumber) {
+      res.status(400).json({ error: 'رقم الإضبارة مطلوب' })
+      return
+    }
     const gRaw = String(body.gender || '').trim()
     const gender = gRaw === 'male' || gRaw === 'female' ? gRaw : ''
     const p = await Patient.create({
+      fileNumber,
       name: String(body.name || '').trim() || 'مريض جديد',
       dob: body.dob ?? '',
       marital: body.marital ?? '',
@@ -255,6 +261,10 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
       },
     })
   } catch (e) {
+    if (e?.code === 11000) {
+      res.status(400).json({ error: 'رقم الإضبارة مستخدم مسبقاً' })
+      return
+    }
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
@@ -275,6 +285,7 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
     }
     const fields = [
       'name',
+      'fileNumber',
       'dob',
       'marital',
       'occupation',
@@ -292,6 +303,12 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
         if (['male', 'female', ''].includes(g)) p.gender = g
         continue
       }
+      if (f === 'fileNumber') {
+        const next = String(body.fileNumber || '').trim()
+        if (!next) continue
+        p.fileNumber = next
+        continue
+      }
       p[f] = body[f]
     }
     if (body.touchLastVisit) p.lastVisit = new Date()
@@ -304,6 +321,10 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
     })
     res.json({ patient: patientToDto(p) })
   } catch (e) {
+    if (e?.code === 11000) {
+      res.status(400).json({ error: 'رقم الإضبارة مستخدم مسبقاً' })
+      return
+    }
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
