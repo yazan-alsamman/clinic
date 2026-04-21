@@ -1888,13 +1888,16 @@ export function PatientRecord() {
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>الحقل</th>
-                        <th>القيمة</th>
+                        <th>نوع الليزر</th>
+                        <th>P.W</th>
+                        <th>Pulse</th>
+                        <th>الضربات</th>
+                        <th>المناطق</th>
+                        <th>ملاحظات</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td>نوع الليزر</td>
                         <td>
                           <select
                             className="select"
@@ -1909,9 +1912,6 @@ export function PatientRecord() {
                             ))}
                           </select>
                         </td>
-                      </tr>
-                      <tr>
-                        <td>P.W</td>
                         <td>
                           <input
                             className="input"
@@ -1923,9 +1923,6 @@ export function PatientRecord() {
                             style={{ maxWidth: 220 }}
                           />
                         </td>
-                      </tr>
-                      <tr>
-                        <td>Pulse</td>
                         <td>
                           <input
                             className="input"
@@ -1937,9 +1934,6 @@ export function PatientRecord() {
                             style={{ maxWidth: 220 }}
                           />
                         </td>
-                      </tr>
-                      <tr>
-                        <td>الضربات</td>
                         <td>
                           <input
                             className="input"
@@ -1951,9 +1945,6 @@ export function PatientRecord() {
                             style={{ maxWidth: 220 }}
                           />
                         </td>
-                      </tr>
-                      <tr>
-                        <td>المناطق</td>
                         <td>
                           <button
                             type="button"
@@ -1968,9 +1959,6 @@ export function PatientRecord() {
                               : 'لم يتم اختيار مناطق بعد'}
                           </div>
                         </td>
-                      </tr>
-                      <tr>
-                        <td>ملاحظات</td>
                         <td>
                           <textarea
                             className="textarea"
