@@ -108,7 +108,7 @@ export function ReceptionAppointmentPage() {
   const [selectedService, setSelectedService] = useState<ServiceValue>('laser')
   const [selectedChannel, setSelectedChannel] = useState<string>(SERVICE_CHANNELS.laser[0])
   const [appointmentTime, setAppointmentTime] = useState('09:00')
-  const [durationMinutes, setDurationMinutes] = useState(60)
+  const [bookingDurationMinutes, setBookingDurationMinutes] = useState(60)
   const [procedureType, setProcedureType] = useState('')
 
   const [patientQ, setPatientQ] = useState('')
@@ -229,9 +229,8 @@ export function ReceptionAppointmentPage() {
       .sort((a, b) => a.start - b.start)
       const out: string[] = []
       let t = DAY_START_MIN
-      while (t + durationMinutes <= DAY_END_MIN) {
-        const candidateEnd = t + durationMinutes
-        const overlap = intervals.find((iv) => intervalsOverlapHalfOpen(t, candidateEnd, iv.start, iv.end))
+      while (t <= DAY_END_MIN - DEFAULT_SLOT_STEP_MIN) {
+        const overlap = intervals.find((iv) => t >= iv.start && t < iv.end)
         if (overlap) {
           t = overlap.end
           continue
@@ -241,7 +240,7 @@ export function ReceptionAppointmentPage() {
       }
       return out
     },
-    [channelBookedSlots, durationMinutes],
+    [channelBookedSlots],
   )
 
   const appointmentRowsForChannel = useCallback((channel: string) => {
@@ -273,17 +272,15 @@ export function ReceptionAppointmentPage() {
             range: iv ? `${toHm(iv.start)} — ${toHm(iv.end)}` : busy.time,
           }
         }
-        const sm = hmToMinutes(time) || 0
-        const em = sm + durationMinutes
         return {
           time,
           status: 'free' as const,
           patientName: '',
           procedureType: '',
-          range: `${time} — ${toHm(em)}`,
+          range: '—',
         }
       })
-  }, [channelBookedSlots, availableStartTimesForChannel, durationMinutes])
+  }, [channelBookedSlots, availableStartTimesForChannel])
 
   const selectedChannelRows = useMemo(
     () => appointmentRowsForChannel(selectedChannel),
@@ -369,7 +366,7 @@ export function ReceptionAppointmentPage() {
       return false
     }
     const sm = hmToMinutes(time)
-    const em = sm == null ? null : sm + durationMinutes
+    const em = sm == null ? null : sm + bookingDurationMinutes
     const endTime = em == null ? null : toHm(em)
     if (sm == null || em == null || !endTime) {
       setFormErr('الوقت المختار غير صالح')
@@ -438,7 +435,7 @@ export function ReceptionAppointmentPage() {
         ? ` — الأخصائي: ${data.slot.assignedSpecialistName}`
         : ''
       setSuccessMsg(
-        `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${durationMinutes} دقيقة) — ${businessDate}${specialistPart}`,
+        `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${bookingDurationMinutes} دقيقة) — ${businessDate}${specialistPart}`,
       )
       setPicked(null)
       setPatientQ('')
@@ -541,24 +538,6 @@ export function ReceptionAppointmentPage() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="form-label" htmlFor="appt-duration">
-              مدة الموعد الجديد
-            </label>
-            <select
-              id="appt-duration"
-              className="select"
-              style={{ width: '100%', maxWidth: 220 }}
-              value={String(durationMinutes)}
-              onChange={(e) => setDurationMinutes(Math.max(15, Number(e.target.value) || 60))}
-            >
-              <option value="30">30 دقيقة</option>
-              <option value="45">45 دقيقة</option>
-              <option value="60">60 دقيقة</option>
-              <option value="90">90 دقيقة</option>
-              <option value="120">120 دقيقة</option>
-            </select>
-          </div>
         </div>
         {slotsLoading ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل الجدول…</p>
@@ -618,6 +597,7 @@ export function ReceptionAppointmentPage() {
                                     setPatientHits([])
                                     setProcedureType('')
                                     setSelectedLaserItemIds([])
+                                    setBookingDurationMinutes(60)
                                     setFormErr('')
                                     setSuccessMsg('')
                                     setDeclinedNewPatientForName(null)
@@ -682,6 +662,7 @@ export function ReceptionAppointmentPage() {
                             setPatientHits([])
                             setProcedureType('')
                             setSelectedLaserItemIds([])
+                            setBookingDurationMinutes(60)
                             setFormErr('')
                             setSuccessMsg('')
                             setDeclinedNewPatientForName(null)
@@ -720,9 +701,24 @@ export function ReceptionAppointmentPage() {
               {selectedService === 'laser' ? ` (${LASER_ROOM_TITLES[selectedChannel] || selectedChannel})` : ''}
             </h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.25rem', fontSize: '0.88rem' }}>
-              الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{durationMinutes} دقيقة</strong> — التاريخ:{' '}
+              الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{bookingDurationMinutes} دقيقة</strong> — التاريخ:{' '}
               <strong>{businessDate}</strong>
             </p>
+            <div className="card" style={{ marginBottom: '0.85rem' }}>
+              <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>مدة الموعد</h4>
+              <select
+                className="select"
+                style={{ width: '100%', maxWidth: 220 }}
+                value={String(bookingDurationMinutes)}
+                onChange={(e) => setBookingDurationMinutes(Math.max(15, Number(e.target.value) || 60))}
+              >
+                <option value="30">30 دقيقة</option>
+                <option value="45">45 دقيقة</option>
+                <option value="60">60 دقيقة</option>
+                <option value="90">90 دقيقة</option>
+                <option value="120">120 دقيقة</option>
+              </select>
+            </div>
             <div className="card" style={{ marginBottom: '0.85rem' }}>
               <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>اختيار المريض</h4>
               <input
