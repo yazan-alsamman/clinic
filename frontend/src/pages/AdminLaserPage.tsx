@@ -21,7 +21,7 @@ type LaserTab = 'shots' | 'financial'
 
 export function AdminLaserPage() {
   const { user } = useAuth()
-  const { businessDate } = useClinic()
+  const { businessDate, usdSypRate } = useClinic()
   const allowed = user?.role === 'super_admin'
   const [tab, setTab] = useState<LaserTab>('shots')
   const [date, setDate] = useState('')
@@ -45,6 +45,21 @@ export function AdminLaserPage() {
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountUsd) || 0), 0),
     [financeRows],
   )
+  const fxRate = Number(usdSypRate || 0)
+  const renderMoneyDual = (usdValue: number) => {
+    const usd = Number(usdValue) || 0
+    const usdText = `${usd.toFixed(2)} USD`
+    if (!(fxRate > 0)) return <span>{usdText}</span>
+    const syp = usd * fxRate
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '0.1rem' }}>
+        <span>{usdText}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+          {syp.toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س
+        </span>
+      </span>
+    )
+  }
 
   const loadShots = useCallback(async () => {
     if (!allowed) return
@@ -235,9 +250,7 @@ export function AdminLaserPage() {
               ) : topSpecialist ? (
                 <>
                   <div style={{ fontWeight: 800, marginBottom: '0.2rem' }}>{topSpecialist.name}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                    {Number(topSpecialist.totalAmountUsd || 0).toFixed(2)} USD
-                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{renderMoneyDual(topSpecialist.totalAmountUsd || 0)}</div>
                 </>
               ) : (
                 <span style={{ color: 'var(--text-muted)' }}>لا يوجد بيانات مالية لهذا اليوم.</span>
@@ -250,7 +263,7 @@ export function AdminLaserPage() {
             </h2>
             <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
               مجموع أسعار جلسات جميع الأخصائيين:{' '}
-              <strong style={{ color: 'var(--text)' }}>{totalFinanceUsd.toFixed(2)} USD</strong>
+              <strong style={{ color: 'var(--text)' }}>{renderMoneyDual(totalFinanceUsd)}</strong>
             </div>
             <div className="table-wrap">
               <table className="data-table">
@@ -277,7 +290,7 @@ export function AdminLaserPage() {
                     financeRows.map((r) => (
                       <tr key={r.userId}>
                         <td>{r.name}</td>
-                        <td>{Number(r.totalAmountUsd || 0).toFixed(2)} USD</td>
+                        <td>{renderMoneyDual(Number(r.totalAmountUsd || 0))}</td>
                         <td>{Number(r.sessionsCount) || 0}</td>
                         <td>{r.active ? 'فعّال' : 'غير فعّال'}</td>
                       </tr>
