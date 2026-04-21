@@ -12,7 +12,26 @@ import {
 } from '../utils/scheduleTime'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
 
-const DEFAULT_PROVIDERS = ['د. لورا', 'د. سامي', 'أخصائية ليزر']
+const SERVICE_OPTIONS = [
+  { value: 'laser', label: 'ليزر' },
+  { value: 'dental', label: 'أسنان' },
+  { value: 'dermatology', label: 'جلدية' },
+  { value: 'solarium', label: 'سولاريوم' },
+] as const
+
+type ServiceValue = (typeof SERVICE_OPTIONS)[number]['value']
+
+const SERVICE_CHANNELS: Record<ServiceValue, string[]> = {
+  laser: ['Laser Room 1', 'Laser Room 2'],
+  dental: ['أسنان'],
+  dermatology: ['جلدية'],
+  solarium: ['سولاريوم'],
+}
+
+const LASER_ROOM_TITLES: Record<string, string> = {
+  'Laser Room 1': 'Room 1',
+  'Laser Room 2': 'Room 2',
+}
 
 type SlotRow = {
   id: string
@@ -59,9 +78,8 @@ export function ReceptionAppointmentPage() {
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [slotsErr, setSlotsErr] = useState('')
 
-  const [providerDirectory, setProviderDirectory] = useState<string[]>([])
-
-  const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDERS[0])
+  const [selectedService, setSelectedService] = useState<ServiceValue>('laser')
+  const [selectedChannel, setSelectedChannel] = useState<string>(SERVICE_CHANNELS.laser[0])
   const [appointmentTime, setAppointmentTime] = useState('09:00')
   const [durationMinutes, setDurationMinutes] = useState(60)
   const [procedureType, setProcedureType] = useState('')
@@ -77,16 +95,6 @@ export function ReceptionAppointmentPage() {
   const [formErr, setFormErr] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
   const [bookingOpen, setBookingOpen] = useState(false)
-
-  const loadProviders = useCallback(async () => {
-    if (!canUse) return
-    try {
-      const data = await api<{ providers: string[] }>('/api/schedule/providers')
-      setProviderDirectory(data.providers)
-    } catch {
-      setProviderDirectory([])
-    }
-  }, [canUse])
 
   const loadSlots = useCallback(async () => {
     if (!canUse) return
@@ -110,26 +118,17 @@ export function ReceptionAppointmentPage() {
   }, [loadSlots])
 
   useEffect(() => {
-    void loadProviders()
-  }, [loadProviders])
-
-  useEffect(() => {
     if (dayActive) {
       setFormErr((prev) => (prev.includes('يوم العمل') ? '' : prev))
     }
   }, [dayActive])
 
-  const providerOptions = useMemo(() => {
-    const u = new Set(providerDirectory.length > 0 ? providerDirectory : DEFAULT_PROVIDERS)
-    for (const s of slots) u.add(s.providerName)
-    return [...u].sort((a, b) => a.localeCompare(b, 'ar'))
-  }, [slots, providerDirectory])
-
   useEffect(() => {
-    if (providerOptions.length > 0 && !providerOptions.includes(selectedProvider)) {
-      setSelectedProvider(providerOptions[0])
+    const channels = SERVICE_CHANNELS[selectedService]
+    if (channels.length > 0 && !channels.includes(selectedChannel)) {
+      setSelectedChannel(channels[0])
     }
-  }, [providerOptions, selectedProvider])
+  }, [selectedService, selectedChannel])
 
   useEffect(() => {
     const q = patientQ.trim()
@@ -164,37 +163,42 @@ export function ReceptionAppointmentPage() {
     }
   }, [patientQ, declinedNewPatientForName])
 
-  const providerBookedSlots = useMemo(
-    () =>
+  const channelBookedSlots = useCallback(
+    (channel: string) =>
       slots
-        .filter((s) => s.providerName === selectedProvider)
+        .filter((s) => s.providerName === channel)
         .sort((a, b) => a.time.localeCompare(b.time, undefined, { numeric: true })),
-    [slots, selectedProvider],
+    [slots],
   )
 
-  const availableStartTimes = useMemo(() => {
-    const intervals = providerBookedSlots
+  const availableStartTimesForChannel = useCallback(
+    (channel: string) => {
+      const intervals = channelBookedSlots(channel)
       .map((s) => slotIntervalFromRow(s.time, s.endTime))
       .filter((x): x is { start: number; end: number } => x != null)
       .sort((a, b) => a.start - b.start)
-    const out: string[] = []
-    let t = DAY_START_MIN
-    while (t + durationMinutes <= DAY_END_MIN) {
-      const candidateEnd = t + durationMinutes
-      const overlap = intervals.find((iv) => intervalsOverlapHalfOpen(t, candidateEnd, iv.start, iv.end))
-      if (overlap) {
-        t = overlap.end
-        continue
+      const out: string[] = []
+      let t = DAY_START_MIN
+      while (t + durationMinutes <= DAY_END_MIN) {
+        const candidateEnd = t + durationMinutes
+        const overlap = intervals.find((iv) => intervalsOverlapHalfOpen(t, candidateEnd, iv.start, iv.end))
+        if (overlap) {
+          t = overlap.end
+          continue
+        }
+        out.push(toHm(t))
+        t += DEFAULT_SLOT_STEP_MIN
       }
-      out.push(toHm(t))
-      t += DEFAULT_SLOT_STEP_MIN
-    }
-    return out
-  }, [providerBookedSlots, durationMinutes])
+      return out
+    },
+    [channelBookedSlots, durationMinutes],
+  )
 
-  const appointmentRows = useMemo(() => {
+  const appointmentRowsForChannel = useCallback((channel: string) => {
+    const bookedSlots = channelBookedSlots(channel)
+    const availableStartTimes = availableStartTimesForChannel(channel)
     const bookedMap = new Map<string, SlotRow>()
-    for (const s of providerBookedSlots) {
+    for (const s of bookedSlots) {
       const t = normalizeTime(s.time)
       if (t) bookedMap.set(t, s)
     }
@@ -229,14 +233,24 @@ export function ReceptionAppointmentPage() {
           range: `${time} — ${toHm(em)}`,
         }
       })
-  }, [providerBookedSlots, availableStartTimes, durationMinutes])
+  }, [channelBookedSlots, availableStartTimesForChannel, durationMinutes])
+
+  const selectedChannelRows = useMemo(
+    () => appointmentRowsForChannel(selectedChannel),
+    [appointmentRowsForChannel, selectedChannel],
+  )
+
+  const selectedChannelAvailableTimes = useMemo(
+    () => availableStartTimesForChannel(selectedChannel),
+    [availableStartTimesForChannel, selectedChannel],
+  )
 
   useEffect(() => {
-    if (availableStartTimes.length === 0) return
-    if (!availableStartTimes.includes(appointmentTime)) {
-      setAppointmentTime(availableStartTimes[0])
+    if (selectedChannelAvailableTimes.length === 0) return
+    if (!selectedChannelAvailableTimes.includes(appointmentTime)) {
+      setAppointmentTime(selectedChannelAvailableTimes[0])
     }
-  }, [availableStartTimes, appointmentTime])
+  }, [selectedChannelAvailableTimes, appointmentTime])
 
   async function createNewPatientAndSelect() {
     const name = patientQ.trim()
@@ -297,11 +311,12 @@ export function ReceptionAppointmentPage() {
       setFormErr('وقت نهاية الموعد يجب أن يكون بعد وقت البداية')
       return false
     }
-    const providerName = selectedProvider.trim()
+    const providerName = selectedChannel.trim()
     if (!providerName) {
-      setFormErr('اختر المقدّم من القائمة')
+      setFormErr('اختر الخدمة أو الغرفة أولاً')
       return false
     }
+    const availableStartTimes = availableStartTimesForChannel(providerName)
     if (!availableStartTimes.includes(time)) {
       setFormErr('الوقت المختار لم يعد متاحاً بعد تحديث الجدول')
       return false
@@ -420,22 +435,22 @@ export function ReceptionAppointmentPage() {
 
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h2 className="card-title" style={{ marginTop: 0 }}>
-          جدول الأوقات ({selectedProvider || '—'})
+          جدول الأوقات
         </h2>
         <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '0.75rem' }}>
           <div>
             <label className="form-label" htmlFor="appt-prov">
-              المقدّم (طبيب / أخصائي)
+              الخدمة
             </label>
             <select
               id="appt-prov"
               className="select"
-              value={selectedProvider}
-              onChange={(e) => setSelectedProvider(e.target.value)}
+              value={selectedService}
+              onChange={(e) => setSelectedService(e.target.value as ServiceValue)}
             >
-              {providerOptions.map((p) => (
-                <option key={p} value={p}>
-                  {p}
+              {SERVICE_OPTIONS.map((svc) => (
+                <option key={svc.value} value={svc.value}>
+                  {svc.label}
                 </option>
               ))}
             </select>
@@ -461,6 +476,77 @@ export function ReceptionAppointmentPage() {
         </div>
         {slotsLoading ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل الجدول…</p>
+        ) : selectedService === 'laser' ? (
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {SERVICE_CHANNELS.laser.map((channel) => {
+              const rows = appointmentRowsForChannel(channel)
+              return (
+                <div key={channel}>
+                  <h3 style={{ margin: '0 0 0.5rem' }}>جدول {LASER_ROOM_TITLES[channel] || channel}</h3>
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>الوقت</th>
+                          <th>الحالة</th>
+                          <th>اسم المريض</th>
+                          <th>نوع الإجراء</th>
+                          <th>الفترة</th>
+                          <th>إجراء</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={`${channel}-${r.time}-${r.status}`}>
+                            <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{r.time}</td>
+                            <td>
+                              {r.status === 'busy' ? (
+                                <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
+                                  محجوز
+                                </span>
+                              ) : (
+                                <span className="chip" style={{ background: 'var(--success-dim)', color: 'var(--success)' }}>
+                                  متاح
+                                </span>
+                              )}
+                            </td>
+                            <td>{r.status === 'busy' ? r.patientName : '—'}</td>
+                            <td>{r.status === 'busy' ? r.procedureType : '—'}</td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.range}</td>
+                            <td>
+                              {r.status === 'free' ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  style={{ fontSize: '0.8rem' }}
+                                  onClick={() => {
+                                    setSelectedChannel(channel)
+                                    setAppointmentTime(r.time)
+                                    setPicked(null)
+                                    setPatientQ('')
+                                    setPatientHits([])
+                                    setProcedureType('')
+                                    setFormErr('')
+                                    setSuccessMsg('')
+                                    setDeclinedNewPatientForName(null)
+                                    setBookingOpen(true)
+                                  }}
+                                >
+                                  اختيار
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
@@ -475,8 +561,8 @@ export function ReceptionAppointmentPage() {
                 </tr>
               </thead>
               <tbody>
-                {appointmentRows.map((r) => (
-                  <tr key={`${selectedProvider}-${r.time}-${r.status}`}>
+                {selectedChannelRows.map((r) => (
+                  <tr key={`${selectedChannel}-${r.time}-${r.status}`}>
                     <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{r.time}</td>
                     <td>
                       {r.status === 'busy' ? (
@@ -499,6 +585,7 @@ export function ReceptionAppointmentPage() {
                           className="btn btn-primary"
                           style={{ fontSize: '0.8rem' }}
                           onClick={() => {
+                            setSelectedChannel(SERVICE_CHANNELS[selectedService][0])
                             setAppointmentTime(r.time)
                             setPicked(null)
                             setPatientQ('')
@@ -537,7 +624,10 @@ export function ReceptionAppointmentPage() {
       {bookingOpen ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setBookingOpen(false)}>
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>حجز موعد عند {selectedProvider}</h3>
+            <h3 style={{ marginTop: 0 }}>
+              حجز موعد — {SERVICE_OPTIONS.find((x) => x.value === selectedService)?.label || selectedService}
+              {selectedService === 'laser' ? ` (${LASER_ROOM_TITLES[selectedChannel] || selectedChannel})` : ''}
+            </h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.25rem', fontSize: '0.88rem' }}>
               الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{durationMinutes} دقيقة</strong> — التاريخ:{' '}
               <strong>{businessDate}</strong>
