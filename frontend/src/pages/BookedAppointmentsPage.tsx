@@ -16,8 +16,21 @@ type SlotRow = {
   time: string
   endTime?: string
   providerName: string
+  assignedSpecialistName?: string
+  serviceType?: string
+  roomNumber?: number | null
   procedureType?: string
   patientName: string
+}
+
+type ServiceKey = 'laser' | 'dental' | 'dermatology' | 'solarium' | 'other'
+
+const SERVICE_LABELS: Record<ServiceKey, string> = {
+  laser: 'الليزر',
+  dental: 'الأسنان',
+  dermatology: 'الجلدية',
+  solarium: 'السولاريوم',
+  other: 'أخرى',
 }
 
 function todayYmd() {
@@ -34,6 +47,30 @@ const canOpenPage = (role: string | undefined) =>
 
 function fullScheduleRoles(role: string | undefined) {
   return role === 'super_admin' || role === 'reception'
+}
+
+function parseRoomNumber(slot: SlotRow) {
+  if (Number.isFinite(Number(slot.roomNumber)) && Number(slot.roomNumber) > 0) return Number(slot.roomNumber)
+  const m = String(slot.providerName || '').match(/room\s*(\d+)/i)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function normalizeService(slot: SlotRow): ServiceKey {
+  const raw = String(slot.serviceType || '')
+    .trim()
+    .toLowerCase()
+  if (raw === 'laser') return 'laser'
+  if (raw === 'dental') return 'dental'
+  if (raw === 'dermatology') return 'dermatology'
+  if (raw === 'solarium') return 'solarium'
+
+  const inferred = inferProcedureCategory(slot.procedureType ?? '', slot.providerName)
+  if (inferred === 'laser') return 'laser'
+  if (inferred === 'dental') return 'dental'
+  if (inferred === 'dermatology') return 'dermatology'
+  return 'other'
 }
 
 export function BookedAppointmentsPage() {
@@ -73,7 +110,7 @@ export function BookedAppointmentsPage() {
     void load()
   }, [load])
 
-  const sorted = useMemo(() => {
+  const grouped = useMemo(() => {
     const filtered = fullView
       ? procedureFilter === 'all'
         ? slots
@@ -82,13 +119,33 @@ export function BookedAppointmentsPage() {
           )
       : slots
 
-    return [...filtered].sort((a, b) => {
+    const sorted = [...filtered].sort((a, b) => {
       const c = a.businessDate.localeCompare(b.businessDate)
       if (c !== 0) return c
       const p = a.providerName.localeCompare(b.providerName, 'ar')
       if (p !== 0) return p
       return a.time.localeCompare(b.time, undefined, { numeric: true })
     })
+
+    const byService: Record<ServiceKey, SlotRow[]> = {
+      laser: [],
+      dental: [],
+      dermatology: [],
+      solarium: [],
+      other: [],
+    }
+    for (const s of sorted) byService[normalizeService(s)].push(s)
+
+    const laserRooms = {
+      room1: byService.laser.filter((s) => parseRoomNumber(s) === 1),
+      room2: byService.laser.filter((s) => parseRoomNumber(s) === 2),
+      other: byService.laser.filter((s) => {
+        const r = parseRoomNumber(s)
+        return r !== 1 && r !== 2
+      }),
+    }
+
+    return { sorted, byService, laserRooms }
   }, [slots, procedureFilter, fullView])
 
   if (!allowed) {
@@ -185,39 +242,216 @@ export function BookedAppointmentsPage() {
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري التحميل…</p>
         ) : slots.length === 0 ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد مواعيد محجوزة في هذا اليوم.</p>
-        ) : sorted.length === 0 ? (
+        ) : grouped.sorted.length === 0 ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>
             {fullView
               ? `لا توجد مواعيد تطابق فلتر «${PROCEDURE_FILTER_LABELS[procedureFilter]}» في هذا اليوم.`
               : 'لا توجد مواعيد باسمك في يوم العمل هذا.'}
           </p>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>التاريخ</th>
-                  <th>المقدّم</th>
-                  <th>نوع الإجراء</th>
-                  <th>من — إلى</th>
-                  <th>المريض</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((s) => (
-                  <tr key={s.id}>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{s.businessDate}</td>
-                    <td>{s.providerName}</td>
-                    <td>{s.procedureType?.trim() ? s.procedureType : '—'}</td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {s.time}
-                      {s.endTime ? ` — ${s.endTime}` : ''}
-                    </td>
-                    <td>{s.patientName || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {grouped.byService.dental.length > 0 ? (
+              <div>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.dental}</h3>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>من — إلى</th>
+                        <th>اسم المريض</th>
+                        <th>القسم</th>
+                        <th>المقدم</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.byService.dental.map((s) => (
+                        <tr key={s.id}>
+                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {s.time}
+                            {s.endTime ? ` — ${s.endTime}` : ''}
+                          </td>
+                          <td>{s.patientName || '—'}</td>
+                          <td>{SERVICE_LABELS.dental}</td>
+                          <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {grouped.byService.laser.length > 0 ? (
+              <div>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.laser}</h3>
+                <div style={{ display: 'grid', gap: '0.8rem', gridTemplateColumns: 'repeat(auto-fit,minmax(360px,1fr))' }}>
+                  {[
+                    { key: 'room1', label: 'Laser Room 1', rows: grouped.laserRooms.room1 },
+                    { key: 'room2', label: 'Laser Room 2', rows: grouped.laserRooms.room2 },
+                  ].map((room) => (
+                    <div key={room.key}>
+                      <h4 style={{ margin: '0 0 0.35rem', color: 'var(--text-muted)' }}>{room.label}</h4>
+                      <div className="table-wrap">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>من — إلى</th>
+                              <th>اسم المريض</th>
+                              <th>المناطق</th>
+                              <th>المقدم</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {room.rows.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} style={{ color: 'var(--text-muted)' }}>
+                                  لا توجد مواعيد محجوزة
+                                </td>
+                              </tr>
+                            ) : (
+                              room.rows.map((s) => (
+                                <tr key={s.id}>
+                                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                    {s.time}
+                                    {s.endTime ? ` — ${s.endTime}` : ''}
+                                  </td>
+                                  <td>{s.patientName || '—'}</td>
+                                  <td>{s.procedureType?.trim() ? s.procedureType : '—'}</td>
+                                  <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                  {grouped.laserRooms.other.length > 0 ? (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <h4 style={{ margin: '0 0 0.35rem', color: 'var(--text-muted)' }}>غرف أخرى</h4>
+                      <div className="table-wrap">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>من — إلى</th>
+                              <th>اسم المريض</th>
+                              <th>المناطق</th>
+                              <th>المقدم</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {grouped.laserRooms.other.map((s) => (
+                              <tr key={s.id}>
+                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                  {s.time}
+                                  {s.endTime ? ` — ${s.endTime}` : ''}
+                                </td>
+                                <td>{s.patientName || '—'}</td>
+                                <td>{s.procedureType?.trim() ? s.procedureType : '—'}</td>
+                                <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {grouped.byService.dermatology.length > 0 ? (
+              <div>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.dermatology}</h3>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>من — إلى</th>
+                        <th>اسم المريض</th>
+                        <th>القسم</th>
+                        <th>المقدم</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.byService.dermatology.map((s) => (
+                        <tr key={s.id}>
+                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {s.time}
+                            {s.endTime ? ` — ${s.endTime}` : ''}
+                          </td>
+                          <td>{s.patientName || '—'}</td>
+                          <td>{SERVICE_LABELS.dermatology}</td>
+                          <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {grouped.byService.solarium.length > 0 ? (
+              <div>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.solarium}</h3>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>من — إلى</th>
+                        <th>اسم المريض</th>
+                        <th>القسم</th>
+                        <th>المقدم</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.byService.solarium.map((s) => (
+                        <tr key={s.id}>
+                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {s.time}
+                            {s.endTime ? ` — ${s.endTime}` : ''}
+                          </td>
+                          <td>{s.patientName || '—'}</td>
+                          <td>{SERVICE_LABELS.solarium}</td>
+                          <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {grouped.byService.other.length > 0 ? (
+              <div>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.other}</h3>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>من — إلى</th>
+                        <th>اسم المريض</th>
+                        <th>القسم</th>
+                        <th>المقدم</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.byService.other.map((s) => (
+                        <tr key={s.id}>
+                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {s.time}
+                            {s.endTime ? ` — ${s.endTime}` : ''}
+                          </td>
+                          <td>{s.patientName || '—'}</td>
+                          <td>{SERVICE_LABELS.other}</td>
+                          <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>

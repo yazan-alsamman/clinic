@@ -29,6 +29,7 @@ const LASER_PROCEDURE_GROUPS = {
   lower: 'الجزء السفلي',
   offers: 'العروض التوفيرية',
 }
+const LASER_PROCEDURE_GROUP_ORDER = ['face', 'upper', 'lower', 'offers']
 
 const defaultProcedureOptions = [
   ['face', 'area', 'الوجه', 55000],
@@ -165,7 +166,13 @@ laserRouter.get('/procedure-options', async (req, res) => {
       }
       groupsMap.get(row.groupId).items.push(optionToDto(row))
     }
-    const groups = [...groupsMap.values()]
+    const rank = new Map(LASER_PROCEDURE_GROUP_ORDER.map((id, idx) => [id, idx]))
+    const groups = [...groupsMap.values()].sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id) : 999
+      const rb = rank.has(b.id) ? rank.get(b.id) : 999
+      if (ra !== rb) return ra - rb
+      return String(a.title || '').localeCompare(String(b.title || ''), 'ar')
+    })
     res.json({ groups })
   } catch (e) {
     console.error(e)
