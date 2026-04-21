@@ -78,6 +78,7 @@ export function ReceptionAppointmentPage() {
   const [saving, setSaving] = useState(false)
   const [formErr, setFormErr] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+  const [bookingOpen, setBookingOpen] = useState(false)
 
   const loadProviders = useCallback(async () => {
     if (!canUse) return
@@ -191,20 +192,56 @@ export function ReceptionAppointmentPage() {
     const out: string[] = []
     let t = DAY_START_MIN
     while (t + durationMinutes <= DAY_END_MIN) {
-      let jumped = false
-      for (const iv of intervals) {
-        if (t >= iv.start && t < iv.end) {
-          t = iv.end
-          jumped = true
-          break
-        }
+      const candidateEnd = t + durationMinutes
+      const overlap = intervals.find((iv) => intervalsOverlapHalfOpen(t, candidateEnd, iv.start, iv.end))
+      if (overlap) {
+        t = overlap.end
+        continue
       }
-      if (jumped) continue
       out.push(toHm(t))
       t += DEFAULT_SLOT_STEP_MIN
     }
     return out
   }, [providerBookedSlots, durationMinutes])
+
+  const appointmentRows = useMemo(() => {
+    const bookedMap = new Map<string, SlotRow>()
+    for (const s of providerBookedSlots) {
+      const t = normalizeTime(s.time)
+      if (t) bookedMap.set(t, s)
+    }
+    const times = new Set<string>(availableStartTimes)
+    for (const t of bookedMap.keys()) times.add(t)
+    if (times.size === 0) {
+      for (let m = DAY_START_MIN; m <= DAY_END_MIN - DEFAULT_SLOT_STEP_MIN; m += DEFAULT_SLOT_STEP_MIN) {
+        times.add(toHm(m))
+      }
+    }
+    return [...times]
+      .sort((a, b) => (hmToMinutes(a) || 0) - (hmToMinutes(b) || 0))
+      .map((time) => {
+        const busy = bookedMap.get(time)
+        if (busy) {
+          const iv = slotIntervalFromRow(busy.time, busy.endTime)
+          return {
+            time,
+            status: 'busy' as const,
+            patientName: busy.patientName || '—',
+            procedureType: busy.procedureType?.trim() || '—',
+            range: iv ? `${toHm(iv.start)} — ${toHm(iv.end)}` : busy.time,
+          }
+        }
+        const sm = hmToMinutes(time) || 0
+        const em = sm + durationMinutes
+        return {
+          time,
+          status: 'free' as const,
+          patientName: '',
+          procedureType: '',
+          range: `${time} — ${toHm(em)}`,
+        }
+      })
+  }, [providerBookedSlots, availableStartTimes, durationMinutes])
 
   useEffect(() => {
     if (availableStartTimes.length === 0) return
@@ -240,51 +277,51 @@ export function ReceptionAppointmentPage() {
     }
   }
 
-  async function submit() {
+  async function submit(): Promise<boolean> {
     setFormErr('')
     setSuccessMsg('')
     if (!picked) {
       setFormErr('اختر المريض من نتائج البحث')
-      return
+      return false
     }
     if (assignBlocked) {
       setFormErr('يوم العمل غير مفعّل — لا يمكن حجز موعد من الاستقبال حتى يفعّل المدير اليوم.')
-      return
+      return false
     }
 
     const time = normalizeTime(appointmentTime)
     if (!time) {
       setFormErr('اختر وقت بداية من الجدول')
-      return
+      return false
     }
     const sm = hmToMinutes(time)
     const em = sm == null ? null : sm + durationMinutes
     const endTime = em == null ? null : toHm(em)
     if (sm == null || em == null || !endTime) {
       setFormErr('الوقت المختار غير صالح')
-      return
+      return false
     }
     if (em > DAY_END_MIN) {
       setFormErr('الموعد يتجاوز نهاية الدوام (8:00 مساءً)')
-      return
+      return false
     }
     if (sm == null || em == null || em <= sm) {
       setFormErr('وقت نهاية الموعد يجب أن يكون بعد وقت البداية')
-      return
+      return false
     }
     const providerName = selectedProvider.trim()
     if (!providerName) {
       setFormErr('اختر المقدّم من القائمة')
-      return
+      return false
     }
     if (!availableStartTimes.includes(time)) {
       setFormErr('الوقت المختار لم يعد متاحاً بعد تحديث الجدول')
-      return
+      return false
     }
     const proc = procedureType.trim()
     if (!proc) {
       setFormErr('اختر نوع الإجراء من القائمة')
-      return
+      return false
     }
     const overlap = slots.some((x) => {
       if (x.providerName !== providerName) return false
@@ -296,7 +333,7 @@ export function ReceptionAppointmentPage() {
       setFormErr(
         'فترة الموعد (البداية–النهاية) تتداخل مع موعد آخر لنفس المقدّم — اختر أوقاتاً لا تغطي جزءاً من فترة محجوزة',
       )
-      return
+      return false
     }
 
     setSaving(true)
@@ -319,6 +356,7 @@ export function ReceptionAppointmentPage() {
       setPatientQ('')
       setPatientHits([])
       await loadSlots()
+      return true
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.status === 423) {
@@ -331,6 +369,7 @@ export function ReceptionAppointmentPage() {
       } else {
         setFormErr('فشل الحجز')
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -482,93 +521,9 @@ export function ReceptionAppointmentPage() {
 
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h2 className="card-title" style={{ marginTop: 0 }}>
-          المريض
+          جدول الأوقات ({selectedProvider || '—'})
         </h2>
-        <input
-          className="input"
-          placeholder="ابحث بالاسم…"
-          value={patientQ}
-          onChange={(e) => {
-            setPatientQ(e.target.value)
-            if (picked) setPicked(null)
-          }}
-        />
-        {picked ? (
-          <p style={{ marginTop: '0.65rem', marginBottom: 0 }}>
-            المختار: <strong>{picked.name}</strong>{' '}
-            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
-              إلغاء الاختيار
-            </button>
-          </p>
-        ) : patientSearchLoading && patientQ.trim().length >= 2 ? (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem', marginBottom: 0 }}>
-            جاري البحث…
-          </p>
-        ) : patientHits.length > 0 ? (
-          <ul style={{ listStyle: 'none', padding: 0, margin: '0.5rem 0 0' }}>
-            {patientHits.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ width: '100%', justifyContent: 'flex-start', marginBottom: '0.35rem' }}
-                  onClick={() => {
-                    setPicked(p)
-                    setPatientQ(p.name)
-                    setPatientHits([])
-                  }}
-                >
-                  {p.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : patientQ.trim().length >= 2 &&
-          !patientSearchLoading &&
-          patientQ.trim() !== declinedNewPatientForName ? (
-          <div
-            style={{
-              marginTop: '0.75rem',
-              padding: '0.85rem 1rem',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              background: 'var(--bg)',
-            }}
-            role="status"
-          >
-            <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', lineHeight: 1.5 }}>
-              لا يوجد مريض بهذا الاسم في السجلات. هل ترغب بإنشاء مريض جديد بالاسم المكتوب أعلاه ومتابعة الحجز؟
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={creatingPatient || assignBlocked}
-                onClick={() => void createNewPatientAndSelect()}
-              >
-                {creatingPatient ? 'جاري الإنشاء…' : 'نعم، إنشاء ومتابعة'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={creatingPatient}
-                onClick={() => setDeclinedNewPatientForName(patientQ.trim())}
-              >
-                لا
-              </button>
-            </div>
-            <p style={{ margin: '0.75rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 0 }}>
-              يُنشأ الملف بالاسم فقط؛ يمكن إكمال تاريخ الميلاد والهاتف وباقي البيانات لاحقاً من صفحة المرضى.
-            </p>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h2 className="card-title" style={{ marginTop: 0 }}>
-          الوقت والمقدّم
-        </h2>
-        <div style={{ display: 'grid', gap: '0.75rem' }}>
+        <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '0.75rem' }}>
           <div>
             <label className="form-label" htmlFor="appt-prov">
               المقدّم (طبيب / أخصائي)
@@ -587,27 +542,8 @@ export function ReceptionAppointmentPage() {
             </select>
           </div>
           <div>
-            <label className="form-label" htmlFor="appt-proc">
-              نوع الإجراء
-            </label>
-            <select
-              id="appt-proc"
-              className="select"
-              style={{ width: '100%', maxWidth: 360 }}
-              value={procedureType}
-              onChange={(e) => setProcedureType(e.target.value)}
-            >
-              <option value="">— اختر نوع الإجراء —</option>
-              {APPOINTMENT_PROCEDURE_OPTIONS.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
             <label className="form-label" htmlFor="appt-duration">
-              مدة الموعد
+              مدة الموعد الجديد
             </label>
             <select
               id="appt-duration"
@@ -623,52 +559,73 @@ export function ReceptionAppointmentPage() {
               <option value="120">120 دقيقة</option>
             </select>
           </div>
-          <div>
-            <span className="form-label">الأوقات المتاحة ({selectedProvider || '—'})</span>
-            {slotsLoading ? (
-              <p style={{ color: 'var(--text-muted)', margin: '0.4rem 0 0' }}>جاري تحميل الأوقات…</p>
-            ) : availableStartTimes.length === 0 ? (
-              <p style={{ color: 'var(--danger)', margin: '0.4rem 0 0' }}>لا توجد أوقات متاحة بهذه المدة.</p>
-            ) : (
-              <div
-                style={{
-                  marginTop: '0.45rem',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
-                  gap: '0.45rem',
-                  maxWidth: 700,
-                }}
-              >
-                {availableStartTimes.map((t) => {
-                  const selected = appointmentTime === t
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{ fontVariantNumeric: 'tabular-nums', justifyContent: 'center' }}
-                      onClick={() => setAppointmentTime(t)}
-                    >
-                      {t}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0 }}>
-            بداية الدوام 09:00 ونهايته 20:00. الوقت المختار: <strong>{appointmentTime}</strong> — النهاية المتوقعة:{' '}
-            <strong>
-              {(() => {
-                const s = hmToMinutes(appointmentTime)
-                if (s == null) return '—'
-                const end = s + durationMinutes
-                return end <= DAY_END_MIN ? toHm(end) : 'يتجاوز الدوام'
-              })()}
-            </strong>
-            .
-          </p>
         </div>
+        {slotsLoading ? (
+          <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل الجدول…</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>الوقت</th>
+                  <th>الحالة</th>
+                  <th>اسم المريض</th>
+                  <th>نوع الإجراء</th>
+                  <th>الفترة</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {appointmentRows.map((r) => (
+                  <tr key={`${selectedProvider}-${r.time}-${r.status}`}>
+                    <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{r.time}</td>
+                    <td>
+                      {r.status === 'busy' ? (
+                        <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
+                          محجوز
+                        </span>
+                      ) : (
+                        <span className="chip" style={{ background: 'var(--success-dim)', color: 'var(--success)' }}>
+                          متاح
+                        </span>
+                      )}
+                    </td>
+                    <td>{r.status === 'busy' ? r.patientName : '—'}</td>
+                    <td>{r.status === 'busy' ? r.procedureType : '—'}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.range}</td>
+                    <td>
+                      {r.status === 'free' ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ fontSize: '0.8rem' }}
+                          onClick={() => {
+                            setAppointmentTime(r.time)
+                            setPicked(null)
+                            setPatientQ('')
+                            setPatientHits([])
+                            setProcedureType('')
+                            setFormErr('')
+                            setSuccessMsg('')
+                            setDeclinedNewPatientForName(null)
+                            setBookingOpen(true)
+                          }}
+                        >
+                          اختيار
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.75rem 0 0' }}>
+          بداية الدوام 09:00 ونهايته 20:00. المدد المحجوزة تؤثر مباشرة على الأوقات المتاحة التالية.
+        </p>
       </div>
 
       {formErr ? (
@@ -678,9 +635,133 @@ export function ReceptionAppointmentPage() {
         <p style={{ color: 'var(--success)', marginBottom: '0.75rem' }}>{successMsg}</p>
       ) : null}
 
-      <button type="button" className="btn btn-primary" disabled={saving || assignBlocked} onClick={() => void submit()}>
-        {saving ? 'جاري الحفظ…' : 'تأكيد حجز الموعد'}
-      </button>
+      {bookingOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setBookingOpen(false)}>
+          <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>حجز موعد عند {selectedProvider}</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: '-0.25rem', fontSize: '0.88rem' }}>
+              الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{durationMinutes} دقيقة</strong> — التاريخ:{' '}
+              <strong>{businessDate}</strong>
+            </p>
+            <div className="card" style={{ marginBottom: '0.85rem' }}>
+              <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>اختيار المريض</h4>
+              <input
+                className="input"
+                placeholder="ابحث بالاسم…"
+                value={patientQ}
+                onChange={(e) => {
+                  setPatientQ(e.target.value)
+                  if (picked) setPicked(null)
+                }}
+              />
+              {picked ? (
+                <p style={{ marginTop: '0.65rem', marginBottom: 0 }}>
+                  المختار: <strong>{picked.name}</strong>{' '}
+                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
+                    إلغاء الاختيار
+                  </button>
+                </p>
+              ) : patientSearchLoading && patientQ.trim().length >= 2 ? (
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem', marginBottom: 0 }}>
+                  جاري البحث…
+                </p>
+              ) : patientHits.length > 0 ? (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '0.5rem 0 0' }}>
+                  {patientHits.map((p) => (
+                    <li key={p.id}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ width: '100%', justifyContent: 'flex-start', marginBottom: '0.35rem' }}
+                        onClick={() => {
+                          setPicked(p)
+                          setPatientQ(p.name)
+                          setPatientHits([])
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : patientQ.trim().length >= 2 &&
+                !patientSearchLoading &&
+                patientQ.trim() !== declinedNewPatientForName ? (
+                <div
+                  style={{
+                    marginTop: '0.75rem',
+                    padding: '0.85rem 1rem',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--bg)',
+                  }}
+                  role="status"
+                >
+                  <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                    لا يوجد مريض بهذا الاسم. هل تريد إنشاء ملف جديد والمتابعة؟
+                  </p>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={creatingPatient || assignBlocked}
+                      onClick={() => void createNewPatientAndSelect()}
+                    >
+                      {creatingPatient ? 'جاري الإنشاء…' : 'نعم'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={creatingPatient}
+                      onClick={() => setDeclinedNewPatientForName(patientQ.trim())}
+                    >
+                      لا
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="card">
+              <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>نوع الإجراء</h4>
+              <select
+                className="select"
+                style={{ width: '100%' }}
+                value={procedureType}
+                onChange={(e) => setProcedureType(e.target.value)}
+              >
+                <option value="">— اختر نوع الإجراء —</option>
+                {APPOINTMENT_PROCEDURE_OPTIONS.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {formErr ? (
+              <p style={{ color: 'var(--danger)', margin: '0.75rem 0 0' }}>{formErr}</p>
+            ) : null}
+            {successMsg ? (
+              <p style={{ color: 'var(--success)', margin: '0.75rem 0 0' }}>{successMsg}</p>
+            ) : null}
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setBookingOpen(false)}>
+                إغلاق
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={saving || assignBlocked}
+                onClick={async () => {
+                  const ok = await submit()
+                  if (ok) setBookingOpen(false)
+                }}
+              >
+                {saving ? 'جاري الحفظ…' : 'تأكيد حجز الموعد'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }
