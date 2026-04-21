@@ -15,6 +15,8 @@ export function patientToDto(p) {
     lastVisit: o.lastVisit ? o.lastVisit.toISOString().slice(0, 10) : '',
     phone: o.phone ?? '',
     gender: o.gender === 'male' || o.gender === 'female' ? o.gender : '',
+    outstandingDebtUsd: Number(o.outstandingDebtUsd) || 0,
+    prepaidCreditUsd: Number(o.prepaidCreditUsd) || 0,
     paperLaserEntries: Array.isArray(o.paperLaserEntries) ? o.paperLaserEntries : [],
   }
 }

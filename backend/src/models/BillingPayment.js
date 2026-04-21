@@ -3,7 +3,12 @@ import mongoose from 'mongoose'
 const billingPaymentSchema = new mongoose.Schema(
   {
     billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', required: true, unique: true, index: true },
+    /** المبلغ المطبّق على بند الفاتورة (لا يتجاوز المستحق) */
     amountUsd: { type: Number, required: true, min: 0 },
+    /** المبلغ المستلم فعلياً من المريض */
+    receivedAmountUsd: { type: Number, default: 0, min: 0 },
+    /** الفرق: موجب = رصيد إضافي، سالب = ذمة */
+    settlementDeltaUsd: { type: Number, default: 0 },
     method: { type: String, enum: ['cash', 'card', 'transfer', 'other'], default: 'cash' },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     receivedAt: { type: Date, default: () => new Date() },

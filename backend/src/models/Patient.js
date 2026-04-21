@@ -32,6 +32,10 @@ const patientSchema = new mongoose.Schema(
     lastVisit: { type: Date, default: null },
     phone: { type: String, default: '' },
     gender: { type: String, default: '' },
+    /** رصيد مستحق على المريض (ذمم) */
+    outstandingDebtUsd: { type: Number, default: 0, min: 0 },
+    /** رصيد إضافي مدفوع مسبقاً للمريض */
+    prepaidCreditUsd: { type: Number, default: 0, min: 0 },
     /** إدخالات أرشيف ورقي (ليزر/جلسات قديمة) */
     paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
     /** بوابة المريض — تسجيل دخول منفصل عن موظفي العيادة */

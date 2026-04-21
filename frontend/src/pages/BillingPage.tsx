@@ -24,7 +24,7 @@ const deptLabel: Record<string, string> = {
 
 export function BillingPage() {
   const { user } = useAuth()
-  const { businessDate } = useClinic()
+  const { businessDate, usdSypRate } = useClinic()
   const allowed = BILLING_ROLES.includes(user?.role as (typeof BILLING_ROLES)[number])
 
   const [date, setDate] = useState('')
@@ -34,6 +34,10 @@ export function BillingPage() {
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [method, setMethod] = useState<'cash' | 'card' | 'transfer' | 'other'>('cash')
+  const [payOpen, setPayOpen] = useState(false)
+  const [payItem, setPayItem] = useState<Item | null>(null)
+  const [payUsd, setPayUsd] = useState('')
+  const [paySyp, setPaySyp] = useState('')
 
   useEffect(() => {
     if (businessDate && !date) setDate(businessDate)
@@ -72,14 +76,24 @@ export function BillingPage() {
     void load()
   }, [load])
 
-  async function completePay(id: string, amountDueUsd: number) {
+  async function completePay(id: string) {
     setBusyId(id)
     setErr('')
     try {
+      const usd = Number(payUsd)
+      const syp = Number(paySyp)
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
-        body: JSON.stringify({ method, amountUsd: amountDueUsd }),
+        body: JSON.stringify({
+          method,
+          amountUsd: Number.isFinite(usd) && usd > 0 ? usd : undefined,
+          amountSyp: Number.isFinite(syp) && syp > 0 ? syp : undefined,
+        }),
       })
+      setPayOpen(false)
+      setPayItem(null)
+      setPayUsd('')
+      setPaySyp('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل التحصيل')
@@ -183,13 +197,26 @@ export function BillingPage() {
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     {b.procedureLabel} — المقدّم: {b.providerName || '—'}
                   </p>
-                  <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>{b.amountDueUsd} USD</p>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>
+                    {b.amountDueUsd} USD
+                    {usdSypRate && usdSypRate > 0 ? (
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                        {' '}
+                        — {(Number(b.amountDueUsd || 0) * Number(usdSypRate)).toLocaleString('en-US')} ل.س
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
                 <button
                   type="button"
                   className="btn btn-primary"
                   disabled={busyId === b.id}
-                  onClick={() => void completePay(b.id, b.amountDueUsd)}
+                  onClick={() => {
+                    setPayItem(b)
+                    setPayUsd(String(Number(b.amountDueUsd || 0)))
+                    setPaySyp('')
+                    setPayOpen(true)
+                  }}
                 >
                   {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                 </button>
@@ -198,6 +225,96 @@ export function BillingPage() {
           ))}
         </ul>
       )}
+      {payOpen && payItem ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setPayOpen(false)}>
+          <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>تأكيد استلام الدفع</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem' }}>
+              {payItem.patientName} — {payItem.procedureLabel}
+            </p>
+            <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
+              سعر الجلسة: {payItem.amountDueUsd} USD
+              {usdSypRate && usdSypRate > 0 ? (
+                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                  {' '}
+                  — {(Number(payItem.amountDueUsd || 0) * Number(usdSypRate)).toLocaleString('en-US')} ل.س
+                </span>
+              ) : null}
+            </p>
+            <div className="grid-2" style={{ marginTop: '0.5rem' }}>
+              <div>
+                <label className="form-label">المبلغ المستلم (USD)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={payUsd}
+                  onChange={(e) => setPayUsd(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="form-label">المبلغ المستلم (SYP)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={paySyp}
+                  onChange={(e) => setPaySyp(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              يكفي إدخال أحد الحقلين.
+            </p>
+            {(() => {
+              const usd = Number(payUsd)
+              const syp = Number(paySyp)
+              const rate = Number(usdSypRate || 0)
+              const receivedUsd =
+                Number.isFinite(usd) && usd > 0
+                  ? usd
+                  : Number.isFinite(syp) && syp > 0 && rate > 0
+                    ? syp / rate
+                    : 0
+              const due = Number(payItem.amountDueUsd || 0)
+              if (!(receivedUsd > 0) || !(due > 0)) return null
+              const delta = receivedUsd - due
+              if (delta < -0.0001) {
+                return (
+                  <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
+                    المبلغ أقل من سعر الجلسة — سيتم تسجيل الباقي كذمة على المريض ({Math.abs(delta).toFixed(2)} USD).
+                  </p>
+                )
+              }
+              if (delta > 0.0001) {
+                return (
+                  <p style={{ marginTop: '0.45rem', color: 'var(--success)' }}>
+                    المبلغ أعلى من سعر الجلسة — سيتم تسجيل الزيادة كرصيد إضافي للمريض ({delta.toFixed(2)} USD).
+                  </p>
+                )
+              }
+              return (
+                <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)' }}>
+                  المبلغ مطابق لسعر الجلسة.
+                </p>
+              )
+            })()}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.9rem' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setPayOpen(false)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busyId === payItem.id}
+                onClick={() => void completePay(payItem.id)}
+              >
+                {busyId === payItem.id ? 'جاري الحفظ…' : 'تأكيد استلام الدفع'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }

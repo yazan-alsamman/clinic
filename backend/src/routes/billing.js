@@ -4,6 +4,8 @@ import { authMiddleware, requireRoles } from '../middleware/auth.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { LaserSession } from '../models/LaserSession.js'
+import { Patient } from '../models/Patient.js'
+import { BusinessDay } from '../models/BusinessDay.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
@@ -119,15 +121,27 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     const body = req.body ?? {}
     const methodRaw = String(body.method || 'cash').toLowerCase()
     const method = ['cash', 'card', 'transfer', 'other'].includes(methodRaw) ? methodRaw : 'cash'
-    let amountUsd = round2(Number(body.amountUsd ?? bi.amountDueUsd) || 0)
-    if (amountUsd <= 0) {
+    const amountUsdRaw = Number(body.amountUsd)
+    const amountSypRaw = Number(body.amountSyp)
+    let receivedUsd = 0
+    if (Number.isFinite(amountUsdRaw) && amountUsdRaw > 0) {
+      receivedUsd = round2(amountUsdRaw)
+    } else if (Number.isFinite(amountSypRaw) && amountSypRaw > 0) {
+      const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
+      const rate = Number(bd?.exchangeRate)
+      if (!Number.isFinite(rate) || rate <= 0) {
+        res.status(400).json({ error: 'سعر الصرف غير متاح لهذا اليوم' })
+        return
+      }
+      receivedUsd = round2(amountSypRaw / rate)
+    }
+    if (receivedUsd <= 0) {
       res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
       return
     }
-    if (amountUsd > round2(bi.amountDueUsd) + 0.001) {
-      res.status(400).json({ error: 'المبلغ أكبر من المستحق' })
-      return
-    }
+    const amountDueUsd = round2(Number(bi.amountDueUsd) || 0)
+    const appliedAmountUsd = round2(Math.min(receivedUsd, amountDueUsd))
+    const settlementDeltaUsd = round2(receivedUsd - amountDueUsd)
 
     const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
     if (existingPay) {
@@ -137,7 +151,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
 
     const payment = await BillingPayment.create({
       billingItemId: bi._id,
-      amountUsd,
+      amountUsd: appliedAmountUsd,
+      receivedAmountUsd: receivedUsd,
+      settlementDeltaUsd,
       method,
       receivedBy: req.user._id,
     })
@@ -151,6 +167,32 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       await LaserSession.updateOne({ billingItemId: bi._id }, { $set: { status: 'completed' } })
     }
 
+    const patient = await Patient.findById(bi.patientId)
+    let outstandingDebtUsd = 0
+    let prepaidCreditUsd = 0
+    if (patient) {
+      let debt = round2(Number(patient.outstandingDebtUsd) || 0)
+      let credit = round2(Number(patient.prepaidCreditUsd) || 0)
+      if (settlementDeltaUsd < 0) {
+        let need = round2(Math.abs(settlementDeltaUsd))
+        const useCredit = round2(Math.min(credit, need))
+        credit = round2(credit - useCredit)
+        need = round2(need - useCredit)
+        debt = round2(debt + need)
+      } else if (settlementDeltaUsd > 0) {
+        let extra = round2(settlementDeltaUsd)
+        const settleDebt = round2(Math.min(debt, extra))
+        debt = round2(debt - settleDebt)
+        extra = round2(extra - settleDebt)
+        credit = round2(credit + extra)
+      }
+      patient.outstandingDebtUsd = debt
+      patient.prepaidCreditUsd = credit
+      await patient.save()
+      outstandingDebtUsd = debt
+      prepaidCreditUsd = credit
+    }
+
     let posting = { skipped: true, reason: 'unknown' }
     try {
       posting = await postBillingPayment(payment._id, req.user._id)
@@ -161,15 +203,26 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         action: 'دفع مؤكد — فشل الترحيل المحاسبي',
         entityType: 'BillingPayment',
         entityId: payment._id,
-        details: { error: String(postErr?.message || postErr) },
+        details: {
+          error: String(postErr?.message || postErr),
+          receivedUsd,
+          appliedAmountUsd,
+          settlementDeltaUsd,
+        },
       })
       res.status(201).json({
         payment: {
           id: String(payment._id),
           amountUsd: payment.amountUsd,
+          receivedAmountUsd: payment.receivedAmountUsd,
+          settlementDeltaUsd: payment.settlementDeltaUsd,
           method: payment.method,
         },
         billingItem: { id: String(bi._id), status: bi.status },
+        patientSettlement: {
+          outstandingDebtUsd,
+          prepaidCreditUsd,
+        },
         accountingWarning: String(postErr?.message || postErr),
       })
       return
@@ -182,7 +235,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       entityId: bi._id,
       details: {
         paymentId: String(payment._id),
-        amountUsd,
+        receivedUsd,
+        appliedAmountUsd,
+        settlementDeltaUsd,
         accountingSkipped: posting.skipped,
       },
     })
@@ -197,9 +252,15 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       payment: {
         id: String(payment._id),
         amountUsd: payment.amountUsd,
+        receivedAmountUsd: payment.receivedAmountUsd,
+        settlementDeltaUsd: payment.settlementDeltaUsd,
         method: payment.method,
       },
       billingItem: { id: String(bi._id), status: bi.status },
+      patientSettlement: {
+        outstandingDebtUsd,
+        prepaidCreditUsd,
+      },
       financialDocument,
       accountingSkipped: posting.skipped,
     })
