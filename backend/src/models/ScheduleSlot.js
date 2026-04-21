@@ -8,6 +8,15 @@ const scheduleSlotSchema = new mongoose.Schema(
     /** وقت نهاية الموعد HH:mm (بعد time) */
     endTime: { type: String, default: '', trim: true },
     providerName: { type: String, required: true, trim: true },
+    serviceType: {
+      type: String,
+      enum: ['laser', 'dental', 'dermatology', 'solarium', 'other'],
+      default: 'other',
+      index: true,
+    },
+    roomNumber: { type: Number, default: null },
+    assignedSpecialistUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    assignedSpecialistName: { type: String, default: '', trim: true },
     /** نوع الإجراء (كشف، جلسة، …) */
     procedureType: { type: String, default: '', trim: true, maxlength: 200 },
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', default: null },

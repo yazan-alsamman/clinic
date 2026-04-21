@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
+import { Room } from '../models/Room.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { todayBusinessDate, addCalendarDaysYmd, isValidYmd } from '../utils/date.js'
@@ -18,6 +19,25 @@ export const scheduleRouter = Router()
 scheduleRouter.use(authMiddleware)
 
 const providerRoles = ['laser', 'dermatology', 'dental_branch']
+const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'other']
+
+function normalizeServiceType(v) {
+  const s = String(v || '')
+    .trim()
+    .toLowerCase()
+  if (s === 'laser' || s === 'ليزر') return 'laser'
+  if (s === 'dental' || s === 'أسنان' || s === 'اسنان') return 'dental'
+  if (s === 'dermatology' || s === 'جلدية' || s === 'بشرة') return 'dermatology'
+  if (s === 'solarium' || s === 'سولاريوم') return 'solarium'
+  return 'other'
+}
+
+function inferRoomNumber(providerNameRaw) {
+  const m = String(providerNameRaw || '').match(/room\s*(\d+)/i)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 
 /**
  * مواعيد محجوزة: إما يوم واحد `?date=YYYY-MM-DD` أو نطاق `from` / `to` (للتوافق).
@@ -66,7 +86,7 @@ scheduleRouter.get(
       let scopedToProvider = false
       if (isProvider) {
         const name = String(req.user.name || '').trim()
-        if (!name) {
+        if (!name && req.user.role !== 'laser') {
           res.json({
             from,
             to,
@@ -75,7 +95,11 @@ scheduleRouter.get(
           })
           return
         }
-        filter.providerName = name
+        if (req.user.role === 'laser') {
+          filter.$or = [{ assignedSpecialistUserId: req.user._id }, { providerName: name }]
+        } else {
+          filter.providerName = name
+        }
         scopedToProvider = true
       }
 
@@ -146,6 +170,10 @@ function slotToDto(s) {
     time: o.time,
     endTime,
     providerName: o.providerName,
+    serviceType: SERVICE_TYPES.includes(o.serviceType) ? o.serviceType : 'other',
+    roomNumber: Number.isFinite(Number(o.roomNumber)) ? Number(o.roomNumber) : null,
+    assignedSpecialistUserId: o.assignedSpecialistUserId ? String(o.assignedSpecialistUserId) : null,
+    assignedSpecialistName: String(o.assignedSpecialistName || '').trim(),
     procedureType: String(o.procedureType || '').trim(),
     status: busy ? 'busy' : 'free',
     patientId: o.patientId ? String(o.patientId) : null,
@@ -177,6 +205,7 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
     const time = normalizeHm(body.time)
     const endTime = normalizeHm(body.endTime)
     const providerName = String(body.providerName || '').trim()
+    const serviceType = normalizeServiceType(body.serviceType)
     const procedureType = String(body.procedureType || '')
       .trim()
       .slice(0, 200)
@@ -200,7 +229,27 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName }).lean()
+    let effectiveProviderName = providerName
+    let roomNumber = null
+    let assignedSpecialistUserId = null
+    let assignedSpecialistName = ''
+    if (serviceType === 'laser') {
+      const bodyRoom = Number(body.roomNumber)
+      roomNumber = Number.isFinite(bodyRoom) && bodyRoom > 0 ? Math.trunc(bodyRoom) : inferRoomNumber(providerName)
+      if (!roomNumber) {
+        res.status(400).json({ error: 'رقم غرفة الليزر مطلوب للحجز' })
+        return
+      }
+      const room = await Room.findOne({ number: roomNumber }).populate('assignedUserId', 'name')
+      if (!room?.assignedUserId) {
+        res.status(400).json({ error: 'لم يتم تعيين أخصائي لهذه الغرفة بعد. حدّده أولاً من لوحة المدير.' })
+        return
+      }
+      effectiveProviderName = `Laser Room ${roomNumber}`
+      assignedSpecialistUserId = room.assignedUserId._id
+      assignedSpecialistName = room.assignedUserId.name || ''
+    }
+    const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName: effectiveProviderName }).lean()
     const existing = sameProvSlots.find((o) => normalizeHm(o.time) === time) ?? null
     if (existing?.patientId && String(existing.patientId) !== String(patient._id)) {
       res.status(409).json({ error: 'هذه الخانة محجوزة لمريض آخر' })
@@ -221,7 +270,7 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
         return
       }
     }
-    const filter = existing ? { _id: existing._id } : { businessDate, time, providerName }
+    const filter = existing ? { _id: existing._id } : { businessDate, time, providerName: effectiveProviderName }
     const slot = await ScheduleSlot.findOneAndUpdate(
       filter,
       {
@@ -229,7 +278,11 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
           businessDate,
           time,
           endTime,
-          providerName,
+          providerName: effectiveProviderName,
+          serviceType,
+          roomNumber,
+          assignedSpecialistUserId,
+          assignedSpecialistName,
           procedureType,
           patientId: patient._id,
           patientName: patient.name,
@@ -249,7 +302,10 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
         businessDate,
         time,
         endTime,
-        providerName,
+        providerName: effectiveProviderName,
+        serviceType,
+        roomNumber,
+        assignedSpecialistName,
         procedureType,
         patientId: String(patient._id),
       },

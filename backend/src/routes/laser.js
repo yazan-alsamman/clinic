@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { LaserAreaCatalog } from '../models/LaserAreaCatalog.js'
+import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
@@ -21,6 +22,88 @@ const LASER_TODAY_PAGE = ['super_admin', 'laser']
 /** تسجيل جلسة من ملف المريض: ليزر + مدير (الاستقبال يعرض السجل فقط من نظرة عامة) */
 const LASER_SESSION_CREATE = ['super_admin', 'laser']
 const LASER_STATUS_VALUES = ['scheduled', 'in_progress', 'completed_pending_collection', 'completed']
+const LASER_PROCEDURE_READ = ['super_admin', 'reception', 'laser']
+const LASER_PROCEDURE_GROUPS = {
+  face: 'الوجه',
+  upper: 'الجزء العلوي',
+  lower: 'الجزء السفلي',
+  offers: 'العروض التوفيرية',
+}
+
+const defaultProcedureOptions = [
+  ['face', 'area', 'الوجه', 55000],
+  ['face', 'area', 'الجبين', 55000],
+  ['face', 'area', 'الذقن', 55000],
+  ['face', 'area', 'الأنف', 55000],
+  ['face', 'area', 'الشارب', 55000],
+  ['face', 'area', 'السالف', 55000],
+  ['face', 'area', 'الرقبة', 55000],
+  ['face', 'area', 'نقرة', 55000],
+  ['upper', 'area', 'إبطين', 55000],
+  ['upper', 'area', 'ساعدين', 55000],
+  ['upper', 'area', 'زندين', 55000],
+  ['upper', 'area', 'كفين', 55000],
+  ['upper', 'area', 'صدر', 55000],
+  ['upper', 'area', 'بطن', 55000],
+  ['upper', 'area', 'ظهر', 55000],
+  ['upper', 'area', 'أسفل الظهر', 55000],
+  ['upper', 'area', 'حول الحلمة', 55000],
+  ['upper', 'area', 'خط البطن', 55000],
+  ['upper', 'area', 'خط الصدر', 55000],
+  ['upper', 'area', 'خط الظهر', 55000],
+  ['lower', 'area', 'بكيني', 55000],
+  ['lower', 'area', 'حواف بكيني', 55000],
+  ['lower', 'area', 'ديريير', 55000],
+  ['lower', 'area', 'مثلث فخدين', 55000],
+  ['lower', 'area', 'فخذين', 55000],
+  ['lower', 'area', 'ساقين', 55000],
+  ['lower', 'area', 'مشط قدم', 55000],
+  ['lower', 'area', 'ركبة', 55000],
+  ['offers', 'offer', 'رجلين كاملين', 55000],
+  ['offers', 'offer', 'ساعدين و ساقين', 55000],
+  ['offers', 'offer', 'يدين كاملين', 55000],
+  ['offers', 'offer', 'فخذين و زندين', 55000],
+  ['offers', 'offer', 'إبطين و بكيني', 55000],
+  ['offers', 'offer', 'جسم كامل', 55000],
+]
+
+function slugifyArabic(v) {
+  return String(v || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\u0600-\u06FFa-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function optionToDto(row) {
+  return {
+    id: String(row._id),
+    code: row.code,
+    name: row.name,
+    groupId: row.groupId,
+    groupTitle: row.groupTitle,
+    kind: row.kind,
+    priceSyp: Number(row.priceSyp) || 0,
+    active: Boolean(row.active),
+    sortOrder: Number(row.sortOrder) || 0,
+  }
+}
+
+async function ensureDefaultLaserProcedureOptions() {
+  const count = await LaserProcedureOption.estimatedDocumentCount()
+  if (count > 0) return
+  const rows = defaultProcedureOptions.map(([groupId, kind, name, priceSyp], idx) => ({
+    code: `${groupId}-${slugifyArabic(name)}-${idx + 1}`,
+    name,
+    groupId,
+    groupTitle: LASER_PROCEDURE_GROUPS[groupId],
+    kind,
+    priceSyp,
+    active: true,
+    sortOrder: idx + 1,
+  }))
+  await LaserProcedureOption.insertMany(rows, { ordered: false })
+}
 function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
   const usd = Number(usdRaw)
   if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return round2(usd)
@@ -55,6 +138,153 @@ laserRouter.get('/catalog', async (req, res) => {
       })
     }
     res.json({ categories: [...byCat.values()] })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.get('/procedure-options', async (req, res) => {
+  try {
+    if (!LASER_PROCEDURE_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    await ensureDefaultLaserProcedureOptions()
+    const includeInactive = req.user.role === 'super_admin' && String(req.query.includeInactive || '') === '1'
+    const filter = includeInactive ? {} : { active: true }
+    const rows = await LaserProcedureOption.find(filter).sort({ groupId: 1, sortOrder: 1, name: 1 }).lean()
+    const groupsMap = new Map()
+    for (const row of rows) {
+      if (!groupsMap.has(row.groupId)) {
+        groupsMap.set(row.groupId, {
+          id: row.groupId,
+          title: row.groupTitle || LASER_PROCEDURE_GROUPS[row.groupId] || row.groupId,
+          items: [],
+        })
+      }
+      groupsMap.get(row.groupId).items.push(optionToDto(row))
+    }
+    const groups = [...groupsMap.values()]
+    res.json({ groups })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const name = String(body.name || '')
+      .trim()
+      .slice(0, 120)
+    const groupId = String(body.groupId || '').trim()
+    const kind = String(body.kind || 'area').trim() === 'offer' ? 'offer' : 'area'
+    const priceSyp = Number(body.priceSyp)
+    const sortOrder = Number(body.sortOrder)
+    if (!name) {
+      res.status(400).json({ error: 'اسم المنطقة/العرض مطلوب' })
+      return
+    }
+    if (!LASER_PROCEDURE_GROUPS[groupId]) {
+      res.status(400).json({ error: 'القسم غير صالح' })
+      return
+    }
+    if (!Number.isFinite(priceSyp) || priceSyp < 0) {
+      res.status(400).json({ error: 'السعر بالليرة غير صالح' })
+      return
+    }
+    const option = await LaserProcedureOption.create({
+      code: `${groupId}-${slugifyArabic(name)}-${Date.now()}`,
+      name,
+      groupId,
+      groupTitle: LASER_PROCEDURE_GROUPS[groupId],
+      kind,
+      priceSyp,
+      active: body.active !== false,
+      sortOrder: Number.isFinite(sortOrder) ? sortOrder : 999,
+    })
+    await writeAudit({
+      user: req.user,
+      action: 'إضافة منطقة/عرض ليزر',
+      entityType: 'LaserProcedureOption',
+      entityId: option._id,
+      details: optionToDto(option),
+    })
+    res.status(201).json({ option: optionToDto(option) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.patch('/procedure-options/:id', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const option = await LaserProcedureOption.findById(req.params.id)
+    if (!option) {
+      res.status(404).json({ error: 'العنصر غير موجود' })
+      return
+    }
+    const body = req.body ?? {}
+    if (body.name != null) option.name = String(body.name).trim().slice(0, 120)
+    if (body.groupId != null) {
+      const groupId = String(body.groupId).trim()
+      if (!LASER_PROCEDURE_GROUPS[groupId]) {
+        res.status(400).json({ error: 'القسم غير صالح' })
+        return
+      }
+      option.groupId = groupId
+      option.groupTitle = LASER_PROCEDURE_GROUPS[groupId]
+    }
+    if (body.kind != null) option.kind = String(body.kind).trim() === 'offer' ? 'offer' : 'area'
+    if (body.priceSyp != null) {
+      const priceSyp = Number(body.priceSyp)
+      if (!Number.isFinite(priceSyp) || priceSyp < 0) {
+        res.status(400).json({ error: 'السعر بالليرة غير صالح' })
+        return
+      }
+      option.priceSyp = priceSyp
+    }
+    if (body.sortOrder != null) {
+      const so = Number(body.sortOrder)
+      if (Number.isFinite(so)) option.sortOrder = so
+    }
+    if (body.active != null) option.active = Boolean(body.active)
+    if (!option.name) {
+      res.status(400).json({ error: 'اسم المنطقة/العرض مطلوب' })
+      return
+    }
+    await option.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تعديل منطقة/عرض ليزر',
+      entityType: 'LaserProcedureOption',
+      entityId: option._id,
+      details: optionToDto(option),
+    })
+    res.json({ option: optionToDto(option) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.delete('/procedure-options/:id', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const option = await LaserProcedureOption.findByIdAndDelete(req.params.id)
+    if (!option) {
+      res.status(404).json({ error: 'العنصر غير موجود' })
+      return
+    }
+    await writeAudit({
+      user: req.user,
+      action: 'حذف منطقة/عرض ليزر',
+      entityType: 'LaserProcedureOption',
+      entityId: option._id,
+      details: { name: option.name, groupId: option.groupId },
+    })
+    res.json({ ok: true })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

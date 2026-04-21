@@ -43,6 +43,26 @@ type SlotRow = {
   status: 'free' | 'busy'
   patientId: string | null
   patientName: string
+  roomNumber?: number | null
+  assignedSpecialistName?: string
+}
+
+type LaserProcedureItem = {
+  id: string
+  code: string
+  name: string
+  groupId: string
+  groupTitle: string
+  kind: 'area' | 'offer'
+  priceSyp: number
+  active: boolean
+  sortOrder: number
+}
+
+type LaserProcedureGroup = {
+  id: string
+  title: string
+  items: LaserProcedureItem[]
 }
 
 const DAY_START_MIN = 9 * 60
@@ -65,6 +85,13 @@ function tempFileNumber() {
   return `TMP-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${d.getTime()
     .toString()
     .slice(-6)}`
+}
+
+function inferRoomNumber(channel: string) {
+  const m = String(channel || '').match(/room\s*(\d+)/i)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) ? n : null
 }
 
 export function ReceptionAppointmentPage() {
@@ -95,6 +122,9 @@ export function ReceptionAppointmentPage() {
   const [formErr, setFormErr] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
   const [bookingOpen, setBookingOpen] = useState(false)
+  const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
+  const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
+  const [laserProcedureErr, setLaserProcedureErr] = useState('')
 
   const loadSlots = useCallback(async () => {
     if (!canUse) return
@@ -113,9 +143,28 @@ export function ReceptionAppointmentPage() {
     }
   }, [canUse, businessDate])
 
+  const loadLaserProcedureOptions = useCallback(async () => {
+    if (!canUse) return
+    setLaserProcedureLoading(true)
+    setLaserProcedureErr('')
+    try {
+      const data = await api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options')
+      setLaserProcedureGroups(data.groups || [])
+    } catch (e) {
+      setLaserProcedureGroups([])
+      setLaserProcedureErr(e instanceof ApiError ? e.message : 'تعذر تحميل مناطق الليزر')
+    } finally {
+      setLaserProcedureLoading(false)
+    }
+  }, [canUse])
+
   useEffect(() => {
     void loadSlots()
   }, [loadSlots])
+
+  useEffect(() => {
+    void loadLaserProcedureOptions()
+  }, [loadLaserProcedureOptions])
 
   useEffect(() => {
     if (dayActive) {
@@ -316,6 +365,11 @@ export function ReceptionAppointmentPage() {
       setFormErr('اختر الخدمة أو الغرفة أولاً')
       return false
     }
+    const roomNumber = selectedService === 'laser' ? inferRoomNumber(providerName) : null
+    if (selectedService === 'laser' && !roomNumber) {
+      setFormErr('رقم غرفة الليزر غير صالح')
+      return false
+    }
     const availableStartTimes = availableStartTimesForChannel(providerName)
     if (!availableStartTimes.includes(time)) {
       setFormErr('الوقت المختار لم يعد متاحاً بعد تحديث الجدول')
@@ -323,7 +377,7 @@ export function ReceptionAppointmentPage() {
     }
     const proc = procedureType.trim()
     if (!proc) {
-      setFormErr('اختر نوع الإجراء من القائمة')
+      setFormErr(selectedService === 'laser' ? 'اختر منطقة/عرض ليزر من القائمة' : 'اختر نوع الإجراء من القائمة')
       return false
     }
     const overlap = slots.some((x) => {
@@ -341,19 +395,24 @@ export function ReceptionAppointmentPage() {
 
     setSaving(true)
     try {
-      await api('/api/schedule/assign', {
+      const data = await api<{ slot?: SlotRow }>('/api/schedule/assign', {
         method: 'POST',
         body: JSON.stringify({
           businessDate,
           time,
           endTime,
           providerName,
+          serviceType: selectedService,
+          roomNumber,
           procedureType: proc.slice(0, 200),
           patientId: picked.id,
         }),
       })
+      const specialistPart = data?.slot?.assignedSpecialistName
+        ? ` — الأخصائي: ${data.slot.assignedSpecialistName}`
+        : ''
       setSuccessMsg(
-        `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${durationMinutes} دقيقة) — ${businessDate}`,
+        `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${durationMinutes} دقيقة) — ${businessDate}${specialistPart}`,
       )
       setPicked(null)
       setPatientQ('')
@@ -714,20 +773,50 @@ export function ReceptionAppointmentPage() {
               ) : null}
             </div>
             <div className="card">
-              <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>نوع الإجراء</h4>
-              <select
-                className="select"
-                style={{ width: '100%' }}
-                value={procedureType}
-                onChange={(e) => setProcedureType(e.target.value)}
-              >
-                <option value="">— اختر نوع الإجراء —</option>
-                {APPOINTMENT_PROCEDURE_OPTIONS.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
+              <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>
+                {selectedService === 'laser' ? 'منطقة / عرض الليزر' : 'نوع الإجراء'}
+              </h4>
+              {selectedService === 'laser' ? (
+                <>
+                  {laserProcedureErr ? (
+                    <p style={{ marginTop: 0, color: 'var(--danger)' }}>{laserProcedureErr}</p>
+                  ) : null}
+                  <select
+                    className="select"
+                    style={{ width: '100%' }}
+                    value={procedureType}
+                    onChange={(e) => setProcedureType(e.target.value)}
+                    disabled={laserProcedureLoading}
+                  >
+                    <option value="">
+                      {laserProcedureLoading ? 'جاري تحميل المناطق…' : '— اختر منطقة أو عرض —'}
+                    </option>
+                    {laserProcedureGroups.map((g) => (
+                      <optgroup key={g.id} label={g.title}>
+                        {g.items.map((item) => (
+                          <option key={item.id} value={item.name}>
+                            {item.name} — {item.priceSyp.toLocaleString('en-US')} ل.س
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <select
+                  className="select"
+                  style={{ width: '100%' }}
+                  value={procedureType}
+                  onChange={(e) => setProcedureType(e.target.value)}
+                >
+                  <option value="">— اختر نوع الإجراء —</option>
+                  {APPOINTMENT_PROCEDURE_OPTIONS.map((x) => (
+                    <option key={x} value={x}>
+                      {x}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             {formErr ? (
               <p style={{ color: 'var(--danger)', margin: '0.75rem 0 0' }}>{formErr}</p>
