@@ -497,7 +497,6 @@ export function ReceptionAppointmentPage() {
                           <th>الوقت</th>
                           <th>الحالة</th>
                           <th>اسم المريض</th>
-                          <th>نوع الإجراء</th>
                           <th>الفترة</th>
                           <th>إجراء</th>
                         </tr>
@@ -518,7 +517,6 @@ export function ReceptionAppointmentPage() {
                               )}
                             </td>
                             <td>{r.status === 'busy' ? r.patientName : '—'}</td>
-                            <td>{r.status === 'busy' ? r.procedureType : '—'}</td>
                             <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.range}</td>
                             <td>
                               {r.status === 'free' ? (
@@ -562,7 +560,6 @@ export function ReceptionAppointmentPage() {
                   <th>الوقت</th>
                   <th>الحالة</th>
                   <th>اسم المريض</th>
-                  <th>نوع الإجراء</th>
                   <th>الفترة</th>
                   <th>إجراء</th>
                 </tr>
@@ -583,7 +580,6 @@ export function ReceptionAppointmentPage() {
                       )}
                     </td>
                     <td>{r.status === 'busy' ? r.patientName : '—'}</td>
-                    <td>{r.status === 'busy' ? r.procedureType : '—'}</td>
                     <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.range}</td>
                     <td>
                       {r.status === 'free' ? (
