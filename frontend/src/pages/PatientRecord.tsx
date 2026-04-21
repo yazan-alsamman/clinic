@@ -3,7 +3,6 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { canAccessTab } from '../data/nav'
-import { LaserAreaPicker } from '../components/LaserAreaPicker'
 import { api, ApiError } from '../api/client'
 import type { LaserCategory, Patient, Role } from '../types'
 
@@ -67,6 +66,24 @@ type DermatologyMaterialOption = {
 type DermatologySelectedMaterial = {
   inventoryItemId: string
   quantity: string
+}
+
+type LaserProcedureItem = {
+  id: string
+  code: string
+  name: string
+  groupId: string
+  groupTitle: string
+  kind: 'area' | 'offer'
+  priceSyp: number
+  active: boolean
+  sortOrder: number
+}
+
+type LaserProcedureGroup = {
+  id: string
+  title: string
+  items: LaserProcedureItem[]
 }
 
 type DermatologySessionRow = {
@@ -408,7 +425,11 @@ export function PatientRecord() {
   const [laserType, setLaserType] = useState<(typeof laserTypes)[number]>('Mix')
   const [room, setRoom] = useState<'1' | '2'>('1')
   const [laserCatalog, setLaserCatalog] = useState<LaserCategory[]>([])
-  const [laserAreaIds, setLaserAreaIds] = useState<string[]>([])
+  const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
+  const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
+  const [laserProcedureErr, setLaserProcedureErr] = useState('')
+  const [selectedLaserItemIds, setSelectedLaserItemIds] = useState<string[]>([])
+  const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
   const [pw, setPw] = useState('')
   const [pulse, setPulse] = useState('')
   const [shotCount, setShotCount] = useState('')
@@ -417,12 +438,6 @@ export function PatientRecord() {
   const [savingLaser, setSavingLaser] = useState(false)
   const [laserSessionErr, setLaserSessionErr] = useState('')
   const [laserSessionOk, setLaserSessionOk] = useState('')
-  const [laserCostUsd, setLaserCostUsd] = useState('')
-  const [laserCostSyp, setLaserCostSyp] = useState('')
-  const [laserDiscountPercent, setLaserDiscountPercent] = useState('0')
-  const [laserPickerKey, setLaserPickerKey] = useState(0)
-  const [laserManualAreas, setLaserManualAreas] = useState<string[]>([])
-  const [laserManualInput, setLaserManualInput] = useState('')
   const [dentalPlan, setDentalPlan] = useState<DentalPlanDto>(null)
   const [planDraft, setPlanDraft] = useState(
     'تقويم للفكين — حشو 11، 12 — متابعة تنظيف دوري.',
@@ -663,16 +678,21 @@ export function PatientRecord() {
     }
   }, [id, patient, clinicalHistory, laserCatalog, role, user?.name])
 
-  const onLaserAreasChange = useCallback((ids: string[]) => {
-    setLaserAreaIds(ids)
-  }, [])
+  const laserItemById = useMemo(() => {
+    const map = new Map<string, LaserProcedureItem>()
+    for (const g of laserProcedureGroups) {
+      for (const item of g.items) map.set(item.id, item)
+    }
+    return map
+  }, [laserProcedureGroups])
 
-  function addLaserManualArea() {
-    const t = laserManualInput.trim().slice(0, 120)
-    if (!t) return
-    setLaserManualAreas((prev) => (prev.includes(t) ? prev : [...prev, t].slice(0, 20)))
-    setLaserManualInput('')
-  }
+  const selectedLaserItems = useMemo(
+    () =>
+      selectedLaserItemIds
+        .map((id) => laserItemById.get(id))
+        .filter((x): x is LaserProcedureItem => Boolean(x)),
+    [selectedLaserItemIds, laserItemById],
+  )
 
   const openLaserSessionDetail = useCallback(
     async (s: ClinicalLaserRow) => {
@@ -796,11 +816,29 @@ export function PatientRecord() {
     if (tab !== 'laser' || !role || !canAccessTab(role, 'laser')) return
     let cancelled = false
     ;(async () => {
+      setLaserProcedureLoading(true)
+      setLaserProcedureErr('')
       try {
-        const data = await api<{ categories: LaserCategory[] }>('/api/laser/catalog')
-        if (!cancelled) setLaserCatalog(data.categories)
+        const [catalogData, procData] = await Promise.all([
+          api<{ categories: LaserCategory[] }>('/api/laser/catalog'),
+          api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options'),
+        ])
+        if (!cancelled) {
+          setLaserCatalog(catalogData.categories)
+          setLaserProcedureGroups(procData.groups || [])
+          setSelectedLaserItemIds((prev) =>
+            prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id))),
+          )
+        }
       } catch {
-        if (!cancelled) setLaserCatalog([])
+        if (!cancelled) {
+          setLaserCatalog([])
+          setLaserProcedureGroups([])
+          setSelectedLaserItemIds([])
+          setLaserProcedureErr('تعذر تحميل مناطق وعروض الليزر')
+        }
+      } finally {
+        if (!cancelled) setLaserProcedureLoading(false)
       }
     })()
     return () => {
@@ -955,21 +993,16 @@ export function PatientRecord() {
     })
   }, [])
 
+  const selectedLaserTotalSyp = useMemo(
+    () => selectedLaserItems.reduce((sum, item) => sum + (Number(item.priceSyp) || 0), 0),
+    [selectedLaserItems],
+  )
+
   const laserNetDuePreview = useMemo(() => {
-    const usdRaw = parseFloat(laserCostUsd)
-    const sypRaw = parseFloat(laserCostSyp)
-    const g =
-      usdRaw > 0
-        ? usdRaw
-        : sypRaw > 0 && (usdSypRate ?? 0) > 0
-          ? sypRaw / Number(usdSypRate)
-          : 0
-    const d = parseFloat(laserDiscountPercent) || 0
-    if (!(g > 0)) return null
-    const net = g * (1 - Math.min(100, Math.max(0, d)) / 100)
-    if (!(net > 0)) return null
-    return Math.round(net * 100) / 100
-  }, [laserCostUsd, laserCostSyp, laserDiscountPercent, usdSypRate])
+    const rate = Number(usdSypRate || 0)
+    if (!(selectedLaserTotalSyp > 0) || !(rate > 0)) return null
+    return Math.round((selectedLaserTotalSyp / rate) * 100) / 100
+  }, [selectedLaserTotalSyp, usdSypRate])
 
   const dentalPlanApproved = dentalPlan?.status === 'approved'
   const dentalPlanSummary =
@@ -1844,230 +1877,130 @@ export function PatientRecord() {
             </header>
 
             <div className="laser-session-workspace__grid">
-              <section className="card laser-panel">
-                <h3 className="card-title" style={{ fontSize: '0.95rem' }}>
-                  معلومات الجلسة
+              <section className="card laser-panel laser-panel--wide" style={{ gridColumn: '1 / -1' }}>
+                <h3 className="card-title" style={{ marginTop: 0 }}>
+                  إدخال بيانات جلسة الليزر
                 </h3>
-                <div className="grid-2" style={{ marginTop: '0.5rem' }}>
-                  <div>
-                    <span className="form-label">رقم المعالجة</span>
-                    <input className="input" readOnly value={nextTreatmentHint} />
-                  </div>
-                  <div>
-                    <span className="form-label">التاريخ</span>
-                    <input className="input" readOnly value={new Date().toISOString().slice(0, 10)} />
-                  </div>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <span className="form-label">المعالج المسؤول</span>
-                    <input className="input" readOnly value={user?.name ?? '—'} />
-                  </div>
-                </div>
-                <span className="form-label" style={{ marginTop: '1rem', display: 'block' }}>
-                  نوع الليزر
-                </span>
-            <div className="segmented" style={{ marginBottom: '1rem' }}>
-              {laserTypes.map((lt) => (
-                <label key={lt}>
-                  <input
-                    type="radio"
-                    name="laserType"
-                    checked={laserType === lt}
-                    onChange={() => setLaserType(lt)}
-                  />
-                  <span>{lt}</span>
-                </label>
-              ))}
-            </div>
-              </section>
-
-              <section className="card laser-panel">
-            <div className="fieldset">
-              <legend>المعايير التقنية</legend>
-              <div className="grid-2">
-                <div>
-                  <label className="form-label" htmlFor="pw">
-                    P.W
-                  </label>
-                  <input
-                    id="pw"
-                    className="input"
-                    placeholder="0"
-                    value={pw}
-                    onChange={(e) => setPw(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="form-label" htmlFor="pulse">
-                    Pulse
-                  </label>
-                  <input
-                    id="pulse"
-                    className="input"
-                    placeholder="0"
-                    value={pulse}
-                    onChange={(e) => setPulse(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="form-label" htmlFor="shots">
-                    عدد الضربات
-                  </label>
-                  <input
-                    id="shots"
-                    className="input"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={shotCount}
-                    onChange={(e) => setShotCount(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-            <label className="form-label" htmlFor="lnotes">
-              ملاحظات (تنبيهات للحالة)
-            </label>
-            <textarea
-              id="lnotes"
-              className="textarea"
-              placeholder="..."
-              value={laserNotes}
-              onChange={(e) => setLaserNotes(e.target.value)}
-            />
-              </section>
-
-              <section className="card laser-panel laser-panel--wide">
-            <h3 className="card-title" style={{ marginTop: 0 }}>
-              الغرفة
-            </h3>
-            <div className="tabs" style={{ border: 'none', marginBottom: '0.5rem' }}>
-              <button
-                type="button"
-                className={`tab${room === '1' ? ' active' : ''}`}
-                onClick={() => setRoom('1')}
-              >
-                غرفة 1
-              </button>
-              <button
-                type="button"
-                className={`tab${room === '2' ? ' active' : ''}`}
-                onClick={() => setRoom('2')}
-              >
-                غرفة 2
-              </button>
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              المعيّنون: غرفة {room} — أخصائية (يمكن لمدير النظام إعادة التوزيع)
-            </p>
-            <h3 className="card-title" style={{ marginTop: '1.5rem' }}>
-              اختيار المناطق
-            </h3>
-            <LaserAreaPicker
-              key={laserPickerKey}
-              catalog={laserCatalog.length ? laserCatalog : undefined}
-              onAreasChange={onLaserAreasChange}
-              extraSelectedCount={laserManualAreas.length}
-            />
-            <div className="laser-manual-areas">
-              <label className="form-label" htmlFor="laser-manual-area">
-                منطقة يدوية (اختياري)
-              </label>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.15rem 0 0' }}>
-                أضف وصفاً حرّاً إن لم تكن المنطقة في القائمة.
-              </p>
-              <div className="laser-manual-areas__row">
-                <input
-                  id="laser-manual-area"
-                  className="input"
-                  placeholder="مثال: منطقة تحت الكتف"
-                  value={laserManualInput}
-                  onChange={(e) => setLaserManualInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      addLaserManualArea()
-                    }
-                  }}
-                />
-                <button type="button" className="btn btn-secondary" onClick={() => addLaserManualArea()}>
-                  إضافة
-                </button>
-              </div>
-              {laserManualAreas.length > 0 ? (
-                <div className="laser-manual-chips">
-                  {laserManualAreas.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      className="laser-manual-chip"
-                      onClick={() => setLaserManualAreas((prev) => prev.filter((x) => x !== t))}
-                      title="إزالة"
-                    >
-                      {t} ×
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-              </section>
-
-              <section className="card laser-panel">
-            <div className="fieldset" style={{ marginTop: 0 }}>
-              <legend>المبلغ وبند الفوترة</legend>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 0, marginBottom: '0.75rem' }}>
-                يُحفظ مع الجلسة في نفس الخطوة. المبلغ المستحق بعد الحسم يظهر في «التحصيل» للاستقبال حتى تأكيد
-                الدفع والترحيل المحاسبي.
-              </p>
-              <div className="grid-2">
-                <div>
-                  <label className="form-label" htmlFor="laser-cost-usd">
-                    المبلغ الإجمالي (USD)
-                  </label>
-                  <input
-                    id="laser-cost-usd"
-                    className="input"
-                    inputMode="decimal"
-                    placeholder="مثال: 150"
-                    value={laserCostUsd}
-                    onChange={(e) => setLaserCostUsd(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="form-label" htmlFor="laser-cost-syp">
-                    المبلغ الإجمالي (SYP)
-                  </label>
-                  <input
-                    id="laser-cost-syp"
-                    className="input"
-                    inputMode="decimal"
-                    placeholder="مثال: 1500000"
-                    value={laserCostSyp}
-                    onChange={(e) => setLaserCostSyp(e.target.value)}
-                  />
-                </div>
-              </div>
-              <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                يكفي إدخال المبلغ في أحد الحقلين فقط (دولار أو ليرة).
-              </p>
-              <div style={{ marginTop: '0.75rem' }}>
-                <label className="form-label" htmlFor="laser-discount-pct">
-                  حسم %
-                </label>
-                <input
-                  id="laser-discount-pct"
-                  className="input"
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={laserDiscountPercent}
-                  onChange={(e) => setLaserDiscountPercent(e.target.value)}
-                  style={{ maxWidth: 200 }}
-                />
-              </div>
-              {laserNetDuePreview != null ? (
-                <p style={{ margin: '0.75rem 0 0', fontSize: '0.9rem', fontVariantNumeric: 'tabular-nums' }}>
-                  <strong>المستحق للتحصيل:</strong> {laserNetDuePreview} USD
+                <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>
+                  رقم المعالجة: {nextTreatmentHint} — المعالج: {user?.name ?? '—'}
                 </p>
-              ) : null}
-            </div>
+                <div className="table-wrap" style={{ marginTop: '0.6rem' }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>الحقل</th>
+                        <th>القيمة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>نوع الليزر</td>
+                        <td>
+                          <select
+                            className="select"
+                            value={laserType}
+                            onChange={(e) => setLaserType(e.target.value as (typeof laserTypes)[number])}
+                            style={{ maxWidth: 220 }}
+                          >
+                            {laserTypes.map((lt) => (
+                              <option key={lt} value={lt}>
+                                {lt}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>P.W</td>
+                        <td>
+                          <input
+                            className="input"
+                            type="number"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={pw}
+                            onChange={(e) => setPw(e.target.value)}
+                            style={{ maxWidth: 220 }}
+                          />
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>Pulse</td>
+                        <td>
+                          <input
+                            className="input"
+                            type="number"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={pulse}
+                            onChange={(e) => setPulse(e.target.value)}
+                            style={{ maxWidth: 220 }}
+                          />
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>الضربات</td>
+                        <td>
+                          <input
+                            className="input"
+                            type="number"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={shotCount}
+                            onChange={(e) => setShotCount(e.target.value)}
+                            style={{ maxWidth: 220 }}
+                          />
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>المناطق</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => setLaserAreaModalOpen(true)}
+                          >
+                            اختيار المناطق / العروض
+                          </button>
+                          <div style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+                            {selectedLaserItems.length > 0
+                              ? selectedLaserItems.map((x) => x.name).join(' + ')
+                              : 'لم يتم اختيار مناطق بعد'}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>ملاحظات</td>
+                        <td>
+                          <textarea
+                            className="textarea"
+                            placeholder="..."
+                            value={laserNotes}
+                            onChange={(e) => setLaserNotes(e.target.value)}
+                          />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
+                  <strong>سعر الجلسة:</strong>{' '}
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('en-US') : '0'} ل.س
+                  </span>
+                  {laserNetDuePreview != null ? (
+                    <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
+                      (~ {laserNetDuePreview} USD)
+                    </span>
+                  ) : selectedLaserTotalSyp > 0 ? (
+                    <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
+                      (لا يمكن تحويله للدولار قبل تحديد سعر الصرف لليوم)
+                    </span>
+                  ) : null}
+                </div>
+                {laserProcedureErr ? (
+                  <p style={{ color: 'var(--danger)', marginTop: '0.55rem', marginBottom: 0 }}>{laserProcedureErr}</p>
+                ) : null}
             {laserSessionErr ? (
               <p style={{ color: 'var(--danger)', fontSize: '0.9rem', marginTop: '0.75rem', marginBottom: 0 }}>
                 {laserSessionErr}
@@ -2095,22 +2028,16 @@ export function PatientRecord() {
                 if (!id) return
                 setLaserSessionErr('')
                 setLaserSessionOk('')
-                const grossUsdRaw = parseFloat(laserCostUsd)
-                const grossSypRaw = parseFloat(laserCostSyp)
-                const gross =
-                  grossUsdRaw > 0
-                    ? grossUsdRaw
-                    : grossSypRaw > 0 && (usdSypRate ?? 0) > 0
-                      ? grossSypRaw / Number(usdSypRate)
-                      : 0
-                if (!(gross > 0)) {
-                  setLaserSessionErr('أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر).')
+                if (laserProcedureLoading) {
+                  setLaserSessionErr('انتظر تحميل المناطق أولاً.')
                   return
                 }
-                const disc = parseFloat(laserDiscountPercent) || 0
-                const net = gross * (1 - Math.min(100, Math.max(0, disc)) / 100)
-                if (!(net > 0)) {
-                  setLaserSessionErr('المبلغ بعد الحسم يجب أن يكون أكبر من صفر.')
+                if (selectedLaserItems.length === 0 || !(selectedLaserTotalSyp > 0)) {
+                  setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
+                  return
+                }
+                if (!((usdSypRate ?? 0) > 0)) {
+                  setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
                   return
                 }
                 setSavingLaser(true)
@@ -2127,26 +2054,19 @@ export function PatientRecord() {
                       pulse,
                       shotCount,
                       notes: laserNotes,
-                      areaIds: laserAreaIds,
-                      manualAreaLabels: laserManualAreas,
+                      areaIds: [],
+                      manualAreaLabels: selectedLaserItems.map((x) => x.name),
                       status: 'in_progress',
-                      costUsd: grossUsdRaw > 0 ? grossUsdRaw : undefined,
-                      costSyp: grossUsdRaw > 0 ? undefined : grossSypRaw,
-                      discountPercent: disc,
+                      costSyp: selectedLaserTotalSyp,
+                      discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
                   })
                   setLaserSessionOk(
                     `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${created.billingItem.amountDueUsd} USD (صفحة التحصيل للاستقبال).`,
                   )
-                  setLaserCostUsd('')
-                  setLaserCostSyp('')
-                  setLaserDiscountPercent('0')
                   setLaserNotes('')
-                  setLaserAreaIds([])
-                  setLaserManualAreas([])
-                  setLaserManualInput('')
-                  setLaserPickerKey((k) => k + 1)
+                  setSelectedLaserItemIds([])
                   setPw('')
                   setPulse('')
                   setShotCount('')
@@ -2176,6 +2096,57 @@ export function PatientRecord() {
               {savingLaser ? 'جاري الحفظ…' : 'حفظ الجلسة والفوترة'}
             </button>
               </section>
+
+              {laserAreaModalOpen ? (
+                <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setLaserAreaModalOpen(false)}>
+                  <div className="modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+                    <h3 style={{ marginTop: 0 }}>اختيار مناطق / عروض الليزر</h3>
+                    {laserProcedureLoading ? (
+                      <p style={{ color: 'var(--text-muted)' }}>جاري تحميل المناطق…</p>
+                    ) : (
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        {laserProcedureGroups.map((g) => (
+                          <div key={g.id}>
+                            <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
+                            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                              {g.items.map((item) => {
+                                const selected = selectedLaserItemIds.includes(item.id)
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
+                                    style={{
+                                      fontSize: '0.82rem',
+                                      padding: '0.38rem 0.58rem',
+                                      borderRadius: 999,
+                                      borderColor: selected ? 'var(--cyan)' : 'var(--border)',
+                                    }}
+                                    onClick={() =>
+                                      setSelectedLaserItemIds((prev) =>
+                                        prev.includes(item.id)
+                                          ? prev.filter((x) => x !== item.id)
+                                          : [...prev, item.id],
+                                      )
+                                    }
+                                  >
+                                    {item.name}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
+                      <button type="button" className="btn btn-primary" onClick={() => setLaserAreaModalOpen(false)}>
+                        تم
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <section className="card laser-panel laser-panel--wide" style={{ gridColumn: '1 / -1' }}>
                 <h3 className="card-title" style={{ fontSize: '0.95rem' }}>
                   بنود التحصيل السريرية (ليزر)
