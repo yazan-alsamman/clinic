@@ -125,6 +125,7 @@ export function ReceptionAppointmentPage() {
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
+  const [selectedLaserItemIds, setSelectedLaserItemIds] = useState<string[]>([])
 
   const loadSlots = useCallback(async () => {
     if (!canUse) return
@@ -294,12 +295,34 @@ export function ReceptionAppointmentPage() {
     [availableStartTimesForChannel, selectedChannel],
   )
 
+  const laserItemById = useMemo(() => {
+    const map = new Map<string, LaserProcedureItem>()
+    for (const g of laserProcedureGroups) {
+      for (const item of g.items) map.set(item.id, item)
+    }
+    return map
+  }, [laserProcedureGroups])
+
+  const selectedLaserItems = useMemo(
+    () => selectedLaserItemIds.map((id) => laserItemById.get(id)).filter((x): x is LaserProcedureItem => Boolean(x)),
+    [selectedLaserItemIds, laserItemById],
+  )
+
+  const selectedLaserTotalSyp = useMemo(
+    () => selectedLaserItems.reduce((sum, item) => sum + (Number(item.priceSyp) || 0), 0),
+    [selectedLaserItems],
+  )
+
   useEffect(() => {
     if (selectedChannelAvailableTimes.length === 0) return
     if (!selectedChannelAvailableTimes.includes(appointmentTime)) {
       setAppointmentTime(selectedChannelAvailableTimes[0])
     }
   }, [selectedChannelAvailableTimes, appointmentTime])
+
+  useEffect(() => {
+    setSelectedLaserItemIds((prev) => prev.filter((id) => laserItemById.has(id)))
+  }, [laserItemById])
 
   async function createNewPatientAndSelect() {
     const name = patientQ.trim()
@@ -375,9 +398,12 @@ export function ReceptionAppointmentPage() {
       setFormErr('الوقت المختار لم يعد متاحاً بعد تحديث الجدول')
       return false
     }
-    const proc = procedureType.trim()
+    const proc =
+      selectedService === 'laser'
+        ? selectedLaserItems.map((item) => item.name).join(' + ').trim()
+        : procedureType.trim()
     if (!proc) {
-      setFormErr(selectedService === 'laser' ? 'اختر منطقة/عرض ليزر من القائمة' : 'اختر نوع الإجراء من القائمة')
+      setFormErr(selectedService === 'laser' ? 'اختر منطقة أو أكثر لليزر' : 'اختر نوع الإجراء من القائمة')
       return false
     }
     const overlap = slots.some((x) => {
@@ -417,6 +443,7 @@ export function ReceptionAppointmentPage() {
       setPicked(null)
       setPatientQ('')
       setPatientHits([])
+      setSelectedLaserItemIds([])
       await loadSlots()
       return true
     } catch (e) {
@@ -590,6 +617,7 @@ export function ReceptionAppointmentPage() {
                                     setPatientQ('')
                                     setPatientHits([])
                                     setProcedureType('')
+                                    setSelectedLaserItemIds([])
                                     setFormErr('')
                                     setSuccessMsg('')
                                     setDeclinedNewPatientForName(null)
@@ -653,6 +681,7 @@ export function ReceptionAppointmentPage() {
                             setPatientQ('')
                             setPatientHits([])
                             setProcedureType('')
+                            setSelectedLaserItemIds([])
                             setFormErr('')
                             setSuccessMsg('')
                             setDeclinedNewPatientForName(null)
@@ -781,26 +810,52 @@ export function ReceptionAppointmentPage() {
                   {laserProcedureErr ? (
                     <p style={{ marginTop: 0, color: 'var(--danger)' }}>{laserProcedureErr}</p>
                   ) : null}
-                  <select
-                    className="select"
-                    style={{ width: '100%' }}
-                    value={procedureType}
-                    onChange={(e) => setProcedureType(e.target.value)}
-                    disabled={laserProcedureLoading}
-                  >
-                    <option value="">
-                      {laserProcedureLoading ? 'جاري تحميل المناطق…' : '— اختر منطقة أو عرض —'}
-                    </option>
-                    {laserProcedureGroups.map((g) => (
-                      <optgroup key={g.id} label={g.title}>
-                        {g.items.map((item) => (
-                          <option key={item.id} value={item.name}>
-                            {item.name} — {item.priceSyp.toLocaleString('en-US')} ل.س
-                          </option>
+                  {laserProcedureLoading ? (
+                    <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>جاري تحميل المناطق…</p>
+                  ) : (
+                    <>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        {laserProcedureGroups.map((g) => (
+                          <div key={g.id}>
+                            <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
+                            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                              {g.items.map((item) => {
+                                const selected = selectedLaserItemIds.includes(item.id)
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
+                                    style={{
+                                      fontSize: '0.82rem',
+                                      padding: '0.38rem 0.58rem',
+                                      borderRadius: 999,
+                                      borderColor: selected ? 'var(--cyan)' : 'var(--border)',
+                                    }}
+                                    onClick={() =>
+                                      setSelectedLaserItemIds((prev) =>
+                                        prev.includes(item.id)
+                                          ? prev.filter((x) => x !== item.id)
+                                          : [...prev, item.id],
+                                      )
+                                    }
+                                  >
+                                    {item.name} — {item.priceSyp.toLocaleString('en-US')} ل.س
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
                         ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                      </div>
+                      <p style={{ margin: '0.65rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                        تم اختيار <strong>{selectedLaserItems.length}</strong> منطقة/عرض
+                        {selectedLaserItems.length > 0
+                          ? ` — المجموع التقريبي: ${selectedLaserTotalSyp.toLocaleString('en-US')} ل.س`
+                          : ''}
+                      </p>
+                    </>
+                  )}
                 </>
               ) : (
                 <select
