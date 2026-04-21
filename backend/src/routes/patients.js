@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { Patient } from '../models/Patient.js'
+import { BillingItem } from '../models/BillingItem.js'
+import { BillingPayment } from '../models/BillingPayment.js'
 import { authMiddleware, requireActiveDay } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
@@ -201,6 +203,78 @@ patientsRouter.post('/:id/portal/regenerate-password', requireActiveDay, async (
       username: p.portalUsername,
       password: plain,
       account: portalAccountPayload(p),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+patientsRouter.get('/:id/financial-ledger', async (req, res) => {
+  try {
+    if (!['super_admin', 'reception'].includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+
+    const items = await BillingItem.find({ patientId: p._id })
+      .select('_id amountDueUsd businessDate procedureLabel')
+      .lean()
+    const byId = new Map(items.map((x) => [String(x._id), x]))
+    const itemIds = [...byId.keys()]
+    if (itemIds.length === 0) {
+      res.json({
+        summary: {
+          outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
+          prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
+        },
+        entries: [],
+      })
+      return
+    }
+
+    const payments = await BillingPayment.find({ billingItemId: { $in: itemIds } })
+      .sort({ receivedAt: -1, createdAt: -1 })
+      .populate('receivedBy', 'name')
+      .lean()
+
+    const entries = payments.map((pay) => {
+      const key = String(pay.billingItemId)
+      const bi = byId.get(key)
+      const due = Number(bi?.amountDueUsd) || 0
+      const applied = Number(pay.amountUsd) || 0
+      const received = Number(pay.receivedAmountUsd ?? pay.amountUsd) || 0
+      const delta = Number(pay.settlementDeltaUsd ?? received - due) || 0
+      let settlementType = 'exact'
+      if (delta < -0.0001) settlementType = 'debt'
+      else if (delta > 0.0001) settlementType = 'credit'
+      return {
+        id: String(pay._id),
+        billingItemId: key,
+        businessDate: String(bi?.businessDate || '').trim(),
+        procedureLabel: String(bi?.procedureLabel || '').trim(),
+        amountDueUsd: due,
+        appliedAmountUsd: applied,
+        receivedAmountUsd: received,
+        settlementDeltaUsd: Math.round(delta * 100) / 100,
+        settlementType,
+        method: pay.method,
+        receivedAt: pay.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
+        receivedByName: String(pay.receivedBy?.name || '').trim(),
+      }
+    })
+
+    res.json({
+      summary: {
+        outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
+        prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
+      },
+      entries,
     })
   } catch (e) {
     console.error(e)

@@ -6,7 +6,15 @@ import { canAccessTab } from '../data/nav'
 import { api, ApiError } from '../api/client'
 import type { LaserCategory, Patient, Role } from '../types'
 
-type Tab = 'overview' | 'account' | 'sessions' | 'laser' | 'dermatology' | 'dental' | 'solarium'
+type Tab =
+  | 'overview'
+  | 'account'
+  | 'financial'
+  | 'sessions'
+  | 'laser'
+  | 'dermatology'
+  | 'dental'
+  | 'solarium'
 
 const laserTypes = ['Mix', 'Yag', 'Alex'] as const
 
@@ -416,7 +424,16 @@ export function PatientRecord() {
   useEffect(() => {
     const requested = searchParams.get('tab')
     if (!requested) return
-    const allowed: Tab[] = ['overview', 'account', 'sessions', 'laser', 'dermatology', 'dental', 'solarium']
+    const allowed: Tab[] = [
+      'overview',
+      'account',
+      'financial',
+      'sessions',
+      'laser',
+      'dermatology',
+      'dental',
+      'solarium',
+    ]
     if (allowed.includes(requested as Tab)) {
       setTab(requested as Tab)
     }
@@ -497,6 +514,23 @@ export function PatientRecord() {
     null,
   )
   const [portalActionBusy, setPortalActionBusy] = useState(false)
+  type FinancialEntry = {
+    id: string
+    billingItemId: string
+    businessDate: string
+    procedureLabel: string
+    amountDueUsd: number
+    appliedAmountUsd: number
+    receivedAmountUsd: number
+    settlementDeltaUsd: number
+    settlementType: 'exact' | 'debt' | 'credit' | string
+    method: string
+    receivedAt: string | null
+    receivedByName: string
+  }
+  const [financialEntries, setFinancialEntries] = useState<FinancialEntry[]>([])
+  const [financialLoading, setFinancialLoading] = useState(false)
+  const [financialErr, setFinancialErr] = useState('')
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
   const [laserSessionCompleting, setLaserSessionCompleting] = useState(false)
   const [laserDetailActionErr, setLaserDetailActionErr] = useState('')
@@ -953,10 +987,48 @@ export function PatientRecord() {
     }
   }, [id, tab, role])
 
+  useEffect(() => {
+    if (!id || tab !== 'financial') return
+    if (role !== 'super_admin' && role !== 'reception') return
+    let cancelled = false
+    setFinancialLoading(true)
+    setFinancialErr('')
+    ;(async () => {
+      try {
+        const data = await api<{
+          summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+          entries: FinancialEntry[]
+        }>(`/api/patients/${encodeURIComponent(id)}/financial-ledger`)
+        if (cancelled) return
+        setFinancialEntries(data.entries || [])
+        setPatient((prev) =>
+          prev
+            ? {
+                ...prev,
+                outstandingDebtUsd: Number(data.summary?.outstandingDebtUsd) || 0,
+                prepaidCreditUsd: Number(data.summary?.prepaidCreditUsd) || 0,
+              }
+            : prev,
+        )
+      } catch {
+        if (!cancelled) {
+          setFinancialEntries([])
+          setFinancialErr('تعذر تحميل السجل المالي')
+        }
+      } finally {
+        if (!cancelled) setFinancialLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, tab, role])
+
   const visibleTabs = useMemo(() => {
     const allTabs: { key: Tab; label: string }[] = [
       { key: 'overview', label: 'نظرة عامة' },
       { key: 'account', label: 'الحساب' },
+      { key: 'financial', label: 'مالية' },
       { key: 'sessions', label: 'جلسات / تحصيل' },
       { key: 'laser', label: 'الليزر' },
       { key: 'dermatology', label: 'الجلدية' },
@@ -973,6 +1045,7 @@ export function PatientRecord() {
         t.key === 'overview' ||
         (t.key === 'account' && showAccount) ||
         (t.key === 'sessions' && showSessionsTab) ||
+        (t.key === 'financial' && showAccount) ||
         (t.key === 'laser' && canAccessTab(role, 'laser')) ||
         (t.key === 'dermatology' && canAccessTab(role, 'dermatology')) ||
         (t.key === 'dental' && canAccessTab(role, 'dental')) ||
@@ -1702,6 +1775,65 @@ export function PatientRecord() {
               </div>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {tab === 'financial' && (role === 'super_admin' || role === 'reception') && (
+        <div className="card">
+          <h2 className="card-title">السجل المالي للمريض</h2>
+          <div className="grid-2" style={{ marginBottom: '0.75rem' }}>
+            <div>
+              <span className="form-label">إجمالي الذمم (USD)</span>
+              <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>
+                {(Number(patient.outstandingDebtUsd) || 0).toFixed(2)}
+              </p>
+            </div>
+            <div>
+              <span className="form-label">الرصيد الإضافي (USD)</span>
+              <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>
+                {(Number(patient.prepaidCreditUsd) || 0).toFixed(2)}
+              </p>
+            </div>
+          </div>
+          {financialErr ? <p style={{ color: 'var(--danger)', marginTop: 0 }}>{financialErr}</p> : null}
+          {financialLoading ? (
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري التحميل…</p>
+          ) : financialEntries.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد حركات مالية بعد.</p>
+          ) : (
+            <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>الإجراء</th>
+                    <th>سعر الجلسة</th>
+                    <th>المستلم</th>
+                    <th>الفرق</th>
+                    <th>التصنيف</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {financialEntries.map((x) => (
+                    <tr key={x.id}>
+                      <td>{x.businessDate || '—'}</td>
+                      <td>{x.procedureLabel || '—'}</td>
+                      <td>{(Number(x.amountDueUsd) || 0).toFixed(2)} USD</td>
+                      <td>{(Number(x.receivedAmountUsd) || 0).toFixed(2)} USD</td>
+                      <td>{(Number(x.settlementDeltaUsd) || 0).toFixed(2)} USD</td>
+                      <td>
+                        {x.settlementType === 'debt'
+                          ? 'ذمة'
+                          : x.settlementType === 'credit'
+                            ? 'رصيد إضافي'
+                            : 'مطابق'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

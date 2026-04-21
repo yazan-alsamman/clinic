@@ -40,6 +40,8 @@ export interface Patient {
   phone?: string
   /** ذكر / أنثى — فارغ إن لم يُحدَّد */
   gender?: 'male' | 'female' | ''
+  outstandingDebtUsd?: number
+  prepaidCreditUsd?: number
   paperLaserEntries?: Array<{
     therapist: string
     sessionDate: string
