@@ -167,7 +167,7 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       await LaserSession.updateOne({ billingItemId: bi._id }, { $set: { status: 'completed' } })
     }
 
-    const patient = await Patient.findById(bi.patientId)
+    const patient = await Patient.findById(bi.patientId).lean()
     let outstandingDebtUsd = 0
     let prepaidCreditUsd = 0
     if (patient) {
@@ -186,9 +186,16 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         extra = round2(extra - settleDebt)
         credit = round2(credit + extra)
       }
-      patient.outstandingDebtUsd = debt
-      patient.prepaidCreditUsd = credit
-      await patient.save()
+      // Avoid full document validation on legacy patient records (e.g. missing newer required fields).
+      await Patient.updateOne(
+        { _id: bi.patientId },
+        {
+          $set: {
+            outstandingDebtUsd: debt,
+            prepaidCreditUsd: credit,
+          },
+        },
+      )
       outstandingDebtUsd = debt
       prepaidCreditUsd = credit
     }
