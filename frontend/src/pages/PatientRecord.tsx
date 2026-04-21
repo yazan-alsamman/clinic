@@ -423,7 +423,7 @@ export function PatientRecord() {
   }, [searchParams])
 
   const [laserType, setLaserType] = useState<(typeof laserTypes)[number]>('Mix')
-  const [room, setRoom] = useState<'1' | '2'>('1')
+  const room: '1' | '2' = '1'
   const [laserCatalog, setLaserCatalog] = useState<LaserCategory[]>([])
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
