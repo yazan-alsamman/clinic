@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
-type RoomRow = { number: number; assigned: { id: string; name: string } | null }
+type RoomRow = {
+  number: number
+  assigned: { id: string; name: string } | null
+  morningAssigned: { id: string; name: string } | null
+  eveningAssigned: { id: string; name: string } | null
+  morningShiftStart: string
+  morningShiftEnd: string
+  eveningShiftStart: string
+  eveningShiftEnd: string
+}
 type LaserUser = { id: string; name: string; role: string; active: boolean }
 type LaserProcedureItem = {
   id: string
@@ -27,6 +36,12 @@ export function AdminRooms() {
   const [rooms, setRooms] = useState<RoomRow[]>([])
   const [laserUsers, setLaserUsers] = useState<LaserUser[]>([])
   const [pickRoom, setPickRoom] = useState<number | null>(null)
+  const [pickMorningUserId, setPickMorningUserId] = useState('')
+  const [pickEveningUserId, setPickEveningUserId] = useState('')
+  const [pickMorningShiftStart, setPickMorningShiftStart] = useState('09:00')
+  const [pickMorningShiftEnd, setPickMorningShiftEnd] = useState('15:00')
+  const [pickEveningShiftStart, setPickEveningShiftStart] = useState('15:00')
+  const [pickEveningShiftEnd, setPickEveningShiftEnd] = useState('21:00')
   const [loading, setLoading] = useState(true)
   const [groups, setGroups] = useState<LaserProcedureGroup[]>([])
   const [procLoading, setProcLoading] = useState(false)
@@ -89,13 +104,24 @@ export function AdminRooms() {
             <div key={room.number} className="card">
               <h2 className="card-title">غرفة {room.number}</h2>
               <p style={{ color: 'var(--text-muted)' }}>
-                المعيّن: {room.assigned?.name ?? '—'}
+                {room.morningShiftStart} - {room.morningShiftEnd}: {room.morningAssigned?.name ?? room.assigned?.name ?? '—'}
+              </p>
+              <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem' }}>
+                {room.eveningShiftStart} - {room.eveningShiftEnd}: {room.eveningAssigned?.name ?? room.assigned?.name ?? '—'}
               </p>
               <button
                 type="button"
                 className="btn btn-secondary"
                 style={{ marginTop: '0.75rem' }}
-                onClick={() => setPickRoom(room.number)}
+                onClick={() => {
+                  setPickRoom(room.number)
+                  setPickMorningUserId(room.morningAssigned?.id || room.assigned?.id || '')
+                  setPickEveningUserId(room.eveningAssigned?.id || room.assigned?.id || '')
+                  setPickMorningShiftStart(room.morningShiftStart || '09:00')
+                  setPickMorningShiftEnd(room.morningShiftEnd || '15:00')
+                  setPickEveningShiftStart(room.eveningShiftStart || '15:00')
+                  setPickEveningShiftEnd(room.eveningShiftEnd || '21:00')
+                }}
               >
                 إعادة تعيين
               </button>
@@ -108,36 +134,93 @@ export function AdminRooms() {
           <div className="modal">
             <h3>تعيين غرفة {pickRoom}</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-              اختر أخصائياً من فريق الليزر
+              اختر أخصائياً وحدد ساعات الدوام لكل شِفت
             </p>
-            <ul style={{ listStyle: 'none', padding: 0, margin: '0.75rem 0' }}>
-              {laserUsers.map((u) => (
-                <li key={u.id} style={{ marginBottom: '0.35rem' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ width: '100%' }}
-                    onClick={async () => {
-                      await api(`/api/rooms/${pickRoom}/assign`, {
-                        method: 'PATCH',
-                        body: JSON.stringify({ userId: u.id }),
-                      })
-                      setPickRoom(null)
-                      await load()
-                    }}
-                  >
+            <div style={{ display: 'grid', gap: '0.6rem', margin: '0.75rem 0' }}>
+              <label className="form-label" htmlFor="room-morning">شِفت الصباح</label>
+              <select
+                id="room-morning"
+                className="select"
+                value={pickMorningUserId}
+                onChange={(e) => setPickMorningUserId(e.target.value)}
+              >
+                <option value="">— بدون تعيين —</option>
+                {laserUsers.map((u) => (
+                  <option key={`m-${u.id}`} value={u.id}>
                     {u.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setPickRoom(null)}
-            >
-              إلغاء
-            </button>
+                  </option>
+                ))}
+              </select>
+              <div style={{ display: 'grid', gap: '0.45rem', gridTemplateColumns: '1fr 1fr' }}>
+                <input
+                  type="time"
+                  className="input"
+                  value={pickMorningShiftStart}
+                  onChange={(e) => setPickMorningShiftStart(e.target.value)}
+                />
+                <input
+                  type="time"
+                  className="input"
+                  value={pickMorningShiftEnd}
+                  onChange={(e) => setPickMorningShiftEnd(e.target.value)}
+                />
+              </div>
+
+              <label className="form-label" htmlFor="room-evening">شِفت المساء</label>
+              <select
+                id="room-evening"
+                className="select"
+                value={pickEveningUserId}
+                onChange={(e) => setPickEveningUserId(e.target.value)}
+              >
+                <option value="">— بدون تعيين —</option>
+                {laserUsers.map((u) => (
+                  <option key={`e-${u.id}`} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+              <div style={{ display: 'grid', gap: '0.45rem', gridTemplateColumns: '1fr 1fr' }}>
+                <input
+                  type="time"
+                  className="input"
+                  value={pickEveningShiftStart}
+                  onChange={(e) => setPickEveningShiftStart(e.target.value)}
+                />
+                <input
+                  type="time"
+                  className="input"
+                  value={pickEveningShiftEnd}
+                  onChange={(e) => setPickEveningShiftEnd(e.target.value)}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setPickRoom(null)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={async () => {
+                  await api(`/api/rooms/${pickRoom}/assign`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                      morningUserId: pickMorningUserId || null,
+                      eveningUserId: pickEveningUserId || null,
+                      morningShiftStart: pickMorningShiftStart,
+                      morningShiftEnd: pickMorningShiftEnd,
+                      eveningShiftStart: pickEveningShiftStart,
+                      eveningShiftEnd: pickEveningShiftEnd,
+                    }),
+                  })
+                  setPickRoom(null)
+                  await load()
+                }}
+              >
+                حفظ التعيين
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -128,7 +128,6 @@ export function BookedAppointmentsPage() {
   const [resDuration, setResDuration] = useState(60)
   const [resProcedure, setResProcedure] = useState('')
   const [provService, setProvService] = useState<ServiceKey>('other')
-  const [provRoom, setProvRoom] = useState('1')
   const [provLaserUserId, setProvLaserUserId] = useState('')
   const [provName, setProvName] = useState('')
 
@@ -176,13 +175,17 @@ export function BookedAppointmentsPage() {
     }
   }, [fullView])
 
-  const loadLaserProviders = useCallback(async () => {
-    if (!fullView) return
+  const loadLaserProviders = useCallback(async (slotTime?: string) => {
+    if (!fullView) return [] as LaserProviderOption[]
     try {
-      const data = await api<{ providers: LaserProviderOption[] }>('/api/schedule/laser-provider-options')
-      setLaserProviders(data.providers || [])
+      const q = slotTime ? `?time=${encodeURIComponent(slotTime)}` : ''
+      const data = await api<{ providers: LaserProviderOption[] }>(`/api/schedule/laser-provider-options${q}`)
+      const providers = data.providers || []
+      setLaserProviders(providers)
+      return providers
     } catch {
       setLaserProviders([])
+      return [] as LaserProviderOption[]
     }
   }, [fullView])
 
@@ -199,7 +202,7 @@ export function BookedAppointmentsPage() {
   }, [loadProviders])
 
   useEffect(() => {
-    void loadLaserProviders()
+    void loadLaserProviders('09:00')
   }, [loadLaserProviders])
 
   const grouped = useMemo(() => {
@@ -250,8 +253,12 @@ export function BookedAppointmentsPage() {
     [arrivedSlots],
   )
 
-  function openActionMenu(slot: SlotRow) {
+  async function openActionMenu(slot: SlotRow) {
     if (!fullView) return
+    let byTime: LaserProviderOption[] = laserProviders
+    if (normalizeService(slot) === 'laser') {
+      byTime = await loadLaserProviders(slot.time || '09:00')
+    }
     setActionSlot(slot)
     setActionMode('menu')
     setResDate(slot.businessDate || viewDate)
@@ -260,8 +267,7 @@ export function BookedAppointmentsPage() {
     setResProcedure(slot.procedureType || '')
     const svc = normalizeService(slot)
     setProvService(svc)
-    setProvRoom(String(parseRoomNumber(slot) || 1))
-    const matchedLaser = laserProviders.find((x) => x.roomNumber === (parseRoomNumber(slot) || 0))
+    const matchedLaser = byTime.find((x) => x.roomNumber === (parseRoomNumber(slot) || 0))
     setProvLaserUserId(matchedLaser?.userId || '')
     setProvName(slot.assignedSpecialistName?.trim() || slot.providerName || '')
   }
@@ -299,12 +305,13 @@ export function BookedAppointmentsPage() {
 
   async function submitProviderChange(slot: SlotRow) {
     const selectedLaser = laserProviders.find((x) => x.userId === provLaserUserId)
+    const slotRoom = parseRoomNumber(slot)
     const payload =
       provService === 'laser'
         ? {
             serviceType: 'laser',
-            roomNumber: selectedLaser?.roomNumber ?? Number(provRoom),
-            providerName: selectedLaser ? selectedLaser.name : `Laser Room ${provRoom}`,
+            roomNumber: selectedLaser?.roomNumber ?? slotRoom ?? 1,
+            providerName: selectedLaser ? selectedLaser.name : `Laser Room ${slotRoom ?? 1}`,
           }
         : { serviceType: provService, providerName: provName }
     await api(`/api/schedule/provider/${slot.id}`, {

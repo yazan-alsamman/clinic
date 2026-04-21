@@ -39,7 +39,49 @@ function inferRoomNumber(providerNameRaw) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-async function resolveProviderAssignment({ serviceType, providerName, roomNumberRaw }) {
+function inShift(slotMin, startMin, endMin) {
+  return slotMin >= startMin && slotMin < endMin
+}
+
+function roomShiftBounds(room) {
+  const morningShiftStart = normalizeHm(room?.morningShiftStart) || '09:00'
+  const morningShiftEnd = normalizeHm(room?.morningShiftEnd) || '15:00'
+  const eveningShiftStart = normalizeHm(room?.eveningShiftStart) || '15:00'
+  const eveningShiftEnd = normalizeHm(room?.eveningShiftEnd) || '21:00'
+  return {
+    morningShiftStart,
+    morningShiftEnd,
+    eveningShiftStart,
+    eveningShiftEnd,
+    morningStartMin: hmToMinutes(morningShiftStart),
+    morningEndMin: hmToMinutes(morningShiftEnd),
+    eveningStartMin: hmToMinutes(eveningShiftStart),
+    eveningEndMin: hmToMinutes(eveningShiftEnd),
+  }
+}
+
+function pickAssignedForTime(room, timeStr) {
+  const slotMin = hmToMinutes(normalizeHm(timeStr))
+  if (slotMin == null) return null
+  const b = roomShiftBounds(room)
+  if (
+    b.morningStartMin == null ||
+    b.morningEndMin == null ||
+    b.eveningStartMin == null ||
+    b.eveningEndMin == null
+  ) {
+    return room?.assignedUserId || null
+  }
+  if (inShift(slotMin, b.morningStartMin, b.morningEndMin)) {
+    return room?.morningAssignedUserId || room?.assignedUserId || null
+  }
+  if (inShift(slotMin, b.eveningStartMin, b.eveningEndMin)) {
+    return room?.eveningAssignedUserId || room?.assignedUserId || null
+  }
+  return null
+}
+
+async function resolveProviderAssignment({ serviceType, providerName, roomNumberRaw, timeStr }) {
   let effectiveProviderName = String(providerName || '').trim()
   let roomNumber = null
   let assignedSpecialistUserId = null
@@ -50,13 +92,17 @@ async function resolveProviderAssignment({ serviceType, providerName, roomNumber
     if (!roomNumber) {
       return { error: 'رقم غرفة الليزر مطلوب للحجز' }
     }
-    const room = await Room.findOne({ number: roomNumber }).populate('assignedUserId', 'name')
-    if (!room?.assignedUserId) {
-      return { error: 'لم يتم تعيين أخصائي لهذه الغرفة بعد. حدّده أولاً من لوحة المدير.' }
+    const room = await Room.findOne({ number: roomNumber })
+      .populate('assignedUserId', 'name')
+      .populate('morningAssignedUserId', 'name')
+      .populate('eveningAssignedUserId', 'name')
+    const assignedForShift = pickAssignedForTime(room, timeStr)
+    if (!assignedForShift) {
+      return { error: 'لا يوجد أخصائي مخصص لهذه الغرفة في وقت الموعد. عدّل الورديات من لوحة المدير.' }
     }
     effectiveProviderName = `Laser Room ${roomNumber}`
-    assignedSpecialistUserId = room.assignedUserId._id
-    assignedSpecialistName = room.assignedUserId.name || ''
+    assignedSpecialistUserId = assignedForShift._id
+    assignedSpecialistName = assignedForShift.name || ''
   }
   return { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName }
 }
@@ -199,18 +245,30 @@ scheduleRouter.get('/providers', async (_req, res) => {
 /** خيارات أخصائيي الليزر المعيّنين على الغرف (للاستقبال/المدير) */
 scheduleRouter.get('/laser-provider-options', async (_req, res) => {
   try {
+    const slotTime = normalizeHm(_req.query.time) || '09:00'
     const rooms = await Room.find({
-      assignedUserId: { $ne: null },
+      $or: [{ morningAssignedUserId: { $ne: null } }, { eveningAssignedUserId: { $ne: null } }, { assignedUserId: { $ne: null } }],
     })
+      .populate('morningAssignedUserId', 'name role')
+      .populate('eveningAssignedUserId', 'name role')
       .populate('assignedUserId', 'name role')
       .sort({ number: 1 })
       .lean()
     const providers = rooms
-      .filter((r) => r.assignedUserId?.name)
+      .map((r) => {
+        const assigned = pickAssignedForTime(r, slotTime)
+        if (!assigned?.name) return null
+        return {
+          roomNumber: r.number,
+          userId: String(assigned._id),
+          name: String(assigned.name || '').trim(),
+        }
+      })
+      .filter(Boolean)
       .map((r) => ({
-        roomNumber: r.number,
-        userId: String(r.assignedUserId._id),
-        name: String(r.assignedUserId.name || '').trim(),
+        roomNumber: r.roomNumber,
+        userId: r.userId,
+        name: r.name,
       }))
     res.json({ providers })
   } catch (e) {
@@ -299,7 +357,12 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    const resolved = await resolveProviderAssignment({ serviceType, providerName, roomNumberRaw: body.roomNumber })
+    const resolved = await resolveProviderAssignment({
+      serviceType,
+      providerName,
+      roomNumberRaw: body.roomNumber,
+      timeStr: time,
+    })
     if (resolved.error) {
       res.status(400).json({ error: resolved.error })
       return
@@ -442,6 +505,7 @@ scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async
       serviceType,
       providerName: requestedProvider,
       roomNumberRaw: body.roomNumber ?? slot.roomNumber,
+      timeStr: time,
     })
     if (resolved.error) {
       res.status(400).json({ error: resolved.error })
@@ -497,6 +561,7 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
       serviceType,
       providerName: requestedProvider,
       roomNumberRaw: body.roomNumber ?? slot.roomNumber,
+      timeStr: slot.time,
     })
     if (resolved.error) {
       res.status(400).json({ error: resolved.error })
