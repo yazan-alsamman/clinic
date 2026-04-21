@@ -60,8 +60,6 @@ export function ReceptionAppointmentPage() {
   const [slotsErr, setSlotsErr] = useState('')
 
   const [providerDirectory, setProviderDirectory] = useState<string[]>([])
-  const [providersLoading, setProvidersLoading] = useState(false)
-  const [peekProvider, setPeekProvider] = useState('')
 
   const [selectedProvider, setSelectedProvider] = useState(DEFAULT_PROVIDERS[0])
   const [appointmentTime, setAppointmentTime] = useState('09:00')
@@ -82,14 +80,11 @@ export function ReceptionAppointmentPage() {
 
   const loadProviders = useCallback(async () => {
     if (!canUse) return
-    setProvidersLoading(true)
     try {
       const data = await api<{ providers: string[] }>('/api/schedule/providers')
       setProviderDirectory(data.providers)
     } catch {
       setProviderDirectory([])
-    } finally {
-      setProvidersLoading(false)
     }
   }, [canUse])
 
@@ -168,13 +163,6 @@ export function ReceptionAppointmentPage() {
       setDeclinedNewPatientForName(null)
     }
   }, [patientQ, declinedNewPatientForName])
-
-  const slotsForPeek = useMemo(() => {
-    if (!peekProvider) return []
-    return slots
-      .filter((s) => s.providerName === peekProvider)
-      .sort((a, b) => a.time.localeCompare(b.time, undefined, { numeric: true }))
-  }, [slots, peekProvider])
 
   const providerBookedSlots = useMemo(
     () =>
@@ -427,95 +415,6 @@ export function ReceptionAppointmentPage() {
         </button>
         {slotsErr ? (
           <p style={{ color: 'var(--danger)', marginTop: '0.5rem', marginBottom: 0 }}>{slotsErr}</p>
-        ) : null}
-      </div>
-
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h2 className="card-title" style={{ marginTop: 0 }}>
-          جدول مواعيد الطبيب / الأخصائي
-        </h2>
-        <p className="page-desc" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
-          قائمة بجميع الأطباء والأخصائيين — اختر اسماً لعرض كل المواعيد المسجّلة له في التاريخ أعلاه (محجوزة أو فارغة).
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-          <label className="form-label" htmlFor="peek-provider" style={{ margin: 0 }}>
-            الاسم
-          </label>
-          <select
-            id="peek-provider"
-            className="select"
-            style={{ minWidth: 220, maxWidth: '100%' }}
-            value={peekProvider}
-            onChange={(e) => setPeekProvider(e.target.value)}
-            disabled={providersLoading && providerDirectory.length === 0}
-          >
-            <option value="">— اختر طبيباً أو أخصائياً —</option>
-            {(providerDirectory.length > 0 ? providerDirectory : providerOptions).map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="btn btn-secondary" disabled={providersLoading} onClick={() => void loadProviders()}>
-            تحديث الأسماء
-          </button>
-        </div>
-        {providersLoading && providerDirectory.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', marginTop: '0.75rem', marginBottom: 0 }}>جاري تحميل الأسماء…</p>
-        ) : null}
-        {peekProvider ? (
-          <div className="table-wrap" style={{ marginTop: '1rem' }}>
-            {slotsLoading ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل المواعيد…</p>
-            ) : slotsForPeek.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-                لا مواعيد محجوزة لهذا الاسم في {businessDate}. يمكنك حجز أي وقت بالأسفل طالما لا يتعارض مع موعد آخر
-                لنفس المقدّم.
-              </p>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>المقدّم</th>
-                    <th>نوع الإجراء</th>
-                    <th>من — إلى</th>
-                    <th>الحالة</th>
-                    <th>المريض</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {slotsForPeek.map((s) => (
-                    <tr key={s.id}>
-                      <td>{s.providerName}</td>
-                      <td>{s.procedureType?.trim() ? s.procedureType : '—'}</td>
-                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {s.time}
-                        {s.endTime ? ` — ${s.endTime}` : ''}
-                      </td>
-                      <td>
-                        {s.status === 'busy' ? (
-                          <span
-                            className="chip"
-                            style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}
-                          >
-                            محجوز
-                          </span>
-                        ) : (
-                          <span
-                            className="chip"
-                            style={{ background: 'var(--success-dim)', color: 'var(--success)' }}
-                          >
-                            متاح
-                          </span>
-                        )}
-                      </td>
-                      <td>{s.status === 'busy' && s.patientName ? s.patientName : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
         ) : null}
       </div>
 
