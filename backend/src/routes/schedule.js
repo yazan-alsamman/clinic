@@ -196,6 +196,29 @@ scheduleRouter.get('/providers', async (_req, res) => {
   }
 })
 
+/** خيارات أخصائيي الليزر المعيّنين على الغرف (للاستقبال/المدير) */
+scheduleRouter.get('/laser-provider-options', async (_req, res) => {
+  try {
+    const rooms = await Room.find({
+      assignedUserId: { $ne: null },
+    })
+      .populate('assignedUserId', 'name role')
+      .sort({ number: 1 })
+      .lean()
+    const providers = rooms
+      .filter((r) => r.assignedUserId?.name)
+      .map((r) => ({
+        roomNumber: r.number,
+        userId: String(r.assignedUserId._id),
+        name: String(r.assignedUserId.name || '').trim(),
+      }))
+    res.json({ providers })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 function slotToDto(s) {
   const o = s.toObject ? s.toObject() : s
   const busy = Boolean(o.patientId)

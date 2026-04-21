@@ -23,6 +23,7 @@ type SlotRow = {
   procedureType?: string
   patientName: string
 }
+type LaserProviderOption = { roomNumber: number; userId: string; name: string }
 
 type ServiceKey = 'laser' | 'dental' | 'dermatology' | 'solarium' | 'other'
 
@@ -86,6 +87,25 @@ function addMinutesHm(hm: string, minutes: number) {
   return `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}`
 }
 
+function renderTimeWithArrival(slot: SlotRow) {
+  return (
+    <>
+      <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {slot.time}
+        {slot.endTime ? ` — ${slot.endTime}` : ''}
+      </span>
+      {slot.arrivedAt ? (
+        <span
+          title="المريض وصل"
+          style={{ marginInlineStart: '0.45rem', color: 'var(--success)', fontSize: '0.9rem', fontWeight: 700 }}
+        >
+          ✓
+        </span>
+      ) : null}
+    </>
+  )
+}
+
 export function BookedAppointmentsPage() {
   const { user } = useAuth()
   const { businessDate: clinicBusinessDate } = useClinic()
@@ -102,12 +122,14 @@ export function BookedAppointmentsPage() {
   const [actionSlot, setActionSlot] = useState<SlotRow | null>(null)
   const [actionMode, setActionMode] = useState<'menu' | 'reschedule' | 'provider'>('menu')
   const [providers, setProviders] = useState<string[]>([])
+  const [laserProviders, setLaserProviders] = useState<LaserProviderOption[]>([])
   const [resDate, setResDate] = useState(todayYmd)
   const [resTime, setResTime] = useState('09:00')
   const [resDuration, setResDuration] = useState(60)
   const [resProcedure, setResProcedure] = useState('')
   const [provService, setProvService] = useState<ServiceKey>('other')
   const [provRoom, setProvRoom] = useState('1')
+  const [provLaserUserId, setProvLaserUserId] = useState('')
   const [provName, setProvName] = useState('')
 
   const load = useCallback(async () => {
@@ -154,6 +176,16 @@ export function BookedAppointmentsPage() {
     }
   }, [fullView])
 
+  const loadLaserProviders = useCallback(async () => {
+    if (!fullView) return
+    try {
+      const data = await api<{ providers: LaserProviderOption[] }>('/api/schedule/laser-provider-options')
+      setLaserProviders(data.providers || [])
+    } catch {
+      setLaserProviders([])
+    }
+  }, [fullView])
+
   useEffect(() => {
     void load()
   }, [load])
@@ -165,6 +197,10 @@ export function BookedAppointmentsPage() {
   useEffect(() => {
     void loadProviders()
   }, [loadProviders])
+
+  useEffect(() => {
+    void loadLaserProviders()
+  }, [loadLaserProviders])
 
   const grouped = useMemo(() => {
     const filtered = fullView
@@ -225,6 +261,8 @@ export function BookedAppointmentsPage() {
     const svc = normalizeService(slot)
     setProvService(svc)
     setProvRoom(String(parseRoomNumber(slot) || 1))
+    const matchedLaser = laserProviders.find((x) => x.roomNumber === (parseRoomNumber(slot) || 0))
+    setProvLaserUserId(matchedLaser?.userId || '')
     setProvName(slot.assignedSpecialistName?.trim() || slot.providerName || '')
   }
 
@@ -260,9 +298,14 @@ export function BookedAppointmentsPage() {
   }
 
   async function submitProviderChange(slot: SlotRow) {
+    const selectedLaser = laserProviders.find((x) => x.userId === provLaserUserId)
     const payload =
       provService === 'laser'
-        ? { serviceType: 'laser', roomNumber: Number(provRoom), providerName: `Laser Room ${provRoom}` }
+        ? {
+            serviceType: 'laser',
+            roomNumber: selectedLaser?.roomNumber ?? Number(provRoom),
+            providerName: selectedLaser ? selectedLaser.name : `Laser Room ${provRoom}`,
+          }
         : { serviceType: provService, providerName: provName }
     await api(`/api/schedule/provider/${slot.id}`, {
       method: 'PATCH',
@@ -445,10 +488,7 @@ export function BookedAppointmentsPage() {
                           onClick={() => openActionMenu(s)}
                           style={fullView ? { cursor: 'pointer' } : undefined}
                         >
-                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {s.time}
-                            {s.endTime ? ` — ${s.endTime}` : ''}
-                          </td>
+                          <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
                           <td>{SERVICE_LABELS.dental}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
@@ -494,10 +534,7 @@ export function BookedAppointmentsPage() {
                                   onClick={() => openActionMenu(s)}
                                   style={fullView ? { cursor: 'pointer' } : undefined}
                                 >
-                                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                    {s.time}
-                                    {s.endTime ? ` — ${s.endTime}` : ''}
-                                  </td>
+                                  <td>{renderTimeWithArrival(s)}</td>
                                   <td>{s.patientName || '—'}</td>
                                   <td>{s.procedureType?.trim() ? s.procedureType : '—'}</td>
                                   <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
@@ -529,10 +566,7 @@ export function BookedAppointmentsPage() {
                                 onClick={() => openActionMenu(s)}
                                 style={fullView ? { cursor: 'pointer' } : undefined}
                               >
-                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                  {s.time}
-                                  {s.endTime ? ` — ${s.endTime}` : ''}
-                                </td>
+                                <td>{renderTimeWithArrival(s)}</td>
                                 <td>{s.patientName || '—'}</td>
                                 <td>{s.procedureType?.trim() ? s.procedureType : '—'}</td>
                                 <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
@@ -567,10 +601,7 @@ export function BookedAppointmentsPage() {
                           onClick={() => openActionMenu(s)}
                           style={fullView ? { cursor: 'pointer' } : undefined}
                         >
-                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {s.time}
-                            {s.endTime ? ` — ${s.endTime}` : ''}
-                          </td>
+                          <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
                           <td>{SERVICE_LABELS.dermatology}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
@@ -602,10 +633,7 @@ export function BookedAppointmentsPage() {
                           onClick={() => openActionMenu(s)}
                           style={fullView ? { cursor: 'pointer' } : undefined}
                         >
-                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {s.time}
-                            {s.endTime ? ` — ${s.endTime}` : ''}
-                          </td>
+                          <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
                           <td>{SERVICE_LABELS.solarium}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
@@ -637,10 +665,7 @@ export function BookedAppointmentsPage() {
                           onClick={() => openActionMenu(s)}
                           style={fullView ? { cursor: 'pointer' } : undefined}
                         >
-                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {s.time}
-                            {s.endTime ? ` — ${s.endTime}` : ''}
-                          </td>
+                          <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
                           <td>{SERVICE_LABELS.other}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
@@ -723,9 +748,17 @@ export function BookedAppointmentsPage() {
                   <option value="other">{SERVICE_LABELS.other}</option>
                 </select>
                 {provService === 'laser' ? (
-                  <select className="select" value={provRoom} onChange={(e) => setProvRoom(e.target.value)}>
-                    <option value="1">Room 1</option>
-                    <option value="2">Room 2</option>
+                  <select
+                    className="select"
+                    value={provLaserUserId}
+                    onChange={(e) => setProvLaserUserId(e.target.value)}
+                  >
+                    <option value="">— اختر أخصائي الليزر —</option>
+                    {laserProviders.map((p) => (
+                      <option key={p.userId} value={p.userId}>
+                        {p.name}
+                      </option>
+                    ))}
                   </select>
                 ) : (
                   <input
