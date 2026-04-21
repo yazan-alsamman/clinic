@@ -477,7 +477,14 @@ export function ReceptionAppointmentPage() {
         {slotsLoading ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل الجدول…</p>
         ) : selectedService === 'laser' ? (
-          <div style={{ display: 'grid', gap: '1rem' }}>
+          <div
+            style={{
+              display: 'grid',
+              gap: '1rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
+              alignItems: 'start',
+            }}
+          >
             {SERVICE_CHANNELS.laser.map((channel) => {
               const rows = appointmentRowsForChannel(channel)
               return (
