@@ -19,6 +19,7 @@ type SlotRow = {
   assignedSpecialistName?: string
   serviceType?: string
   roomNumber?: number | null
+  arrivedAt?: string | null
   procedureType?: string
   patientName: string
 }
@@ -73,6 +74,18 @@ function normalizeService(slot: SlotRow): ServiceKey {
   return 'other'
 }
 
+function addMinutesHm(hm: string, minutes: number) {
+  const m = String(hm || '').match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return ''
+  const h = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return ''
+  const total = h * 60 + mm + minutes
+  const outH = Math.floor(total / 60)
+  const outM = total % 60
+  return `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}`
+}
+
 export function BookedAppointmentsPage() {
   const { user } = useAuth()
   const { businessDate: clinicBusinessDate } = useClinic()
@@ -81,9 +94,21 @@ export function BookedAppointmentsPage() {
 
   const [viewDate, setViewDate] = useState(todayYmd)
   const [procedureFilter, setProcedureFilter] = useState<ProcedureCategoryFilter>('all')
+  const [activeTab, setActiveTab] = useState<'booked' | 'clinic_now'>('booked')
   const [slots, setSlots] = useState<SlotRow[]>([])
+  const [arrivedSlots, setArrivedSlots] = useState<SlotRow[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const [actionSlot, setActionSlot] = useState<SlotRow | null>(null)
+  const [actionMode, setActionMode] = useState<'menu' | 'reschedule' | 'provider'>('menu')
+  const [providers, setProviders] = useState<string[]>([])
+  const [resDate, setResDate] = useState(todayYmd)
+  const [resTime, setResTime] = useState('09:00')
+  const [resDuration, setResDuration] = useState(60)
+  const [resProcedure, setResProcedure] = useState('')
+  const [provService, setProvService] = useState<ServiceKey>('other')
+  const [provRoom, setProvRoom] = useState('1')
+  const [provName, setProvName] = useState('')
 
   const load = useCallback(async () => {
     if (!allowed) {
@@ -106,9 +131,40 @@ export function BookedAppointmentsPage() {
     }
   }, [allowed, fullView, viewDate, clinicBusinessDate])
 
+  const loadArrived = useCallback(async () => {
+    if (!allowed) return
+    try {
+      const q = fullView
+        ? new URLSearchParams({ date: viewDate })
+        : new URLSearchParams({ date: clinicBusinessDate || todayYmd() })
+      const data = await api<{ slots: SlotRow[] }>(`/api/schedule/arrived?${q.toString()}`)
+      setArrivedSlots(data.slots || [])
+    } catch {
+      setArrivedSlots([])
+    }
+  }, [allowed, fullView, viewDate, clinicBusinessDate])
+
+  const loadProviders = useCallback(async () => {
+    if (!fullView) return
+    try {
+      const data = await api<{ providers: string[] }>('/api/schedule/providers')
+      setProviders(data.providers || [])
+    } catch {
+      setProviders([])
+    }
+  }, [fullView])
+
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void loadArrived()
+  }, [loadArrived])
+
+  useEffect(() => {
+    void loadProviders()
+  }, [loadProviders])
 
   const grouped = useMemo(() => {
     const filtered = fullView
@@ -147,6 +203,74 @@ export function BookedAppointmentsPage() {
 
     return { sorted, byService, laserRooms }
   }, [slots, procedureFilter, fullView])
+
+  const arrivedSorted = useMemo(
+    () =>
+      [...arrivedSlots].sort((a, b) => {
+        const c = a.businessDate.localeCompare(b.businessDate)
+        if (c !== 0) return c
+        return (a.arrivedAt || '').localeCompare(b.arrivedAt || '')
+      }),
+    [arrivedSlots],
+  )
+
+  function openActionMenu(slot: SlotRow) {
+    if (!fullView) return
+    setActionSlot(slot)
+    setActionMode('menu')
+    setResDate(slot.businessDate || viewDate)
+    setResTime(slot.time || '09:00')
+    setResDuration(60)
+    setResProcedure(slot.procedureType || '')
+    const svc = normalizeService(slot)
+    setProvService(svc)
+    setProvRoom(String(parseRoomNumber(slot) || 1))
+    setProvName(slot.assignedSpecialistName?.trim() || slot.providerName || '')
+  }
+
+  async function markArrived(slot: SlotRow) {
+    await api(`/api/schedule/arrive/${slot.id}`, { method: 'POST' })
+    await Promise.all([load(), loadArrived()])
+    setActionSlot(null)
+  }
+
+  async function cancelSlot(slot: SlotRow) {
+    await api(`/api/schedule/cancel/${slot.id}`, { method: 'DELETE' })
+    await Promise.all([load(), loadArrived()])
+    setActionSlot(null)
+  }
+
+  async function submitReschedule(slot: SlotRow) {
+    const end = addMinutesHm(resTime, resDuration)
+    if (!end) {
+      setErr('وقت غير صالح')
+      return
+    }
+    await api(`/api/schedule/reschedule/${slot.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        businessDate: resDate,
+        time: resTime,
+        endTime: end,
+        procedureType: resProcedure,
+      }),
+    })
+    await Promise.all([load(), loadArrived()])
+    setActionSlot(null)
+  }
+
+  async function submitProviderChange(slot: SlotRow) {
+    const payload =
+      provService === 'laser'
+        ? { serviceType: 'laser', roomNumber: Number(provRoom), providerName: `Laser Room ${provRoom}` }
+        : { serviceType: provService, providerName: provName }
+    await api(`/api/schedule/provider/${slot.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+    await Promise.all([load(), loadArrived()])
+    setActionSlot(null)
+  }
 
   if (!allowed) {
     return (
@@ -235,8 +359,59 @@ export function BookedAppointmentsPage() {
         </div>
       )}
 
+      {fullView ? (
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+          <button
+            type="button"
+            className={`btn ${activeTab === 'booked' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveTab('booked')}
+          >
+            المواعيد المحجوزة
+          </button>
+          <button
+            type="button"
+            className={`btn ${activeTab === 'clinic_now' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveTab('clinic_now')}
+          >
+            حالة العيادة الآن
+          </button>
+        </div>
+      ) : null}
+
       <div className="card">
-        {err ? (
+        {activeTab === 'clinic_now' && fullView ? (
+          arrivedSorted.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا يوجد مرضى تم تسجيل وصولهم بعد.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>من — إلى</th>
+                    <th>اسم المريض</th>
+                    <th>القسم</th>
+                    <th>المقدم</th>
+                    <th>وقت الوصول</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arrivedSorted.map((s) => (
+                    <tr key={`arrived-${s.id}`}>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {s.time}
+                        {s.endTime ? ` — ${s.endTime}` : ''}
+                      </td>
+                      <td>{s.patientName || '—'}</td>
+                      <td>{SERVICE_LABELS[normalizeService(s)]}</td>
+                      <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                      <td>{s.arrivedAt ? new Date(s.arrivedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : err ? (
           <p style={{ color: 'var(--danger)', margin: 0 }}>{err}</p>
         ) : loading ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري التحميل…</p>
@@ -265,7 +440,11 @@ export function BookedAppointmentsPage() {
                     </thead>
                     <tbody>
                       {grouped.byService.dental.map((s) => (
-                        <tr key={s.id}>
+                        <tr
+                          key={s.id}
+                          onClick={() => openActionMenu(s)}
+                          style={fullView ? { cursor: 'pointer' } : undefined}
+                        >
                           <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                             {s.time}
                             {s.endTime ? ` — ${s.endTime}` : ''}
@@ -310,7 +489,11 @@ export function BookedAppointmentsPage() {
                               </tr>
                             ) : (
                               room.rows.map((s) => (
-                                <tr key={s.id}>
+                                <tr
+                                  key={s.id}
+                                  onClick={() => openActionMenu(s)}
+                                  style={fullView ? { cursor: 'pointer' } : undefined}
+                                >
                                   <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                                     {s.time}
                                     {s.endTime ? ` — ${s.endTime}` : ''}
@@ -341,7 +524,11 @@ export function BookedAppointmentsPage() {
                           </thead>
                           <tbody>
                             {grouped.laserRooms.other.map((s) => (
-                              <tr key={s.id}>
+                              <tr
+                                key={s.id}
+                                onClick={() => openActionMenu(s)}
+                                style={fullView ? { cursor: 'pointer' } : undefined}
+                              >
                                 <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                                   {s.time}
                                   {s.endTime ? ` — ${s.endTime}` : ''}
@@ -375,7 +562,11 @@ export function BookedAppointmentsPage() {
                     </thead>
                     <tbody>
                       {grouped.byService.dermatology.map((s) => (
-                        <tr key={s.id}>
+                        <tr
+                          key={s.id}
+                          onClick={() => openActionMenu(s)}
+                          style={fullView ? { cursor: 'pointer' } : undefined}
+                        >
                           <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                             {s.time}
                             {s.endTime ? ` — ${s.endTime}` : ''}
@@ -406,7 +597,11 @@ export function BookedAppointmentsPage() {
                     </thead>
                     <tbody>
                       {grouped.byService.solarium.map((s) => (
-                        <tr key={s.id}>
+                        <tr
+                          key={s.id}
+                          onClick={() => openActionMenu(s)}
+                          style={fullView ? { cursor: 'pointer' } : undefined}
+                        >
                           <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                             {s.time}
                             {s.endTime ? ` — ${s.endTime}` : ''}
@@ -437,7 +632,11 @@ export function BookedAppointmentsPage() {
                     </thead>
                     <tbody>
                       {grouped.byService.other.map((s) => (
-                        <tr key={s.id}>
+                        <tr
+                          key={s.id}
+                          onClick={() => openActionMenu(s)}
+                          style={fullView ? { cursor: 'pointer' } : undefined}
+                        >
                           <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                             {s.time}
                             {s.endTime ? ` — ${s.endTime}` : ''}
@@ -455,6 +654,106 @@ export function BookedAppointmentsPage() {
           </div>
         )}
       </div>
+
+      {fullView && actionSlot ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setActionSlot(null)}>
+          <div className="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>إدارة الموعد</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: '-0.35rem' }}>
+              {actionSlot.patientName} — {actionSlot.time}
+              {actionSlot.endTime ? ` إلى ${actionSlot.endTime}` : ''}
+            </p>
+
+            {actionMode === 'menu' ? (
+              <div style={{ display: 'grid', gap: '0.55rem' }}>
+                <button type="button" className="btn btn-primary" onClick={() => void markArrived(actionSlot)}>
+                  ✅ وصل المريض
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setActionMode('reschedule')}>
+                  🕒 تغيير وقت الموعد
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setActionMode('provider')}>
+                  👨‍⚕️ تغيير المقدم
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => void cancelSlot(actionSlot)}>
+                  ❌ إلغاء الموعد
+                </button>
+              </div>
+            ) : null}
+
+            {actionMode === 'reschedule' ? (
+              <div style={{ display: 'grid', gap: '0.6rem' }}>
+                <input className="input" type="date" value={resDate} onChange={(e) => setResDate(e.target.value)} />
+                <input className="input" type="time" value={resTime} onChange={(e) => setResTime(e.target.value)} />
+                <select
+                  className="select"
+                  value={String(resDuration)}
+                  onChange={(e) => setResDuration(Math.max(15, Number(e.target.value) || 60))}
+                >
+                  <option value="30">30 دقيقة</option>
+                  <option value="45">45 دقيقة</option>
+                  <option value="60">60 دقيقة</option>
+                  <option value="90">90 دقيقة</option>
+                  <option value="120">120 دقيقة</option>
+                </select>
+                <input
+                  className="input"
+                  value={resProcedure}
+                  onChange={(e) => setResProcedure(e.target.value)}
+                  placeholder="الإجراء / المناطق"
+                />
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setActionMode('menu')}>
+                    رجوع
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={() => void submitReschedule(actionSlot)}>
+                    حفظ الوقت الجديد
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {actionMode === 'provider' ? (
+              <div style={{ display: 'grid', gap: '0.6rem' }}>
+                <select className="select" value={provService} onChange={(e) => setProvService(e.target.value as ServiceKey)}>
+                  <option value="laser">{SERVICE_LABELS.laser}</option>
+                  <option value="dental">{SERVICE_LABELS.dental}</option>
+                  <option value="dermatology">{SERVICE_LABELS.dermatology}</option>
+                  <option value="solarium">{SERVICE_LABELS.solarium}</option>
+                  <option value="other">{SERVICE_LABELS.other}</option>
+                </select>
+                {provService === 'laser' ? (
+                  <select className="select" value={provRoom} onChange={(e) => setProvRoom(e.target.value)}>
+                    <option value="1">Room 1</option>
+                    <option value="2">Room 2</option>
+                  </select>
+                ) : (
+                  <input
+                    className="input"
+                    value={provName}
+                    onChange={(e) => setProvName(e.target.value)}
+                    placeholder="اسم المقدم"
+                    list="provider-suggestions"
+                  />
+                )}
+                <datalist id="provider-suggestions">
+                  {providers.map((p) => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setActionMode('menu')}>
+                    رجوع
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={() => void submitProviderChange(actionSlot)}>
+                    حفظ المقدم
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }

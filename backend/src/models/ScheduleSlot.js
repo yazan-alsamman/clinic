@@ -21,6 +21,9 @@ const scheduleSlotSchema = new mongoose.Schema(
     procedureType: { type: String, default: '', trim: true, maxlength: 200 },
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', default: null },
     patientName: { type: String, default: '' },
+    arrivedAt: { type: Date, default: null, index: true },
+    arrivedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    arrivedByName: { type: String, default: '', trim: true },
   },
   { timestamps: true },
 )

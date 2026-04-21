@@ -39,6 +39,50 @@ function inferRoomNumber(providerNameRaw) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+async function resolveProviderAssignment({ serviceType, providerName, roomNumberRaw }) {
+  let effectiveProviderName = String(providerName || '').trim()
+  let roomNumber = null
+  let assignedSpecialistUserId = null
+  let assignedSpecialistName = ''
+  if (serviceType === 'laser') {
+    const bodyRoom = Number(roomNumberRaw)
+    roomNumber = Number.isFinite(bodyRoom) && bodyRoom > 0 ? Math.trunc(bodyRoom) : inferRoomNumber(providerName)
+    if (!roomNumber) {
+      return { error: 'رقم غرفة الليزر مطلوب للحجز' }
+    }
+    const room = await Room.findOne({ number: roomNumber }).populate('assignedUserId', 'name')
+    if (!room?.assignedUserId) {
+      return { error: 'لم يتم تعيين أخصائي لهذه الغرفة بعد. حدّده أولاً من لوحة المدير.' }
+    }
+    effectiveProviderName = `Laser Room ${roomNumber}`
+    assignedSpecialistUserId = room.assignedUserId._id
+    assignedSpecialistName = room.assignedUserId.name || ''
+  }
+  return { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName }
+}
+
+async function assertNoOverlapForProvider({ businessDate, providerName, startTime, endTime, ignoreId = null }) {
+  const startMin = hmToMinutes(startTime)
+  const endMin = hmToMinutes(endTime)
+  if (startMin == null || endMin == null || endMin <= startMin) {
+    return { error: 'وقت النهاية يجب أن يكون بعد وقت البداية' }
+  }
+  const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName }).lean()
+  for (const o of sameProvSlots) {
+    if (!o.patientId) continue
+    if (ignoreId && String(o._id) === String(ignoreId)) continue
+    const iv = slotIntervalMinutes(o)
+    if (!iv) continue
+    if (intervalsOverlapHalfOpen(startMin, endMin, iv.start, iv.end)) {
+      return {
+        error:
+          'فترة الموعد (من وقت البداية إلى النهاية) تتداخل مع موعد آخر لنفس المقدّم في هذا اليوم — اختر أوقاتاً لا تتقاطع مع المواعيد الحالية',
+      }
+    }
+  }
+  return { ok: true }
+}
+
 /**
  * مواعيد محجوزة: إما يوم واحد `?date=YYYY-MM-DD` أو نطاق `from` / `to` (للتوافق).
  * المدير والاستقبال: الكل — المقدّمون: حيث providerName = اسم المستخدم
@@ -174,6 +218,9 @@ function slotToDto(s) {
     roomNumber: Number.isFinite(Number(o.roomNumber)) ? Number(o.roomNumber) : null,
     assignedSpecialistUserId: o.assignedSpecialistUserId ? String(o.assignedSpecialistUserId) : null,
     assignedSpecialistName: String(o.assignedSpecialistName || '').trim(),
+    arrivedAt: o.arrivedAt || null,
+    arrivedByUserId: o.arrivedByUserId ? String(o.arrivedByUserId) : null,
+    arrivedByName: String(o.arrivedByName || '').trim(),
     procedureType: String(o.procedureType || '').trim(),
     status: busy ? 'busy' : 'free',
     patientId: o.patientId ? String(o.patientId) : null,
@@ -229,46 +276,28 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    let effectiveProviderName = providerName
-    let roomNumber = null
-    let assignedSpecialistUserId = null
-    let assignedSpecialistName = ''
-    if (serviceType === 'laser') {
-      const bodyRoom = Number(body.roomNumber)
-      roomNumber = Number.isFinite(bodyRoom) && bodyRoom > 0 ? Math.trunc(bodyRoom) : inferRoomNumber(providerName)
-      if (!roomNumber) {
-        res.status(400).json({ error: 'رقم غرفة الليزر مطلوب للحجز' })
-        return
-      }
-      const room = await Room.findOne({ number: roomNumber }).populate('assignedUserId', 'name')
-      if (!room?.assignedUserId) {
-        res.status(400).json({ error: 'لم يتم تعيين أخصائي لهذه الغرفة بعد. حدّده أولاً من لوحة المدير.' })
-        return
-      }
-      effectiveProviderName = `Laser Room ${roomNumber}`
-      assignedSpecialistUserId = room.assignedUserId._id
-      assignedSpecialistName = room.assignedUserId.name || ''
+    const resolved = await resolveProviderAssignment({ serviceType, providerName, roomNumberRaw: body.roomNumber })
+    if (resolved.error) {
+      res.status(400).json({ error: resolved.error })
+      return
     }
+    const { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName } = resolved
     const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName: effectiveProviderName }).lean()
     const existing = sameProvSlots.find((o) => normalizeHm(o.time) === time) ?? null
     if (existing?.patientId && String(existing.patientId) !== String(patient._id)) {
       res.status(409).json({ error: 'هذه الخانة محجوزة لمريض آخر' })
       return
     }
-    // عدة مواعيد لنفس المقدّم في اليوم مسموحة؛ يُرفض فقط التداخل الزمني بين [بداية، نهاية) الفترة الجديدة
-    // وأي موعد آخر (باستثناء نفس سجل وقت البداية عند التحديث).
-    for (const o of sameProvSlots) {
-      if (!o.patientId) continue
-      if (normalizeHm(o.time) === time) continue
-      const iv = slotIntervalMinutes(o)
-      if (!iv) continue
-      if (intervalsOverlapHalfOpen(startMin, endMin, iv.start, iv.end)) {
-        res.status(409).json({
-          error:
-            'فترة الموعد (من وقت البداية إلى النهاية) تتداخل مع موعد آخر لنفس المقدّم في هذا اليوم — اختر أوقاتاً لا تتقاطع مع المواعيد الحالية',
-        })
-        return
-      }
+    const overlapCheck = await assertNoOverlapForProvider({
+      businessDate,
+      providerName: effectiveProviderName,
+      startTime: time,
+      endTime,
+      ignoreId: existing?._id ?? null,
+    })
+    if (overlapCheck.error) {
+      res.status(409).json({ error: overlapCheck.error })
+      return
     }
     const filter = existing ? { _id: existing._id } : { businessDate, time, providerName: effectiveProviderName }
     const slot = await ScheduleSlot.findOneAndUpdate(
@@ -286,6 +315,9 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
           procedureType,
           patientId: patient._id,
           patientName: patient.name,
+          arrivedAt: null,
+          arrivedByUserId: null,
+          arrivedByName: '',
         },
       },
       { new: true, upsert: !existing },
@@ -316,6 +348,185 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
       res.status(400).json({ error: 'تعارض في بيانات الموعد' })
       return
     }
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+scheduleRouter.get('/arrived', async (req, res) => {
+  try {
+    const businessDate = String(req.query.date || '').trim() || todayBusinessDate()
+    const slots = await ScheduleSlot.find({
+      businessDate,
+      patientId: { $ne: null },
+      arrivedAt: { $ne: null },
+    })
+      .sort({ arrivedAt: -1, time: 1 })
+      .lean()
+    res.json({ businessDate, slots: slots.map(slotToDto) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+scheduleRouter.post('/arrive/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
+  try {
+    const slot = await ScheduleSlot.findById(req.params.id)
+    if (!slot || !slot.patientId) {
+      res.status(404).json({ error: 'الموعد غير موجود' })
+      return
+    }
+    slot.arrivedAt = new Date()
+    slot.arrivedByUserId = req.user._id
+    slot.arrivedByName = String(req.user.name || '').trim()
+    await slot.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تسجيل وصول مريض للعيادة',
+      entityType: 'ScheduleSlot',
+      entityId: slot._id,
+      details: { businessDate: slot.businessDate, time: slot.time, providerName: slot.providerName },
+    })
+    res.json({ slot: slotToDto(slot) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
+  try {
+    const slot = await ScheduleSlot.findById(req.params.id)
+    if (!slot || !slot.patientId) {
+      res.status(404).json({ error: 'الموعد غير موجود' })
+      return
+    }
+    const body = req.body ?? {}
+    const businessDate = String(body.businessDate || slot.businessDate).trim() || slot.businessDate
+    const time = normalizeHm(body.time || slot.time)
+    const endTime = normalizeHm(body.endTime || slot.endTime)
+    const serviceType = normalizeServiceType(body.serviceType || slot.serviceType)
+    const requestedProvider = String(body.providerName || slot.providerName || '').trim()
+    const procedureType = String(body.procedureType ?? slot.procedureType ?? '')
+      .trim()
+      .slice(0, 200)
+    if (!time || !endTime || !requestedProvider || !procedureType) {
+      res.status(400).json({ error: 'بيانات الموعد غير مكتملة' })
+      return
+    }
+    const resolved = await resolveProviderAssignment({
+      serviceType,
+      providerName: requestedProvider,
+      roomNumberRaw: body.roomNumber ?? slot.roomNumber,
+    })
+    if (resolved.error) {
+      res.status(400).json({ error: resolved.error })
+      return
+    }
+    const { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName } = resolved
+    const overlapCheck = await assertNoOverlapForProvider({
+      businessDate,
+      providerName: effectiveProviderName,
+      startTime: time,
+      endTime,
+      ignoreId: slot._id,
+    })
+    if (overlapCheck.error) {
+      res.status(409).json({ error: overlapCheck.error })
+      return
+    }
+    slot.businessDate = businessDate
+    slot.time = time
+    slot.endTime = endTime
+    slot.providerName = effectiveProviderName
+    slot.serviceType = serviceType
+    slot.roomNumber = roomNumber
+    slot.assignedSpecialistUserId = assignedSpecialistUserId
+    slot.assignedSpecialistName = assignedSpecialistName
+    slot.procedureType = procedureType
+    await slot.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تغيير وقت موعد',
+      entityType: 'ScheduleSlot',
+      entityId: slot._id,
+      details: { businessDate, time, endTime, providerName: effectiveProviderName, procedureType },
+    })
+    res.json({ slot: slotToDto(slot) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
+  try {
+    const slot = await ScheduleSlot.findById(req.params.id)
+    if (!slot || !slot.patientId) {
+      res.status(404).json({ error: 'الموعد غير موجود' })
+      return
+    }
+    const body = req.body ?? {}
+    const serviceType = normalizeServiceType(body.serviceType || slot.serviceType)
+    const requestedProvider = String(body.providerName || slot.providerName || '').trim()
+    const resolved = await resolveProviderAssignment({
+      serviceType,
+      providerName: requestedProvider,
+      roomNumberRaw: body.roomNumber ?? slot.roomNumber,
+    })
+    if (resolved.error) {
+      res.status(400).json({ error: resolved.error })
+      return
+    }
+    const { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName } = resolved
+    const overlapCheck = await assertNoOverlapForProvider({
+      businessDate: slot.businessDate,
+      providerName: effectiveProviderName,
+      startTime: slot.time,
+      endTime: normalizeHm(slot.endTime || defaultEndFromStart(slot.time)),
+      ignoreId: slot._id,
+    })
+    if (overlapCheck.error) {
+      res.status(409).json({ error: overlapCheck.error })
+      return
+    }
+    slot.providerName = effectiveProviderName
+    slot.serviceType = serviceType
+    slot.roomNumber = roomNumber
+    slot.assignedSpecialistUserId = assignedSpecialistUserId
+    slot.assignedSpecialistName = assignedSpecialistName
+    await slot.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تغيير مقدم الموعد',
+      entityType: 'ScheduleSlot',
+      entityId: slot._id,
+      details: { providerName: effectiveProviderName, serviceType, roomNumber, assignedSpecialistName },
+    })
+    res.json({ slot: slotToDto(slot) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+scheduleRouter.delete('/cancel/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
+  try {
+    const slot = await ScheduleSlot.findByIdAndDelete(req.params.id)
+    if (!slot) {
+      res.status(404).json({ error: 'الموعد غير موجود' })
+      return
+    }
+    await writeAudit({
+      user: req.user,
+      action: 'إلغاء موعد',
+      entityType: 'ScheduleSlot',
+      entityId: slot._id,
+      details: { businessDate: slot.businessDate, time: slot.time, providerName: slot.providerName },
+    })
+    res.json({ ok: true })
+  } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
