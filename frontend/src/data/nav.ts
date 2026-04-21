@@ -3,6 +3,7 @@ import type { NavKey, Role } from '../types'
 export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'dashboard', path: '/', label: 'لوحة التحكم' },
   { key: 'patients', path: '/patients', label: 'المرضى' },
+  { key: 'laser_create_session', path: '/laser/create-session', label: 'إنشاء جلسة' },
   { key: 'patients_intake_fast', path: '/patients/intake-fast', label: 'إدخال سريع للأضابير' },
   { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
   { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
@@ -31,7 +32,7 @@ const roleNav: Record<Role, NavKey[]> = {
     'inventory',
     'account_password',
   ],
-  laser: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
+  laser: ['dashboard', 'appointments_booked', 'laser_create_session', 'account_password'],
   dermatology: ['dashboard', 'patients', 'appointments_booked', 'dermatology', 'account_password'],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
   solarium: ['dashboard', 'patients', 'appointments_booked', 'account_password'],

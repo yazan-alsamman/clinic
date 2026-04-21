@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { canAccessTab } from '../data/nav'
@@ -389,12 +389,22 @@ function openHtmlPrintWindow(html: string) {
 
 export function PatientRecord() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const { businessDate: clinicBusinessDate, usdSypRate } = useClinic()
   const role = user?.role as Role | undefined
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
   const [tab, setTab] = useState<Tab>('overview')
+  useEffect(() => {
+    const requested = searchParams.get('tab')
+    if (!requested) return
+    const allowed: Tab[] = ['overview', 'account', 'sessions', 'laser', 'dermatology', 'dental', 'solarium']
+    if (allowed.includes(requested as Tab)) {
+      setTab(requested as Tab)
+    }
+  }, [searchParams])
+
   const [laserType, setLaserType] = useState<(typeof laserTypes)[number]>('Mix')
   const [room, setRoom] = useState<'1' | '2'>('1')
   const [laserCatalog, setLaserCatalog] = useState<LaserCategory[]>([])

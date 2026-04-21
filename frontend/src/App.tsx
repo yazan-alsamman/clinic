@@ -20,6 +20,7 @@ import { AdminRooms } from './pages/AdminRooms'
 import { AdminAccounting } from './pages/AdminAccounting'
 import { BillingPage } from './pages/BillingPage'
 import { AccountPassword } from './pages/AccountPassword'
+import { LaserCreateSessionPage } from './pages/LaserCreateSessionPage'
 import { PatientPortalGuard } from './components/PatientPortalGuard'
 import { PatientPortalShell } from './components/PatientPortalShell'
 import { PatientPortalDashboard } from './pages/patient-portal/PatientPortalDashboard'
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="/patients/intake-fast" element={<PatientFastIntakePage />} />
               <Route path="/patients/:id" element={<PatientRecord />} />
               <Route path="/appointments" element={<BookedAppointmentsPage />} />
+              <Route path="/laser/create-session" element={<LaserCreateSessionPage />} />
               <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
               <Route path="/dermatology" element={<DermatologyToday />} />
               <Route path="/dental" element={<DentalPage />} />
