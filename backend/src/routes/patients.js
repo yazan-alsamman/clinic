@@ -33,6 +33,18 @@ function normalizePaperLaserEntries(raw) {
     .slice(0, 300)
 }
 
+function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
+  const usd = Number(usdRaw)
+  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return usd
+  const syp = Number(sypRaw)
+  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
+    const rate = Number(exchangeRate)
+    if (!Number.isFinite(rate) || rate <= 0) throw new Error('سعر الصرف غير متاح')
+    return syp / rate
+  }
+  throw new Error('المبلغ غير صالح')
+}
+
 export const patientsRouter = Router()
 
 patientsRouter.use(authMiddleware, loadBusinessDay)
@@ -275,6 +287,99 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
         prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
       },
       entries,
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, res) => {
+  try {
+    if (!['super_admin', 'reception'].includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    let enteredUsd = 0
+    try {
+      enteredUsd = resolveUsdAmount({
+        usdRaw: req.body?.amountUsd,
+        sypRaw: req.body?.amountSyp,
+        exchangeRate: req.businessDay?.exchangeRate,
+      })
+    } catch (err) {
+      res.status(400).json({ error: String(err?.message || 'المبلغ غير صالح') })
+      return
+    }
+    enteredUsd = Math.round(enteredUsd * 100) / 100
+    if (!(enteredUsd > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغاً أكبر من الصفر' })
+      return
+    }
+
+    const debtBefore = Math.round((Number(p.outstandingDebtUsd) || 0) * 100) / 100
+    const creditBefore = Math.round((Number(p.prepaidCreditUsd) || 0) * 100) / 100
+    const appliedToDebtUsd = Math.round(Math.min(debtBefore, enteredUsd) * 100) / 100
+    const extraToCreditUsd = Math.round((enteredUsd - appliedToDebtUsd) * 100) / 100
+    const debtAfter = Math.round((debtBefore - appliedToDebtUsd) * 100) / 100
+    const creditAfter = Math.round((creditBefore + extraToCreditUsd) * 100) / 100
+
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $set: {
+          outstandingDebtUsd: debtAfter,
+          prepaidCreditUsd: creditAfter,
+        },
+      },
+    )
+
+    const outcome =
+      debtBefore <= 0
+        ? 'credit_only'
+        : enteredUsd < debtBefore
+          ? 'partial'
+          : enteredUsd === debtBefore
+            ? 'exact'
+            : 'overpay'
+
+    await writeAudit({
+      user: req.user,
+      action: 'تسوية مالية يدوية لمريض',
+      entityType: 'Patient',
+      entityId: p._id,
+      details: {
+        enteredUsd,
+        debtBefore,
+        debtAfter,
+        creditBefore,
+        creditAfter,
+        appliedToDebtUsd,
+        extraToCreditUsd,
+        outcome,
+      },
+    })
+
+    res.status(201).json({
+      settlement: {
+        enteredUsd,
+        debtBefore,
+        debtAfter,
+        creditBefore,
+        creditAfter,
+        appliedToDebtUsd,
+        extraToCreditUsd,
+        outcome,
+      },
+      summary: {
+        outstandingDebtUsd: debtAfter,
+        prepaidCreditUsd: creditAfter,
+      },
     })
   } catch (e) {
     console.error(e)

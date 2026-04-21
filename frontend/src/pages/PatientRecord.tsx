@@ -531,6 +531,11 @@ export function PatientRecord() {
   const [financialEntries, setFinancialEntries] = useState<FinancialEntry[]>([])
   const [financialLoading, setFinancialLoading] = useState(false)
   const [financialErr, setFinancialErr] = useState('')
+  const [financialSettleOpen, setFinancialSettleOpen] = useState(false)
+  const [financialSettleUsd, setFinancialSettleUsd] = useState('')
+  const [financialSettleSyp, setFinancialSettleSyp] = useState('')
+  const [financialSettleBusy, setFinancialSettleBusy] = useState(false)
+  const [financialSettleErr, setFinancialSettleErr] = useState('')
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
   const [laserSessionCompleting, setLaserSessionCompleting] = useState(false)
   const [laserDetailActionErr, setLaserDetailActionErr] = useState('')
@@ -987,12 +992,35 @@ export function PatientRecord() {
     }
   }, [id, tab, role])
 
+  const refreshFinancialLedger = useCallback(async () => {
+    if (!id) return
+    try {
+      const data = await api<{
+        summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+        entries: FinancialEntry[]
+      }>(`/api/patients/${encodeURIComponent(id)}/financial-ledger`)
+      setFinancialEntries(data.entries || [])
+      setPatient((prev) =>
+        prev
+          ? {
+              ...prev,
+              outstandingDebtUsd: Number(data.summary?.outstandingDebtUsd) || 0,
+              prepaidCreditUsd: Number(data.summary?.prepaidCreditUsd) || 0,
+            }
+          : prev,
+      )
+      setFinancialErr('')
+    } catch {
+      setFinancialEntries([])
+      setFinancialErr('تعذر تحميل السجل المالي')
+    }
+  }, [id])
+
   useEffect(() => {
     if (!id || tab !== 'financial') return
     if (role !== 'super_admin' && role !== 'reception') return
     let cancelled = false
     setFinancialLoading(true)
-    setFinancialErr('')
     ;(async () => {
       try {
         const data = await api<{
@@ -1010,6 +1038,7 @@ export function PatientRecord() {
               }
             : prev,
         )
+        setFinancialErr('')
       } catch {
         if (!cancelled) {
           setFinancialEntries([])
@@ -1150,12 +1179,12 @@ export function PatientRecord() {
     if (!(fxRate > 0)) return <span>{usdText}</span>
     const syp = usd * fxRate
     return (
-      <div style={{ display: 'grid', gap: '0.1rem' }}>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '0.1rem' }}>
         <span>{usdText}</span>
         <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>
           {syp.toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س
         </span>
-      </div>
+      </span>
     )
   }
 
@@ -1163,6 +1192,80 @@ export function PatientRecord() {
     if (x.settlementType === 'debt' || x.settlementType === 'credit') return true
     return Math.abs(Number(x.settlementDeltaUsd) || 0) > 0.0001
   })
+  let remainingDebt = Number(patient.outstandingDebtUsd) || 0
+  let remainingCredit = Number(patient.prepaidCreditUsd) || 0
+  const financialOpenEntries = financialNonMatchingEntries
+    .map((entry) => {
+      const delta = Number(entry.settlementDeltaUsd) || 0
+      if (delta < 0) {
+        if (!(remainingDebt > 0)) return null
+        const unresolved = Math.min(Math.abs(delta), remainingDebt)
+        remainingDebt -= unresolved
+        return {
+          ...entry,
+          settlementType: 'debt',
+          settlementDeltaUsd: -Math.round(unresolved * 100) / 100,
+        }
+      }
+      if (delta > 0) {
+        if (!(remainingCredit > 0)) return null
+        const unresolved = Math.min(delta, remainingCredit)
+        remainingCredit -= unresolved
+        return {
+          ...entry,
+          settlementType: 'credit',
+          settlementDeltaUsd: Math.round(unresolved * 100) / 100,
+        }
+      }
+      return null
+    })
+    .filter((x): x is FinancialEntry => x != null)
+
+  if (remainingDebt > 0.0001) {
+    financialOpenEntries.push({
+      id: 'synthetic-debt',
+      billingItemId: '',
+      businessDate: clinicBusinessDate || '',
+      procedureLabel: 'ذمة متبقية على المريض',
+      amountDueUsd: remainingDebt,
+      appliedAmountUsd: 0,
+      receivedAmountUsd: 0,
+      settlementDeltaUsd: -Math.round(remainingDebt * 100) / 100,
+      settlementType: 'debt',
+      method: 'manual',
+      receivedAt: null,
+      receivedByName: '',
+    })
+  }
+  if (remainingCredit > 0.0001) {
+    financialOpenEntries.push({
+      id: 'synthetic-credit',
+      billingItemId: '',
+      businessDate: clinicBusinessDate || '',
+      procedureLabel: 'رصيد إضافي متبقٍ للمريض',
+      amountDueUsd: 0,
+      appliedAmountUsd: 0,
+      receivedAmountUsd: remainingCredit,
+      settlementDeltaUsd: Math.round(remainingCredit * 100) / 100,
+      settlementType: 'credit',
+      method: 'manual',
+      receivedAt: null,
+      receivedByName: '',
+    })
+  }
+
+  const debtNow = Number(patient.outstandingDebtUsd) || 0
+  const settlePreviewUsd = Math.max(0, parseFloat(financialSettleUsd) || 0)
+  const settlePreviewSyp = Math.max(0, parseFloat(financialSettleSyp) || 0)
+  const settleEnteredUsd =
+    settlePreviewUsd > 0
+      ? settlePreviewUsd
+      : settlePreviewSyp > 0 && fxRate > 0
+        ? settlePreviewSyp / fxRate
+        : 0
+  const settleWillCoverUsd = Math.min(debtNow, settleEnteredUsd)
+  const settleWillRemainDebtUsd = Math.max(0, debtNow - settleEnteredUsd)
+  const settleWillAddCreditUsd = Math.max(0, settleEnteredUsd - debtNow)
 
   return (
     <>
@@ -1816,10 +1919,13 @@ export function PatientRecord() {
               </div>
             </div>
           </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginTop: '-0.15rem' }}>
+            اضغط على أي سطر لإضافة دفعة وتسوية الذمة تلقائياً.
+          </p>
           {financialErr ? <p style={{ color: 'var(--danger)', marginTop: 0 }}>{financialErr}</p> : null}
           {financialLoading ? (
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري التحميل…</p>
-          ) : financialNonMatchingEntries.length === 0 ? (
+          ) : financialOpenEntries.length === 0 ? (
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات غير مطابقة حالياً.</p>
           ) : (
             <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
@@ -1835,8 +1941,27 @@ export function PatientRecord() {
                   </tr>
                 </thead>
                 <tbody>
-                  {financialNonMatchingEntries.map((x) => (
-                    <tr key={x.id}>
+                  {financialOpenEntries.map((x) => (
+                    <tr
+                      key={x.id}
+                      role="button"
+                      tabIndex={0}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setFinancialSettleErr('')
+                        setFinancialSettleUsd('')
+                        setFinancialSettleSyp('')
+                        setFinancialSettleOpen(true)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return
+                        e.preventDefault()
+                        setFinancialSettleErr('')
+                        setFinancialSettleUsd('')
+                        setFinancialSettleSyp('')
+                        setFinancialSettleOpen(true)
+                      }}
+                    >
                       <td>{x.businessDate || '—'}</td>
                       <td>{x.procedureLabel || '—'}</td>
                       <td>{renderMoneyDual(Number(x.amountDueUsd) || 0)}</td>
@@ -1855,6 +1980,129 @@ export function PatientRecord() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {financialSettleOpen && (role === 'super_admin' || role === 'reception') && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            if (financialSettleBusy) return
+            setFinancialSettleOpen(false)
+          }}
+        >
+          <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="card-title" style={{ marginTop: 0 }}>
+              إضافة دفعة إلى حساب المريض
+            </h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem', fontSize: '0.87rem' }}>
+              يتم مقارنة المبلغ المُدخل مع إجمالي الذمة الحالية ومعالجته تلقائياً (جزئي/مطابق/فائض).
+            </p>
+
+            <div className="grid-2" style={{ marginTop: '0.5rem' }}>
+              <div>
+                <label className="form-label">المبلغ المدخل (USD)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={financialSettleUsd}
+                  onChange={(e) => setFinancialSettleUsd(e.target.value)}
+                  placeholder="0"
+                  disabled={financialSettleBusy}
+                />
+              </div>
+              <div>
+                <label className="form-label">المبلغ المدخل (SYP)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={financialSettleSyp}
+                  onChange={(e) => setFinancialSettleSyp(e.target.value)}
+                  placeholder="0"
+                  disabled={financialSettleBusy}
+                />
+              </div>
+            </div>
+            <p style={{ color: 'var(--text-muted)', marginTop: '0.45rem', fontSize: '0.82rem' }}>
+              يكفي إدخال حقل واحد.
+            </p>
+
+            <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.35rem', fontSize: '0.87rem' }}>
+              <div>
+                الذمة الحالية: <strong>{renderMoneyDual(debtNow)}</strong>
+              </div>
+              <div>
+                سيُغطّى من الذمة: <strong>{renderMoneyDual(settleWillCoverUsd)}</strong>
+              </div>
+              <div>
+                الذمة المتبقية بعد العملية: <strong>{renderMoneyDual(settleWillRemainDebtUsd)}</strong>
+              </div>
+              <div>
+                الرصيد الإضافي الناتج: <strong>{renderMoneyDual(settleWillAddCreditUsd)}</strong>
+              </div>
+            </div>
+
+            {financialSettleErr ? (
+              <p style={{ color: 'var(--danger)', marginTop: '0.6rem' }}>{financialSettleErr}</p>
+            ) : null}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.85rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={financialSettleBusy}
+                onClick={() => setFinancialSettleOpen(false)}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={financialSettleBusy}
+                onClick={async () => {
+                  if (!id) return
+                  setFinancialSettleErr('')
+                  const usd = Math.max(0, parseFloat(financialSettleUsd) || 0)
+                  const syp = Math.max(0, parseFloat(financialSettleSyp) || 0)
+                  if (!(usd > 0) && !(syp > 0 && fxRate > 0)) {
+                    setFinancialSettleErr('أدخل مبلغاً بالدولار أو الليرة.')
+                    return
+                  }
+                  setFinancialSettleBusy(true)
+                  try {
+                    const result = await api<{
+                      summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+                    }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        amountUsd: usd > 0 ? usd : undefined,
+                        amountSyp: usd > 0 ? undefined : syp,
+                      }),
+                    })
+                    setPatient((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            outstandingDebtUsd: Number(result.summary?.outstandingDebtUsd) || 0,
+                            prepaidCreditUsd: Number(result.summary?.prepaidCreditUsd) || 0,
+                          }
+                        : prev,
+                    )
+                    await refreshFinancialLedger()
+                    setFinancialSettleOpen(false)
+                  } catch (e) {
+                    setFinancialSettleErr(e instanceof ApiError ? e.message : 'تعذر تنفيذ التسوية')
+                  } finally {
+                    setFinancialSettleBusy(false)
+                  }
+                }}
+              >
+                {financialSettleBusy ? 'جاري المعالجة…' : 'تأكيد التسوية'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
