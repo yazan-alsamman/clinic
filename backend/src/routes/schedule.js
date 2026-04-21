@@ -237,8 +237,9 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
       },
       { new: true, upsert: !existing },
     )
-    patient.lastVisit = new Date()
-    await patient.save()
+    // Avoid full-document validation on legacy records that may miss newly required fields
+    // (e.g. fileNumber), while still updating "lastVisit" for appointment activity.
+    await Patient.updateOne({ _id: patient._id }, { $set: { lastVisit: new Date() } })
     await writeAudit({
       user: req.user,
       action: 'تعيين موعد لمريض',
