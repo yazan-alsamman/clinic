@@ -16,6 +16,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
+  { key: 'admin_laser', path: '/admin/laser', label: 'ليزر' },
   { key: 'admin_accounting', path: '/admin/accounting', label: 'المحاسبة والترحيل' },
   { key: 'account_password', path: '/account/password', label: 'كلمة المرور' },
 ]

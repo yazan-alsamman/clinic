@@ -3,6 +3,7 @@ import { LaserAreaCatalog } from '../models/LaserAreaCatalog.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
+import { User } from '../models/User.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
@@ -115,6 +116,18 @@ function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
     return round2(syp / rate)
   }
   return null
+}
+
+function parseShotCount(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return 0
+  const normalized = raw
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
+    .replace(/[^\d.,-]/g, '')
+    .replace(/,/g, '.')
+  const num = Number.parseFloat(normalized)
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.round(num)
 }
 
 laserRouter.get('/catalog', async (req, res) => {
@@ -326,6 +339,61 @@ laserRouter.get('/sessions/today', async (req, res) => {
         createdAt: s.createdAt,
       })),
     })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const date = String(req.query.date || '').trim() || req.businessDate || todayBusinessDate()
+    const specialists = await User.find({ role: 'laser' }).select('_id name active').sort({ name: 1 }).lean()
+    const specialistIds = specialists.map((x) => x._id)
+    const clinicalRows =
+      specialistIds.length > 0
+        ? await ClinicalSession.find({
+            department: 'laser',
+            businessDate: date,
+            providerUserId: { $in: specialistIds },
+          })
+            .select('_id providerUserId')
+            .lean()
+        : []
+    const sessionIds = clinicalRows.map((x) => x._id)
+    const doneStatuses = ['completed', 'completed_pending_collection']
+    const laserRows =
+      sessionIds.length > 0
+        ? await LaserSession.find({
+            clinicalSessionId: { $in: sessionIds },
+            status: { $in: doneStatuses },
+          })
+            .select('operatorUserId shotCount')
+            .lean()
+        : []
+
+    const totals = new Map()
+    for (const row of laserRows) {
+      const uid = String(row.operatorUserId || '')
+      if (!uid) continue
+      const prev = totals.get(uid) || { totalShots: 0, sessionsCount: 0 }
+      prev.totalShots += parseShotCount(row.shotCount)
+      prev.sessionsCount += 1
+      totals.set(uid, prev)
+    }
+
+    const rows = specialists.map((sp) => {
+      const current = totals.get(String(sp._id)) || { totalShots: 0, sessionsCount: 0 }
+      return {
+        userId: String(sp._id),
+        name: String(sp.name || '').trim() || '—',
+        active: sp.active !== false,
+        totalShots: current.totalShots,
+        sessionsCount: current.sessionsCount,
+      }
+    })
+
+    res.json({ date, rows })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

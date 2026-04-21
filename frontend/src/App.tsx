@@ -17,6 +17,7 @@ import { InsightsPage } from './pages/InsightsPage'
 import { AdminUsers } from './pages/AdminUsers'
 import { AdminAudit } from './pages/AdminAudit'
 import { AdminRooms } from './pages/AdminRooms'
+import { AdminLaserPage } from './pages/AdminLaserPage'
 import { AdminAccounting } from './pages/AdminAccounting'
 import { BillingPage } from './pages/BillingPage'
 import { AccountPassword } from './pages/AccountPassword'
@@ -63,6 +64,7 @@ export default function App() {
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/audit" element={<AdminAudit />} />
               <Route path="/admin/rooms" element={<AdminRooms />} />
+              <Route path="/admin/laser" element={<AdminLaserPage />} />
               <Route path="/admin/accounting" element={<AdminAccounting />} />
               <Route path="/account/password" element={<AccountPassword />} />
               <Route path="*" element={<Navigate to="/" replace />} />

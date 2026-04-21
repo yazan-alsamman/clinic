@@ -22,6 +22,7 @@ export type NavKey =
   | 'admin_users'
   | 'admin_audit'
   | 'admin_rooms'
+  | 'admin_laser'
   | 'admin_accounting'
   | 'account_password'
 
