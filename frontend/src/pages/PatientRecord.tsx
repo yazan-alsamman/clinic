@@ -1143,6 +1143,27 @@ export function PatientRecord() {
 
   if (!patient || !role) return null
 
+  const fxRate = Number(usdSypRate || 0)
+  const renderMoneyDual = (usdValue: number) => {
+    const usd = Number(usdValue) || 0
+    const usdText = `${usd.toFixed(2)} USD`
+    if (!(fxRate > 0)) return <span>{usdText}</span>
+    const syp = usd * fxRate
+    return (
+      <div style={{ display: 'grid', gap: '0.1rem' }}>
+        <span>{usdText}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+          {syp.toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س
+        </span>
+      </div>
+    )
+  }
+
+  const financialNonMatchingEntries = financialEntries.filter((x) => {
+    if (x.settlementType === 'debt' || x.settlementType === 'credit') return true
+    return Math.abs(Number(x.settlementDeltaUsd) || 0) > 0.0001
+  })
+
   return (
     <>
       <div style={{ marginBottom: '1rem' }}>
@@ -1783,23 +1804,23 @@ export function PatientRecord() {
           <h2 className="card-title">السجل المالي للمريض</h2>
           <div className="grid-2" style={{ marginBottom: '0.75rem' }}>
             <div>
-              <span className="form-label">إجمالي الذمم (USD)</span>
-              <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>
-                {(Number(patient.outstandingDebtUsd) || 0).toFixed(2)}
-              </p>
+              <span className="form-label">إجمالي الذمم</span>
+              <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
+                {renderMoneyDual(Number(patient.outstandingDebtUsd) || 0)}
+              </div>
             </div>
             <div>
-              <span className="form-label">الرصيد الإضافي (USD)</span>
-              <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>
-                {(Number(patient.prepaidCreditUsd) || 0).toFixed(2)}
-              </p>
+              <span className="form-label">الرصيد الإضافي</span>
+              <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
+                {renderMoneyDual(Number(patient.prepaidCreditUsd) || 0)}
+              </div>
             </div>
           </div>
           {financialErr ? <p style={{ color: 'var(--danger)', marginTop: 0 }}>{financialErr}</p> : null}
           {financialLoading ? (
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري التحميل…</p>
-          ) : financialEntries.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد حركات مالية بعد.</p>
+          ) : financialNonMatchingEntries.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات غير مطابقة حالياً.</p>
           ) : (
             <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
               <table className="data-table">
@@ -1814,19 +1835,19 @@ export function PatientRecord() {
                   </tr>
                 </thead>
                 <tbody>
-                  {financialEntries.map((x) => (
+                  {financialNonMatchingEntries.map((x) => (
                     <tr key={x.id}>
                       <td>{x.businessDate || '—'}</td>
                       <td>{x.procedureLabel || '—'}</td>
-                      <td>{(Number(x.amountDueUsd) || 0).toFixed(2)} USD</td>
-                      <td>{(Number(x.receivedAmountUsd) || 0).toFixed(2)} USD</td>
-                      <td>{(Number(x.settlementDeltaUsd) || 0).toFixed(2)} USD</td>
+                      <td>{renderMoneyDual(Number(x.amountDueUsd) || 0)}</td>
+                      <td>{renderMoneyDual(Number(x.receivedAmountUsd) || 0)}</td>
+                      <td>{renderMoneyDual(Number(x.settlementDeltaUsd) || 0)}</td>
                       <td>
                         {x.settlementType === 'debt'
                           ? 'ذمة'
                           : x.settlementType === 'credit'
                             ? 'رصيد إضافي'
-                            : 'مطابق'}
+                            : 'غير مطابق'}
                       </td>
                     </tr>
                   ))}
