@@ -674,15 +674,21 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       },
     )
 
-    if (completed && sess.linkedBillingItemId) {
-      const bi = await BillingItem.findById(sess.linkedBillingItemId)
+    if (completed && sess.linkedBillingItemId && mongoose.isValidObjectId(sess.linkedBillingItemId)) {
+      const bi = await BillingItem.findById(sess.linkedBillingItemId).lean()
       if (bi && bi.isPackagePrepaid && bi.status === 'pending_payment') {
-        bi.status = 'paid'
-        bi.paidAt = new Date()
-        await bi.save()
+        await BillingItem.updateOne(
+          { _id: bi._id },
+          {
+            $set: {
+              status: 'paid',
+              paidAt: new Date(),
+            },
+          },
+        )
       }
     }
-    if (completed && sess.linkedLaserSessionId) {
+    if (completed && sess.linkedLaserSessionId && mongoose.isValidObjectId(sess.linkedLaserSessionId)) {
       await LaserSession.updateOne({ _id: sess.linkedLaserSessionId }, { $set: { status: 'completed' } })
     }
 
