@@ -5,6 +5,7 @@ import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle
 import { todayBusinessDate } from '../utils/date.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
+import { BusinessDay } from '../models/BusinessDay.js'
 
 export const patientPortalRouter = Router()
 patientPortalRouter.use(patientAuthMiddleware)
@@ -91,6 +92,11 @@ patientPortalRouter.get('/dashboard', async (req, res) => {
 patientPortalRouter.get('/financial', async (req, res) => {
   try {
     const p = req.patient
+    const bd = await BusinessDay.findOne({ businessDate: todayBusinessDate() }).lean()
+    const usdSypRate =
+      bd?.exchangeRate != null && Number.isFinite(Number(bd.exchangeRate))
+        ? Number(bd.exchangeRate)
+        : null
     const items = await BillingItem.find({ patientId: p._id })
       .select('_id amountDueUsd businessDate procedureLabel')
       .lean()
@@ -98,6 +104,7 @@ patientPortalRouter.get('/financial', async (req, res) => {
     const itemIds = [...byId.keys()]
     if (itemIds.length === 0) {
       res.json({
+        usdSypRate,
         summary: {
           outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
           prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
@@ -137,6 +144,7 @@ patientPortalRouter.get('/financial', async (req, res) => {
     })
 
     res.json({
+      usdSypRate,
       summary: {
         outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
         prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,

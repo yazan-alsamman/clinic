@@ -14,6 +14,7 @@ type FinancialEntry = {
 }
 
 type FinancialPayload = {
+  usdSypRate?: number | null
   summary: {
     outstandingDebtUsd: number
     prepaidCreditUsd: number
@@ -21,8 +22,13 @@ type FinancialPayload = {
   entries: FinancialEntry[]
 }
 
-function money(usd: number) {
-  return `${(Number(usd) || 0).toFixed(2)} USD`
+function moneyDual(usdRaw: number, rateRaw: number | null | undefined) {
+  const usd = Number(usdRaw) || 0
+  const usdText = `${usd.toFixed(2)} USD`
+  const rate = Number(rateRaw || 0)
+  const sypText =
+    rate > 0 ? `${Math.round(usd * rate).toLocaleString('ar-SY')} ل.س` : '— ل.س'
+  return { usdText, sypText }
 }
 
 const settlementTypeAr: Record<FinancialEntry['settlementType'], string> = {
@@ -79,14 +85,20 @@ export function PatientPortalFinancial() {
 
       <div className="patient-stat-grid">
         <div className="patient-stat">
-          <div className="n" style={{ color: 'var(--danger)' }}>
-            {money(data.summary.outstandingDebtUsd)}
+          <div className="n" style={{ color: 'var(--danger)', fontSize: '1.2rem' }}>
+            {moneyDual(data.summary.outstandingDebtUsd, data.usdSypRate).usdText}
+          </div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.86rem' }}>
+            {moneyDual(data.summary.outstandingDebtUsd, data.usdSypRate).sypText}
           </div>
           <div className="l">الذمم المستحقة</div>
         </div>
         <div className="patient-stat">
-          <div className="n" style={{ color: 'var(--success)' }}>
-            {money(data.summary.prepaidCreditUsd)}
+          <div className="n" style={{ color: 'var(--success)', fontSize: '1.2rem' }}>
+            {moneyDual(data.summary.prepaidCreditUsd, data.usdSypRate).usdText}
+          </div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.86rem' }}>
+            {moneyDual(data.summary.prepaidCreditUsd, data.usdSypRate).sypText}
           </div>
           <div className="l">الرصيد الإضافي</div>
         </div>
@@ -116,9 +128,24 @@ export function PatientPortalFinancial() {
                   <tr key={e.id}>
                     <td>{e.businessDate || '—'}</td>
                     <td>{e.procedureLabel || '—'}</td>
-                    <td>{money(e.amountDueUsd)}</td>
-                    <td>{money(e.receivedAmountUsd)}</td>
-                    <td>{money(e.settlementDeltaUsd)}</td>
+                    <td>
+                      {moneyDual(e.amountDueUsd, data.usdSypRate).usdText}
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        {moneyDual(e.amountDueUsd, data.usdSypRate).sypText}
+                      </div>
+                    </td>
+                    <td>
+                      {moneyDual(e.receivedAmountUsd, data.usdSypRate).usdText}
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        {moneyDual(e.receivedAmountUsd, data.usdSypRate).sypText}
+                      </div>
+                    </td>
+                    <td>
+                      {moneyDual(e.settlementDeltaUsd, data.usdSypRate).usdText}
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        {moneyDual(e.settlementDeltaUsd, data.usdSypRate).sypText}
+                      </div>
+                    </td>
                     <td>{settlementTypeAr[e.settlementType] || '—'}</td>
                   </tr>
                 ))}
