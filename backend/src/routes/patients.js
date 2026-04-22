@@ -634,20 +634,27 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
-    const p = await Patient.findById(req.params.id)
+    const patientId = String(req.params.id || '').trim()
+    const packageId = String(req.params.packageId || '').trim()
+    const sessionId = String(req.params.sessionId || '').trim()
+    if (!mongoose.isValidObjectId(patientId) || !mongoose.isValidObjectId(packageId) || !mongoose.isValidObjectId(sessionId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const p = await Patient.findById(patientId)
     if (!p) {
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
     const packageRows = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
-    const pkgIndex = packageRows.findIndex((x) => String(x?._id) === String(req.params.packageId))
+    const pkgIndex = packageRows.findIndex((x) => String(x?._id) === packageId)
     const pkg = pkgIndex >= 0 ? packageRows[pkgIndex] : null
     if (!pkg) {
       res.status(404).json({ error: 'الباكج غير موجود' })
       return
     }
     const packageSessions = Array.isArray(pkg.sessions) ? pkg.sessions : []
-    const sessIndex = packageSessions.findIndex((x) => String(x?._id) === String(req.params.sessionId))
+    const sessIndex = packageSessions.findIndex((x) => String(x?._id) === sessionId)
     const sess = sessIndex >= 0 ? packageSessions[sessIndex] : null
     if (!sess) {
       res.status(404).json({ error: 'جلسة الباكج غير موجودة' })

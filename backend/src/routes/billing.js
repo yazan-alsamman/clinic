@@ -18,12 +18,19 @@ billingRouter.use(authMiddleware)
 const BILLING_ROLES = ['super_admin', 'reception']
 
 function billingItemDto(b, patientName, providerName) {
+  const patientIdRaw =
+    b?.patientId && typeof b.patientId === 'object' && b.patientId._id ? b.patientId._id : b?.patientId
+  const providerIdRaw =
+    b?.providerUserId && typeof b.providerUserId === 'object' && b.providerUserId._id
+      ? b.providerUserId._id
+      : b?.providerUserId
   return {
     id: String(b._id),
     clinicalSessionId: String(b.clinicalSessionId),
-    patientId: String(b.patientId),
+    patientId: String(patientIdRaw || ''),
     patientName: patientName ?? '',
     providerName: providerName ?? '',
+    providerUserId: String(providerIdRaw || ''),
     department: b.department,
     procedureLabel: b.procedureLabel || '—',
     amountDueUsd: b.amountDueUsd,
