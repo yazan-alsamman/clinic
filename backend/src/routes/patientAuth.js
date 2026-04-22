@@ -76,9 +76,18 @@ patientAuthRouter.patch('/password', patientAuthMiddleware, async (req, res) => 
       res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' })
       return
     }
-    p.portalPasswordHash = await bcrypt.hash(nextPwd, 10)
+    const nextHash = await bcrypt.hash(nextPwd, 10)
+    p.portalPasswordHash = nextHash
     p.portalMustChangePassword = false
-    await p.save()
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $set: {
+          portalPasswordHash: nextHash,
+          portalMustChangePassword: false,
+        },
+      },
+    )
     const token = signPatientToken(p)
     res.json({ token, ok: true })
   } catch (e) {
