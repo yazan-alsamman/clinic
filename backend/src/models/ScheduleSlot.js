@@ -24,6 +24,8 @@ const scheduleSlotSchema = new mongoose.Schema(
     arrivedAt: { type: Date, default: null, index: true },
     arrivedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     arrivedByName: { type: String, default: '', trim: true },
+    /** تُملأ عند إنشاء جلسة ليزر لهذا الموعد لمنع إنشاء جلسة ثانية لنفسه */
+    laserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null, index: true },
   },
   { timestamps: true },
 )

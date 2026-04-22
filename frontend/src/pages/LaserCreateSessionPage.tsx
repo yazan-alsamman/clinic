@@ -12,6 +12,7 @@ type SlotRow = {
   patientId?: string | null
   patientName: string
   procedureType?: string
+  laserSessionId?: string | null
   serviceType?: string
   roomNumber?: number | null
   arrivedAt?: string | null
@@ -59,6 +60,7 @@ export function LaserCreateSessionPage() {
       slots
         .filter((s) => String(s.serviceType || '').toLowerCase() === 'laser')
         .filter((s) => Boolean(s.arrivedAt))
+        .filter((s) => !s.laserSessionId)
         .filter((s) => Boolean(s.patientId))
         .sort((a, b) => (a.arrivedAt || '').localeCompare(b.arrivedAt || '')),
     [slots],
@@ -120,7 +122,7 @@ export function LaserCreateSessionPage() {
                       navigate(
                         `/patients/${s.patientId}?tab=laser&laserProc=${encodeURIComponent(
                           String(s.procedureType || '').trim(),
-                        )}`,
+                        )}&laserSlotId=${encodeURIComponent(String(s.id))}`,
                       )
                     }
                     style={{ cursor: 'pointer' }}

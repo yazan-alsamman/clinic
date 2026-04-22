@@ -507,6 +507,7 @@ export function PatientRecord() {
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
   const [selectedLaserItemIds, setSelectedLaserItemIds] = useState<string[]>([])
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
+  const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
   const [pw, setPw] = useState('')
   const [pulse, setPulse] = useState('')
@@ -2732,6 +2733,7 @@ export function PatientRecord() {
                     method: 'POST',
                     body: JSON.stringify({
                       patientId: id,
+                      scheduleSlotId: bookedLaserSlotId || undefined,
                       room,
                       laserType,
                       pw,

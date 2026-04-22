@@ -6,6 +6,7 @@ import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
+import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
@@ -588,6 +589,40 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
 
     const laserType = body.laserType || 'Mix'
     const businessDate = String(body.businessDate || '').trim() || req.businessDate || todayBusinessDate()
+    const scheduleSlotId = String(body.scheduleSlotId || '').trim()
+
+    let linkedSlot = null
+    if (scheduleSlotId) {
+      linkedSlot = await ScheduleSlot.findById(scheduleSlotId)
+      if (!linkedSlot) {
+        res.status(404).json({ error: 'الموعد المرتبط غير موجود' })
+        return
+      }
+      if (!linkedSlot.patientId || String(linkedSlot.patientId) !== String(patient._id)) {
+        res.status(400).json({ error: 'الموعد المرتبط لا يخص هذا المريض' })
+        return
+      }
+      if (String(linkedSlot.serviceType || '') !== 'laser') {
+        res.status(400).json({ error: 'الموعد المرتبط ليس موعد ليزر' })
+        return
+      }
+      if (!linkedSlot.arrivedAt) {
+        res.status(400).json({ error: 'لا يمكن إنشاء الجلسة قبل تسجيل وصول المريض' })
+        return
+      }
+      if (linkedSlot.laserSessionId) {
+        res.status(409).json({ error: 'تم إنشاء جلسة ليزر لهذا الموعد مسبقاً' })
+        return
+      }
+      if (
+        req.user.role === 'laser' &&
+        linkedSlot.assignedSpecialistUserId &&
+        String(linkedSlot.assignedSpecialistUserId) !== String(req.user._id)
+      ) {
+        res.status(403).json({ error: 'هذا الموعد مرتبط بأخصائي آخر' })
+        return
+      }
+    }
 
     const catalogRows =
       areaIds.length > 0
@@ -655,6 +690,10 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       s.billingItemId = bi._id
       s.clinicalSessionId = cs._id
       await s.save()
+      if (linkedSlot) {
+        linkedSlot.laserSessionId = s._id
+        await linkedSlot.save()
+      }
     } catch (inner) {
       if (bi?._id) await BillingItem.deleteOne({ _id: bi._id })
       if (cs?._id) await ClinicalSession.deleteOne({ _id: cs._id })

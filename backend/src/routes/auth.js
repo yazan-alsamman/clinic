@@ -65,7 +65,14 @@ authRouter.post('/login', async (req, res) => {
       return
     }
     patient.portalLastLoginAt = new Date()
-    await patient.save()
+    await Patient.updateOne(
+      { _id: patient._id },
+      {
+        $set: {
+          portalLastLoginAt: patient.portalLastLoginAt,
+        },
+      },
+    )
     const token = signPatientToken(patient)
     res.json({
       accountType: 'patient',
