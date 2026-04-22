@@ -2434,6 +2434,15 @@ export function PatientRecord() {
             <div style={{ display: 'grid', gap: '0.8rem' }}>
               {patientPackages.map((pkg) => (
                 <div key={pkg.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.8rem' }}>
+                  {(() => {
+                    const remainingSessions = pkg.sessions.filter((s) => !s.completedByReception).length
+                    return (
+                      <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                        الجلسات المتبقية: <strong style={{ color: 'var(--text)' }}>{remainingSessions}</strong> من{' '}
+                        <strong style={{ color: 'var(--text)' }}>{pkg.sessionsCount || pkg.sessions.length}</strong>
+                      </p>
+                    )
+                  })()}
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
                     <strong>{pkg.title || `باكج ليزر (${pkg.sessionsCount} جلسة)`}</strong>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
