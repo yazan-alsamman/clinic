@@ -72,6 +72,15 @@ export function PatientPortalShell() {
         </nav>
       </header>
       <main className="patient-portal-main">
+        <a
+          className="patient-credit-banner"
+          href="https://www.vegacore.co"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img src="/vega-core-logo.jpg" alt="Vega Core" />
+          <p>تم إنتاج هذا النظام من قبل شركة Vega Core</p>
+        </a>
         <Outlet />
       </main>
     </div>
