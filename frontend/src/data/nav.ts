@@ -22,7 +22,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
 ]
 
 const roleNav: Record<Role, NavKey[]> = {
-  super_admin: navItems.map((n) => n.key),
+  super_admin: navItems.filter((n) => n.key !== 'laser_create_session').map((n) => n.key),
   reception: [
     'dashboard',
     'patients',

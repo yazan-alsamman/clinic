@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
@@ -63,6 +63,10 @@ export function LaserCreateSessionPage() {
         .sort((a, b) => (a.arrivedAt || '').localeCompare(b.arrivedAt || '')),
     [slots],
   )
+
+  if (user?.role === 'super_admin') {
+    return <Navigate to="/" replace />
+  }
 
   if (!canUse) {
     return (

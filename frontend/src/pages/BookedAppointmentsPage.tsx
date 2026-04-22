@@ -34,6 +34,13 @@ const SERVICE_LABELS: Record<ServiceKey, string> = {
   solarium: 'السولاريوم',
   other: 'أخرى',
 }
+const SERVICE_ICONS: Record<ServiceKey, string> = {
+  laser: '⚡',
+  dental: '🦷',
+  dermatology: '🧴',
+  solarium: '☀',
+  other: '•',
+}
 
 function todayYmd() {
   const d = new Date()
@@ -104,6 +111,10 @@ function renderTimeWithArrival(slot: SlotRow) {
       ) : null}
     </>
   )
+}
+
+function renderServiceLabel(service: ServiceKey) {
+  return `${SERVICE_ICONS[service]} ${SERVICE_LABELS[service]}`
 }
 
 export function BookedAppointmentsPage() {
@@ -452,7 +463,7 @@ export function BookedAppointmentsPage() {
                         {s.endTime ? ` — ${s.endTime}` : ''}
                       </td>
                       <td>{s.patientName || '—'}</td>
-                      <td>{SERVICE_LABELS[normalizeService(s)]}</td>
+                      <td>{renderServiceLabel(normalizeService(s))}</td>
                       <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
                       <td>{s.arrivedAt ? new Date(s.arrivedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                     </tr>
@@ -477,7 +488,7 @@ export function BookedAppointmentsPage() {
           <div style={{ display: 'grid', gap: '1rem' }}>
             {grouped.byService.dental.length > 0 ? (
               <div>
-                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.dental}</h3>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('dental')}</h3>
                 <div className="table-wrap">
                   <table className="data-table">
                     <thead>
@@ -497,7 +508,7 @@ export function BookedAppointmentsPage() {
                         >
                           <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
-                          <td>{SERVICE_LABELS.dental}</td>
+                          <td>{renderServiceLabel('dental')}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
                         </tr>
                       ))}
@@ -509,11 +520,11 @@ export function BookedAppointmentsPage() {
 
             {grouped.byService.laser.length > 0 ? (
               <div>
-                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.laser}</h3>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('laser')}</h3>
                 <div style={{ display: 'grid', gap: '0.8rem', gridTemplateColumns: 'repeat(auto-fit,minmax(360px,1fr))' }}>
                   {[
-                    { key: 'room1', label: 'Laser Room 1', rows: grouped.laserRooms.room1 },
-                    { key: 'room2', label: 'Laser Room 2', rows: grouped.laserRooms.room2 },
+                    { key: 'room1', label: '⚡ Laser Room 1', rows: grouped.laserRooms.room1 },
+                    { key: 'room2', label: '⚡ Laser Room 2', rows: grouped.laserRooms.room2 },
                   ].map((room) => (
                     <div key={room.key}>
                       <h4 style={{ margin: '0 0 0.35rem', color: 'var(--text-muted)' }}>{room.label}</h4>
@@ -590,7 +601,7 @@ export function BookedAppointmentsPage() {
 
             {grouped.byService.dermatology.length > 0 ? (
               <div>
-                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.dermatology}</h3>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('dermatology')}</h3>
                 <div className="table-wrap">
                   <table className="data-table">
                     <thead>
@@ -610,7 +621,7 @@ export function BookedAppointmentsPage() {
                         >
                           <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
-                          <td>{SERVICE_LABELS.dermatology}</td>
+                          <td>{renderServiceLabel('dermatology')}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
                         </tr>
                       ))}
@@ -622,7 +633,7 @@ export function BookedAppointmentsPage() {
 
             {grouped.byService.solarium.length > 0 ? (
               <div>
-                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.solarium}</h3>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('solarium')}</h3>
                 <div className="table-wrap">
                   <table className="data-table">
                     <thead>
@@ -642,7 +653,7 @@ export function BookedAppointmentsPage() {
                         >
                           <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
-                          <td>{SERVICE_LABELS.solarium}</td>
+                          <td>{renderServiceLabel('solarium')}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
                         </tr>
                       ))}
@@ -654,7 +665,7 @@ export function BookedAppointmentsPage() {
 
             {grouped.byService.other.length > 0 ? (
               <div>
-                <h3 style={{ margin: '0 0 0.45rem' }}>{SERVICE_LABELS.other}</h3>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('other')}</h3>
                 <div className="table-wrap">
                   <table className="data-table">
                     <thead>
@@ -674,7 +685,7 @@ export function BookedAppointmentsPage() {
                         >
                           <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
-                          <td>{SERVICE_LABELS.other}</td>
+                          <td>{renderServiceLabel('other')}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
                         </tr>
                       ))}
