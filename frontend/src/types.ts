@@ -36,6 +36,12 @@ export interface Patient {
   medicalHistory: string
   surgicalHistory: string
   allergies: string
+  drugHistory?: string
+  pregnancyStatus?: '' | 'pregnant' | 'not_pregnant' | 'planning_pregnancy'
+  lactationStatus?: '' | 'lactating' | 'not_lactating'
+  previousTreatments?: '' | 'yes' | 'no'
+  recentDermTreatments?: '' | 'yes' | 'no'
+  isotretinoinHistory?: '' | 'yes' | 'no'
   departments: ('laser' | 'dermatology' | 'dental' | 'solarium')[]
   lastVisit: string
   phone?: string

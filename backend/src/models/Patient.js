@@ -24,6 +24,12 @@ const patientSchema = new mongoose.Schema(
     medicalHistory: { type: String, default: '' },
     surgicalHistory: { type: String, default: '' },
     allergies: { type: String, default: '' },
+    drugHistory: { type: String, default: '' },
+    pregnancyStatus: { type: String, enum: ['', 'pregnant', 'not_pregnant', 'planning_pregnancy'], default: '' },
+    lactationStatus: { type: String, enum: ['', 'lactating', 'not_lactating'], default: '' },
+    previousTreatments: { type: String, enum: ['', 'yes', 'no'], default: '' },
+    recentDermTreatments: { type: String, enum: ['', 'yes', 'no'], default: '' },
+    isotretinoinHistory: { type: String, enum: ['', 'yes', 'no'], default: '' },
     departments: {
       type: [String],
       enum: ['laser', 'dermatology', 'dental', 'solarium'],

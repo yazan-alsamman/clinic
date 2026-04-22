@@ -45,6 +45,60 @@ function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
   throw new Error('المبلغ غير صالح')
 }
 
+function normalizeYesNo(raw) {
+  const v = String(raw || '').trim()
+  return v === 'yes' || v === 'no' ? v : ''
+}
+
+function normalizePregnancyStatus(raw) {
+  const v = String(raw || '').trim()
+  return ['pregnant', 'not_pregnant', 'planning_pregnancy', ''].includes(v) ? v : ''
+}
+
+function normalizeLactationStatus(raw) {
+  const v = String(raw || '').trim()
+  return ['lactating', 'not_lactating', ''].includes(v) ? v : ''
+}
+
+function normalizeGender(raw) {
+  const v = String(raw || '').trim()
+  return v === 'male' || v === 'female' ? v : ''
+}
+
+function normalizeString(raw, maxLen = 4000) {
+  return String(raw ?? '')
+    .trim()
+    .slice(0, maxLen)
+}
+
+function normalizePatientProfilePayload(body) {
+  const gender = normalizeGender(body.gender)
+  const marital = normalizeString(body.marital, 120)
+  const isFemaleMarried = gender === 'female' && marital === 'متزوجة'
+  const payload = {
+    name: normalizeString(body.name, 220) || 'مريض جديد',
+    dob: normalizeString(body.dob, 40),
+    marital,
+    occupation: normalizeString(body.occupation, 220),
+    medicalHistory: normalizeString(body.medicalHistory, 4000),
+    surgicalHistory: normalizeString(body.surgicalHistory, 4000),
+    allergies: normalizeString(body.allergies, 4000),
+    drugHistory: normalizeString(body.drugHistory, 4000),
+    phone: normalizeString(body.phone, 80),
+    gender,
+    previousTreatments: normalizeYesNo(body.previousTreatments),
+    recentDermTreatments: normalizeYesNo(body.recentDermTreatments),
+    isotretinoinHistory: normalizeYesNo(body.isotretinoinHistory),
+    pregnancyStatus: '',
+    lactationStatus: '',
+  }
+  if (isFemaleMarried) {
+    payload.pregnancyStatus = normalizePregnancyStatus(body.pregnancyStatus)
+    payload.lactationStatus = normalizeLactationStatus(body.lactationStatus)
+  }
+  return payload
+}
+
 export const patientsRouter = Router()
 
 patientsRouter.use(authMiddleware, loadBusinessDay)
@@ -417,21 +471,12 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
       res.status(400).json({ error: 'رقم الإضبارة مطلوب' })
       return
     }
-    const gRaw = String(body.gender || '').trim()
-    const gender = gRaw === 'male' || gRaw === 'female' ? gRaw : ''
+    const normalized = normalizePatientProfilePayload(body)
     const paperLaserEntries = normalizePaperLaserEntries(body.paperLaserEntries)
     const p = await Patient.create({
       fileNumber,
-      name: String(body.name || '').trim() || 'مريض جديد',
-      dob: body.dob ?? '',
-      marital: body.marital ?? '',
-      occupation: body.occupation ?? '',
-      medicalHistory: body.medicalHistory ?? '',
-      surgicalHistory: body.surgicalHistory ?? '',
-      allergies: body.allergies ?? '',
+      ...normalized,
       departments: Array.isArray(body.departments) ? body.departments : [],
-      phone: body.phone ?? '',
-      gender,
       paperLaserEntries,
       lastVisit: new Date(),
     })
@@ -490,18 +535,25 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
       'medicalHistory',
       'surgicalHistory',
       'allergies',
+      'drugHistory',
+      'pregnancyStatus',
+      'lactationStatus',
+      'previousTreatments',
+      'recentDermTreatments',
+      'isotretinoinHistory',
       'departments',
       'phone',
       'gender',
       'paperLaserEntries',
     ]
+    const profileNormalized = normalizePatientProfilePayload({
+      ...p.toObject(),
+      ...body,
+      gender: body.gender === undefined ? p.gender : body.gender,
+      marital: body.marital === undefined ? p.marital : body.marital,
+    })
     for (const f of fields) {
       if (body[f] === undefined) continue
-      if (f === 'gender') {
-        const g = String(body.gender || '').trim()
-        if (['male', 'female', ''].includes(g)) p.gender = g
-        continue
-      }
       if (f === 'fileNumber') {
         const next = String(body.fileNumber || '').trim()
         if (!next) continue
@@ -510,6 +562,28 @@ patientsRouter.patch('/:id', requireActiveDay, async (req, res) => {
       }
       if (f === 'paperLaserEntries') {
         p.paperLaserEntries = normalizePaperLaserEntries(body.paperLaserEntries)
+        continue
+      }
+      if (
+        [
+          'name',
+          'dob',
+          'marital',
+          'occupation',
+          'medicalHistory',
+          'surgicalHistory',
+          'allergies',
+          'drugHistory',
+          'pregnancyStatus',
+          'lactationStatus',
+          'previousTreatments',
+          'recentDermTreatments',
+          'isotretinoinHistory',
+          'phone',
+          'gender',
+        ].includes(f)
+      ) {
+        p[f] = profileNormalized[f]
         continue
       }
       p[f] = body[f]

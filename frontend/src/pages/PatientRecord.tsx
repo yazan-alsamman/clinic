@@ -237,6 +237,33 @@ const GENDER_LABELS: Record<'male' | 'female' | '', string> = {
   female: 'أنثى',
 }
 
+const YES_NO_LABELS: Record<'' | 'yes' | 'no', string> = {
+  '': 'غير محدد',
+  yes: 'نعم',
+  no: 'لا',
+}
+
+const PREGNANCY_LABELS: Record<'' | 'pregnant' | 'not_pregnant' | 'planning_pregnancy', string> = {
+  '': 'غير محدد',
+  pregnant: 'حامل',
+  not_pregnant: 'غير حامل',
+  planning_pregnancy: 'تخطط للحمل',
+}
+
+const LACTATION_LABELS: Record<'' | 'lactating' | 'not_lactating', string> = {
+  '': 'غير محدد',
+  lactating: 'مرضع',
+  not_lactating: 'غير مرضع',
+}
+
+function isFemaleMarried(gender: '' | 'male' | 'female' | undefined, marital: string | undefined): boolean {
+  if (gender !== 'female') return false
+  const m = String(marital || '')
+    .trim()
+    .toLowerCase()
+  return ['متزوجة', 'متزوج', 'married'].includes(m)
+}
+
 type ClinicalHistorySnapshot = {
   laserSessions: ClinicalLaserRow[]
   dermatologyVisits: ClinicalDermRow[]
@@ -272,6 +299,30 @@ function buildPatientRecordPrintHtml(opts: {
     <tr><th>الهاتف</th><td dir="ltr" style="text-align:right">${escapeHtmlPdf(patient.phone?.trim() ? patient.phone : '—')}</td></tr>
     <tr><th>الجنس</th><td>${escapeHtmlPdf(genderLabel)}</td></tr>
   `
+  const femaleMarried = isFemaleMarried(g, patient.marital)
+  const pregnancyLabel = PREGNANCY_LABELS[
+    patient.pregnancyStatus === 'pregnant' ||
+    patient.pregnancyStatus === 'not_pregnant' ||
+    patient.pregnancyStatus === 'planning_pregnancy'
+      ? patient.pregnancyStatus
+      : ''
+  ]
+  const lactationLabel = LACTATION_LABELS[
+    patient.lactationStatus === 'lactating' || patient.lactationStatus === 'not_lactating'
+      ? patient.lactationStatus
+      : ''
+  ]
+  const previousTreatmentsLabel = YES_NO_LABELS[
+    patient.previousTreatments === 'yes' || patient.previousTreatments === 'no' ? patient.previousTreatments : ''
+  ]
+  const recentDermTreatmentsLabel = YES_NO_LABELS[
+    patient.recentDermTreatments === 'yes' || patient.recentDermTreatments === 'no'
+      ? patient.recentDermTreatments
+      : ''
+  ]
+  const isotretinoinHistoryLabel = YES_NO_LABELS[
+    patient.isotretinoinHistory === 'yes' || patient.isotretinoinHistory === 'no' ? patient.isotretinoinHistory : ''
+  ]
 
   const historyBlock = `
     <h2>التاريخ الطبي العام</h2>
@@ -279,6 +330,15 @@ function buildPatientRecordPrintHtml(opts: {
       <tr><th style="width:28%">سوابق مرضية</th><td>${escapeHtmlPdf(patient.medicalHistory?.trim() ? patient.medicalHistory : '—')}</td></tr>
       <tr><th>سوابق جراحية</th><td>${escapeHtmlPdf(patient.surgicalHistory?.trim() ? patient.surgicalHistory : '—')}</td></tr>
       <tr><th>تحسس</th><td>${escapeHtmlPdf(patient.allergies?.trim() ? patient.allergies : '—')}</td></tr>
+      <tr><th>سوابق دوائية</th><td>${escapeHtmlPdf(patient.drugHistory?.trim() ? patient.drugHistory : '—')}</td></tr>
+      <tr><th>هل يوجد معالجات سابقة؟</th><td>${escapeHtmlPdf(previousTreatmentsLabel)}</td></tr>
+      <tr><th>علاجات جلدية قريبة</th><td>${escapeHtmlPdf(recentDermTreatmentsLabel)}</td></tr>
+      <tr><th>قصة علاج بالريتان</th><td>${escapeHtmlPdf(isotretinoinHistoryLabel)}</td></tr>
+      ${
+        femaleMarried
+          ? `<tr><th>الحمل</th><td>${escapeHtmlPdf(pregnancyLabel)}</td></tr><tr><th>الإرضاع</th><td>${escapeHtmlPdf(lactationLabel)}</td></tr>`
+          : ''
+      }
     </table>
   `
 
@@ -614,6 +674,12 @@ export function PatientRecord() {
     medicalHistory: '',
     surgicalHistory: '',
     allergies: '',
+    drugHistory: '',
+    pregnancyStatus: '' as '' | 'pregnant' | 'not_pregnant' | 'planning_pregnancy',
+    lactationStatus: '' as '' | 'lactating' | 'not_lactating',
+    previousTreatments: '' as '' | 'yes' | 'no',
+    recentDermTreatments: '' as '' | 'yes' | 'no',
+    isotretinoinHistory: '' as '' | 'yes' | 'no',
     phone: '',
     gender: '' as '' | 'male' | 'female',
   })
@@ -634,6 +700,29 @@ export function PatientRecord() {
       medicalHistory: patient.medicalHistory || '',
       surgicalHistory: patient.surgicalHistory || '',
       allergies: patient.allergies || '',
+      drugHistory: patient.drugHistory || '',
+      pregnancyStatus:
+        patient.pregnancyStatus === 'pregnant' ||
+        patient.pregnancyStatus === 'not_pregnant' ||
+        patient.pregnancyStatus === 'planning_pregnancy'
+          ? patient.pregnancyStatus
+          : '',
+      lactationStatus:
+        patient.lactationStatus === 'lactating' || patient.lactationStatus === 'not_lactating'
+          ? patient.lactationStatus
+          : '',
+      previousTreatments:
+        patient.previousTreatments === 'yes' || patient.previousTreatments === 'no'
+          ? patient.previousTreatments
+          : '',
+      recentDermTreatments:
+        patient.recentDermTreatments === 'yes' || patient.recentDermTreatments === 'no'
+          ? patient.recentDermTreatments
+          : '',
+      isotretinoinHistory:
+        patient.isotretinoinHistory === 'yes' || patient.isotretinoinHistory === 'no'
+          ? patient.isotretinoinHistory
+          : '',
       phone: patient.phone || '',
       gender: patient.gender === 'male' || patient.gender === 'female' ? patient.gender : '',
     })
@@ -666,6 +755,16 @@ export function PatientRecord() {
           medicalHistory: overviewDraft.medicalHistory,
           surgicalHistory: overviewDraft.surgicalHistory,
           allergies: overviewDraft.allergies,
+          drugHistory: overviewDraft.drugHistory,
+          pregnancyStatus: isFemaleMarried(overviewDraft.gender, overviewDraft.marital)
+            ? overviewDraft.pregnancyStatus
+            : '',
+          lactationStatus: isFemaleMarried(overviewDraft.gender, overviewDraft.marital)
+            ? overviewDraft.lactationStatus
+            : '',
+          previousTreatments: overviewDraft.previousTreatments,
+          recentDermTreatments: overviewDraft.recentDermTreatments,
+          isotretinoinHistory: overviewDraft.isotretinoinHistory,
           phone: overviewDraft.phone,
           gender: overviewDraft.gender,
         }),
@@ -678,6 +777,10 @@ export function PatientRecord() {
       setOverviewSaving(false)
     }
   }, [id, patient, overviewDraft])
+  const showFemaleMarriedOverview = isFemaleMarried(
+    overviewEdit ? overviewDraft.gender : patient?.gender,
+    overviewEdit ? overviewDraft.marital : patient?.marital,
+  )
 
   const exportPatientPdf = useCallback(async () => {
     if (!id || !patient) return
@@ -1478,6 +1581,105 @@ export function PatientRecord() {
                     onChange={(e) => setOverviewDraft((d) => ({ ...d, allergies: e.target.value }))}
                   />
                 </div>
+                <div className="fieldset" style={{ gridColumn: '1 / -1' }}>
+                  <legend>سوابق دوائية</legend>
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    value={overviewDraft.drugHistory}
+                    onChange={(e) => setOverviewDraft((d) => ({ ...d, drugHistory: e.target.value }))}
+                  />
+                </div>
+                <div className="fieldset">
+                  <legend>هل يوجد معالجات سابقة؟</legend>
+                  <select
+                    className="input"
+                    value={overviewDraft.previousTreatments}
+                    onChange={(e) =>
+                      setOverviewDraft((d) => ({
+                        ...d,
+                        previousTreatments: e.target.value as '' | 'yes' | 'no',
+                      }))
+                    }
+                  >
+                    <option value="">{YES_NO_LABELS['']}</option>
+                    <option value="yes">{YES_NO_LABELS.yes}</option>
+                    <option value="no">{YES_NO_LABELS.no}</option>
+                  </select>
+                </div>
+                <div className="fieldset">
+                  <legend>علاجات جلدية قريبة</legend>
+                  <select
+                    className="input"
+                    value={overviewDraft.recentDermTreatments}
+                    onChange={(e) =>
+                      setOverviewDraft((d) => ({
+                        ...d,
+                        recentDermTreatments: e.target.value as '' | 'yes' | 'no',
+                      }))
+                    }
+                  >
+                    <option value="">{YES_NO_LABELS['']}</option>
+                    <option value="yes">{YES_NO_LABELS.yes}</option>
+                    <option value="no">{YES_NO_LABELS.no}</option>
+                  </select>
+                </div>
+                <div className="fieldset">
+                  <legend>قصة علاج بالريتان</legend>
+                  <select
+                    className="input"
+                    value={overviewDraft.isotretinoinHistory}
+                    onChange={(e) =>
+                      setOverviewDraft((d) => ({
+                        ...d,
+                        isotretinoinHistory: e.target.value as '' | 'yes' | 'no',
+                      }))
+                    }
+                  >
+                    <option value="">{YES_NO_LABELS['']}</option>
+                    <option value="yes">{YES_NO_LABELS.yes}</option>
+                    <option value="no">{YES_NO_LABELS.no}</option>
+                  </select>
+                </div>
+                {showFemaleMarriedOverview ? (
+                  <>
+                    <div className="fieldset">
+                      <legend>الحمل</legend>
+                      <select
+                        className="input"
+                        value={overviewDraft.pregnancyStatus}
+                        onChange={(e) =>
+                          setOverviewDraft((d) => ({
+                            ...d,
+                            pregnancyStatus: e.target.value as '' | 'pregnant' | 'not_pregnant' | 'planning_pregnancy',
+                          }))
+                        }
+                      >
+                        <option value="">{PREGNANCY_LABELS['']}</option>
+                        <option value="pregnant">{PREGNANCY_LABELS.pregnant}</option>
+                        <option value="not_pregnant">{PREGNANCY_LABELS.not_pregnant}</option>
+                        <option value="planning_pregnancy">{PREGNANCY_LABELS.planning_pregnancy}</option>
+                      </select>
+                    </div>
+                    <div className="fieldset">
+                      <legend>الإرضاع</legend>
+                      <select
+                        className="input"
+                        value={overviewDraft.lactationStatus}
+                        onChange={(e) =>
+                          setOverviewDraft((d) => ({
+                            ...d,
+                            lactationStatus: e.target.value as '' | 'lactating' | 'not_lactating',
+                          }))
+                        }
+                      >
+                        <option value="">{LACTATION_LABELS['']}</option>
+                        <option value="lactating">{LACTATION_LABELS.lactating}</option>
+                        <option value="not_lactating">{LACTATION_LABELS.not_lactating}</option>
+                      </select>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </>
           ) : (
@@ -1542,6 +1744,68 @@ export function PatientRecord() {
                     {patient.allergies?.trim() ? patient.allergies : '—'}
                   </p>
                 </div>
+                <div className="fieldset" style={{ gridColumn: '1 / -1' }}>
+                  <legend>سوابق دوائية</legend>
+                  <p style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                    {patient.drugHistory?.trim() ? patient.drugHistory : '—'}
+                  </p>
+                </div>
+                <div className="fieldset">
+                  <legend>هل يوجد معالجات سابقة؟</legend>
+                  <p style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                    {YES_NO_LABELS[
+                      patient.previousTreatments === 'yes' || patient.previousTreatments === 'no'
+                        ? patient.previousTreatments
+                        : ''
+                    ]}
+                  </p>
+                </div>
+                <div className="fieldset">
+                  <legend>علاجات جلدية قريبة</legend>
+                  <p style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                    {YES_NO_LABELS[
+                      patient.recentDermTreatments === 'yes' || patient.recentDermTreatments === 'no'
+                        ? patient.recentDermTreatments
+                        : ''
+                    ]}
+                  </p>
+                </div>
+                <div className="fieldset">
+                  <legend>قصة علاج بالريتان</legend>
+                  <p style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                    {YES_NO_LABELS[
+                      patient.isotretinoinHistory === 'yes' || patient.isotretinoinHistory === 'no'
+                        ? patient.isotretinoinHistory
+                        : ''
+                    ]}
+                  </p>
+                </div>
+                {showFemaleMarriedOverview ? (
+                  <>
+                    <div className="fieldset">
+                      <legend>الحمل</legend>
+                      <p style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                        {PREGNANCY_LABELS[
+                          patient.pregnancyStatus === 'pregnant' ||
+                          patient.pregnancyStatus === 'not_pregnant' ||
+                          patient.pregnancyStatus === 'planning_pregnancy'
+                            ? patient.pregnancyStatus
+                            : ''
+                        ]}
+                      </p>
+                    </div>
+                    <div className="fieldset">
+                      <legend>الإرضاع</legend>
+                      <p style={{ margin: 0, fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                        {LACTATION_LABELS[
+                          patient.lactationStatus === 'lactating' || patient.lactationStatus === 'not_lactating'
+                            ? patient.lactationStatus
+                            : ''
+                        ]}
+                      </p>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </>
           )}

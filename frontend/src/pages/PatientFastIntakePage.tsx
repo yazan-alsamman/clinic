@@ -15,6 +15,12 @@ type IntakeForm = {
   medicalHistory: string
   surgicalHistory: string
   allergies: string
+  drugHistory: string
+  pregnancyStatus: '' | 'pregnant' | 'not_pregnant' | 'planning_pregnancy'
+  lactationStatus: '' | 'lactating' | 'not_lactating'
+  previousTreatments: '' | 'yes' | 'no'
+  recentDermTreatments: '' | 'yes' | 'no'
+  isotretinoinHistory: '' | 'yes' | 'no'
   departments: Dept[]
   paperLaserEntries: Array<{
     therapist: string
@@ -39,8 +45,20 @@ const emptyForm: IntakeForm = {
   medicalHistory: '',
   surgicalHistory: '',
   allergies: '',
+  drugHistory: '',
+  pregnancyStatus: '',
+  lactationStatus: '',
+  previousTreatments: '',
+  recentDermTreatments: '',
+  isotretinoinHistory: '',
   departments: [],
   paperLaserEntries: [],
+}
+
+function isFemaleMarried(gender: IntakeForm['gender'], marital: string): boolean {
+  if (gender !== 'female') return false
+  const m = marital.trim().toLowerCase()
+  return ['متزوجة', 'متزوج', 'married'].includes(m)
 }
 
 function normalizeGender(raw: string): '' | 'male' | 'female' {
@@ -87,6 +105,10 @@ export function PatientFastIntakePage() {
 
   const canUse = user?.role === 'super_admin' || user?.role === 'reception'
   const deptHint = useMemo(() => form.departments.join(', ') || 'بدون أقسام مبدئية', [form.departments])
+  const showFemaleMarriedFields = useMemo(
+    () => isFemaleMarried(form.gender, form.marital),
+    [form.gender, form.marital],
+  )
 
   function toggleDept(d: Dept) {
     setForm((f) => ({
@@ -148,6 +170,12 @@ export function PatientFastIntakePage() {
           medicalHistory: form.medicalHistory.trim(),
           surgicalHistory: form.surgicalHistory.trim(),
           allergies: form.allergies.trim(),
+          drugHistory: form.drugHistory.trim(),
+          pregnancyStatus: showFemaleMarriedFields ? form.pregnancyStatus : '',
+          lactationStatus: showFemaleMarriedFields ? form.lactationStatus : '',
+          previousTreatments: form.previousTreatments,
+          recentDermTreatments: form.recentDermTreatments,
+          isotretinoinHistory: form.isotretinoinHistory,
           departments: form.departments,
           paperLaserEntries: form.paperLaserEntries,
         }),
@@ -372,7 +400,85 @@ export function PatientFastIntakePage() {
             value={form.allergies}
             onChange={(e) => setForm((f) => ({ ...f, allergies: e.target.value }))}
           />
+          <label className="form-label" style={{ marginTop: '0.5rem', display: 'block' }}>
+            سوابق دوائية
+          </label>
+          <textarea
+            className="textarea"
+            rows={2}
+            value={form.drugHistory}
+            onChange={(e) => setForm((f) => ({ ...f, drugHistory: e.target.value }))}
+          />
         </div>
+        <div className="grid-2" style={{ marginTop: '0.7rem' }}>
+          <div>
+            <label className="form-label">هل يوجد معالجات سابقة؟</label>
+            <select
+              className="input"
+              value={form.previousTreatments}
+              onChange={(e) => setForm((f) => ({ ...f, previousTreatments: e.target.value as IntakeForm['previousTreatments'] }))}
+            >
+              <option value="">غير محدد</option>
+              <option value="yes">نعم</option>
+              <option value="no">لا</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">علاجات جلدية قريبة</label>
+            <select
+              className="input"
+              value={form.recentDermTreatments}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, recentDermTreatments: e.target.value as IntakeForm['recentDermTreatments'] }))
+              }
+            >
+              <option value="">غير محدد</option>
+              <option value="yes">نعم</option>
+              <option value="no">لا</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">قصة علاج بالريتان</label>
+            <select
+              className="input"
+              value={form.isotretinoinHistory}
+              onChange={(e) => setForm((f) => ({ ...f, isotretinoinHistory: e.target.value as IntakeForm['isotretinoinHistory'] }))}
+            >
+              <option value="">غير محدد</option>
+              <option value="yes">نعم</option>
+              <option value="no">لا</option>
+            </select>
+          </div>
+        </div>
+        {showFemaleMarriedFields ? (
+          <div className="grid-2" style={{ marginTop: '0.7rem' }}>
+            <div>
+              <label className="form-label">الحمل</label>
+              <select
+                className="input"
+                value={form.pregnancyStatus}
+                onChange={(e) => setForm((f) => ({ ...f, pregnancyStatus: e.target.value as IntakeForm['pregnancyStatus'] }))}
+              >
+                <option value="">غير محدد</option>
+                <option value="pregnant">حامل</option>
+                <option value="not_pregnant">غير حامل</option>
+                <option value="planning_pregnancy">تخطط للحمل</option>
+              </select>
+            </div>
+            <div>
+              <label className="form-label">الإرضاع</label>
+              <select
+                className="input"
+                value={form.lactationStatus}
+                onChange={(e) => setForm((f) => ({ ...f, lactationStatus: e.target.value as IntakeForm['lactationStatus'] }))}
+              >
+                <option value="">غير محدد</option>
+                <option value="lactating">مرضع</option>
+                <option value="not_lactating">غير مرضع</option>
+              </select>
+            </div>
+          </div>
+        ) : null}
         <div style={{ marginTop: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
             <label className="form-label" style={{ margin: 0 }}>
