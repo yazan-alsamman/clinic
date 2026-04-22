@@ -116,7 +116,13 @@ export function LaserCreateSessionPage() {
                 {rows.map((s) => (
                   <tr
                     key={s.id}
-                    onClick={() => navigate(`/patients/${s.patientId}?tab=laser`)}
+                    onClick={() =>
+                      navigate(
+                        `/patients/${s.patientId}?tab=laser&laserProc=${encodeURIComponent(
+                          String(s.procedureType || '').trim(),
+                        )}`,
+                      )
+                    }
                     style={{ cursor: 'pointer' }}
                     title="فتح ملف المريض وجلسة الليزر"
                   >

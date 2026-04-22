@@ -506,6 +506,7 @@ export function PatientRecord() {
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
   const [selectedLaserItemIds, setSelectedLaserItemIds] = useState<string[]>([])
+  const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
   const [pw, setPw] = useState('')
   const [pulse, setPulse] = useState('')
@@ -968,9 +969,26 @@ export function PatientRecord() {
         if (!cancelled) {
           setLaserCatalog(catalogData.categories)
           setLaserProcedureGroups(procData.groups || [])
-          setSelectedLaserItemIds((prev) =>
-            prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id))),
-          )
+          setSelectedLaserItemIds((prev) => {
+            const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
+            if (!bookedLaserProcedureText) return validPrev
+
+            const byName = new Map<string, string>()
+            for (const g of procData.groups || []) {
+              for (const item of g.items || []) {
+                byName.set(String(item.name || '').trim().toLowerCase(), String(item.id))
+              }
+            }
+            const parsedNames = bookedLaserProcedureText
+              .split(/\s*\+\s*/g)
+              .map((x) => x.trim().toLowerCase())
+              .filter(Boolean)
+            const matchedIds = parsedNames
+              .map((name) => byName.get(name))
+              .filter((id): id is string => Boolean(id))
+
+            return matchedIds.length > 0 ? [...new Set(matchedIds)] : validPrev
+          })
         }
       } catch {
         if (!cancelled) {
@@ -986,7 +1004,7 @@ export function PatientRecord() {
     return () => {
       cancelled = true
     }
-  }, [tab, role])
+  }, [tab, role, bookedLaserProcedureText])
 
   useEffect(() => {
     if (tab !== 'laser' || !id || !role || !canAccessTab(role, 'laser')) return
