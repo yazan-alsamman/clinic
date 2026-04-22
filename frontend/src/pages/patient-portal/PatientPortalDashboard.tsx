@@ -96,6 +96,16 @@ export function PatientPortalDashboard() {
         </div>
       </div>
 
+      <a
+        className="patient-credit-banner"
+        href="https://www.vegacore.co"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <img src="/vega-core-logo.jpg" alt="Vega Core" />
+        <p>تم إنتاج هذا النظام من قبل شركة Vega Core</p>
+      </a>
+
       <div className="grid-2" style={{ gap: '1rem', alignItems: 'stretch' }}>
         <div className="card" style={{ margin: 0 }}>
           <h2 className="card-title">مواعيد قادمة</h2>
