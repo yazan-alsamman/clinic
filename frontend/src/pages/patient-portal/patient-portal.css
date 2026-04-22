@@ -4,12 +4,7 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(
-    165deg,
-    rgba(8, 12, 28, 0.94) 0%,
-    rgba(6, 8, 20, 0.98) 50%,
-    rgba(4, 6, 16, 1) 100%
-  );
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f7fd 100%);
 }
 
 .patient-portal-header {
@@ -23,7 +18,7 @@
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
   padding-top: max(1rem, env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--border);
-  background: rgba(12, 16, 32, 0.75);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: var(--blur-glass);
   position: sticky;
   top: 0;
@@ -76,7 +71,7 @@
 .patient-portal-nav a.active {
   color: var(--cyan);
   background: var(--cyan-dim);
-  border-color: rgba(34, 211, 238, 0.25);
+  border-color: rgba(14, 165, 233, 0.28);
 }
 
 .patient-portal-main {
@@ -227,8 +222,8 @@
   min-height: 280px;
   border: 1px solid var(--border-bright);
   background:
-    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(34, 211, 238, 0.2), transparent 55%),
-    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(168, 85, 247, 0.18), transparent 50%),
+    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(34, 211, 238, 0.12), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(168, 85, 247, 0.12), transparent 50%),
     var(--surface-solid);
   display: flex;
   flex-direction: column;
