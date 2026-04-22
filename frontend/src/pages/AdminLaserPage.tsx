@@ -46,14 +46,12 @@ export function AdminLaserPage() {
   const renderMoneyDual = (usdValue: number) => {
     const usd = Number(usdValue) || 0
     const usdText = `${usd.toFixed(2)} USD`
-    if (!(fxRate > 0)) return <span>{usdText}</span>
-    const syp = usd * fxRate
+    const sypText =
+      fxRate > 0 ? `${(usd * fxRate).toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س` : '— ل.س'
     return (
       <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '0.1rem' }}>
         <span>{usdText}</span>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-          {syp.toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س
-        </span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>{sypText}</span>
       </span>
     )
   }
