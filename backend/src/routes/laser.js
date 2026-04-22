@@ -368,16 +368,22 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
             clinicalSessionId: { $in: sessionIds },
             status: { $in: doneStatuses },
           })
-            .select('operatorUserId shotCount')
+            .select('operatorUserId shotCount room')
             .lean()
         : []
 
     const totals = new Map()
+    const roomTotals = { room1Shots: 0, room2Shots: 0 }
     for (const row of laserRows) {
+      const shotCount = parseShotCount(row.shotCount)
+      const room = String(row.room || '').trim()
+      if (room === '1') roomTotals.room1Shots += shotCount
+      if (room === '2') roomTotals.room2Shots += shotCount
+
       const uid = String(row.operatorUserId || '')
       if (!uid) continue
       const prev = totals.get(uid) || { totalShots: 0, sessionsCount: 0 }
-      prev.totalShots += parseShotCount(row.shotCount)
+      prev.totalShots += shotCount
       prev.sessionsCount += 1
       totals.set(uid, prev)
     }
@@ -393,7 +399,7 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
       }
     })
 
-    res.json({ date, rows })
+    res.json({ date, rows, roomTotals })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

@@ -26,6 +26,7 @@ export function AdminLaserPage() {
   const [tab, setTab] = useState<LaserTab>('shots')
   const [date, setDate] = useState('')
   const [shotRows, setShotRows] = useState<DailyRow[]>([])
+  const [roomTotals, setRoomTotals] = useState<{ room1Shots: number; room2Shots: number }>({ room1Shots: 0, room2Shots: 0 })
   const [shotLoading, setShotLoading] = useState(false)
   const [shotErr, setShotErr] = useState('')
   const [financeRows, setFinanceRows] = useState<FinanceRow[]>([])
@@ -37,10 +38,6 @@ export function AdminLaserPage() {
     if (!date && businessDate) setDate(businessDate)
   }, [businessDate, date])
 
-  const totalShots = useMemo(
-    () => shotRows.reduce((sum, r) => sum + (Number(r.totalShots) || 0), 0),
-    [shotRows],
-  )
   const totalFinanceUsd = useMemo(
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountUsd) || 0), 0),
     [financeRows],
@@ -67,11 +64,18 @@ export function AdminLaserPage() {
     setShotLoading(true)
     try {
       const q = date ? `?date=${encodeURIComponent(date)}` : ''
-      const data = await api<{ date: string; rows: DailyRow[] }>(`/api/laser/shots-daily${q}`)
+      const data = await api<{ date: string; rows: DailyRow[]; roomTotals?: { room1Shots?: number; room2Shots?: number } }>(
+        `/api/laser/shots-daily${q}`,
+      )
       setShotRows(data.rows || [])
+      setRoomTotals({
+        room1Shots: Number(data.roomTotals?.room1Shots) || 0,
+        room2Shots: Number(data.roomTotals?.room2Shots) || 0,
+      })
       if (!date && data.date) setDate(data.date)
     } catch (e) {
       setShotRows([])
+      setRoomTotals({ room1Shots: 0, room2Shots: 0 })
       setShotErr(e instanceof ApiError ? e.message : 'تعذر تحميل تقرير الضربات')
     } finally {
       setShotLoading(false)
@@ -192,7 +196,8 @@ export function AdminLaserPage() {
             تاريخ التقرير: {date || '—'}
           </h2>
           <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-            مجموع ضربات جميع الأخصائيين: <strong style={{ color: 'var(--text)' }}>{totalShots}</strong>
+            ضربات الغرفة الأولى: <strong style={{ color: 'var(--text)' }}>{roomTotals.room1Shots}</strong> — ضربات الغرفة
+            الثانية: <strong style={{ color: 'var(--text)' }}>{roomTotals.room2Shots}</strong>
           </div>
           <div className="table-wrap">
             <table className="data-table">
