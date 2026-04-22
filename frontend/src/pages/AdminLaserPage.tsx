@@ -18,13 +18,16 @@ type FinanceRow = {
   sessionsCount: number
 }
 type LaserTab = 'shots' | 'financial'
+type ReportPeriod = 'daily' | 'monthly'
 
 export function AdminLaserPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
   const allowed = user?.role === 'super_admin'
   const [tab, setTab] = useState<LaserTab>('shots')
+  const [period, setPeriod] = useState<ReportPeriod>('daily')
   const [date, setDate] = useState('')
+  const [month, setMonth] = useState('')
   const [shotRows, setShotRows] = useState<DailyRow[]>([])
   const [roomTotals, setRoomTotals] = useState<{ room1Shots: number; room2Shots: number }>({ room1Shots: 0, room2Shots: 0 })
   const [shotLoading, setShotLoading] = useState(false)
@@ -37,6 +40,9 @@ export function AdminLaserPage() {
   useEffect(() => {
     if (!date && businessDate) setDate(businessDate)
   }, [businessDate, date])
+  useEffect(() => {
+    if (!month && businessDate) setMonth(String(businessDate).slice(0, 7))
+  }, [businessDate, month])
 
   const totalFinanceUsd = useMemo(
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountUsd) || 0), 0),
@@ -61,16 +67,28 @@ export function AdminLaserPage() {
     setShotErr('')
     setShotLoading(true)
     try {
-      const q = date ? `?date=${encodeURIComponent(date)}` : ''
-      const data = await api<{ date: string; rows: DailyRow[]; roomTotals?: { room1Shots?: number; room2Shots?: number } }>(
-        `/api/laser/shots-daily${q}`,
-      )
+      const q =
+        period === 'daily'
+          ? date
+            ? `?date=${encodeURIComponent(date)}`
+            : ''
+          : month
+            ? `?month=${encodeURIComponent(month)}`
+            : ''
+      const endpoint = period === 'daily' ? '/api/laser/shots-daily' : '/api/laser/shots-monthly'
+      const data = await api<{
+        date?: string
+        month?: string
+        rows: DailyRow[]
+        roomTotals?: { room1Shots?: number; room2Shots?: number }
+      }>(`${endpoint}${q}`)
       setShotRows(data.rows || [])
       setRoomTotals({
         room1Shots: Number(data.roomTotals?.room1Shots) || 0,
         room2Shots: Number(data.roomTotals?.room2Shots) || 0,
       })
-      if (!date && data.date) setDate(data.date)
+      if (period === 'daily' && !date && data.date) setDate(data.date)
+      if (period === 'monthly' && !month && data.month) setMonth(data.month)
     } catch (e) {
       setShotRows([])
       setRoomTotals({ room1Shots: 0, room2Shots: 0 })
@@ -78,22 +96,32 @@ export function AdminLaserPage() {
     } finally {
       setShotLoading(false)
     }
-  }, [allowed, date])
+  }, [allowed, date, month, period])
 
   const loadFinancial = useCallback(async () => {
     if (!allowed) return
     setFinanceErr('')
     setFinanceLoading(true)
     try {
-      const q = date ? `?date=${encodeURIComponent(date)}` : ''
+      const q =
+        period === 'daily'
+          ? date
+            ? `?date=${encodeURIComponent(date)}`
+            : ''
+          : month
+            ? `?month=${encodeURIComponent(month)}`
+            : ''
+      const endpoint = period === 'daily' ? '/api/laser/finance-daily' : '/api/laser/finance-monthly'
       const data = await api<{
-        date: string
+        date?: string
+        month?: string
         rows: FinanceRow[]
         topSpecialist: { userId: string; name: string; totalAmountUsd: number } | null
-      }>(`/api/laser/finance-daily${q}`)
+      }>(`${endpoint}${q}`)
       setFinanceRows(data.rows || [])
       setTopSpecialist(data.topSpecialist ? { name: data.topSpecialist.name, totalAmountUsd: data.topSpecialist.totalAmountUsd } : null)
-      if (!date && data.date) setDate(data.date)
+      if (period === 'daily' && !date && data.date) setDate(data.date)
+      if (period === 'monthly' && !month && data.month) setMonth(data.month)
     } catch (e) {
       setFinanceRows([])
       setTopSpecialist(null)
@@ -101,7 +129,7 @@ export function AdminLaserPage() {
     } finally {
       setFinanceLoading(false)
     }
-  }, [allowed, date])
+  }, [allowed, date, month, period])
 
   useEffect(() => {
     if (tab === 'shots') {
@@ -123,23 +151,41 @@ export function AdminLaserPage() {
   return (
     <>
       <h1 className="page-title">ليزر</h1>
-      <p className="page-desc">متابعة يومية لأداء الأخصائيين (ضربات ومالية) حسب التاريخ.</p>
+      <p className="page-desc">متابعة يومية وشهرية لأداء الأخصائيين (ضربات ومالية).</p>
 
       <div
         className="toolbar"
         style={{ marginTop: '0.95rem', display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}
       >
-        <label className="form-label" htmlFor="laser-day" style={{ margin: 0 }}>
-          تاريخ اليوم
-        </label>
-        <input
-          id="laser-day"
-          className="input"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          style={{ maxWidth: 220 }}
-        />
+        {period === 'daily' ? (
+          <>
+            <label className="form-label" htmlFor="laser-day" style={{ margin: 0 }}>
+              تاريخ اليوم
+            </label>
+            <input
+              id="laser-day"
+              className="input"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={{ maxWidth: 220 }}
+            />
+          </>
+        ) : (
+          <>
+            <label className="form-label" htmlFor="laser-month" style={{ margin: 0 }}>
+              الشهر
+            </label>
+            <input
+              id="laser-month"
+              className="input"
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              style={{ maxWidth: 220 }}
+            />
+          </>
+        )}
         <button
           type="button"
           className="btn btn-secondary"
@@ -163,6 +209,24 @@ export function AdminLaserPage() {
       </div>
 
       <div className="tabs" role="tablist" style={{ marginTop: '0.65rem' }}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={period === 'daily'}
+          className={`tab${period === 'daily' ? ' active' : ''}`}
+          onClick={() => setPeriod('daily')}
+        >
+          تقارير يومية
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={period === 'monthly'}
+          className={`tab${period === 'monthly' ? ' active' : ''}`}
+          onClick={() => setPeriod('monthly')}
+        >
+          تقارير شهرية
+        </button>
         <button
           type="button"
           role="tab"
@@ -191,7 +255,7 @@ export function AdminLaserPage() {
       {tab === 'shots' ? (
         <div className="card" style={{ marginTop: '1rem' }}>
           <h2 className="card-title" style={{ marginBottom: '0.55rem' }}>
-            تاريخ التقرير: {date || '—'}
+            {period === 'daily' ? `تاريخ التقرير: ${date || '—'}` : `شهر التقرير: ${month || '—'}`}
           </h2>
           <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
             ضربات الغرفة الأولى: <strong style={{ color: 'var(--text)' }}>{roomTotals.room1Shots}</strong> — ضربات الغرفة
@@ -236,7 +300,7 @@ export function AdminLaserPage() {
         <>
           <div className="card" style={{ marginTop: '1rem' }}>
             <h2 className="card-title" style={{ marginBottom: '0.35rem' }}>
-              الأعلى مبلغًا — تاريخ {date || '—'}
+              الأعلى مبلغًا — {period === 'daily' ? `تاريخ ${date || '—'}` : `شهر ${month || '—'}`}
             </h2>
             <div
               style={{
@@ -262,7 +326,7 @@ export function AdminLaserPage() {
           </div>
           <div className="card" style={{ marginTop: '1rem' }}>
             <h2 className="card-title" style={{ marginBottom: '0.55rem' }}>
-              مالية جلسات الليزر — تاريخ {date || '—'}
+              مالية جلسات الليزر — {period === 'daily' ? `تاريخ ${date || '—'}` : `شهر ${month || '—'}`}
             </h2>
             <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
               مجموع أسعار جلسات جميع الأخصائيين:{' '}

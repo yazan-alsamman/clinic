@@ -131,6 +131,14 @@ function parseShotCount(value) {
   return Math.round(num)
 }
 
+function resolveReportMonth(rawMonth, fallbackBusinessDate) {
+  const m = String(rawMonth || '').trim()
+  if (/^\d{4}-\d{2}$/.test(m)) return m
+  const bd = String(fallbackBusinessDate || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(bd)) return bd.slice(0, 7)
+  return todayBusinessDate().slice(0, 7)
+}
+
 function findActiveLaserPackage(patientLike) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
@@ -475,6 +483,131 @@ laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) 
     const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
     res.json({
       date,
+      rows,
+      topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountUsd: top.totalAmountUsd } : null,
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.get('/shots-monthly', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
+    const specialists = await User.find({ role: 'laser' }).select('_id name active').sort({ name: 1 }).lean()
+    const specialistIds = specialists.map((x) => x._id)
+    const clinicalRows =
+      specialistIds.length > 0
+        ? await ClinicalSession.find({
+            department: 'laser',
+            businessDate: new RegExp(`^${month}-`),
+            providerUserId: { $in: specialistIds },
+          })
+            .select('_id providerUserId')
+            .lean()
+        : []
+    const sessionIds = clinicalRows.map((x) => x._id)
+    const doneStatuses = ['completed', 'completed_pending_collection']
+    const laserRows =
+      sessionIds.length > 0
+        ? await LaserSession.find({
+            clinicalSessionId: { $in: sessionIds },
+            status: { $in: doneStatuses },
+          })
+            .select('operatorUserId shotCount room')
+            .lean()
+        : []
+
+    const totals = new Map()
+    const roomTotals = { room1Shots: 0, room2Shots: 0 }
+    for (const row of laserRows) {
+      const shotCount = parseShotCount(row.shotCount)
+      const room = String(row.room || '').trim()
+      if (room === '1') roomTotals.room1Shots += shotCount
+      if (room === '2') roomTotals.room2Shots += shotCount
+
+      const uid = String(row.operatorUserId || '')
+      if (!uid) continue
+      const prev = totals.get(uid) || { totalShots: 0, sessionsCount: 0 }
+      prev.totalShots += shotCount
+      prev.sessionsCount += 1
+      totals.set(uid, prev)
+    }
+
+    const rows = specialists.map((sp) => {
+      const current = totals.get(String(sp._id)) || { totalShots: 0, sessionsCount: 0 }
+      return {
+        userId: String(sp._id),
+        name: String(sp.name || '').trim() || '—',
+        active: sp.active !== false,
+        totalShots: current.totalShots,
+        sessionsCount: current.sessionsCount,
+      }
+    })
+
+    res.json({ month, rows, roomTotals })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
+    const specialists = await User.find({ role: 'laser' }).select('_id name active').sort({ name: 1 }).lean()
+    const specialistIds = specialists.map((x) => x._id)
+    const clinicalRows =
+      specialistIds.length > 0
+        ? await ClinicalSession.find({
+            department: 'laser',
+            businessDate: new RegExp(`^${month}-`),
+            providerUserId: { $in: specialistIds },
+          })
+            .select('_id providerUserId sessionFeeUsd')
+            .lean()
+        : []
+
+    const sessionIds = clinicalRows.map((x) => x._id)
+    const doneStatuses = ['completed', 'completed_pending_collection']
+    const doneLaserRows =
+      sessionIds.length > 0
+        ? await LaserSession.find({
+            clinicalSessionId: { $in: sessionIds },
+            status: { $in: doneStatuses },
+          })
+            .select('clinicalSessionId')
+            .lean()
+        : []
+    const doneClinicalIds = new Set(doneLaserRows.map((x) => String(x.clinicalSessionId || '')))
+
+    const totals = new Map()
+    for (const row of clinicalRows) {
+      const sid = String(row._id)
+      if (!doneClinicalIds.has(sid)) continue
+      const uid = String(row.providerUserId || '')
+      if (!uid) continue
+      const prev = totals.get(uid) || { totalAmountUsd: 0, sessionsCount: 0 }
+      prev.totalAmountUsd += Number(row.sessionFeeUsd) || 0
+      prev.sessionsCount += 1
+      totals.set(uid, prev)
+    }
+
+    const rows = specialists.map((sp) => {
+      const current = totals.get(String(sp._id)) || { totalAmountUsd: 0, sessionsCount: 0 }
+      return {
+        userId: String(sp._id),
+        name: String(sp.name || '').trim() || '—',
+        active: sp.active !== false,
+        totalAmountUsd: round2(current.totalAmountUsd),
+        sessionsCount: current.sessionsCount,
+      }
+    })
+
+    const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
+    res.json({
+      month,
       rows,
       topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountUsd: top.totalAmountUsd } : null,
     })
