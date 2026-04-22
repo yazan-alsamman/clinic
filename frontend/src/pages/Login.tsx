@@ -10,8 +10,8 @@ const prodMissingApiBase =
 export function Login() {
   const { user, loading: staffLoading, login } = useAuth()
   const nav = useNavigate()
-  const [identifier, setIdentifier] = useState('elias@clinic.local')
-  const [password, setPassword] = useState('admin123')
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [pending, setPending] = useState(false)
   const [patientGate, setPatientGate] = useState<'pending' | 'yes' | 'no'>(() =>
