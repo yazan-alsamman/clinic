@@ -9,6 +9,7 @@ import type { LaserCategory, Patient, Role } from '../types'
 type Tab =
   | 'overview'
   | 'account'
+  | 'packages'
   | 'financial'
   | 'sessions'
   | 'laser'
@@ -46,6 +47,9 @@ type ClinicalLaserRow = {
   billingItemStatus?: string | null
   collectedAmountUsd?: number | null
   manualAreaLabels?: string[]
+  isPackageSession?: boolean
+  patientPackageId?: string
+  patientPackageSessionId?: string
 }
 
 type ClinicalDermRow = {
@@ -109,12 +113,36 @@ type DermatologySessionRow = {
   notes: string
   createdAt: string
   createdByReceptionUserId?: string | null
+  isPackagePrepaid?: boolean
   materials: Array<{
     name: string
     quantity: number
     chargedUnitPriceUsd?: number
     lineChargeUsd?: number
   }>
+}
+
+type PatientPackageSession = {
+  id: string
+  label: string
+  completedByReception: boolean
+  completedAt: string | null
+  completedByUserId: string | null
+  linkedLaserSessionId: string | null
+  linkedBillingItemId: string | null
+}
+
+type PatientPackage = {
+  id: string
+  department: 'laser'
+  title: string
+  sessionsCount: number
+  packageTotalUsd: number
+  paidAmountUsd: number
+  settlementDeltaUsd: number
+  notes: string
+  createdAt: string | null
+  sessions: PatientPackageSession[]
 }
 
 function clinicalDeptLabelAr(d: string) {
@@ -598,6 +626,16 @@ export function PatientRecord() {
   const [financialSettleSyp, setFinancialSettleSyp] = useState('')
   const [financialSettleBusy, setFinancialSettleBusy] = useState(false)
   const [financialSettleErr, setFinancialSettleErr] = useState('')
+  const [packageBusy, setPackageBusy] = useState(false)
+  const [packageErr, setPackageErr] = useState('')
+  const [packageOk, setPackageOk] = useState('')
+  const [packageTitle, setPackageTitle] = useState('')
+  const [packageSessionsCount, setPackageSessionsCount] = useState('6')
+  const [packageTotalUsd, setPackageTotalUsd] = useState('')
+  const [packageTotalSyp, setPackageTotalSyp] = useState('')
+  const [packagePaidUsd, setPackagePaidUsd] = useState('')
+  const [packagePaidSyp, setPackagePaidSyp] = useState('')
+  const [packageNotes, setPackageNotes] = useState('')
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
   const [laserSessionCompleting, setLaserSessionCompleting] = useState(false)
   const [laserDetailActionErr, setLaserDetailActionErr] = useState('')
@@ -1191,6 +1229,7 @@ export function PatientRecord() {
     const allTabs: { key: Tab; label: string }[] = [
       { key: 'overview', label: 'نظرة عامة' },
       { key: 'account', label: 'الحساب' },
+      { key: 'packages', label: 'باكج' },
       { key: 'financial', label: 'مالية' },
       { key: 'sessions', label: 'جلسات / تحصيل' },
       { key: 'laser', label: 'الليزر' },
@@ -1207,6 +1246,7 @@ export function PatientRecord() {
       (t) =>
         t.key === 'overview' ||
         (t.key === 'account' && showAccount) ||
+        (t.key === 'packages' && showAccount) ||
         (t.key === 'sessions' && showSessionsTab) ||
         (t.key === 'financial' && showAccount) ||
         (t.key === 'laser' && canAccessTab(role, 'laser')) ||
@@ -1239,6 +1279,41 @@ export function PatientRecord() {
     if (!(selectedLaserTotalSyp > 0) || !(rate > 0)) return null
     return Math.round((selectedLaserTotalSyp / rate) * 100) / 100
   }, [selectedLaserTotalSyp, usdSypRate])
+
+  const patientPackages: PatientPackage[] = useMemo(() => {
+    if (!patient) return []
+    const rows = Array.isArray(patient.sessionPackages) ? patient.sessionPackages : []
+    return rows
+      .filter((x): x is NonNullable<typeof x> => Boolean(x))
+      .map((x) => ({
+        id: String(x.id),
+        department: 'laser',
+        title: String(x.title || ''),
+        sessionsCount: Number(x.sessionsCount) || 0,
+        packageTotalUsd: Number(x.packageTotalUsd) || 0,
+        paidAmountUsd: Number(x.paidAmountUsd) || 0,
+        settlementDeltaUsd: Number(x.settlementDeltaUsd) || 0,
+        notes: String(x.notes || ''),
+        createdAt: x.createdAt ?? null,
+        sessions: Array.isArray(x.sessions)
+          ? x.sessions.map((s) => ({
+              id: String(s.id),
+              label: String(s.label || ''),
+              completedByReception: s.completedByReception === true,
+              completedAt: s.completedAt ?? null,
+              completedByUserId: s.completedByUserId ?? null,
+              linkedLaserSessionId: s.linkedLaserSessionId ?? null,
+              linkedBillingItemId: s.linkedBillingItemId ?? null,
+            }))
+          : [],
+      }))
+  }, [patient])
+
+  const activeLaserPackage = useMemo(() => {
+    return patientPackages.find(
+      (pkg) => pkg.department === 'laser' && pkg.sessions.some((s) => !s.linkedLaserSessionId),
+    )
+  }, [patientPackages])
 
   const dentalPlanApproved = dentalPlan?.status === 'approved'
   const dentalPlanSummary =
@@ -2198,6 +2273,259 @@ export function PatientRecord() {
         </div>
       )}
 
+      {tab === 'packages' && (role === 'super_admin' || role === 'reception') && (
+        <div className="card">
+          <h2 className="card-title">باكج جلسات الليزر</h2>
+          <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+            يقوم الاستقبال بتحديد عدد الجلسات وسعر الباكج والمبلغ المدفوع. عند دفع أقل من إجمالي الباكج يتم إضافة
+            الفرق إلى ذمم المريض تلقائياً.
+          </p>
+          <div className="grid-2" style={{ marginTop: '0.75rem' }}>
+            <div>
+              <label className="form-label">اسم الباكج (اختياري)</label>
+              <input
+                className="input"
+                value={packageTitle}
+                onChange={(e) => setPackageTitle(e.target.value)}
+                placeholder="مثال: باكج ليزر 6 جلسات"
+              />
+            </div>
+            <div>
+              <label className="form-label">عدد الجلسات</label>
+              <input
+                className="input"
+                inputMode="numeric"
+                value={packageSessionsCount}
+                onChange={(e) => setPackageSessionsCount(e.target.value)}
+                placeholder="6"
+              />
+            </div>
+            <div>
+              <label className="form-label">إجمالي سعر الباكج (USD)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={packageTotalUsd}
+                onChange={(e) => setPackageTotalUsd(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="form-label">إجمالي سعر الباكج (SYP)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={packageTotalSyp}
+                onChange={(e) => setPackageTotalSyp(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="form-label">المدفوع حالياً (USD)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={packagePaidUsd}
+                onChange={(e) => setPackagePaidUsd(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="form-label">المدفوع حالياً (SYP)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={packagePaidSyp}
+                onChange={(e) => setPackagePaidSyp(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: '0.75rem' }}>
+            <label className="form-label">ملاحظات</label>
+            <textarea
+              className="textarea"
+              rows={2}
+              value={packageNotes}
+              onChange={(e) => setPackageNotes(e.target.value)}
+              placeholder="ملاحظات إضافية على الباكج..."
+            />
+          </div>
+          {packageErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{packageErr}</p> : null}
+          {packageOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{packageOk}</p> : null}
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ marginTop: '0.9rem' }}
+            disabled={packageBusy}
+            onClick={async () => {
+              if (!id) return
+              setPackageErr('')
+              setPackageOk('')
+              const sessionsCount = Math.max(1, parseInt(packageSessionsCount || '0', 10) || 0)
+              if (!sessionsCount) {
+                setPackageErr('حدد عدد جلسات صالح.')
+                return
+              }
+              const totalUsd = Math.max(0, parseFloat(packageTotalUsd) || 0)
+              const totalSyp = Math.max(0, parseFloat(packageTotalSyp) || 0)
+              const paidUsd = Math.max(0, parseFloat(packagePaidUsd) || 0)
+              const paidSyp = Math.max(0, parseFloat(packagePaidSyp) || 0)
+              if (!(totalUsd > 0) && !(totalSyp > 0)) {
+                setPackageErr('أدخل إجمالي سعر الباكج بالدولار أو الليرة.')
+                return
+              }
+              if (!(paidUsd > 0) && !(paidSyp > 0) && !(paidUsd === 0 && paidSyp === 0)) {
+                setPackageErr('المبلغ المدفوع غير صالح.')
+                return
+              }
+              setPackageBusy(true)
+              try {
+                const data = await api<{
+                  package: PatientPackage
+                  summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+                }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    department: 'laser',
+                    title: packageTitle.trim() || undefined,
+                    sessionsCount,
+                    packageTotalUsd: totalUsd > 0 ? totalUsd : undefined,
+                    packageTotalSyp: totalUsd > 0 ? undefined : totalSyp,
+                    paidAmountUsd: paidUsd > 0 ? paidUsd : undefined,
+                    paidAmountSyp: paidUsd > 0 ? undefined : paidSyp,
+                    notes: packageNotes.trim(),
+                  }),
+                })
+                setPatient((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        outstandingDebtUsd: Number(data.summary?.outstandingDebtUsd) || 0,
+                        prepaidCreditUsd: Number(data.summary?.prepaidCreditUsd) || 0,
+                        sessionPackages: [...(Array.isArray(prev.sessionPackages) ? prev.sessionPackages : []), data.package],
+                      }
+                    : prev,
+                )
+                setPackageOk('تم حفظ الباكج بنجاح.')
+                setPackageTitle('')
+                setPackageSessionsCount('6')
+                setPackageTotalUsd('')
+                setPackageTotalSyp('')
+                setPackagePaidUsd('')
+                setPackagePaidSyp('')
+                setPackageNotes('')
+              } catch (e) {
+                setPackageErr(e instanceof ApiError ? e.message : 'تعذر حفظ الباكج')
+              } finally {
+                setPackageBusy(false)
+              }
+            }}
+          >
+            {packageBusy ? 'جاري الحفظ…' : 'حفظ الباكج'}
+          </button>
+
+          <h3 className="card-title" style={{ marginTop: '1.35rem', fontSize: '0.95rem' }}>
+            الباكجات المسجلة
+          </h3>
+          {patientPackages.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد باكجات مسجلة لهذا المريض.</p>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.8rem' }}>
+              {patientPackages.map((pkg) => (
+                <div key={pkg.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.8rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <strong>{pkg.title || `باكج ليزر (${pkg.sessionsCount} جلسة)`}</strong>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                      {pkg.createdAt ? formatClinicDate(pkg.createdAt) : '—'}
+                    </span>
+                  </div>
+                  <p style={{ margin: '0.45rem 0', fontSize: '0.88rem' }}>
+                    إجمالي الباكج: <strong>{renderMoneyDual(pkg.packageTotalUsd)}</strong> — المدفوع:{' '}
+                    <strong>{renderMoneyDual(pkg.paidAmountUsd)}</strong>
+                  </p>
+                  <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                    حالة التسوية:{' '}
+                    {pkg.settlementDeltaUsd < 0
+                      ? `ذمة ${Math.abs(pkg.settlementDeltaUsd).toFixed(2)} USD`
+                      : pkg.settlementDeltaUsd > 0
+                        ? `رصيد إضافي ${pkg.settlementDeltaUsd.toFixed(2)} USD`
+                        : 'متوازن'}
+                  </p>
+                  <div style={{ display: 'grid', gap: '0.4rem' }}>
+                    {pkg.sessions.map((s) => (
+                      <label
+                        key={s.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          padding: '0.45rem 0.55rem',
+                          fontSize: '0.88rem',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={s.completedByReception}
+                          disabled={s.completedByReception || packageBusy}
+                          onChange={async (e) => {
+                            if (!id) return
+                            const nextCompleted = e.target.checked
+                            if (!nextCompleted) return
+                            setPackageErr('')
+                            setPackageOk('')
+                            setPackageBusy(true)
+                            try {
+                              const data = await api<{ package: PatientPackage }>(
+                                `/api/patients/${encodeURIComponent(id)}/packages/${encodeURIComponent(pkg.id)}/sessions/${encodeURIComponent(s.id)}`,
+                                {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({ completed: true }),
+                                },
+                              )
+                              setPatient((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      sessionPackages: (prev.sessionPackages || []).map((x) =>
+                                        x.id === pkg.id ? data.package : x,
+                                      ),
+                                    }
+                                  : prev,
+                              )
+                              setPackageOk('تم تثبيت إتمام جلسة الباكج.')
+                            } catch (err) {
+                              setPackageErr(err instanceof ApiError ? err.message : 'تعذر تحديث جلسة الباكج')
+                            } finally {
+                              setPackageBusy(false)
+                            }
+                          }}
+                        />
+                        <span>
+                          {s.label}
+                          {s.linkedLaserSessionId ? (
+                            <span style={{ color: 'var(--text-muted)' }}> — مرتبطة بجلسة ليزر</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}> — بانتظار تسجيل الجلسة</span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {pkg.notes ? (
+                    <p style={{ margin: '0.55rem 0 0', color: 'var(--text-muted)', fontSize: '0.83rem' }}>
+                      {pkg.notes}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === 'financial' && (role === 'super_admin' || role === 'reception') && (
         <div className="card">
           <h2 className="card-title">السجل المالي للمريض</h2>
@@ -2535,7 +2863,7 @@ export function PatientRecord() {
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
                         <td>{s.amountDueUsd} USD</td>
-                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
                           <button
                             type="button"
@@ -2571,6 +2899,12 @@ export function PatientRecord() {
                   </>
                 ) : null}
               </p>
+              {activeLaserPackage ? (
+                <p style={{ margin: '0.45rem 0 0', color: 'var(--success)', fontSize: '0.86rem' }}>
+                  هذه الجلسة ستُسجّل ضمن الباكج: <strong>{activeLaserPackage.title || 'باكج ليزر'}</strong> — لن يظهر سعر
+                  جلسة جديد لأن الجلسة مدفوعة مسبقاً.
+                </p>
+              ) : null}
             </header>
 
             <div className="laser-session-workspace__grid">
@@ -2668,21 +3002,27 @@ export function PatientRecord() {
                     </tbody>
                   </table>
                 </div>
-                <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
-                  <strong>سعر الجلسة:</strong>{' '}
-                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('en-US') : '0'} ل.س
-                  </span>
-                  {laserNetDuePreview != null ? (
-                    <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
-                      (~ {laserNetDuePreview} USD)
+                {activeLaserPackage ? (
+                  <div style={{ marginTop: '0.8rem', fontSize: '0.9rem', color: 'var(--success)' }}>
+                    <strong>جلسة ضمن باكج مدفوع مسبقاً</strong>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
+                    <strong>سعر الجلسة:</strong>{' '}
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('en-US') : '0'} ل.س
                     </span>
-                  ) : selectedLaserTotalSyp > 0 ? (
-                    <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
-                      (لا يمكن تحويله للدولار قبل تحديد سعر الصرف لليوم)
-                    </span>
-                  ) : null}
-                </div>
+                    {laserNetDuePreview != null ? (
+                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
+                        (~ {laserNetDuePreview} USD)
+                      </span>
+                    ) : selectedLaserTotalSyp > 0 ? (
+                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
+                        (لا يمكن تحويله للدولار قبل تحديد سعر الصرف لليوم)
+                      </span>
+                    ) : null}
+                  </div>
+                )}
                 {laserProcedureErr ? (
                   <p style={{ color: 'var(--danger)', marginTop: '0.55rem', marginBottom: 0 }}>{laserProcedureErr}</p>
                 ) : null}
@@ -2721,14 +3061,14 @@ export function PatientRecord() {
                   setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
                   return
                 }
-                if (!((usdSypRate ?? 0) > 0)) {
+                if (!activeLaserPackage && !((usdSypRate ?? 0) > 0)) {
                   setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
                   return
                 }
                 setSavingLaser(true)
                 try {
                   const created = await api<{
-                    billingItem: { amountDueUsd: number }
+                    billingItem: { amountDueUsd: number; isPackagePrepaid?: boolean }
                   }>('/api/laser/sessions', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -2742,14 +3082,16 @@ export function PatientRecord() {
                       notes: laserNotes,
                       areaIds: [],
                       manualAreaLabels: selectedLaserItems.map((x) => x.name),
-                      status: 'in_progress',
-                      costSyp: selectedLaserTotalSyp,
+                      status: activeLaserPackage ? 'completed_pending_collection' : 'in_progress',
+                      costSyp: activeLaserPackage ? undefined : selectedLaserTotalSyp,
                       discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
                   })
                   setLaserSessionOk(
-                    `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${created.billingItem.amountDueUsd} USD (صفحة التحصيل للاستقبال).`,
+                    created.billingItem?.isPackagePrepaid
+                      ? 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. سيظهر تنبيه خاص في قسم التحصيل للاستقبال.'
+                      : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${created.billingItem.amountDueUsd} USD (صفحة التحصيل للاستقبال).`,
                   )
                   setLaserNotes('')
                   setSelectedLaserItemIds([])
@@ -2779,7 +3121,7 @@ export function PatientRecord() {
                 }
               }}
             >
-              {savingLaser ? 'جاري الحفظ…' : 'حفظ الجلسة والفوترة'}
+              {savingLaser ? 'جاري الحفظ…' : activeLaserPackage ? 'حفظ الجلسة (ضمن الباكج)' : 'حفظ الجلسة والفوترة'}
             </button>
               </section>
 
@@ -2860,7 +3202,7 @@ export function PatientRecord() {
                             <td>{s.businessDate}</td>
                             <td>{s.procedureDescription || '—'}</td>
                             <td>{s.amountDueUsd} USD</td>
-                            <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                            <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                             <td>
                               {canEditClinicalSessionRow(
                                 { id: user?.id, role },
@@ -3094,7 +3436,13 @@ export function PatientRecord() {
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
                         <td>{s.amountDueUsd}</td>
-                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'بانتظار التحصيل'}</td>
+                        <td>
+                          {s.isPackagePrepaid
+                            ? 'مدفوعة مسبقاً (باكج)'
+                            : s.billingStatus === 'paid'
+                              ? 'مدفوع'
+                              : 'بانتظار التحصيل'}
+                        </td>
                         <td>
                           {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
                             <button
@@ -3284,7 +3632,7 @@ export function PatientRecord() {
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
                         <td>{s.amountDueUsd} USD</td>
-                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
                           {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
                             <button
@@ -3343,7 +3691,7 @@ export function PatientRecord() {
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
                         <td>{s.amountDueUsd} USD</td>
-                        <td>{s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
                           {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
                             <button

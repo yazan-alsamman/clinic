@@ -1,8 +1,10 @@
 import { Router } from 'express'
+import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
 import { Patient } from '../models/Patient.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
+import { LaserSession } from '../models/LaserSession.js'
 import { authMiddleware, requireActiveDay } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
@@ -99,6 +101,35 @@ function normalizePatientProfilePayload(body) {
   return payload
 }
 
+function canManagePackages(role) {
+  return role === 'super_admin' || role === 'reception'
+}
+
+function serializePackage(pkg) {
+  return {
+    id: String(pkg?._id || ''),
+    department: String(pkg?.department || 'laser'),
+    title: String(pkg?.title || ''),
+    sessionsCount: Number(pkg?.sessionsCount) || 0,
+    packageTotalUsd: Number(pkg?.packageTotalUsd) || 0,
+    paidAmountUsd: Number(pkg?.paidAmountUsd) || 0,
+    settlementDeltaUsd: Number(pkg?.settlementDeltaUsd) || 0,
+    notes: String(pkg?.notes || ''),
+    createdAt: pkg?.createdAt ? new Date(pkg.createdAt).toISOString() : null,
+    sessions: Array.isArray(pkg?.sessions)
+      ? pkg.sessions.map((s) => ({
+          id: String(s?._id || ''),
+          label: String(s?.label || ''),
+          completedByReception: s?.completedByReception === true,
+          completedAt: s?.completedAt ? new Date(s.completedAt).toISOString() : null,
+          completedByUserId: s?.completedByUserId ? String(s.completedByUserId) : null,
+          linkedLaserSessionId: s?.linkedLaserSessionId ? String(s.linkedLaserSessionId) : null,
+          linkedBillingItemId: s?.linkedBillingItemId ? String(s.linkedBillingItemId) : null,
+        }))
+      : [],
+  }
+}
+
 export const patientsRouter = Router()
 
 patientsRouter.use(authMiddleware, loadBusinessDay)
@@ -130,7 +161,7 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
-    const p = await Patient.findById(req.params.id)
+    const p = await Patient.findById(req.params.id).lean()
     if (!p) {
       res.status(404).json({ error: 'المريض غير موجود' })
       return
@@ -443,6 +474,236 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         outstandingDebtUsd: debtAfter,
         prepaidCreditUsd: creditAfter,
       },
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+patientsRouter.get('/:id/packages', async (req, res) => {
+  try {
+    if (!canReadPatients(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).select('sessionPackages').lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const rows = Array.isArray(p.sessionPackages) ? p.sessionPackages.map(serializePackage) : []
+    res.json({ packages: rows })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const department = String(req.body?.department || 'laser').trim() || 'laser'
+    if (department !== 'laser') {
+      res.status(400).json({ error: 'حالياً الباكج متاح لقسم الليزر فقط' })
+      return
+    }
+    const sessionsCount = Math.max(1, Math.min(200, Number.parseInt(String(req.body?.sessionsCount || '0'), 10) || 0))
+    if (!sessionsCount) {
+      res.status(400).json({ error: 'عدد الجلسات غير صالح' })
+      return
+    }
+    let packageTotalUsd = 0
+    let paidAmountUsd = 0
+    try {
+      packageTotalUsd = resolveUsdAmount({
+        usdRaw: req.body?.packageTotalUsd,
+        sypRaw: req.body?.packageTotalSyp,
+        exchangeRate: req.businessDay?.exchangeRate,
+        allowZero: true,
+      })
+      paidAmountUsd = resolveUsdAmount({
+        usdRaw: req.body?.paidAmountUsd,
+        sypRaw: req.body?.paidAmountSyp,
+        exchangeRate: req.businessDay?.exchangeRate,
+        allowZero: true,
+      })
+    } catch (err) {
+      res.status(400).json({ error: String(err?.message || 'المبلغ غير صالح') })
+      return
+    }
+    packageTotalUsd = Math.round((Number(packageTotalUsd) || 0) * 100) / 100
+    paidAmountUsd = Math.round((Number(paidAmountUsd) || 0) * 100) / 100
+    if (!(packageTotalUsd > 0)) {
+      res.status(400).json({ error: 'أدخل إجمالي سعر الباكج (USD أو SYP)' })
+      return
+    }
+    if (!(paidAmountUsd >= 0)) {
+      res.status(400).json({ error: 'مبلغ المدفوع غير صالح' })
+      return
+    }
+
+    const debtBefore = Math.round((Number(p.outstandingDebtUsd) || 0) * 100) / 100
+    const creditBefore = Math.round((Number(p.prepaidCreditUsd) || 0) * 100) / 100
+    const settlementDeltaUsd = Math.round((paidAmountUsd - packageTotalUsd) * 100) / 100
+    let debtAfter = debtBefore
+    let creditAfter = creditBefore
+    if (settlementDeltaUsd < 0) {
+      debtAfter = Math.round((debtAfter + Math.abs(settlementDeltaUsd)) * 100) / 100
+    } else if (settlementDeltaUsd > 0) {
+      creditAfter = Math.round((creditAfter + settlementDeltaUsd) * 100) / 100
+    }
+
+    const packageId = new mongoose.Types.ObjectId()
+    const title = String(req.body?.title || '').trim().slice(0, 160) || `باكج ليزر (${sessionsCount} جلسة)`
+    const notes = String(req.body?.notes || '').trim().slice(0, 1200)
+    const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
+      _id: new mongoose.Types.ObjectId(),
+      label: `جلسة ${idx + 1}`,
+      completedByReception: false,
+      completedAt: null,
+      completedByUserId: null,
+      linkedLaserSessionId: null,
+      linkedBillingItemId: null,
+    }))
+    const packageDoc = {
+      _id: packageId,
+      department: 'laser',
+      title,
+      sessionsCount,
+      packageTotalUsd,
+      paidAmountUsd,
+      settlementDeltaUsd,
+      notes,
+      createdByUserId: req.user._id,
+      sessions,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $push: { sessionPackages: packageDoc },
+        $set: {
+          outstandingDebtUsd: debtAfter,
+          prepaidCreditUsd: creditAfter,
+        },
+      },
+    )
+
+    await writeAudit({
+      user: req.user,
+      action: 'إنشاء باكج جلسات لمريض',
+      entityType: 'Patient',
+      entityId: p._id,
+      details: {
+        packageId: String(packageId),
+        department: 'laser',
+        sessionsCount,
+        packageTotalUsd,
+        paidAmountUsd,
+        settlementDeltaUsd,
+      },
+    })
+
+    res.status(201).json({
+      package: serializePackage(packageDoc),
+      summary: {
+        outstandingDebtUsd: debtAfter,
+        prepaidCreditUsd: creditAfter,
+      },
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActiveDay, async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const p = await Patient.findById(req.params.id)
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const pkg = (Array.isArray(p.sessionPackages) ? p.sessionPackages : []).find(
+      (x) => String(x?._id) === String(req.params.packageId),
+    )
+    if (!pkg) {
+      res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    const sess = (Array.isArray(pkg.sessions) ? pkg.sessions : []).find(
+      (x) => String(x?._id) === String(req.params.sessionId),
+    )
+    if (!sess) {
+      res.status(404).json({ error: 'جلسة الباكج غير موجودة' })
+      return
+    }
+
+    const completed = req.body?.completed !== false
+    if (sess.completedByReception === true && !completed) {
+      res.status(400).json({ error: 'لا يمكن إلغاء إتمام جلسة باكج بعد تثبيتها' })
+      return
+    }
+    const completedAt = completed ? new Date() : null
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $set: {
+          'sessionPackages.$[pkg].sessions.$[sess].completedByReception': completed,
+          'sessionPackages.$[pkg].sessions.$[sess].completedAt': completedAt,
+          'sessionPackages.$[pkg].sessions.$[sess].completedByUserId': completed ? req.user._id : null,
+        },
+      },
+      {
+        arrayFilters: [{ 'pkg._id': pkg._id }, { 'sess._id': sess._id }],
+      },
+    )
+
+    if (completed && sess.linkedBillingItemId) {
+      const bi = await BillingItem.findById(sess.linkedBillingItemId)
+      if (bi && bi.isPackagePrepaid && bi.status === 'pending_payment') {
+        bi.status = 'paid'
+        bi.paidAt = new Date()
+        await bi.save()
+      }
+    }
+    if (completed && sess.linkedLaserSessionId) {
+      await LaserSession.updateOne({ _id: sess.linkedLaserSessionId }, { $set: { status: 'completed' } })
+    }
+
+    await writeAudit({
+      user: req.user,
+      action: 'تثبيت إتمام جلسة من باكج مريض',
+      entityType: 'Patient',
+      entityId: p._id,
+      details: {
+        packageId: String(pkg._id),
+        sessionId: String(sess._id),
+        completed,
+      },
+    })
+
+    const fresh = await Patient.findById(p._id).select('sessionPackages').lean()
+    const freshPkg = (Array.isArray(fresh?.sessionPackages) ? fresh.sessionPackages : []).find(
+      (x) => String(x?._id) === String(pkg._id),
+    )
+    res.json({
+      package: freshPkg ? serializePackage(freshPkg) : serializePackage(pkg),
     })
   } catch (e) {
     console.error(e)

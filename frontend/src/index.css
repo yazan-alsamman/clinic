@@ -736,6 +736,10 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.tooth-btn):not(.btn):n
   content: '👤';
 }
 
+.patient-record-tabs .tab[data-tab-key='packages']::before {
+  content: '📦';
+}
+
 .patient-record-tabs .tab[data-tab-key='financial']::before {
   content: '💰';
 }

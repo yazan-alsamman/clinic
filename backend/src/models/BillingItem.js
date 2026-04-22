@@ -24,6 +24,10 @@ const billingItemSchema = new mongoose.Schema(
     },
     paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingPayment', default: null },
     paidAt: { type: Date, default: null },
+    /** جلسة ضمن باكج مدفوع مسبقاً — لا تستقبل دفعة نقدية من شاشة التحصيل */
+    isPackagePrepaid: { type: Boolean, default: false, index: true },
+    patientPackageId: { type: String, default: '' },
+    patientPackageSessionId: { type: String, default: '' },
   },
   { timestamps: true },
 )

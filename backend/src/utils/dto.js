@@ -24,6 +24,30 @@ export function patientToDto(p) {
     outstandingDebtUsd: Number(o.outstandingDebtUsd) || 0,
     prepaidCreditUsd: Number(o.prepaidCreditUsd) || 0,
     paperLaserEntries: Array.isArray(o.paperLaserEntries) ? o.paperLaserEntries : [],
+    sessionPackages: Array.isArray(o.sessionPackages)
+      ? o.sessionPackages.map((pkg) => ({
+          id: String(pkg?._id || ''),
+          department: String(pkg?.department || 'laser'),
+          title: String(pkg?.title || ''),
+          sessionsCount: Number(pkg?.sessionsCount) || 0,
+          packageTotalUsd: Number(pkg?.packageTotalUsd) || 0,
+          paidAmountUsd: Number(pkg?.paidAmountUsd) || 0,
+          settlementDeltaUsd: Number(pkg?.settlementDeltaUsd) || 0,
+          notes: String(pkg?.notes || ''),
+          createdAt: pkg?.createdAt ? new Date(pkg.createdAt).toISOString() : null,
+          sessions: Array.isArray(pkg?.sessions)
+            ? pkg.sessions.map((s) => ({
+                id: String(s?._id || ''),
+                label: String(s?.label || ''),
+                completedByReception: s?.completedByReception === true,
+                completedAt: s?.completedAt ? new Date(s.completedAt).toISOString() : null,
+                completedByUserId: s?.completedByUserId ? String(s.completedByUserId) : null,
+                linkedLaserSessionId: s?.linkedLaserSessionId ? String(s.linkedLaserSessionId) : null,
+                linkedBillingItemId: s?.linkedBillingItemId ? String(s.linkedBillingItemId) : null,
+              }))
+            : [],
+        }))
+      : [],
   }
 }
 

@@ -96,6 +96,7 @@ function sessionToPatientRow(r) {
     materialChargeUsdTotal: r.materialChargeUsdTotal ?? 0,
     amountDueUsd: r.billingItemId?.amountDueUsd ?? r.sessionFeeUsd ?? 0,
     billingStatus: r.billingItemId?.status ?? 'pending_payment',
+    isPackagePrepaid: r.billingItemId?.isPackagePrepaid === true,
     providerName: r.providerUserId?.name || '—',
     providerUserId: r.providerUserId?._id ? String(r.providerUserId._id) : String(r.providerUserId || ''),
     notes: r.notes || '',
@@ -501,7 +502,7 @@ clinicalRouter.get('/sessions/patient/:patientId', requireRoles(...PATIENT_SESSI
       .sort({ createdAt: -1 })
       .limit(120)
       .populate('providerUserId', 'name')
-      .populate('billingItemId', 'status amountDueUsd')
+      .populate('billingItemId', 'status amountDueUsd isPackagePrepaid')
       .lean()
     res.json({
       sessions: rows.map((r) => sessionToPatientRow(r)),
@@ -522,7 +523,7 @@ clinicalRouter.get('/sessions/:sessionId', requireRoles(...SESSION_EDIT_ROLES), 
     }
     const r = await ClinicalSession.findById(sessionId)
       .populate('providerUserId', 'name')
-      .populate('billingItemId', 'status amountDueUsd')
+      .populate('billingItemId', 'status amountDueUsd isPackagePrepaid')
       .lean()
     if (!r) {
       res.status(404).json({ error: 'الجلسة غير موجودة' })
@@ -611,7 +612,7 @@ clinicalRouter.patch(
 
         const populated = await ClinicalSession.findById(cs._id)
           .populate('providerUserId', 'name')
-          .populate('billingItemId', 'status amountDueUsd')
+          .populate('billingItemId', 'status amountDueUsd isPackagePrepaid')
           .lean()
 
         res.json({ session: sessionToPatientRow(populated) })

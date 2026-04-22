@@ -12,6 +12,7 @@ type Item = {
   amountDueUsd: number
   status: string
   businessDate?: string
+  isPackagePrepaid?: boolean
 }
 
 const BILLING_ROLES = ['super_admin', 'reception'] as const
@@ -210,16 +211,22 @@ export function BillingPage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={busyId === b.id}
+                  disabled={busyId === b.id || b.isPackagePrepaid === true}
                   onClick={() => {
+                    if (b.isPackagePrepaid) return
                     setPayItem(b)
                     setPayUsd(String(Number(b.amountDueUsd || 0)))
                     setPaySyp('')
                     setPayOpen(true)
                   }}
                 >
-                  {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
+                  {b.isPackagePrepaid ? 'مدفوعة مسبقاً ضمن الباكج' : busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                 </button>
+                {b.isPackagePrepaid ? (
+                  <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                    هذه الجلسة مدفوعة مسبقاً — تأكد من إتمام جلسة من ضمن الباكج لهذا المريض.
+                  </p>
+                ) : null}
               </div>
             </li>
           ))}

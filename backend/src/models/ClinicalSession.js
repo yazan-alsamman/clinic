@@ -42,6 +42,9 @@ const clinicalSessionSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    isPackageSession: { type: Boolean, default: false },
+    patientPackageId: { type: String, default: '' },
+    patientPackageSessionId: { type: String, default: '' },
   },
   { timestamps: true },
 )

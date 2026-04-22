@@ -30,6 +30,9 @@ function billingItemDto(b, patientName, providerName) {
     currency: b.currency || 'USD',
     businessDate: b.businessDate,
     status: b.status,
+    isPackagePrepaid: b.isPackagePrepaid === true,
+    patientPackageId: String(b.patientPackageId || ''),
+    patientPackageSessionId: String(b.patientPackageSessionId || ''),
     createdAt: b.createdAt,
   }
 }
@@ -115,6 +118,10 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
     if (bi.status !== 'pending_payment') {
       res.status(400).json({ error: 'البند ليس في انتظار الدفع' })
+      return
+    }
+    if (bi.isPackagePrepaid === true) {
+      res.status(400).json({ error: 'هذه الجلسة مدفوعة مسبقاً ضمن باكج' })
       return
     }
 

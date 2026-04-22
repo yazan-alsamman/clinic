@@ -27,6 +27,9 @@ const laserSessionSchema = new mongoose.Schema(
     /** يُملأ عند الحفظ مع مسار الفوترة — الترحيل عند الاستقبال عبر billing_payment */
     billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
     clinicalSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalSession', default: null },
+    isPackageSession: { type: Boolean, default: false },
+    patientPackageId: { type: String, default: '' },
+    patientPackageSessionId: { type: String, default: '' },
   },
   { timestamps: true },
 )

@@ -59,6 +59,26 @@ export interface Patient {
     shots: string
     notes: string
   }>
+  sessionPackages?: Array<{
+    id: string
+    department: 'laser'
+    title: string
+    sessionsCount: number
+    packageTotalUsd: number
+    paidAmountUsd: number
+    settlementDeltaUsd: number
+    notes: string
+    createdAt: string | null
+    sessions: Array<{
+      id: string
+      label: string
+      completedByReception: boolean
+      completedAt: string | null
+      completedByUserId: string | null
+      linkedLaserSessionId: string | null
+      linkedBillingItemId: string | null
+    }>
+  }>
 }
 
 export interface LaserArea {

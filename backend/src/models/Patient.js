@@ -14,6 +14,33 @@ const paperLaserEntrySchema = new mongoose.Schema(
   { _id: false },
 )
 
+const packageSessionSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: '' },
+    completedByReception: { type: Boolean, default: false },
+    completedAt: { type: Date, default: null },
+    completedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    linkedLaserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null },
+    linkedBillingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+  },
+  { _id: true },
+)
+
+const patientPackageSchema = new mongoose.Schema(
+  {
+    department: { type: String, enum: ['laser'], default: 'laser' },
+    title: { type: String, default: '' },
+    sessionsCount: { type: Number, default: 0, min: 1 },
+    packageTotalUsd: { type: Number, default: 0, min: 0 },
+    paidAmountUsd: { type: Number, default: 0, min: 0 },
+    settlementDeltaUsd: { type: Number, default: 0 },
+    notes: { type: String, default: '' },
+    createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    sessions: { type: [packageSessionSchema], default: [] },
+  },
+  { _id: true, timestamps: true },
+)
+
 const patientSchema = new mongoose.Schema(
   {
     fileNumber: { type: String, required: true, trim: true, unique: true, index: true },
@@ -44,6 +71,8 @@ const patientSchema = new mongoose.Schema(
     prepaidCreditUsd: { type: Number, default: 0, min: 0 },
     /** إدخالات أرشيف ورقي (ليزر/جلسات قديمة) */
     paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
+    /** باقات جلسات مسبقة الدفع (حالياً: ليزر) */
+    sessionPackages: { type: [patientPackageSchema], default: [] },
     /** بوابة المريض — تسجيل دخول منفصل عن موظفي العيادة */
     portalUsername: { type: String, trim: true, sparse: true, unique: true },
     portalPasswordHash: { type: String, default: undefined },

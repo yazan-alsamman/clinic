@@ -90,6 +90,9 @@ export async function getClinicalBundleForPatientId(pid) {
       billingItemStatus: bi?.status ?? null,
       collectedAmountUsd,
       manualAreaLabels: Array.isArray(s.manualAreaLabels) ? s.manualAreaLabels : [],
+      isPackageSession: s.isPackageSession === true,
+      patientPackageId: String(s.patientPackageId || ''),
+      patientPackageSessionId: String(s.patientPackageSessionId || ''),
     }
   })
 

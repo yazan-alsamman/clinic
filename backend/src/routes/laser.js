@@ -131,6 +131,19 @@ function parseShotCount(value) {
   return Math.round(num)
 }
 
+function findActiveLaserPackage(patientLike) {
+  const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
+  for (const pkg of packages) {
+    if (String(pkg?.department || '') !== 'laser') continue
+    const sessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
+    const available = sessions.find((s) => !s?.linkedLaserSessionId)
+    if (available) {
+      return { pkg, session: available }
+    }
+  }
+  return null
+}
+
 laserRouter.get('/catalog', async (req, res) => {
   try {
     if (!LASER_READ.includes(req.user.role)) {
@@ -561,18 +574,22 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       return
     }
 
-    const costGross = resolveUsdAmount({
-      usdRaw: body.costUsd,
-      sypRaw: body.costSyp,
-      exchangeRate: req.businessDay?.exchangeRate,
-    })
-    const discountPercent = Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
-    if (!(costGross > 0)) {
+    const packageMatch = findActiveLaserPackage(patient)
+    const isPackageSession = Boolean(packageMatch)
+    const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
+    const costGross = isPackageSession
+      ? 0
+      : resolveUsdAmount({
+          usdRaw: body.costUsd,
+          sypRaw: body.costSyp,
+          exchangeRate: req.businessDay?.exchangeRate,
+        })
+    if (!isPackageSession && !(costGross > 0)) {
       res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر)' })
       return
     }
-    const amountDueUsd = round2(costGross * (1 - discountPercent / 100))
-    if (amountDueUsd <= 0) {
+    const amountDueUsd = isPackageSession ? 0 : round2(costGross * (1 - discountPercent / 100))
+    if (!isPackageSession && amountDueUsd <= 0) {
       res.status(400).json({ error: 'المبلغ بعد الحسم يجب أن يكون أكبر من صفر' })
       return
     }
@@ -634,7 +651,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       : ''
     const manualPart = manualAreaLabels.length ? manualAreaLabels.join('، ') : ''
     const areaPart = [catalogPart, manualPart].filter(Boolean).join(' — ') || 'بدون مناطق محددة'
-    const procedureDescription = `ليزر ${laserType} — ${areaPart}`.slice(0, 500)
+    const procedureDescription = `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}`.slice(0, 500)
 
     const treatmentNumber = await nextSequence('laserTreatment')
 
@@ -654,9 +671,12 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         notes: body.notes ?? '',
         areaIds,
         manualAreaLabels,
-        status: body.status || 'scheduled',
+        status: isPackageSession ? 'completed_pending_collection' : body.status || 'scheduled',
         costUsd: costGross,
         discountPercent,
+        isPackageSession,
+        patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
+        patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
       })
 
       cs = await ClinicalSession.create({
@@ -670,6 +690,9 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         laserSessionId: s._id,
         materials: [],
         materialCostUsdTotal: 0,
+        isPackageSession,
+        patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
+        patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
       })
 
       bi = await BillingItem.create({
@@ -682,6 +705,9 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         currency: 'USD',
         businessDate,
         status: 'pending_payment',
+        isPackagePrepaid: isPackageSession,
+        patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
+        patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
       })
 
       cs.billingItemId = bi._id
@@ -690,6 +716,20 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       s.billingItemId = bi._id
       s.clinicalSessionId = cs._id
       await s.save()
+      if (isPackageSession && packageMatch?.pkg?._id && packageMatch?.session?._id) {
+        await Patient.updateOne(
+          { _id: patient._id },
+          {
+            $set: {
+              'sessionPackages.$[pkg].sessions.$[sess].linkedLaserSessionId': s._id,
+              'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': bi._id,
+            },
+          },
+          {
+            arrayFilters: [{ 'pkg._id': packageMatch.pkg._id }, { 'sess._id': packageMatch.session._id }],
+          },
+        )
+      }
       if (linkedSlot) {
         linkedSlot.laserSessionId = s._id
         await linkedSlot.save()
@@ -723,7 +763,15 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         id: String(bi._id),
         status: bi.status,
         amountDueUsd: bi.amountDueUsd,
+        isPackagePrepaid: bi.isPackagePrepaid === true,
       },
+      packageInfo: isPackageSession
+        ? {
+            packageId: String(packageMatch?.pkg?._id || ''),
+            packageSessionId: String(packageMatch?.session?._id || ''),
+            label: String(packageMatch?.session?.label || ''),
+          }
+        : null,
     })
   } catch (e) {
     console.error(e)
