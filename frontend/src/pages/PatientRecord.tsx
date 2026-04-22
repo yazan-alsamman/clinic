@@ -3040,15 +3040,7 @@ export function PatientRecord() {
               type="button"
               className="btn btn-primary"
               style={{ marginTop: '1.25rem', width: '100%', maxWidth: 420 }}
-              disabled={
-                savingLaser ||
-                (role !== 'super_admin' && role !== 'laser' && role !== 'reception')
-              }
-              title={
-                role !== 'super_admin' && role !== 'laser' && role !== 'reception'
-                  ? 'الحفظ متاح للاستقبال ومشغّل الليزر والمدير'
-                  : undefined
-              }
+              disabled={savingLaser}
               onClick={async () => {
                 if (!id) return
                 setLaserSessionErr('')

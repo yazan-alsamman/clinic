@@ -22,7 +22,7 @@ laserRouter.use(authMiddleware, loadBusinessDay)
 const LASER_READ = ['super_admin', 'laser', 'reception']
 const LASER_TODAY_PAGE = ['super_admin', 'laser']
 /** تسجيل جلسة من ملف المريض: ليزر + مدير (الاستقبال يعرض السجل فقط من نظرة عامة) */
-const LASER_SESSION_CREATE = ['super_admin', 'laser']
+const LASER_SESSION_CREATE = ['super_admin', 'laser', 'reception']
 const LASER_STATUS_VALUES = ['scheduled', 'in_progress', 'completed_pending_collection', 'completed']
 const LASER_PROCEDURE_READ = ['super_admin', 'reception', 'laser']
 const LASER_PROCEDURE_GROUPS = {
