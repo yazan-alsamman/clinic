@@ -1404,13 +1404,14 @@ export function PatientRecord() {
         </button>
       </div>
 
-      <div className="tabs" role="tablist">
+      <div className="tabs patient-record-tabs" role="tablist">
         {visibleTabs.map((t) => (
           <button
             key={t.key}
             type="button"
             role="tab"
             aria-selected={tab === t.key}
+            data-tab-key={t.key}
             className={`tab${tab === t.key ? ' active' : ''}`}
             onClick={() => setTab(t.key)}
           >

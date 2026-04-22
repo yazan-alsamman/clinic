@@ -421,9 +421,13 @@ button {
 
 .day-banner.locked {
   background: linear-gradient(135deg, var(--warning-dim), var(--danger-dim));
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fef3c7;
-  box-shadow: 0 0 40px rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(202, 138, 4, 0.28);
+  color: #6b4f08;
+  box-shadow: 0 8px 24px rgba(202, 138, 4, 0.14);
+}
+
+.day-banner.locked strong {
+  color: #7c2d12;
 }
 
 .day-banner.active {
@@ -479,7 +483,6 @@ button {
 
 /* Global icon system for text buttons */
 button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.tooth-btn)::before,
-.tab::before,
 .chip::before,
 .area-chip-btn::before {
   display: inline-block;
@@ -508,10 +511,6 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.tooth-btn):not(.btn):n
 
 .btn-ghost::before {
   content: '↗';
-}
-
-.tab::before {
-  content: '◉';
 }
 
 .chip::before {
@@ -723,6 +722,44 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.tooth-btn):not(.btn):n
   text-shadow: 0 0 24px rgba(34, 211, 238, 0.35);
 }
 
+.patient-record-tabs .tab[data-tab-key='overview']::before {
+  content: '🏠';
+}
+
+.patient-record-tabs .tab::before {
+  display: inline-block;
+  margin-inline-end: 0.35rem;
+  opacity: 0.95;
+}
+
+.patient-record-tabs .tab[data-tab-key='account']::before {
+  content: '👤';
+}
+
+.patient-record-tabs .tab[data-tab-key='financial']::before {
+  content: '💰';
+}
+
+.patient-record-tabs .tab[data-tab-key='sessions']::before {
+  content: '📅';
+}
+
+.patient-record-tabs .tab[data-tab-key='laser']::before {
+  content: '⚡';
+}
+
+.patient-record-tabs .tab[data-tab-key='dermatology']::before {
+  content: '🧴';
+}
+
+.patient-record-tabs .tab[data-tab-key='dental']::before {
+  content: '🦷';
+}
+
+.patient-record-tabs .tab[data-tab-key='solarium']::before {
+  content: '☀';
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -738,21 +775,36 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.tooth-btn):not(.btn):n
 }
 
 .chip-laser {
-  background: rgba(99, 102, 241, 0.2);
-  color: #c4b5fd;
-  border-color: rgba(129, 140, 248, 0.35);
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #a5b4fc;
+}
+
+.chip-laser::before {
+  content: '⚡';
+  color: #4f46e5;
 }
 
 .chip-derm {
-  background: var(--magenta-dim);
-  color: #fbcfe8;
-  border-color: rgba(244, 114, 182, 0.35);
+  background: #fdf2f8;
+  color: #be185d;
+  border-color: #f9a8d4;
+}
+
+.chip-derm::before {
+  content: '✿';
+  color: #db2777;
 }
 
 .chip-dental {
-  background: rgba(34, 211, 238, 0.15);
-  color: #a5f3fc;
-  border-color: rgba(34, 211, 238, 0.3);
+  background: #ecfeff;
+  color: #0e7490;
+  border-color: #67e8f9;
+}
+
+.chip-dental::before {
+  content: '🦷';
+  color: #0891b2;
 }
 
 .chip-day-live {
