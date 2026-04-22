@@ -5,6 +5,7 @@ import { useClinic } from '../context/ClinicContext'
 
 type Item = {
   id: string
+  patientId: string
   patientName: string
   providerName: string
   department: string
@@ -13,6 +14,8 @@ type Item = {
   status: string
   businessDate?: string
   isPackagePrepaid?: boolean
+  patientPackageId?: string
+  patientPackageSessionId?: string
 }
 
 const BILLING_ROLES = ['super_admin', 'reception'] as const
@@ -34,6 +37,7 @@ export function BillingPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
   const [method, setMethod] = useState<'cash' | 'card' | 'transfer' | 'other'>('cash')
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
@@ -100,6 +104,31 @@ export function BillingPage() {
       setErr(e instanceof ApiError ? e.message : 'فشل التحصيل')
     } finally {
       setBusyId(null)
+    }
+  }
+
+  async function consumePackageSession(item: Item) {
+    if (!item.patientId || !item.patientPackageId || !item.patientPackageSessionId) {
+      setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
+      return
+    }
+    setPackageBusyId(item.id)
+    setErr('')
+    try {
+      await api(
+        `/api/patients/${encodeURIComponent(item.patientId)}/packages/${encodeURIComponent(
+          item.patientPackageId,
+        )}/sessions/${encodeURIComponent(item.patientPackageSessionId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ completed: true }),
+        },
+      )
+      await load()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'تعذر إنقاص جلسة الباكج')
+    } finally {
+      setPackageBusyId(null)
     }
   }
 
@@ -208,20 +237,32 @@ export function BillingPage() {
                     ) : null}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={busyId === b.id || b.isPackagePrepaid === true}
-                  onClick={() => {
-                    if (b.isPackagePrepaid) return
-                    setPayItem(b)
-                    setPayUsd(String(Number(b.amountDueUsd || 0)))
-                    setPaySyp('')
-                    setPayOpen(true)
-                  }}
-                >
-                  {b.isPackagePrepaid ? 'مدفوعة مسبقاً ضمن الباكج' : busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {b.isPackagePrepaid ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={packageBusyId === b.id}
+                      onClick={() => void consumePackageSession(b)}
+                    >
+                      {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busyId === b.id || b.isPackagePrepaid === true}
+                    onClick={() => {
+                      if (b.isPackagePrepaid) return
+                      setPayItem(b)
+                      setPayUsd(String(Number(b.amountDueUsd || 0)))
+                      setPaySyp('')
+                      setPayOpen(true)
+                    }}
+                  >
+                    {b.isPackagePrepaid ? 'مدفوعة مسبقاً ضمن الباكج' : busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
+                  </button>
+                </div>
                 {b.isPackagePrepaid ? (
                   <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                     هذه الجلسة مدفوعة مسبقاً — تأكد من إتمام جلسة من ضمن الباكج لهذا المريض.
