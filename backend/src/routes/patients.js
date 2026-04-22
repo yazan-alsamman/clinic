@@ -256,9 +256,18 @@ patientsRouter.post('/:id/portal/regenerate-password', requireActiveDay, async (
       return
     }
     const plain = randomPasswordPlain()
-    p.portalPasswordHash = await bcrypt.hash(plain, 10)
+    const nextHash = await bcrypt.hash(plain, 10)
+    p.portalPasswordHash = nextHash
     p.portalMustChangePassword = true
-    await p.save()
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $set: {
+          portalPasswordHash: nextHash,
+          portalMustChangePassword: true,
+        },
+      },
+    )
     await writeAudit({
       user: req.user,
       action: 'إعادة إنشاء كلمة مرور بوابة مريض',

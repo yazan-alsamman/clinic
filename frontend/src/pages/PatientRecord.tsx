@@ -979,9 +979,21 @@ export function PatientRecord() {
                 byName.set(String(item.name || '').trim().toLowerCase(), String(item.id))
               }
             }
+            const normalize = (x: string) =>
+              x
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, ' ')
+            const fullRaw = normalize(bookedLaserProcedureText)
+
+            // 1) Try exact full-string match first (important when offer names themselves include "+")
+            const exactFullId = byName.get(fullRaw)
+            if (exactFullId) return [exactFullId]
+
+            // 2) Fallback: split by common separators used in booking summaries
             const parsedNames = bookedLaserProcedureText
-              .split(/\s*\+\s*/g)
-              .map((x) => x.trim().toLowerCase())
+              .split(/\s*(?:\+|،|,|\/|\\|\||-)\s*/g)
+              .map((x) => normalize(x))
               .filter(Boolean)
             const matchedIds = parsedNames
               .map((name) => byName.get(name))
