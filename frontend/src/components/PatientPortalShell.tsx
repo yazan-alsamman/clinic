@@ -62,6 +62,7 @@ export function PatientPortalShell() {
               <NavLink to="/patient/profile">ملفي الشخصي</NavLink>
               <NavLink to="/patient/records">السجل الطبي</NavLink>
               <NavLink to="/patient/appointments">المواعيد</NavLink>
+              <NavLink to="/patient/financial">مالية</NavLink>
             </>
           )}
           <NavLink to="/patient/security">الأمان</NavLink>

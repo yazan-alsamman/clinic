@@ -28,6 +28,7 @@ import { PatientPortalDashboard } from './pages/patient-portal/PatientPortalDash
 import { PatientPortalProfile } from './pages/patient-portal/PatientPortalProfile'
 import { PatientPortalRecords } from './pages/patient-portal/PatientPortalRecords'
 import { PatientPortalAppointments } from './pages/patient-portal/PatientPortalAppointments'
+import { PatientPortalFinancial } from './pages/patient-portal/PatientPortalFinancial'
 import { PatientPortalSecurity } from './pages/patient-portal/PatientPortalSecurity'
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="profile" element={<PatientPortalProfile />} />
               <Route path="records" element={<PatientPortalRecords />} />
               <Route path="appointments" element={<PatientPortalAppointments />} />
+              <Route path="financial" element={<PatientPortalFinancial />} />
               <Route path="security" element={<PatientPortalSecurity />} />
             </Route>
           </Route>
