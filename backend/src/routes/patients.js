@@ -639,16 +639,16 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    const pkg = (Array.isArray(p.sessionPackages) ? p.sessionPackages : []).find(
-      (x) => String(x?._id) === String(req.params.packageId),
-    )
+    const packageRows = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
+    const pkgIndex = packageRows.findIndex((x) => String(x?._id) === String(req.params.packageId))
+    const pkg = pkgIndex >= 0 ? packageRows[pkgIndex] : null
     if (!pkg) {
       res.status(404).json({ error: 'الباكج غير موجود' })
       return
     }
-    const sess = (Array.isArray(pkg.sessions) ? pkg.sessions : []).find(
-      (x) => String(x?._id) === String(req.params.sessionId),
-    )
+    const packageSessions = Array.isArray(pkg.sessions) ? pkg.sessions : []
+    const sessIndex = packageSessions.findIndex((x) => String(x?._id) === String(req.params.sessionId))
+    const sess = sessIndex >= 0 ? packageSessions[sessIndex] : null
     if (!sess) {
       res.status(404).json({ error: 'جلسة الباكج غير موجودة' })
       return
@@ -664,13 +664,10 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       { _id: p._id },
       {
         $set: {
-          'sessionPackages.$[pkg].sessions.$[sess].completedByReception': completed,
-          'sessionPackages.$[pkg].sessions.$[sess].completedAt': completedAt,
-          'sessionPackages.$[pkg].sessions.$[sess].completedByUserId': completed ? req.user._id : null,
+          [`sessionPackages.${pkgIndex}.sessions.${sessIndex}.completedByReception`]: completed,
+          [`sessionPackages.${pkgIndex}.sessions.${sessIndex}.completedAt`]: completedAt,
+          [`sessionPackages.${pkgIndex}.sessions.${sessIndex}.completedByUserId`]: completed ? req.user._id : null,
         },
-      },
-      {
-        arrayFilters: [{ 'pkg._id': pkg._id }, { 'sess._id': sess._id }],
       },
     )
 
