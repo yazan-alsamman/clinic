@@ -79,7 +79,7 @@ export function PatientPortalShell() {
           rel="noopener noreferrer"
         >
           <img src="/vega-core-logo.jpg" alt="Vega Core" />
-          <p>تم إنتاج هذا النظام من قبل شركة Vega Core</p>
+          <p>تم إنتاج و تطوير هذا النظام من قبل شركة Vega Core</p>
         </a>
         <Outlet />
       </main>
