@@ -76,6 +76,22 @@ function toHm(min: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+/** دمج فترات [بداية،نهاية) المتداخلة أو المتلامسة حتى لا تُحسب كل شريحة فرعية كنقطة نهاية منفصلة */
+function mergeHalfOpenIntervals(intervals: { start: number; end: number }[]): { start: number; end: number }[] {
+  if (intervals.length === 0) return []
+  const sorted = [...intervals].sort((a, b) => a.start - b.start || a.end - b.end)
+  const out: { start: number; end: number }[] = []
+  for (const iv of sorted) {
+    const last = out[out.length - 1]
+    if (!last || iv.start > last.end) {
+      out.push({ start: iv.start, end: iv.end })
+    } else {
+      last.end = Math.max(last.end, iv.end)
+    }
+  }
+  return out
+}
+
 function todayYmd() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -380,12 +396,13 @@ export function ReceptionAppointmentPage() {
         addIfOk(m)
       }
 
-      const intervalEnds = new Set<number>()
-      for (const iv of apiIntervals) intervalEnds.add(iv.end)
+      const forMerge = [...apiIntervals]
       if (draftBookingInterval && channel === selectedChannel) {
-        intervalEnds.add(draftBookingInterval.end)
+        forMerge.push({ start: draftBookingInterval.start, end: draftBookingInterval.end })
       }
-      for (const e of intervalEnds) {
+      const mergedBusy = mergeHalfOpenIntervals(forMerge)
+      for (const block of mergedBusy) {
+        const e = block.end
         if (e <= DAY_START_MIN || e >= DAY_END_MIN) continue
         if (e % HOURLY_DISPLAY_STEP_MIN === 0) continue
         addIfOk(e)
