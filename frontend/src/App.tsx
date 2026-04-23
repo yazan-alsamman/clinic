@@ -19,6 +19,7 @@ import { AdminAudit } from './pages/AdminAudit'
 import { AdminRooms } from './pages/AdminRooms'
 import { AdminLaserPage } from './pages/AdminLaserPage'
 import { AdminAccounting } from './pages/AdminAccounting'
+import { AdminFinancialBalances } from './pages/AdminFinancialBalances'
 import { BillingPage } from './pages/BillingPage'
 import { AccountPassword } from './pages/AccountPassword'
 import { LaserCreateSessionPage } from './pages/LaserCreateSessionPage'
@@ -68,6 +69,7 @@ export default function App() {
               <Route path="/admin/rooms" element={<AdminRooms />} />
               <Route path="/admin/laser" element={<AdminLaserPage />} />
               <Route path="/admin/accounting" element={<AdminAccounting />} />
+              <Route path="/admin/financial-balances" element={<AdminFinancialBalances />} />
               <Route path="/account/password" element={<AccountPassword />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

@@ -14,6 +14,24 @@ import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patien
 
 const CLINICAL_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
 
+const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']
+
+function parseFinancialBalanceDept(raw) {
+  const v = String(raw || '').trim()
+  return FIN_BALANCE_FILTER_DEPTS.includes(v) ? v : null
+}
+
+function financialBalanceRowDto(o) {
+  return {
+    id: String(o._id),
+    fileNumber: String(o.fileNumber || ''),
+    name: String(o.name || ''),
+    departments: Array.isArray(o.departments) ? o.departments : [],
+    outstandingDebtUsd: Math.round((Number(o.outstandingDebtUsd) || 0) * 100) / 100,
+    prepaidCreditUsd: Math.round((Number(o.prepaidCreditUsd) || 0) * 100) / 100,
+  }
+}
+
 function canReadPatients(role) {
   return CLINICAL_ROLES.includes(role)
 }
@@ -148,6 +166,37 @@ patientsRouter.get('/', async (req, res) => {
     }
     const list = await Patient.find(query).sort({ updatedAt: -1 }).limit(200)
     res.json({ patients: list.map(patientToDto) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** ذمم ورصيد إضافي — لوحة المدير (يجب أن يسبق مسار /:id) */
+patientsRouter.get('/financial-balances', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const debtDept = parseFinancialBalanceDept(req.query.debtDepartment)
+    const creditDept = parseFinancialBalanceDept(req.query.creditDepartment)
+    const debtQuery = { outstandingDebtUsd: { $gt: 0.0001 } }
+    if (debtDept) debtQuery.departments = debtDept
+    const creditQuery = { prepaidCreditUsd: { $gt: 0.0001 } }
+    if (creditDept) creditQuery.departments = creditDept
+    const select = 'fileNumber name departments outstandingDebtUsd prepaidCreditUsd'
+    const [debtRows, creditRows] = await Promise.all([
+      Patient.find(debtQuery).select(select).sort({ outstandingDebtUsd: -1, name: 1 }).limit(5000).lean(),
+      Patient.find(creditQuery).select(select).sort({ prepaidCreditUsd: -1, name: 1 }).limit(5000).lean(),
+    ])
+    const rateRaw = req.businessDay?.exchangeRate
+    const usdSypRate = rateRaw != null && Number.isFinite(Number(rateRaw)) ? Number(rateRaw) : null
+    res.json({
+      debts: debtRows.map(financialBalanceRowDto),
+      credits: creditRows.map(financialBalanceRowDto),
+      usdSypRate,
+    })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
