@@ -8,6 +8,7 @@ import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { BusinessDay } from '../models/BusinessDay.js'
+import { LaserMonthlyExpenses } from '../models/LaserMonthlyExpenses.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
@@ -626,11 +627,74 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
     })
 
     const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
+    const totalSessionRevenueUsd = round2(rows.reduce((s, r) => s + (Number(r.totalAmountUsd) || 0), 0))
+    const expDoc = await LaserMonthlyExpenses.findOne({ month }).select('lines').lean()
+    const totalExpensesUsd = round2(
+      (expDoc?.lines || []).reduce((s, l) => s + (Number(l.amountUsd) || 0), 0),
+    )
+    const netProfitUsd = round2(totalSessionRevenueUsd - totalExpensesUsd)
     res.json({
       month,
       rows,
       topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountUsd: top.totalAmountUsd } : null,
+      totalSessionRevenueUsd,
+      totalExpensesUsd,
+      netProfitUsd,
     })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.get('/monthly-expenses', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
+    const doc = await LaserMonthlyExpenses.findOne({ month }).lean()
+    const lines = (doc?.lines || []).map((l) => ({
+      id: String(l._id),
+      reason: String(l.reason || '').trim(),
+      amountUsd: round2(Number(l.amountUsd) || 0),
+    }))
+    const totalExpensesUsd = round2(lines.reduce((s, l) => s + l.amountUsd, 0))
+    res.json({ month, lines, totalExpensesUsd })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.put('/monthly-expenses', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const month = resolveReportMonth(req.body?.month, req.businessDate || todayBusinessDate())
+    const rawLines = Array.isArray(req.body?.lines) ? req.body.lines : []
+    if (rawLines.length > 300) {
+      res.status(400).json({ error: 'عدد الصفوف كبير جداً' })
+      return
+    }
+    const lines = rawLines.map((row) => ({
+      reason: String(row?.reason ?? '').trim().slice(0, 500),
+      amountUsd: round2(Math.max(0, Number(row?.amountUsd) || 0)),
+    }))
+    const doc = await LaserMonthlyExpenses.findOneAndUpdate(
+      { month },
+      { $set: { lines, updatedBy: req.user._id } },
+      { upsert: true, new: true },
+    ).lean()
+    const outLines = (doc?.lines || []).map((l) => ({
+      id: String(l._id),
+      reason: String(l.reason || '').trim(),
+      amountUsd: round2(Number(l.amountUsd) || 0),
+    }))
+    const totalExpensesUsd = round2(outLines.reduce((s, l) => s + l.amountUsd, 0))
+    await writeAudit({
+      user: req.user,
+      action: 'تحديث مصاريف ليزر شهرية',
+      entityType: 'LaserMonthlyExpenses',
+      entityId: month,
+      details: { linesCount: outLines.length, totalExpensesUsd },
+    })
+    res.json({ month, lines: outLines, totalExpensesUsd })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

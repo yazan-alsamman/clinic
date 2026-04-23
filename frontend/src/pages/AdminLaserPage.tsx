@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
+import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 
 type DailyRow = {
   userId: string
@@ -17,8 +18,16 @@ type FinanceRow = {
   totalAmountUsd: number
   sessionsCount: number
 }
-type LaserTab = 'shots' | 'financial'
+type LaserTab = 'shots' | 'expenses' | 'financial'
 type ReportPeriod = 'daily' | 'monthly'
+
+type LocalExpenseRow = { clientKey: string; reason: string; amountInput: string }
+
+type FinanceMonthlyExtras = {
+  totalSessionRevenueUsd: number
+  totalExpensesUsd: number
+  netProfitUsd: number
+}
 
 type MeterReconciliationRow = {
   complete: boolean
@@ -108,6 +117,11 @@ export function AdminLaserPage() {
   const [financeLoading, setFinanceLoading] = useState(false)
   const [financeErr, setFinanceErr] = useState('')
   const [topSpecialist, setTopSpecialist] = useState<{ name: string; totalAmountUsd: number } | null>(null)
+  const [financeMonthlyExtras, setFinanceMonthlyExtras] = useState<FinanceMonthlyExtras | null>(null)
+  const [expenseRows, setExpenseRows] = useState<LocalExpenseRow[]>([])
+  const [expenseLoading, setExpenseLoading] = useState(false)
+  const [expenseErr, setExpenseErr] = useState('')
+  const [expenseSaveBusy, setExpenseSaveBusy] = useState(false)
 
   useEffect(() => {
     if (!date && businessDate) setDate(businessDate)
@@ -115,6 +129,14 @@ export function AdminLaserPage() {
   useEffect(() => {
     if (!month && businessDate) setMonth(String(businessDate).slice(0, 7))
   }, [businessDate, month])
+
+  const expenseMonth = useMemo(() => {
+    if (period === 'monthly' && month && /^\d{4}-\d{2}$/.test(month)) return month
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date.slice(0, 7)
+    if (businessDate && /^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return businessDate.slice(0, 7)
+    if (month && /^\d{4}-\d{2}$/.test(month)) return month
+    return ''
+  }, [period, month, date, businessDate])
 
   const totalFinanceUsd = useMemo(
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountUsd) || 0), 0),
@@ -201,27 +223,106 @@ export function AdminLaserPage() {
         month?: string
         rows: FinanceRow[]
         topSpecialist: { userId: string; name: string; totalAmountUsd: number } | null
+        totalSessionRevenueUsd?: number
+        totalExpensesUsd?: number
+        netProfitUsd?: number
       }>(`${endpoint}${q}`)
       setFinanceRows(data.rows || [])
       setTopSpecialist(data.topSpecialist ? { name: data.topSpecialist.name, totalAmountUsd: data.topSpecialist.totalAmountUsd } : null)
+      if (period === 'monthly' && data.totalSessionRevenueUsd != null && data.totalExpensesUsd != null && data.netProfitUsd != null) {
+        setFinanceMonthlyExtras({
+          totalSessionRevenueUsd: Number(data.totalSessionRevenueUsd) || 0,
+          totalExpensesUsd: Number(data.totalExpensesUsd) || 0,
+          netProfitUsd: Number(data.netProfitUsd) || 0,
+        })
+      } else {
+        setFinanceMonthlyExtras(null)
+      }
       if (period === 'daily' && !date && data.date) setDate(data.date)
       if (period === 'monthly' && !month && data.month) setMonth(data.month)
     } catch (e) {
       setFinanceRows([])
       setTopSpecialist(null)
+      setFinanceMonthlyExtras(null)
       setFinanceErr(e instanceof ApiError ? e.message : 'تعذر تحميل التقرير المالي')
     } finally {
       setFinanceLoading(false)
     }
   }, [allowed, date, month, period])
 
+  const loadExpenses = useCallback(async () => {
+    if (!allowed || !expenseMonth) return
+    setExpenseErr('')
+    setExpenseLoading(true)
+    try {
+      const data = await api<{
+        month: string
+        lines: { id: string; reason: string; amountUsd: number }[]
+        totalExpensesUsd: number
+      }>(`/api/laser/monthly-expenses?month=${encodeURIComponent(expenseMonth)}`)
+      const lines = data.lines || []
+      setExpenseRows(
+        lines.length > 0
+          ? lines.map((l) => ({
+              clientKey: l.id,
+              reason: l.reason,
+              amountInput: l.amountUsd === 0 ? '' : String(l.amountUsd),
+            }))
+          : [{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }],
+      )
+    } catch (e) {
+      setExpenseRows([{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }])
+      setExpenseErr(e instanceof ApiError ? e.message : 'تعذر تحميل المصاريف')
+    } finally {
+      setExpenseLoading(false)
+    }
+  }, [allowed, expenseMonth])
+
+  const saveExpenses = useCallback(async () => {
+    if (!allowed || !expenseMonth) return
+    setExpenseSaveBusy(true)
+    setExpenseErr('')
+    try {
+      const lines = expenseRows.map((r) => ({
+        reason: r.reason.trim(),
+        amountUsd: Math.max(0, parseFloat(normalizeDecimalDigits(r.amountInput)) || 0),
+      }))
+      const data = await api<{
+        month: string
+        lines: { id: string; reason: string; amountUsd: number }[]
+        totalExpensesUsd: number
+      }>('/api/laser/monthly-expenses', {
+        method: 'PUT',
+        body: JSON.stringify({ month: expenseMonth, lines }),
+      })
+      const out = data.lines || []
+      setExpenseRows(
+        out.length > 0
+          ? out.map((l) => ({
+              clientKey: l.id,
+              reason: l.reason,
+              amountInput: l.amountUsd === 0 ? '' : String(l.amountUsd),
+            }))
+          : [{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }],
+      )
+    } catch (e) {
+      setExpenseErr(e instanceof ApiError ? e.message : 'تعذر حفظ المصاريف')
+    } finally {
+      setExpenseSaveBusy(false)
+    }
+  }, [allowed, expenseMonth, expenseRows])
+
   useEffect(() => {
     if (tab === 'shots') {
       void loadShots()
       return
     }
+    if (tab === 'expenses') {
+      void loadExpenses()
+      return
+    }
     void loadFinancial()
-  }, [tab, loadShots, loadFinancial])
+  }, [tab, loadShots, loadFinancial, loadExpenses])
 
   if (!allowed) {
     return (
@@ -273,10 +374,16 @@ export function AdminLaserPage() {
         <button
           type="button"
           className="btn btn-secondary"
-          disabled={tab === 'shots' ? shotLoading : financeLoading}
+          disabled={
+            tab === 'shots' ? shotLoading : tab === 'expenses' ? expenseLoading : financeLoading
+          }
           onClick={() => {
             if (tab === 'shots') {
               void loadShots()
+              return
+            }
+            if (tab === 'expenses') {
+              void loadExpenses()
               return
             }
             void loadFinancial()
@@ -286,9 +393,13 @@ export function AdminLaserPage() {
             ? shotLoading
               ? 'جاري التحديث…'
               : 'تحديث'
-            : financeLoading
-              ? 'جاري التحديث…'
-              : 'تحديث'}
+            : tab === 'expenses'
+              ? expenseLoading
+                ? 'جاري التحديث…'
+                : 'تحديث'
+              : financeLoading
+                ? 'جاري التحديث…'
+                : 'تحديث'}
         </button>
       </div>
 
@@ -323,6 +434,15 @@ export function AdminLaserPage() {
         <button
           type="button"
           role="tab"
+          aria-selected={tab === 'expenses'}
+          className={`tab${tab === 'expenses' ? ' active' : ''}`}
+          onClick={() => setTab('expenses')}
+        >
+          مصاريف
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === 'financial'}
           className={`tab${tab === 'financial' ? ' active' : ''}`}
           onClick={() => setTab('financial')}
@@ -332,6 +452,9 @@ export function AdminLaserPage() {
       </div>
 
       {tab === 'shots' && shotErr ? <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{shotErr}</p> : null}
+      {tab === 'expenses' && expenseErr ? (
+        <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{expenseErr}</p>
+      ) : null}
       {tab === 'financial' && financeErr ? (
         <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{financeErr}</p>
       ) : null}
@@ -392,6 +515,125 @@ export function AdminLaserPage() {
             </table>
           </div>
         </div>
+      ) : tab === 'expenses' ? (
+        <div className="card" style={{ marginTop: '1rem' }}>
+          <h2 className="card-title" style={{ marginBottom: '0.45rem' }}>
+            مصاريف الليزر — شهر {expenseMonth || '—'}
+          </h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: '0.65rem' }}>
+            تُجمع المبالغ أدناه وتُطرح من <strong>مجموع أسعار جلسات الليزر</strong> في التقرير المالي{' '}
+            <strong>الشهري</strong> ليظهر <strong>الربح الصافي</strong>.
+          </p>
+          {period === 'daily' ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginBottom: '0.75rem' }}>
+              أنت في «تقارير يومية»: المصاريف المفتوحة هنا تخصّ الشهر الذي يتضمّن <strong>تاريخ اليوم</strong> المحدد في
+              الشريط أعلاه ({expenseMonth || '—'}).
+            </p>
+          ) : null}
+          {!expenseMonth ? (
+            <p style={{ color: 'var(--warning)', fontSize: '0.9rem' }}>حدّد شهراً أو تاريخ يوم من الشريط أعلاه.</p>
+          ) : expenseLoading ? (
+            <p style={{ color: 'var(--text-muted)' }}>جاري التحميل…</p>
+          ) : (
+            <>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th style={{ minWidth: 220 }}>سبب الصرف</th>
+                      <th style={{ minWidth: 140 }}>المبلغ (USD)</th>
+                      <th style={{ width: 90 }}> </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expenseRows.map((row) => (
+                      <tr key={row.clientKey}>
+                        <td>
+                          <input
+                            className="input"
+                            dir="rtl"
+                            value={row.reason}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setExpenseRows((prev) =>
+                                prev.map((r) => (r.clientKey === row.clientKey ? { ...r, reason: v } : r)),
+                              )
+                            }}
+                            placeholder="مثال: صيانة، مستهلكات…"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            dir="ltr"
+                            inputMode="decimal"
+                            value={row.amountInput}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setExpenseRows((prev) =>
+                                prev.map((r) => (r.clientKey === row.clientKey ? { ...r, amountInput: v } : r)),
+                              )
+                            }}
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ fontSize: '0.82rem' }}
+                            onClick={() => {
+                              setExpenseRows((prev) => {
+                                if (prev.length <= 1) {
+                                  return [{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }]
+                                }
+                                return prev.filter((r) => r.clientKey !== row.clientKey)
+                              })
+                            }}
+                          >
+                            حذف
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div
+                style={{
+                  marginTop: '0.85rem',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '0.6rem',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() =>
+                    setExpenseRows((prev) => [...prev, { clientKey: crypto.randomUUID(), reason: '', amountInput: '' }])
+                  }
+                >
+                  + صف جديد
+                </button>
+                <button type="button" className="btn btn-primary" disabled={expenseSaveBusy} onClick={() => void saveExpenses()}>
+                  {expenseSaveBusy ? 'جاري الحفظ…' : 'حفظ المصاريف'}
+                </button>
+              </div>
+              <p style={{ marginTop: '0.75rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                مجموع هذا الجدول (USD):{' '}
+                <strong style={{ color: 'var(--text)' }}>
+                  {expenseRows
+                    .reduce((s, r) => s + Math.max(0, parseFloat(normalizeDecimalDigits(r.amountInput)) || 0), 0)
+                    .toFixed(2)}
+                </strong>{' '}
+                — بعد الحفظ يُستخدم في التقرير المالي الشهري.
+              </p>
+            </>
+          )}
+        </div>
       ) : (
         <>
           <div className="card" style={{ marginTop: '1rem' }}>
@@ -424,10 +666,43 @@ export function AdminLaserPage() {
             <h2 className="card-title" style={{ marginBottom: '0.55rem' }}>
               مالية جلسات الليزر — {period === 'daily' ? `تاريخ ${date || '—'}` : `شهر ${month || '—'}`}
             </h2>
-            <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              مجموع أسعار جلسات جميع الأخصائيين:{' '}
-              <strong style={{ color: 'var(--text)' }}>{renderMoneyDual(totalFinanceUsd)}</strong>
-            </div>
+            {period === 'monthly' && financeMonthlyExtras ? (
+              <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                  مجموع إيراد جلسات الليزر (مجموع أسعار الجلسات):{' '}
+                  <strong style={{ color: 'var(--text)' }}>
+                    {renderMoneyDual(financeMonthlyExtras.totalSessionRevenueUsd)}
+                  </strong>
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                  مجمل المصاريف المسجّلة في تبويب «مصاريف» لهذا الشهر:{' '}
+                  <strong style={{ color: 'var(--text)' }}>{renderMoneyDual(financeMonthlyExtras.totalExpensesUsd)}</strong>
+                </div>
+                <div
+                  role="region"
+                  aria-label="الربح الصافي"
+                  style={{
+                    borderRadius: 12,
+                    padding: '0.85rem 1rem',
+                    border: '2px solid #6366f1',
+                    background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(14,165,233,0.06))',
+                  }}
+                >
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>الربح الصافي</div>
+                  <div style={{ fontWeight: 900, fontSize: '1.05rem', color: 'var(--text)' }}>
+                    {renderMoneyDual(financeMonthlyExtras.netProfitUsd)}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                    إيراد الجلسات − المصاريف (نفس الشهر)
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                مجموع أسعار جلسات جميع الأخصائيين:{' '}
+                <strong style={{ color: 'var(--text)' }}>{renderMoneyDual(totalFinanceUsd)}</strong>
+              </div>
+            )}
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
