@@ -92,6 +92,22 @@ function mergeHalfOpenIntervals(intervals: { start: number; end: number }[]): { 
   return out
 }
 
+/** تداخل [startMin,endMin) مع مواعيد محفوظة فعلياً — نفس منطق التأكيد على الخادم (بدون مسودة النافذة) */
+function intervalOverlapsBookedSlots(
+  slots: SlotRow[],
+  providerName: string,
+  startMin: number,
+  endMin: number,
+): boolean {
+  const p = providerName.trim()
+  return slots.some((x) => {
+    if (String(x.providerName || '').trim() !== p) return false
+    const o = slotIntervalFromRow(x.time, x.endTime)
+    if (!o) return false
+    return intervalsOverlapHalfOpen(startMin, endMin, o.start, o.end)
+  })
+}
+
 function todayYmd() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -485,11 +501,6 @@ export function ReceptionAppointmentPage() {
     [appointmentRowsForChannel, selectedChannel],
   )
 
-  const selectedChannelAvailableTimes = useMemo(
-    () => availableStartTimesForChannel(selectedChannel),
-    [availableStartTimesForChannel, selectedChannel],
-  )
-
   const laserItemById = useMemo(() => {
     const map = new Map<string, LaserProcedureItem>()
     for (const g of laserProcedureGroups) {
@@ -508,13 +519,36 @@ export function ReceptionAppointmentPage() {
     [selectedLaserItems],
   )
 
+  /** مزامنة الوقت مع المدة والجدول الفعلي — لا تعتمد على قائمة العرض فقط (تجنّب رفض 5/15 دقيقة ومسودة الحجز) */
   useEffect(() => {
-    if (selectedChannelAvailableTimes.length === 0) return
+    const ch = selectedChannel.trim()
+    if (!ch) return
     const norm = normalizeTime(appointmentTime)
-    if (!norm || !selectedChannelAvailableTimes.includes(norm)) {
-      setAppointmentTime(selectedChannelAvailableTimes[0])
+    const sm = norm ? hmToMinutes(norm) : null
+    const dur = bookingDurationMinutes
+    if (sm == null || dur < 1) return
+    const em = sm + dur
+    if (em > DAY_END_MIN || em <= sm) {
+      const picks = availableStartTimesForChannel(selectedChannel)
+      const next = picks.find((hm) => {
+        const t = hmToMinutes(hm)
+        if (t == null) return false
+        if (t + dur > DAY_END_MIN) return false
+        return !intervalOverlapsBookedSlots(slots, ch, t, t + dur)
+      })
+      if (next) setAppointmentTime(next)
+      return
     }
-  }, [selectedChannelAvailableTimes, appointmentTime])
+    if (!intervalOverlapsBookedSlots(slots, ch, sm, em)) return
+    const picks = availableStartTimesForChannel(selectedChannel)
+    const next = picks.find((hm) => {
+      const t = hmToMinutes(hm)
+      if (t == null) return false
+      if (t + dur > DAY_END_MIN) return false
+      return !intervalOverlapsBookedSlots(slots, ch, t, t + dur)
+    })
+    if (next && normalizeTime(next) !== norm) setAppointmentTime(next)
+  }, [selectedChannel, appointmentTime, bookingDurationMinutes, slots, availableStartTimesForChannel])
 
   useEffect(() => {
     setSelectedLaserItemIds((prev) => prev.filter((id) => laserItemById.has(id)))
@@ -597,13 +631,7 @@ export function ReceptionAppointmentPage() {
       setFormErr(selectedService === 'laser' ? 'اختر منطقة أو أكثر لليزر' : 'اختر نوع الإجراء من القائمة')
       return false
     }
-    const overlap = slots.some((x) => {
-      if (x.providerName !== providerName) return false
-      const o = slotIntervalFromRow(x.time, x.endTime)
-      if (!o) return false
-      return intervalsOverlapHalfOpen(sm, em, o.start, o.end)
-    })
-    if (overlap) {
+    if (intervalOverlapsBookedSlots(slots, providerName, sm, em)) {
       setFormErr(
         'فترة الموعد (البداية–النهاية) تتداخل مع موعد آخر لنفس المقدّم — اختر أوقاتاً لا تغطي جزءاً من فترة محجوزة',
       )
@@ -922,7 +950,11 @@ export function ReceptionAppointmentPage() {
                 className="select"
                 style={{ width: '100%', maxWidth: 220 }}
                 value={String(bookingDurationMinutes)}
-                onChange={(e) => setBookingDurationMinutes(Math.max(5, Number(e.target.value) || 60))}
+                onChange={(e) => {
+                  setFormErr('')
+                  const v = Number.parseInt(String(e.target.value), 10)
+                  setBookingDurationMinutes(Number.isFinite(v) && v > 0 ? Math.max(5, v) : 60)
+                }}
               >
                 <option value="5">5 دقائق</option>
                 <option value="15">15 دقيقة</option>
