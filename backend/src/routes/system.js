@@ -14,6 +14,10 @@ systemRouter.get('/status', loadBusinessDay, (_req, res) => {
     dayActive: Boolean(d?.active),
     usdSypRate: d?.exchangeRate ?? null,
     dayClosed: Boolean(d?.closedAt),
+    room1MeterStart: d?.room1MeterStart ?? null,
+    room2MeterStart: d?.room2MeterStart ?? null,
+    room1MeterEnd: d?.room1MeterEnd ?? null,
+    room2MeterEnd: d?.room2MeterEnd ?? null,
   })
 })
 
@@ -25,8 +29,18 @@ systemRouter.post(
   async (req, res) => {
     try {
       const rate = Number(req.body?.rate)
+      const room1MeterStart = Number(req.body?.room1MeterStart)
+      const room2MeterStart = Number(req.body?.room2MeterStart)
       if (!Number.isFinite(rate) || rate <= 0) {
         res.status(400).json({ error: 'سعر صرف غير صالح' })
+        return
+      }
+      if (!Number.isFinite(room1MeterStart) || room1MeterStart < 0) {
+        res.status(400).json({ error: 'قراءة عداد غرفة 1 في بداية اليوم غير صالحة' })
+        return
+      }
+      if (!Number.isFinite(room2MeterStart) || room2MeterStart < 0) {
+        res.status(400).json({ error: 'قراءة عداد غرفة 2 في بداية اليوم غير صالحة' })
         return
       }
       const d = req.businessDay
@@ -34,23 +48,29 @@ systemRouter.post(
       if (d.closedAt) {
         d.closedAt = null
         d.closedBy = null
+        d.room1MeterEnd = null
+        d.room2MeterEnd = null
       }
       d.active = true
       d.exchangeRate = rate
       d.rateSetBy = req.user._id
       d.rateSetAt = new Date()
+      d.room1MeterStart = room1MeterStart
+      d.room2MeterStart = room2MeterStart
       await d.save()
       await writeAudit({
         user: req.user,
-        action: 'تفعيل يوم العمل وتحديد سعر الصرف',
+        action: 'تفعيل يوم العمل وتحديد سعر الصرف والعدادات',
         entityType: 'BusinessDay',
         entityId: d.businessDate,
-        details: { rate },
+        details: { rate, room1MeterStart, room2MeterStart },
       })
       res.json({
         businessDate: d.businessDate,
         dayActive: true,
         usdSypRate: d.exchangeRate,
+        room1MeterStart: d.room1MeterStart,
+        room2MeterStart: d.room2MeterStart,
       })
     } catch (e) {
       console.error(e)
@@ -102,11 +122,34 @@ systemRouter.post(
   requireRoles('super_admin'),
   async (req, res) => {
     try {
-      if (String(req.body?.confirm || '').toUpperCase() !== 'CLOSE') {
-        res.status(400).json({ error: 'تأكيد غير صالح' })
+      const confirm = String(req.body?.confirm || '').trim().toLowerCase()
+      if (confirm !== 'close') {
+        res.status(400).json({ error: 'اكتب كلمة close للتأكيد' })
+        return
+      }
+      const room1MeterEnd = Number(req.body?.room1MeterEnd)
+      const room2MeterEnd = Number(req.body?.room2MeterEnd)
+      if (!Number.isFinite(room1MeterEnd) || room1MeterEnd < 0) {
+        res.status(400).json({ error: 'قراءة عداد غرفة 1 في نهاية اليوم غير صالحة' })
+        return
+      }
+      if (!Number.isFinite(room2MeterEnd) || room2MeterEnd < 0) {
+        res.status(400).json({ error: 'قراءة عداد غرفة 2 في نهاية اليوم غير صالحة' })
         return
       }
       const d = req.businessDay
+      const s1 = d.room1MeterStart
+      const s2 = d.room2MeterStart
+      if (Number.isFinite(s1) && room1MeterEnd < s1) {
+        res.status(400).json({ error: 'عداد غرفة 1 في النهاية يجب ألا يقل عن قراءة البداية' })
+        return
+      }
+      if (Number.isFinite(s2) && room2MeterEnd < s2) {
+        res.status(400).json({ error: 'عداد غرفة 2 في النهاية يجب ألا يقل عن قراءة البداية' })
+        return
+      }
+      d.room1MeterEnd = room1MeterEnd
+      d.room2MeterEnd = room2MeterEnd
       d.active = false
       d.closedAt = new Date()
       d.closedBy = req.user._id
@@ -116,12 +159,15 @@ systemRouter.post(
         action: 'إغلاق وأرشفة اليوم',
         entityType: 'BusinessDay',
         entityId: d.businessDate,
+        details: { room1MeterEnd, room2MeterEnd },
       })
       res.json({
         businessDate: d.businessDate,
         dayActive: false,
         usdSypRate: d.exchangeRate,
         dayClosed: true,
+        room1MeterEnd: d.room1MeterEnd,
+        room2MeterEnd: d.room2MeterEnd,
       })
     } catch (e) {
       console.error(e)

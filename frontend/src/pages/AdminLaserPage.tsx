@@ -20,6 +20,74 @@ type FinanceRow = {
 type LaserTab = 'shots' | 'financial'
 type ReportPeriod = 'daily' | 'monthly'
 
+type MeterReconciliationRow = {
+  complete: boolean
+  delta: number | null
+  matched: boolean | null
+}
+
+function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterReconciliationRow }) {
+  if (!row.complete) {
+    return (
+      <div
+        role="status"
+        style={{
+          borderRadius: 10,
+          padding: '0.55rem 0.85rem',
+          border: '1px solid var(--border)',
+          background: 'var(--bg)',
+          color: 'var(--text-muted)',
+          fontSize: '0.86rem',
+          minWidth: 160,
+        }}
+      >
+        <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: '0.15rem' }}>{roomLabel}</div>
+        التحقق غير متاح (يُحتاج قراءة عداد بداية ونهاية هذا اليوم في إعدادات اليوم).
+      </div>
+    )
+  }
+  if (row.matched) {
+    return (
+      <div
+        role="status"
+        style={{
+          borderRadius: 10,
+          padding: '0.55rem 0.85rem',
+          border: '1px solid var(--success)',
+          background: 'var(--success-bg)',
+          color: 'var(--success)',
+          fontWeight: 800,
+          fontSize: '0.95rem',
+          minWidth: 160,
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.2rem', opacity: 0.9 }}>{roomLabel}</div>
+        متطابق
+      </div>
+    )
+  }
+  return (
+    <div
+      role="status"
+      style={{
+        borderRadius: 10,
+        padding: '0.55rem 0.85rem',
+        border: '1px solid var(--danger)',
+        background: 'var(--danger-bg)',
+        color: 'var(--danger)',
+        fontWeight: 800,
+        fontSize: '0.95rem',
+        minWidth: 160,
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.2rem', opacity: 0.9 }}>{roomLabel}</div>
+      لا يوجد تطابق
+    </div>
+  )
+}
+
 export function AdminLaserPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
@@ -30,6 +98,10 @@ export function AdminLaserPage() {
   const [month, setMonth] = useState('')
   const [shotRows, setShotRows] = useState<DailyRow[]>([])
   const [roomTotals, setRoomTotals] = useState<{ room1Shots: number; room2Shots: number }>({ room1Shots: 0, room2Shots: 0 })
+  const [meterReconciliation, setMeterReconciliation] = useState<{
+    room1: MeterReconciliationRow
+    room2: MeterReconciliationRow
+  } | null>(null)
   const [shotLoading, setShotLoading] = useState(false)
   const [shotErr, setShotErr] = useState('')
   const [financeRows, setFinanceRows] = useState<FinanceRow[]>([])
@@ -81,17 +153,29 @@ export function AdminLaserPage() {
         month?: string
         rows: DailyRow[]
         roomTotals?: { room1Shots?: number; room2Shots?: number }
+        meterReconciliation?: { room1?: MeterReconciliationRow; room2?: MeterReconciliationRow }
       }>(`${endpoint}${q}`)
       setShotRows(data.rows || [])
       setRoomTotals({
         room1Shots: Number(data.roomTotals?.room1Shots) || 0,
         room2Shots: Number(data.roomTotals?.room2Shots) || 0,
       })
+      const emptyRec: MeterReconciliationRow = { complete: false, delta: null, matched: null }
+      if (period === 'daily') {
+        const mr = data.meterReconciliation
+        setMeterReconciliation({
+          room1: mr?.room1 ?? emptyRec,
+          room2: mr?.room2 ?? emptyRec,
+        })
+      } else {
+        setMeterReconciliation(null)
+      }
       if (period === 'daily' && !date && data.date) setDate(data.date)
       if (period === 'monthly' && !month && data.month) setMonth(data.month)
     } catch (e) {
       setShotRows([])
       setRoomTotals({ room1Shots: 0, room2Shots: 0 })
+      setMeterReconciliation(null)
       setShotErr(e instanceof ApiError ? e.message : 'تعذر تحميل تقرير الضربات')
     } finally {
       setShotLoading(false)
@@ -261,6 +345,18 @@ export function AdminLaserPage() {
             ضربات الغرفة الأولى: <strong style={{ color: 'var(--text)' }}>{roomTotals.room1Shots}</strong> — ضربات الغرفة
             الثانية: <strong style={{ color: 'var(--text)' }}>{roomTotals.room2Shots}</strong>
           </div>
+          {period === 'daily' && meterReconciliation ? (
+            <div style={{ marginBottom: '0.95rem' }}>
+              <p style={{ margin: '0 0 0.45rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                مطابقة العداد: (قراءة بداية اليوم + ضربات الجلسات المسجّلة) − قراءة نهاية اليوم — يجب أن يساوي{' '}
+                <strong>0</strong> عند التطابق مع الجهاز.
+              </p>
+              <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
+                <ShotsMeterMatchBox roomLabel="الغرفة 1" row={meterReconciliation.room1} />
+                <ShotsMeterMatchBox roomLabel="الغرفة 2" row={meterReconciliation.room2} />
+              </div>
+            </div>
+          ) : null}
           <div className="table-wrap">
             <table className="data-table">
               <thead>

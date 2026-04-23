@@ -15,6 +15,10 @@ interface SystemStatus {
   dayActive: boolean
   usdSypRate: number | null
   dayClosed: boolean
+  room1MeterStart: number | null
+  room2MeterStart: number | null
+  room1MeterEnd: number | null
+  room2MeterEnd: number | null
 }
 
 interface ClinicContextValue {
@@ -24,8 +28,16 @@ interface ClinicContextValue {
   dayClosed: boolean
   systemLoading: boolean
   refreshSystem: () => Promise<void>
-  startDay: (rate: number) => Promise<void>
-  endDay: () => Promise<void>
+  startDay: (input: {
+    rate: number
+    room1MeterStart: number
+    room2MeterStart: number
+  }) => Promise<void>
+  endDay: (input: {
+    room1MeterEnd: number
+    room2MeterEnd: number
+    confirm: string
+  }) => Promise<void>
   updateExchangeRate: (rate: number) => Promise<void>
 }
 
@@ -64,23 +76,34 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   }, [user, refreshSystem])
 
   const startDay = useCallback(
-    async (rate: number) => {
+    async (input: {
+      rate: number
+      room1MeterStart: number
+      room2MeterStart: number
+    }) => {
       await api('/api/system/start-day', {
         method: 'POST',
-        body: JSON.stringify({ rate }),
+        body: JSON.stringify(input),
       })
       await refreshSystem()
     },
     [refreshSystem],
   )
 
-  const endDay = useCallback(async () => {
-    await api('/api/system/close-day', {
-      method: 'POST',
-      body: JSON.stringify({ confirm: 'CLOSE' }),
-    })
-    await refreshSystem()
-  }, [refreshSystem])
+  const endDay = useCallback(
+    async (input: {
+      room1MeterEnd: number
+      room2MeterEnd: number
+      confirm: string
+    }) => {
+      await api('/api/system/close-day', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+      await refreshSystem()
+    },
+    [refreshSystem],
+  )
 
   const updateExchangeRate = useCallback(
     async (rate: number) => {

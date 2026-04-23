@@ -7,6 +7,7 @@ import { User } from '../models/User.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
+import { BusinessDay } from '../models/BusinessDay.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
@@ -421,7 +422,26 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
       }
     })
 
-    res.json({ date, rows, roomTotals })
+    const bd = await BusinessDay.findOne({ businessDate: date })
+      .select('room1MeterStart room2MeterStart room1MeterEnd room2MeterEnd')
+      .lean()
+    function meterReconciliationRow(meterStart, meterEnd, shotsInDay) {
+      const s = meterStart != null ? Number(meterStart) : NaN
+      const e = meterEnd != null ? Number(meterEnd) : NaN
+      const sh = Number(shotsInDay) || 0
+      if (!Number.isFinite(s) || !Number.isFinite(e)) {
+        return { complete: false, delta: null, matched: null }
+      }
+      const delta = s + sh - e
+      const matched = Math.abs(delta) < 1e-6
+      return { complete: true, delta, matched }
+    }
+    const meterReconciliation = {
+      room1: meterReconciliationRow(bd?.room1MeterStart, bd?.room1MeterEnd, roomTotals.room1Shots),
+      room2: meterReconciliationRow(bd?.room2MeterStart, bd?.room2MeterEnd, roomTotals.room2Shots),
+    }
+
+    res.json({ date, rows, roomTotals, meterReconciliation })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

@@ -10,6 +10,11 @@ const businessDaySchema = new mongoose.Schema(
     rateSetAt: { type: Date, default: null },
     closedAt: { type: Date, default: null },
     closedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    /** قراءة عداد الليزر (غرفة 1 و 2) عند بداية اليوم ونهايته */
+    room1MeterStart: { type: Number, default: null },
+    room2MeterStart: { type: Number, default: null },
+    room1MeterEnd: { type: Number, default: null },
+    room2MeterEnd: { type: Number, default: null },
   },
   { timestamps: true },
 )

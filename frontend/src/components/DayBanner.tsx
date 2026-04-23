@@ -2,17 +2,7 @@ import { useEffect, useState } from 'react'
 import { ApiError } from '../api/client'
 import { useClinic } from '../context/ClinicContext'
 import { useAuth } from '../context/AuthContext'
-
-/** تحويل الأرقام العربية/الفارسية إلى أرقام لاتينية ليقبلها parseFloat */
-function normalizeRateDigits(raw: string) {
-  let s = raw.replace(/,/g, '').replace(/\s/g, '').trim()
-  for (let i = 0; i < 10; i++) {
-    const ar = String.fromCharCode(0x0660 + i)
-    const ext = String.fromCharCode(0x06f0 + i)
-    s = s.split(ar).join(String(i)).split(ext).join(String(i))
-  }
-  return s
-}
+import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 
 export function DayBanner() {
   const { user, sessionMinutesLeft } = useAuth()
@@ -25,7 +15,11 @@ export function DayBanner() {
     systemLoading,
   } = useClinic()
   const [showStart, setShowStart] = useState(false)
+  const [startStep, setStartStep] = useState<'rate' | 'meters'>('rate')
+  const [savedRate, setSavedRate] = useState<number | null>(null)
   const [rateInput, setRateInput] = useState(String(usdSypRate ?? ''))
+  const [room1Input, setRoom1Input] = useState('')
+  const [room2Input, setRoom2Input] = useState('')
   const [busy, setBusy] = useState(false)
   const [startErr, setStartErr] = useState('')
 
@@ -34,7 +28,13 @@ export function DayBanner() {
   }, [usdSypRate])
 
   useEffect(() => {
-    if (!showStart) setStartErr('')
+    if (!showStart) {
+      setStartErr('')
+      setStartStep('rate')
+      setSavedRate(null)
+      setRoom1Input('')
+      setRoom2Input('')
+    }
   }, [showStart])
 
   const isReception = role === 'reception'
@@ -63,6 +63,10 @@ export function DayBanner() {
               className="btn btn-primary"
               onClick={() => {
                 setStartErr('')
+                setStartStep('rate')
+                setSavedRate(null)
+                setRoom1Input('')
+                setRoom2Input('')
                 setShowStart(true)
               }}
             >
@@ -79,24 +83,63 @@ export function DayBanner() {
           >
             <div className="modal">
               <h3 id="start-day-title">تفعيل يوم العمل</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                أدخل سعر صرف USD/SYP لهذا اليوم. ستُحسب جميع الفواتير والأرباح
-                بناءً عليه.
-              </p>
-              <label className="form-label" htmlFor="rate">
-                سعر الصرف (ليرة / دولار)
-              </label>
-              <input
-                id="rate"
-                className="input"
-                inputMode="decimal"
-                dir="ltr"
-                value={rateInput}
-                onChange={(e) => {
-                  setStartErr('')
-                  setRateInput(e.target.value)
-                }}
-              />
+              {startStep === 'rate' ? (
+                <>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    أدخل سعر صرف USD/SYP لهذا اليوم. ستُحسب جميع الفواتير والأرباح
+                    بناءً عليه.
+                  </p>
+                  <label className="form-label" htmlFor="rate">
+                    سعر الصرف (ليرة / دولار)
+                  </label>
+                  <input
+                    id="rate"
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    value={rateInput}
+                    onChange={(e) => {
+                      setStartErr('')
+                      setRateInput(e.target.value)
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    أدخل قراءة عداد الجهاز لكل غرفة في <strong>بداية</strong> هذا اليوم
+                    (قبل أول جلسة).
+                  </p>
+                  <label className="form-label" htmlFor="meter-r1">
+                    عداد الجهاز — غرفة 1 (Room 1)
+                  </label>
+                  <input
+                    id="meter-r1"
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    value={room1Input}
+                    onChange={(e) => {
+                      setStartErr('')
+                      setRoom1Input(e.target.value)
+                    }}
+                  />
+                  <label className="form-label" htmlFor="meter-r2" style={{ marginTop: '0.75rem' }}>
+                    عداد الجهاز — غرفة 2 (Room 2)
+                  </label>
+                  <input
+                    id="meter-r2"
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    value={room2Input}
+                    onChange={(e) => {
+                      setStartErr('')
+                      setRoom2Input(e.target.value)
+                    }}
+                  />
+                </>
+              )}
               {startErr ? (
                 <p style={{ color: 'var(--danger)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>{startErr}</p>
               ) : null}
@@ -106,6 +149,7 @@ export function DayBanner() {
                   gap: '0.5rem',
                   marginTop: '1rem',
                   justifyContent: 'flex-end',
+                  flexWrap: 'wrap',
                 }}
               >
                 <button
@@ -113,36 +157,69 @@ export function DayBanner() {
                   className="btn btn-secondary"
                   onClick={() => {
                     setStartErr('')
+                    if (startStep === 'meters') {
+                      setStartStep('rate')
+                      return
+                    }
                     setShowStart(false)
                   }}
                 >
-                  إلغاء
+                  {startStep === 'meters' ? 'رجوع' : 'إلغاء'}
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={async () => {
-                    setStartErr('')
-                    const normalized = normalizeRateDigits(rateInput)
-                    const n = parseFloat(normalized)
-                    if (!Number.isFinite(n) || n <= 0) {
-                      setStartErr('أدخل سعراً صالحاً (رقم أكبر من صفر). يمكن استخدام الأرقام 0–9 أو العربية ٠–٩.')
-                      return
-                    }
-                    setBusy(true)
-                    try {
-                      await startDay(n)
-                      setShowStart(false)
-                    } catch (e) {
-                      setStartErr(e instanceof ApiError ? e.message : 'تعذر تفعيل اليوم. تحقق من الاتصال بالخادم.')
-                    } finally {
-                      setBusy(false)
-                    }
-                  }}
-                >
-                  {busy ? 'جاري التفعيل…' : 'تأكيد والبدء'}
-                </button>
+                {startStep === 'rate' ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => {
+                      setStartErr('')
+                      const normalized = normalizeDecimalDigits(rateInput)
+                      const n = parseFloat(normalized)
+                      if (!Number.isFinite(n) || n <= 0) {
+                        setStartErr('أدخل سعراً صالحاً (رقم أكبر من صفر). يمكن استخدام الأرقام 0–9 أو العربية ٠–٩.')
+                        return
+                      }
+                      setSavedRate(n)
+                      setStartStep('meters')
+                    }}
+                  >
+                    التالي
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy || savedRate == null}
+                    onClick={async () => {
+                      setStartErr('')
+                      const m1 = parseFloat(normalizeDecimalDigits(room1Input))
+                      const m2 = parseFloat(normalizeDecimalDigits(room2Input))
+                      if (!Number.isFinite(m1) || m1 < 0) {
+                        setStartErr('أدخل قراءة صالحة لعداد غرفة 1 (رقم ≥ 0).')
+                        return
+                      }
+                      if (!Number.isFinite(m2) || m2 < 0) {
+                        setStartErr('أدخل قراءة صالحة لعداد غرفة 2 (رقم ≥ 0).')
+                        return
+                      }
+                      setBusy(true)
+                      try {
+                        await startDay({
+                          rate: savedRate!,
+                          room1MeterStart: m1,
+                          room2MeterStart: m2,
+                        })
+                        setShowStart(false)
+                      } catch (e) {
+                        setStartErr(e instanceof ApiError ? e.message : 'تعذر تفعيل اليوم. تحقق من الاتصال بالخادم.')
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    {busy ? 'جاري التفعيل…' : 'تأكيد والبدء'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
