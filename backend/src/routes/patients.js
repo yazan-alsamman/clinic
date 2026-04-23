@@ -5,12 +5,14 @@ import { Patient } from '../models/Patient.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { LaserSession } from '../models/LaserSession.js'
+import { ClinicalSession } from '../models/ClinicalSession.js'
 import { authMiddleware, requireActiveDay } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
 import { writeAudit } from '../utils/audit.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
+import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
 
 const CLINICAL_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
 
@@ -19,17 +21,6 @@ const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']
 function parseFinancialBalanceDept(raw) {
   const v = String(raw || '').trim()
   return FIN_BALANCE_FILTER_DEPTS.includes(v) ? v : null
-}
-
-function financialBalanceRowDto(o) {
-  return {
-    id: String(o._id),
-    fileNumber: String(o.fileNumber || ''),
-    name: String(o.name || ''),
-    departments: Array.isArray(o.departments) ? o.departments : [],
-    outstandingDebtUsd: Math.round((Number(o.outstandingDebtUsd) || 0) * 100) / 100,
-    prepaidCreditUsd: Math.round((Number(o.prepaidCreditUsd) || 0) * 100) / 100,
-  }
 }
 
 function canReadPatients(role) {
@@ -172,7 +163,7 @@ patientsRouter.get('/', async (req, res) => {
   }
 })
 
-/** ذمم ورصيد إضافي — لوحة المدير (يجب أن يسبق مسار /:id) */
+/** ذمم ورصيد إضافي — لوحة المدير: أسطر مفتوحة حسب بند التحصيل/القسم (يجب أن يسبق مسار /:id) */
 patientsRouter.get('/financial-balances', async (req, res) => {
   try {
     if (req.user.role !== 'super_admin') {
@@ -181,20 +172,36 @@ patientsRouter.get('/financial-balances', async (req, res) => {
     }
     const debtDept = parseFinancialBalanceDept(req.query.debtDepartment)
     const creditDept = parseFinancialBalanceDept(req.query.creditDepartment)
-    const debtQuery = { outstandingDebtUsd: { $gt: 0.0001 } }
-    if (debtDept) debtQuery.departments = debtDept
-    const creditQuery = { prepaidCreditUsd: { $gt: 0.0001 } }
-    if (creditDept) creditQuery.departments = creditDept
-    const select = 'fileNumber name departments outstandingDebtUsd prepaidCreditUsd'
-    const [debtRows, creditRows] = await Promise.all([
-      Patient.find(debtQuery).select(select).sort({ outstandingDebtUsd: -1, name: 1 }).limit(5000).lean(),
-      Patient.find(creditQuery).select(select).sort({ prepaidCreditUsd: -1, name: 1 }).limit(5000).lean(),
+    const select = 'fileNumber name outstandingDebtUsd prepaidCreditUsd sessionPackages'
+    const [debtPatients, creditPatients] = await Promise.all([
+      Patient.find({ outstandingDebtUsd: { $gt: 0.0001 } })
+        .select(select)
+        .sort({ outstandingDebtUsd: -1, name: 1 })
+        .limit(5000)
+        .lean(),
+      Patient.find({ prepaidCreditUsd: { $gt: 0.0001 } })
+        .select(select)
+        .sort({ prepaidCreditUsd: -1, name: 1 })
+        .limit(5000)
+        .lean(),
     ])
+    const [debtLinesRaw, creditLinesRaw] = await Promise.all([
+      buildAdminOpenFinancialLines(debtPatients, 'debt'),
+      buildAdminOpenFinancialLines(creditPatients, 'credit'),
+    ])
+    const debtLines = debtLinesRaw.filter((row) => {
+      if (!debtDept) return true
+      return row.department === debtDept
+    })
+    const creditLines = creditLinesRaw.filter((row) => {
+      if (!creditDept) return true
+      return row.department === creditDept
+    })
     const rateRaw = req.businessDay?.exchangeRate
     const usdSypRate = rateRaw != null && Number.isFinite(Number(rateRaw)) ? Number(rateRaw) : null
     res.json({
-      debts: debtRows.map(financialBalanceRowDto),
-      credits: creditRows.map(financialBalanceRowDto),
+      debtLines,
+      creditLines,
       usdSypRate,
     })
   } catch (e) {
@@ -431,6 +438,118 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
       },
       entries,
     })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** تفاصيل الجلسة المرتبطة ببند تحصيل — للمدير (صفحة الذمم المالية) */
+patientsRouter.get('/:id/financial-billing-detail/:billingItemId', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const pid = req.params.id
+    const bid = req.params.billingItemId
+    if (!mongoose.isValidObjectId(pid) || !mongoose.isValidObjectId(bid)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const bi = await BillingItem.findOne({
+      _id: new mongoose.Types.ObjectId(bid),
+      patientId: new mongoose.Types.ObjectId(pid),
+    }).lean()
+    if (!bi) {
+      res.status(404).json({ error: 'البند غير موجود' })
+      return
+    }
+    const cs = bi.clinicalSessionId
+      ? await ClinicalSession.findById(bi.clinicalSessionId).populate('providerUserId', 'name').lean()
+      : null
+    let laser = null
+    if (cs?.laserSessionId) {
+      laser = await LaserSession.findById(cs.laserSessionId).populate('operatorUserId', 'name').lean()
+    }
+    if (!laser) {
+      laser = await LaserSession.findOne({ billingItemId: bi._id }).populate('operatorUserId', 'name').lean()
+    }
+    res.json({
+      billingItem: {
+        id: String(bi._id),
+        department: bi.department,
+        procedureLabel: String(bi.procedureLabel || ''),
+        amountDueUsd: Number(bi.amountDueUsd) || 0,
+        businessDate: String(bi.businessDate || ''),
+        status: bi.status,
+        paidAt: bi.paidAt ? new Date(bi.paidAt).toISOString() : null,
+      },
+      clinicalSession: cs
+        ? {
+            id: String(cs._id),
+            procedureDescription: String(cs.procedureDescription || ''),
+            sessionFeeUsd: Number(cs.sessionFeeUsd) || 0,
+            businessDate: String(cs.businessDate || ''),
+            notes: String(cs.notes || ''),
+            materialCostUsdTotal: Number(cs.materialCostUsdTotal) || 0,
+            materialChargeUsdTotal: Number(cs.materialChargeUsdTotal) || 0,
+            materials: Array.isArray(cs.materials) ? cs.materials : [],
+            providerName: String(cs.providerUserId?.name || '').trim(),
+            isPackageSession: cs.isPackageSession === true,
+          }
+        : null,
+      laserSession: laser
+        ? {
+            id: String(laser._id),
+            laserType: laser.laserType,
+            pw: String(laser.pw || ''),
+            pulse: String(laser.pulse || ''),
+            shotCount: String(laser.shotCount || ''),
+            notes: String(laser.notes || ''),
+            areaIds: Array.isArray(laser.areaIds) ? laser.areaIds : [],
+            manualAreaLabels: Array.isArray(laser.manualAreaLabels) ? laser.manualAreaLabels : [],
+            room: String(laser.room || ''),
+            sessionTypeLabel: String(laser.sessionTypeLabel || ''),
+            discountPercent: Number(laser.discountPercent) || 0,
+            costUsd: Number(laser.costUsd) || 0,
+            status: laser.status,
+            operatorName: String(laser.operatorUserId?.name || '').trim(),
+            treatmentNumber: laser.treatmentNumber,
+          }
+        : null,
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** تفاصيل باكج جلسات (ليزر) — للمدير (صفحة الذمم المالية) */
+patientsRouter.get('/:id/financial-package-detail/:packageId', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const pid = req.params.id
+    const packageId = req.params.packageId
+    if (!mongoose.isValidObjectId(pid) || !mongoose.isValidObjectId(packageId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const p = await Patient.findById(pid).select('sessionPackages').lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const rows = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
+    const pkg = rows.find((x) => String(x?._id) === String(packageId))
+    if (!pkg) {
+      res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    res.json({ package: serializePackage(pkg) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
