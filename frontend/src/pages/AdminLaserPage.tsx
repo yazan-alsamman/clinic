@@ -21,12 +21,14 @@ type FinanceRow = {
 type LaserTab = 'shots' | 'expenses' | 'financial'
 type ReportPeriod = 'daily' | 'monthly'
 
-type LocalExpenseRow = { clientKey: string; reason: string; amountInput: string }
+type LocalExpenseRow = { clientKey: string; reason: string; amountUsdInput: string; amountSypInput: string }
 
 type FinanceMonthlyExtras = {
   totalSessionRevenueUsd: number
   totalExpensesUsd: number
   netProfitUsd: number
+  monthAvgSypPerUsd: number | null
+  expenseConversionWarning: string | null
 }
 
 type MeterReconciliationRow = {
@@ -122,6 +124,8 @@ export function AdminLaserPage() {
   const [expenseLoading, setExpenseLoading] = useState(false)
   const [expenseErr, setExpenseErr] = useState('')
   const [expenseSaveBusy, setExpenseSaveBusy] = useState(false)
+  const [expenseMonthAvgSypPerUsd, setExpenseMonthAvgSypPerUsd] = useState<number | null>(null)
+  const [expenseLoadWarning, setExpenseLoadWarning] = useState<string | null>(null)
 
   useEffect(() => {
     if (!date && businessDate) setDate(businessDate)
@@ -132,11 +136,26 @@ export function AdminLaserPage() {
 
   const expenseMonth = useMemo(() => {
     if (period === 'monthly' && month && /^\d{4}-\d{2}$/.test(month)) return month
-    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date.slice(0, 7)
-    if (businessDate && /^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return businessDate.slice(0, 7)
-    if (month && /^\d{4}-\d{2}$/.test(month)) return month
     return ''
-  }, [period, month, date, businessDate])
+  }, [period, month])
+
+  useEffect(() => {
+    if (period === 'daily' && tab === 'expenses') setTab('shots')
+  }, [period, tab])
+
+  const previewExpenseTotalUsd = useMemo(() => {
+    let sum = 0
+    for (const r of expenseRows) {
+      const usd = Math.max(0, parseFloat(normalizeDecimalDigits(r.amountUsdInput)) || 0)
+      const syp = Math.max(0, parseFloat(normalizeDecimalDigits(r.amountSypInput)) || 0)
+      sum += usd
+      if (syp > 0) {
+        if (!expenseMonthAvgSypPerUsd || expenseMonthAvgSypPerUsd <= 0) return null
+        sum += syp / expenseMonthAvgSypPerUsd
+      }
+    }
+    return sum
+  }, [expenseRows, expenseMonthAvgSypPerUsd])
 
   const totalFinanceUsd = useMemo(
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountUsd) || 0), 0),
@@ -226,6 +245,8 @@ export function AdminLaserPage() {
         totalSessionRevenueUsd?: number
         totalExpensesUsd?: number
         netProfitUsd?: number
+        monthAvgSypPerUsd?: number | null
+        expenseConversionWarning?: string | null
       }>(`${endpoint}${q}`)
       setFinanceRows(data.rows || [])
       setTopSpecialist(data.topSpecialist ? { name: data.topSpecialist.name, totalAmountUsd: data.topSpecialist.totalAmountUsd } : null)
@@ -234,6 +255,11 @@ export function AdminLaserPage() {
           totalSessionRevenueUsd: Number(data.totalSessionRevenueUsd) || 0,
           totalExpensesUsd: Number(data.totalExpensesUsd) || 0,
           netProfitUsd: Number(data.netProfitUsd) || 0,
+          monthAvgSypPerUsd:
+            data.monthAvgSypPerUsd != null && Number.isFinite(Number(data.monthAvgSypPerUsd))
+              ? Number(data.monthAvgSypPerUsd)
+              : null,
+          expenseConversionWarning: data.expenseConversionWarning ? String(data.expenseConversionWarning) : null,
         })
       } else {
         setFinanceMonthlyExtras(null)
@@ -254,24 +280,36 @@ export function AdminLaserPage() {
     if (!allowed || !expenseMonth) return
     setExpenseErr('')
     setExpenseLoading(true)
+    setExpenseLoadWarning(null)
     try {
       const data = await api<{
         month: string
-        lines: { id: string; reason: string; amountUsd: number }[]
+        lines: { id: string; reason: string; amountUsd: number; amountSyp: number }[]
         totalExpensesUsd: number
+        monthAvgSypPerUsd?: number | null
+        expenseConversionWarning?: string | null
       }>(`/api/laser/monthly-expenses?month=${encodeURIComponent(expenseMonth)}`)
       const lines = data.lines || []
+      setExpenseMonthAvgSypPerUsd(
+        data.monthAvgSypPerUsd != null && Number.isFinite(Number(data.monthAvgSypPerUsd))
+          ? Number(data.monthAvgSypPerUsd)
+          : null,
+      )
+      setExpenseLoadWarning(data.expenseConversionWarning ? String(data.expenseConversionWarning) : null)
       setExpenseRows(
         lines.length > 0
           ? lines.map((l) => ({
               clientKey: l.id,
               reason: l.reason,
-              amountInput: l.amountUsd === 0 ? '' : String(l.amountUsd),
+              amountUsdInput: l.amountUsd === 0 ? '' : String(l.amountUsd),
+              amountSypInput: (l.amountSyp ?? 0) === 0 ? '' : String(l.amountSyp),
             }))
-          : [{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }],
+          : [{ clientKey: crypto.randomUUID(), reason: '', amountUsdInput: '', amountSypInput: '' }],
       )
     } catch (e) {
-      setExpenseRows([{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }])
+      setExpenseMonthAvgSypPerUsd(null)
+      setExpenseLoadWarning(null)
+      setExpenseRows([{ clientKey: crypto.randomUUID(), reason: '', amountUsdInput: '', amountSypInput: '' }])
       setExpenseErr(e instanceof ApiError ? e.message : 'تعذر تحميل المصاريف')
     } finally {
       setExpenseLoading(false)
@@ -285,25 +323,34 @@ export function AdminLaserPage() {
     try {
       const lines = expenseRows.map((r) => ({
         reason: r.reason.trim(),
-        amountUsd: Math.max(0, parseFloat(normalizeDecimalDigits(r.amountInput)) || 0),
+        amountUsd: Math.max(0, parseFloat(normalizeDecimalDigits(r.amountUsdInput)) || 0),
+        amountSyp: Math.max(0, parseFloat(normalizeDecimalDigits(r.amountSypInput)) || 0),
       }))
       const data = await api<{
         month: string
-        lines: { id: string; reason: string; amountUsd: number }[]
+        lines: { id: string; reason: string; amountUsd: number; amountSyp: number }[]
         totalExpensesUsd: number
+        monthAvgSypPerUsd?: number | null
       }>('/api/laser/monthly-expenses', {
         method: 'PUT',
         body: JSON.stringify({ month: expenseMonth, lines }),
       })
+      setExpenseMonthAvgSypPerUsd(
+        data.monthAvgSypPerUsd != null && Number.isFinite(Number(data.monthAvgSypPerUsd))
+          ? Number(data.monthAvgSypPerUsd)
+          : null,
+      )
+      setExpenseLoadWarning(null)
       const out = data.lines || []
       setExpenseRows(
         out.length > 0
           ? out.map((l) => ({
               clientKey: l.id,
               reason: l.reason,
-              amountInput: l.amountUsd === 0 ? '' : String(l.amountUsd),
+              amountUsdInput: l.amountUsd === 0 ? '' : String(l.amountUsd),
+              amountSypInput: (l.amountSyp ?? 0) === 0 ? '' : String(l.amountSyp),
             }))
-          : [{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }],
+          : [{ clientKey: crypto.randomUUID(), reason: '', amountUsdInput: '', amountSypInput: '' }],
       )
     } catch (e) {
       setExpenseErr(e instanceof ApiError ? e.message : 'تعذر حفظ المصاريف')
@@ -409,7 +456,10 @@ export function AdminLaserPage() {
           role="tab"
           aria-selected={period === 'daily'}
           className={`tab${period === 'daily' ? ' active' : ''}`}
-          onClick={() => setPeriod('daily')}
+          onClick={() => {
+            setPeriod('daily')
+            setTab((t) => (t === 'expenses' ? 'shots' : t))
+          }}
         >
           تقارير يومية
         </button>
@@ -431,15 +481,17 @@ export function AdminLaserPage() {
         >
           الضربات
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'expenses'}
-          className={`tab${tab === 'expenses' ? ' active' : ''}`}
-          onClick={() => setTab('expenses')}
-        >
-          مصاريف
-        </button>
+        {period === 'monthly' ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'expenses'}
+            className={`tab${tab === 'expenses' ? ' active' : ''}`}
+            onClick={() => setTab('expenses')}
+          >
+            مصاريف
+          </button>
+        ) : null}
         <button
           type="button"
           role="tab"
@@ -515,23 +567,32 @@ export function AdminLaserPage() {
             </table>
           </div>
         </div>
-      ) : tab === 'expenses' ? (
+      ) : tab === 'expenses' && period === 'monthly' ? (
         <div className="card" style={{ marginTop: '1rem' }}>
           <h2 className="card-title" style={{ marginBottom: '0.45rem' }}>
             مصاريف الليزر — شهر {expenseMonth || '—'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: '0.65rem' }}>
-            تُجمع المبالغ أدناه وتُطرح من <strong>مجموع أسعار جلسات الليزر</strong> في التقرير المالي{' '}
-            <strong>الشهري</strong> ليظهر <strong>الربح الصافي</strong>.
+            تُسجّل المصاريف <strong>شهرياً فقط</strong>. تُجمع المبالغ (دولار + ليرة محوّلة) وتُطرح من{' '}
+            <strong>مجموع أسعار جلسات الليزر</strong> في التقرير المالي الشهري ليظهر <strong>الربح الصافي</strong>.
           </p>
-          {period === 'daily' ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginBottom: '0.75rem' }}>
-              أنت في «تقارير يومية»: المصاريف المفتوحة هنا تخصّ الشهر الذي يتضمّن <strong>تاريخ اليوم</strong> المحدد في
-              الشريط أعلاه ({expenseMonth || '—'}).
+          {expenseMonthAvgSypPerUsd != null && expenseMonthAvgSypPerUsd > 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginBottom: '0.65rem' }}>
+              متوسط سعر الصرف لهذا الشهر (للتحويل ل.س → USD):{' '}
+              <strong style={{ color: 'var(--text)' }}>{expenseMonthAvgSypPerUsd.toLocaleString('ar-SY')}</strong> ل.س /
+              USD
             </p>
+          ) : (
+            <p style={{ color: 'var(--warning)', fontSize: '0.82rem', marginBottom: '0.65rem' }}>
+              لا يوجد في هذا الشهر أي يوم عمل بسعر صرف محفوظ — يمكنك إدخال المبالغ بالدولار فقط، أو تفعيل أيام في
+              الشهر ثم إدخال الليرة.
+            </p>
+          )}
+          {expenseLoadWarning ? (
+            <p style={{ color: 'var(--warning)', fontSize: '0.84rem', marginBottom: '0.65rem' }}>{expenseLoadWarning}</p>
           ) : null}
           {!expenseMonth ? (
-            <p style={{ color: 'var(--warning)', fontSize: '0.9rem' }}>حدّد شهراً أو تاريخ يوم من الشريط أعلاه.</p>
+            <p style={{ color: 'var(--warning)', fontSize: '0.9rem' }}>حدّد الشهر من الشريط أعلاه.</p>
           ) : expenseLoading ? (
             <p style={{ color: 'var(--text-muted)' }}>جاري التحميل…</p>
           ) : (
@@ -540,9 +601,10 @@ export function AdminLaserPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th style={{ minWidth: 220 }}>سبب الصرف</th>
-                      <th style={{ minWidth: 140 }}>المبلغ (USD)</th>
-                      <th style={{ width: 90 }}> </th>
+                      <th style={{ minWidth: 200 }}>سبب الصرف</th>
+                      <th style={{ minWidth: 120 }}>المبلغ (USD)</th>
+                      <th style={{ minWidth: 130 }}>المبلغ (ل.س)</th>
+                      <th style={{ width: 88 }}> </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -567,11 +629,26 @@ export function AdminLaserPage() {
                             className="input"
                             dir="ltr"
                             inputMode="decimal"
-                            value={row.amountInput}
+                            value={row.amountUsdInput}
                             onChange={(e) => {
                               const v = e.target.value
                               setExpenseRows((prev) =>
-                                prev.map((r) => (r.clientKey === row.clientKey ? { ...r, amountInput: v } : r)),
+                                prev.map((r) => (r.clientKey === row.clientKey ? { ...r, amountUsdInput: v } : r)),
+                              )
+                            }}
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            dir="ltr"
+                            inputMode="decimal"
+                            value={row.amountSypInput}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setExpenseRows((prev) =>
+                                prev.map((r) => (r.clientKey === row.clientKey ? { ...r, amountSypInput: v } : r)),
                               )
                             }}
                             placeholder="0"
@@ -585,7 +662,14 @@ export function AdminLaserPage() {
                             onClick={() => {
                               setExpenseRows((prev) => {
                                 if (prev.length <= 1) {
-                                  return [{ clientKey: crypto.randomUUID(), reason: '', amountInput: '' }]
+                                  return [
+                                    {
+                                      clientKey: crypto.randomUUID(),
+                                      reason: '',
+                                      amountUsdInput: '',
+                                      amountSypInput: '',
+                                    },
+                                  ]
                                 }
                                 return prev.filter((r) => r.clientKey !== row.clientKey)
                               })
@@ -613,28 +697,40 @@ export function AdminLaserPage() {
                   type="button"
                   className="btn btn-secondary"
                   onClick={() =>
-                    setExpenseRows((prev) => [...prev, { clientKey: crypto.randomUUID(), reason: '', amountInput: '' }])
+                    setExpenseRows((prev) => [
+                      ...prev,
+                      { clientKey: crypto.randomUUID(), reason: '', amountUsdInput: '', amountSypInput: '' },
+                    ])
                   }
                 >
                   + صف جديد
                 </button>
-                <button type="button" className="btn btn-primary" disabled={expenseSaveBusy} onClick={() => void saveExpenses()}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={
+                    expenseSaveBusy ||
+                    expenseRows.some((r) => {
+                      const syp = Math.max(0, parseFloat(normalizeDecimalDigits(r.amountSypInput)) || 0)
+                      return syp > 0 && (!expenseMonthAvgSypPerUsd || expenseMonthAvgSypPerUsd <= 0)
+                    })
+                  }
+                  onClick={() => void saveExpenses()}
+                >
                   {expenseSaveBusy ? 'جاري الحفظ…' : 'حفظ المصاريف'}
                 </button>
               </div>
               <p style={{ marginTop: '0.75rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                مجموع هذا الجدول (USD):{' '}
+                مجموع المصاريف مكافئ USD (تقديري قبل الحفظ):{' '}
                 <strong style={{ color: 'var(--text)' }}>
-                  {expenseRows
-                    .reduce((s, r) => s + Math.max(0, parseFloat(normalizeDecimalDigits(r.amountInput)) || 0), 0)
-                    .toFixed(2)}
+                  {previewExpenseTotalUsd == null ? '—' : previewExpenseTotalUsd.toFixed(2)}
                 </strong>{' '}
-                — بعد الحفظ يُستخدم في التقرير المالي الشهري.
+                USD — بعد الحفظ يُستخدم في التقرير المالي الشهري.
               </p>
             </>
           )}
         </div>
-      ) : (
+      ) : tab === 'financial' ? (
         <>
           <div className="card" style={{ marginTop: '1rem' }}>
             <h2 className="card-title" style={{ marginBottom: '0.35rem' }}>
@@ -696,6 +792,17 @@ export function AdminLaserPage() {
                     إيراد الجلسات − المصاريف (نفس الشهر)
                   </div>
                 </div>
+                {financeMonthlyExtras.monthAvgSypPerUsd != null && financeMonthlyExtras.monthAvgSypPerUsd > 0 ? (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    تحويل الليرة في المصاريف: متوسط سعر الصرف للشهر ≈{' '}
+                    {financeMonthlyExtras.monthAvgSypPerUsd.toLocaleString('ar-SY')} ل.س/USD
+                  </p>
+                ) : null}
+                {financeMonthlyExtras.expenseConversionWarning ? (
+                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--warning)' }}>
+                    {financeMonthlyExtras.expenseConversionWarning}
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
@@ -739,7 +846,7 @@ export function AdminLaserPage() {
             </div>
           </div>
         </>
-      )}
+      ) : null}
     </>
   )
 }

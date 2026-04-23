@@ -141,6 +141,40 @@ function resolveReportMonth(rawMonth, fallbackBusinessDate) {
   return todayBusinessDate().slice(0, 7)
 }
 
+/** متوسط USD/SYP (ليرة لكل دولار) لأيام الشهر التي فيها exchangeRate */
+async function averageExchangeRateForMonth(month) {
+  const m = String(month || '').trim()
+  if (!/^\d{4}-\d{2}$/.test(m)) return null
+  const rows = await BusinessDay.find({
+    businessDate: new RegExp(`^${m}-`),
+    exchangeRate: { $gt: 0 },
+  })
+    .select('exchangeRate')
+    .lean()
+  const rates = rows.map((r) => Number(r.exchangeRate)).filter((x) => Number.isFinite(x) && x > 0)
+  if (!rates.length) return null
+  return round2(rates.reduce((a, b) => a + b, 0) / rates.length)
+}
+
+function sumLaserExpenseLinesUsd(lines, avgSypPerUsd) {
+  let sum = 0
+  for (const l of lines || []) {
+    const usd = round2(Math.max(0, Number(l.amountUsd) || 0))
+    const syp = Math.max(0, Number(l.amountSyp) || 0)
+    if (syp > 0) {
+      if (!avgSypPerUsd || !Number.isFinite(avgSypPerUsd) || avgSypPerUsd <= 0) return null
+      sum = round2(sum + usd + round2(syp / avgSypPerUsd))
+    } else {
+      sum = round2(sum + usd)
+    }
+  }
+  return round2(sum)
+}
+
+function sumLaserExpenseLinesUsdOnly(lines) {
+  return round2((lines || []).reduce((s, l) => s + (Number(l.amountUsd) || 0), 0))
+}
+
 function findActiveLaserPackage(patientLike) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
@@ -629,9 +663,17 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
     const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
     const totalSessionRevenueUsd = round2(rows.reduce((s, r) => s + (Number(r.totalAmountUsd) || 0), 0))
     const expDoc = await LaserMonthlyExpenses.findOne({ month }).select('lines').lean()
-    const totalExpensesUsd = round2(
-      (expDoc?.lines || []).reduce((s, l) => s + (Number(l.amountUsd) || 0), 0),
-    )
+    const monthAvgSypPerUsd = await averageExchangeRateForMonth(month)
+    let totalExpensesUsd = sumLaserExpenseLinesUsd(expDoc?.lines, monthAvgSypPerUsd)
+    let expenseConversionWarning = null
+    if (totalExpensesUsd == null) {
+      const hasSyp = (expDoc?.lines || []).some((l) => (Number(l.amountSyp) || 0) > 0)
+      if (hasSyp) {
+        expenseConversionWarning =
+          'لا يوجد في هذا الشهر أي يوم بسعر صرف محفوظ؛ لم يُحسب مبلغ الليرة في المصاريف (يُحسب بالدولار فقط).'
+      }
+      totalExpensesUsd = sumLaserExpenseLinesUsdOnly(expDoc?.lines)
+    }
     const netProfitUsd = round2(totalSessionRevenueUsd - totalExpensesUsd)
     res.json({
       month,
@@ -640,6 +682,8 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
       totalSessionRevenueUsd,
       totalExpensesUsd,
       netProfitUsd,
+      monthAvgSypPerUsd,
+      expenseConversionWarning,
     })
   } catch (e) {
     console.error(e)
@@ -651,13 +695,24 @@ laserRouter.get('/monthly-expenses', requireRoles('super_admin'), async (req, re
   try {
     const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
     const doc = await LaserMonthlyExpenses.findOne({ month }).lean()
+    const monthAvgSypPerUsd = await averageExchangeRateForMonth(month)
     const lines = (doc?.lines || []).map((l) => ({
       id: String(l._id),
       reason: String(l.reason || '').trim(),
       amountUsd: round2(Number(l.amountUsd) || 0),
+      amountSyp: round2(Number(l.amountSyp) || 0),
     }))
-    const totalExpensesUsd = round2(lines.reduce((s, l) => s + l.amountUsd, 0))
-    res.json({ month, lines, totalExpensesUsd })
+    let totalExpensesUsd = sumLaserExpenseLinesUsd(lines, monthAvgSypPerUsd)
+    let expenseConversionWarning = null
+    if (totalExpensesUsd == null) {
+      const hasSyp = lines.some((l) => l.amountSyp > 0)
+      if (hasSyp) {
+        expenseConversionWarning =
+          'لا يوجد في هذا الشهر أي يوم بسعر صرف محفوظ؛ يظهر المجموع بالدولار فقط دون تحويل الليرة.'
+      }
+      totalExpensesUsd = sumLaserExpenseLinesUsdOnly(lines)
+    }
+    res.json({ month, lines, totalExpensesUsd, monthAvgSypPerUsd, expenseConversionWarning })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -675,7 +730,17 @@ laserRouter.put('/monthly-expenses', requireRoles('super_admin'), async (req, re
     const lines = rawLines.map((row) => ({
       reason: String(row?.reason ?? '').trim().slice(0, 500),
       amountUsd: round2(Math.max(0, Number(row?.amountUsd) || 0)),
+      amountSyp: round2(Math.max(0, Number(row?.amountSyp) || 0)),
     }))
+    const monthAvgSypPerUsd = await averageExchangeRateForMonth(month)
+    const hasSyp = lines.some((l) => l.amountSyp > 0)
+    if (hasSyp && (!monthAvgSypPerUsd || monthAvgSypPerUsd <= 0)) {
+      res.status(400).json({
+        error:
+          'لا يمكن حفظ مبالغ بالليرة: لا يوجد في هذا الشهر أي يوم عمل بسعر صرف محفوظ لحساب المتوسط. فعّل أياماً في الشهر أو أدخل المبلغ بالدولار فقط.',
+      })
+      return
+    }
     const doc = await LaserMonthlyExpenses.findOneAndUpdate(
       { month },
       { $set: { lines, updatedBy: req.user._id } },
@@ -685,8 +750,9 @@ laserRouter.put('/monthly-expenses', requireRoles('super_admin'), async (req, re
       id: String(l._id),
       reason: String(l.reason || '').trim(),
       amountUsd: round2(Number(l.amountUsd) || 0),
+      amountSyp: round2(Number(l.amountSyp) || 0),
     }))
-    const totalExpensesUsd = round2(outLines.reduce((s, l) => s + l.amountUsd, 0))
+    const totalExpensesUsd = sumLaserExpenseLinesUsd(outLines, monthAvgSypPerUsd) ?? sumLaserExpenseLinesUsdOnly(outLines)
     await writeAudit({
       user: req.user,
       action: 'تحديث مصاريف ليزر شهرية',
@@ -694,7 +760,7 @@ laserRouter.put('/monthly-expenses', requireRoles('super_admin'), async (req, re
       entityId: month,
       details: { linesCount: outLines.length, totalExpensesUsd },
     })
-    res.json({ month, lines: outLines, totalExpensesUsd })
+    res.json({ month, lines: outLines, totalExpensesUsd, monthAvgSypPerUsd, expenseConversionWarning: null })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
