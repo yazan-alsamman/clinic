@@ -109,6 +109,83 @@ function fmtUsdSyp(usdRaw: number, rateRaw: number | null | undefined) {
   return { usdText, sypText }
 }
 
+/** تنبيه ذمة/رصيد — يُعرض أعلى نافذة الحجز ليبقى ظاهراً عند التمرير */
+function BookingFinancialStickyAlert({
+  picked,
+  usdSypRate,
+}: {
+  picked: Patient
+  usdSypRate: number | null | undefined
+}) {
+  const { debt, credit } = patientDebtCreditUsd(picked)
+  const hasDebt = debt > 0.0001
+  const hasCredit = credit > 0.0001
+  if (!hasDebt && !hasCredit) return null
+  const debtFmt = fmtUsdSyp(debt, usdSypRate)
+  const creditFmt = fmtUsdSyp(credit, usdSypRate)
+  return (
+    <div
+      style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 3,
+        marginBottom: '0.75rem',
+        paddingBottom: '0.35rem',
+        background: 'var(--bg-elevated, var(--bg))',
+      }}
+    >
+      <div
+        role="alert"
+        style={{
+          padding: '0.75rem 0.9rem',
+          borderRadius: 'var(--radius)',
+          border: '2px solid var(--warning, #d4a017)',
+          background: 'rgba(212, 160, 23, 0.14)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+        }}
+      >
+        <div style={{ fontWeight: 800, marginBottom: '0.45rem', fontSize: '0.92rem' }}>تنبيه مالي — المريض المختار</div>
+        {hasDebt ? (
+          <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
+            <span style={{ color: 'var(--text-muted)' }}>ذمة على المريض: </span>
+            <strong style={{ color: 'var(--danger)' }}>{debtFmt.usdText}</strong>
+            {debtFmt.sypText ? (
+              <>
+                {' '}
+                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
+                <strong style={{ color: 'var(--danger)' }}>{debtFmt.sypText}</strong>
+              </>
+            ) : (
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                {' '}
+                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
+              </span>
+            )}
+          </p>
+        ) : null}
+        {hasCredit ? (
+          <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
+            <span style={{ color: 'var(--text-muted)' }}>رصيد إضافي للمريض: </span>
+            <strong style={{ color: 'var(--success)' }}>{creditFmt.usdText}</strong>
+            {creditFmt.sypText ? (
+              <>
+                {' '}
+                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
+                <strong style={{ color: 'var(--success)' }}>{creditFmt.sypText}</strong>
+              </>
+            ) : (
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                {' '}
+                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
+              </span>
+            )}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function ReceptionAppointmentPage() {
   const { user } = useAuth()
   const { dayActive, usdSypRate } = useClinic()
@@ -240,7 +317,8 @@ export function ReceptionAppointmentPage() {
         setPicked((prev) => {
           if (!prev || String(prev.id) !== String(id)) return prev
           if (String(data.patient.id) !== String(id)) return prev
-          return data.patient
+          /** دمج كامل لضمان وصول حقول الملف بما فيها المالية */
+          return { ...prev, ...data.patient }
         })
       } catch {
         /* الإبقاء على نتيجة البحث */
@@ -472,8 +550,20 @@ export function ReceptionAppointmentPage() {
       const specialistPart = data?.slot?.assignedSpecialistName
         ? ` — الأخصائي: ${data.slot.assignedSpecialistName}`
         : ''
+      const { debt: finDebt, credit: finCredit } = patientDebtCreditUsd(picked)
+      let financialReminder = ''
+      if (finDebt > 0.0001) {
+        const f = fmtUsdSyp(finDebt, usdSypRate)
+        financialReminder += ` — تنبيه: على المريض ذمة ${f.usdText}`
+        if (f.sypText) financialReminder += ` (≈ ${f.sypText})`
+      }
+      if (finCredit > 0.0001) {
+        const f = fmtUsdSyp(finCredit, usdSypRate)
+        financialReminder += ` — رصيد إضافي للمريض ${f.usdText}`
+        if (f.sypText) financialReminder += ` (≈ ${f.sypText})`
+      }
       setSuccessMsg(
-        `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${bookingDurationMinutes} دقيقة) — ${businessDate}${specialistPart}`,
+        `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${bookingDurationMinutes} دقيقة) — ${businessDate}${specialistPart}${financialReminder}`,
       )
       setPicked(null)
       setPatientQ('')
@@ -733,7 +823,11 @@ export function ReceptionAppointmentPage() {
 
       {bookingOpen ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setBookingOpen(false)}>
-          <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal"
+            style={{ maxWidth: 620, maxHeight: 'min(92vh, 900px)', overflow: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 style={{ marginTop: 0 }}>
               حجز موعد — {SERVICE_OPTIONS.find((x) => x.value === selectedService)?.label || selectedService}
               {selectedService === 'laser' ? ` (${LASER_ROOM_TITLES[selectedChannel] || selectedChannel})` : ''}
@@ -742,6 +836,7 @@ export function ReceptionAppointmentPage() {
               الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{bookingDurationMinutes} دقيقة</strong> — التاريخ:{' '}
               <strong>{businessDate}</strong>
             </p>
+            {picked ? <BookingFinancialStickyAlert picked={picked} usdSypRate={usdSypRate} /> : null}
             <div className="card" style={{ marginBottom: '0.85rem' }}>
               <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>مدة الموعد</h4>
               <select
@@ -769,72 +864,12 @@ export function ReceptionAppointmentPage() {
                 }}
               />
               {picked ? (
-                <div style={{ marginTop: '0.65rem' }}>
-                  <p style={{ marginBottom: 0 }}>
-                    المختار: <strong>{picked.name}</strong>{' '}
-                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
-                      إلغاء الاختيار
-                    </button>
-                  </p>
-                  {(() => {
-                    const { debt, credit } = patientDebtCreditUsd(picked)
-                    const hasDebt = debt > 0.0001
-                    const hasCredit = credit > 0.0001
-                    if (!hasDebt && !hasCredit) return null
-                    const debtFmt = fmtUsdSyp(debt, usdSypRate)
-                    const creditFmt = fmtUsdSyp(credit, usdSypRate)
-                    return (
-                      <div
-                        role="alert"
-                        style={{
-                          marginTop: '0.75rem',
-                          padding: '0.75rem 0.9rem',
-                          borderRadius: 'var(--radius)',
-                          border: '1px solid var(--warning, #d4a017)',
-                          background: 'var(--warning-bg, rgba(212, 160, 23, 0.12))',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, marginBottom: '0.4rem', fontSize: '0.9rem' }}>تنبيه مالي</div>
-                        {hasDebt ? (
-                          <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
-                            <span style={{ color: 'var(--text-muted)' }}>ذمة على المريض: </span>
-                            <strong style={{ color: 'var(--danger)' }}>{debtFmt.usdText}</strong>
-                            {debtFmt.sypText ? (
-                              <>
-                                {' '}
-                                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
-                                <strong style={{ color: 'var(--danger)' }}>{debtFmt.sypText}</strong>
-                              </>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                                {' '}
-                                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
-                              </span>
-                            )}
-                          </p>
-                        ) : null}
-                        {hasCredit ? (
-                          <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
-                            <span style={{ color: 'var(--text-muted)' }}>رصيد إضافي للمريض: </span>
-                            <strong style={{ color: 'var(--success)' }}>{creditFmt.usdText}</strong>
-                            {creditFmt.sypText ? (
-                              <>
-                                {' '}
-                                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
-                                <strong style={{ color: 'var(--success)' }}>{creditFmt.sypText}</strong>
-                              </>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                                {' '}
-                                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
-                              </span>
-                            )}
-                          </p>
-                        ) : null}
-                      </div>
-                    )
-                  })()}
-                </div>
+                <p style={{ marginTop: '0.65rem', marginBottom: 0 }}>
+                  المختار: <strong>{picked.name}</strong>{' '}
+                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
+                    إلغاء الاختيار
+                  </button>
+                </p>
               ) : patientSearchLoading && patientQ.trim().length >= 2 ? (
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem', marginBottom: 0 }}>
                   جاري البحث…
