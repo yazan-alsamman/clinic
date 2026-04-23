@@ -763,45 +763,169 @@ export function AdminLaserPage() {
               مالية جلسات الليزر — {period === 'daily' ? `تاريخ ${date || '—'}` : `شهر ${month || '—'}`}
             </h2>
             {period === 'monthly' && financeMonthlyExtras ? (
-              <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                  مجموع إيراد جلسات الليزر (مجموع أسعار الجلسات):{' '}
-                  <strong style={{ color: 'var(--text)' }}>
-                    {renderMoneyDual(financeMonthlyExtras.totalSessionRevenueUsd)}
-                  </strong>
-                </div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                  مجمل المصاريف المسجّلة في تبويب «مصاريف» لهذا الشهر:{' '}
-                  <strong style={{ color: 'var(--text)' }}>{renderMoneyDual(financeMonthlyExtras.totalExpensesUsd)}</strong>
+              <div style={{ marginBottom: '1.35rem' }}>
+                <p
+                  style={{
+                    margin: '0 0 0.85rem',
+                    fontSize: '0.84rem',
+                    color: 'var(--text-muted)',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  ملخص الشهر: مقارنة بين إيراد الجلسات والمصاريف المسجّلة، ثم <strong style={{ color: 'var(--text)' }}>الربح الصافي</strong>.
+                </p>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))',
+                    gap: '0.75rem',
+                    marginBottom: '0.85rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      borderRadius: 14,
+                      padding: '1rem 1.05rem',
+                      background: 'linear-gradient(160deg, #ecfdf5 0%, #d1fae5 55%, #a7f3d0 100%)',
+                      border: '1px solid #34d399',
+                      boxShadow: '0 4px 14px rgba(16, 185, 129, 0.12)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: '#065f46',
+                        background: 'rgba(255,255,255,0.65)',
+                        padding: '0.2rem 0.55rem',
+                        borderRadius: 999,
+                        marginBottom: '0.45rem',
+                      }}
+                    >
+                      <span aria-hidden>↑</span> إيراد الجلسات
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 700, marginBottom: '0.2rem' }}>
+                      مجموع أسعار الجلسات
+                    </div>
+                    <div style={{ fontWeight: 800, color: '#064e3b', fontSize: '0.95rem' }}>
+                      {renderMoneyDual(financeMonthlyExtras.totalSessionRevenueUsd)}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      borderRadius: 14,
+                      padding: '1rem 1.05rem',
+                      background: 'linear-gradient(160deg, #fff7ed 0%, #ffedd5 50%, #fed7aa 100%)',
+                      border: '1px solid #fb923c',
+                      boxShadow: '0 4px 14px rgba(249, 115, 22, 0.12)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: '#9a3412',
+                        background: 'rgba(255,255,255,0.7)',
+                        padding: '0.2rem 0.55rem',
+                        borderRadius: 999,
+                        marginBottom: '0.45rem',
+                      }}
+                    >
+                      <span aria-hidden>−</span> المصاريف
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#c2410c', fontWeight: 700, marginBottom: '0.2rem' }}>
+                      من تبويب «مصاريف» لهذا الشهر
+                    </div>
+                    <div style={{ fontWeight: 800, color: '#7c2d12', fontSize: '0.95rem' }}>
+                      {renderMoneyDual(financeMonthlyExtras.totalExpensesUsd)}
+                    </div>
+                  </div>
                 </div>
                 <div
                   role="region"
                   aria-label="الربح الصافي"
                   style={{
-                    borderRadius: 12,
-                    padding: '0.85rem 1rem',
-                    border: '2px solid #6366f1',
-                    background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(14,165,233,0.06))',
+                    borderRadius: 16,
+                    padding: '1.1rem 1.2rem',
+                    border: '2px solid #818cf8',
+                    background: 'linear-gradient(145deg, #eef2ff 0%, #e0e7ff 40%, #c7d2fe 100%)',
+                    boxShadow: '0 8px 24px rgba(99, 102, 241, 0.18)',
                   }}
                 >
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>الربح الصافي</div>
-                  <div style={{ fontWeight: 900, fontSize: '1.05rem', color: 'var(--text)' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                      marginBottom: '0.35rem',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 900,
+                        letterSpacing: '0.02em',
+                        color: '#3730a3',
+                        background: 'rgba(255,255,255,0.75)',
+                        padding: '0.25rem 0.65rem',
+                        borderRadius: 999,
+                      }}
+                    >
+                      الربح الصافي
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: '#4f46e5', fontWeight: 600 }}>
+                      إيراد الجلسات − المصاريف
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: '1.18rem',
+                      color: '#312e81',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
                     {renderMoneyDual(financeMonthlyExtras.netProfitUsd)}
                   </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                    إيراد الجلسات − المصاريف (نفس الشهر)
-                  </div>
                 </div>
-                {financeMonthlyExtras.monthAvgSypPerUsd != null && financeMonthlyExtras.monthAvgSypPerUsd > 0 ? (
-                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    تحويل الليرة في المصاريف: متوسط سعر الصرف للشهر ≈{' '}
-                    {financeMonthlyExtras.monthAvgSypPerUsd.toLocaleString('ar-SY')} ل.س/USD
-                  </p>
-                ) : null}
-                {financeMonthlyExtras.expenseConversionWarning ? (
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--warning)' }}>
-                    {financeMonthlyExtras.expenseConversionWarning}
-                  </p>
+                {(financeMonthlyExtras.monthAvgSypPerUsd != null &&
+                  financeMonthlyExtras.monthAvgSypPerUsd > 0) ||
+                financeMonthlyExtras.expenseConversionWarning ? (
+                  <div
+                    style={{
+                      marginTop: '0.85rem',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: 10,
+                      background: 'var(--surface-solid)',
+                      border: '1px solid var(--border)',
+                      borderInlineStart: '4px solid #0ea5e9',
+                    }}
+                  >
+                    {financeMonthlyExtras.monthAvgSypPerUsd != null &&
+                    financeMonthlyExtras.monthAvgSypPerUsd > 0 ? (
+                      <p style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <strong style={{ color: 'var(--text)' }}>متوسط سعر الصرف</strong> المستخدم لتحويل ليرة المصاريف
+                        ≈{' '}
+                        <span style={{ color: '#0369a1', fontWeight: 800 }}>
+                          {financeMonthlyExtras.monthAvgSypPerUsd.toLocaleString('ar-SY')}
+                        </span>{' '}
+                        ل.س لكل USD
+                      </p>
+                    ) : null}
+                    {financeMonthlyExtras.expenseConversionWarning ? (
+                      <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--warning)', fontWeight: 600 }}>
+                        {financeMonthlyExtras.expenseConversionWarning}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             ) : (
