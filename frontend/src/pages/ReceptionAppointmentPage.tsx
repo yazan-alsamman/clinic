@@ -589,11 +589,6 @@ export function ReceptionAppointmentPage() {
       setFormErr('رقم غرفة الليزر غير صالح')
       return false
     }
-    const availableStartTimes = availableStartTimesForChannel(providerName)
-    if (!availableStartTimes.includes(time)) {
-      setFormErr('الوقت المختار لم يعد متاحاً بعد تحديث الجدول')
-      return false
-    }
     const proc =
       selectedService === 'laser'
         ? selectedLaserItems.map((item) => item.name).join(' + ').trim()
