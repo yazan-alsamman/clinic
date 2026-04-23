@@ -1156,22 +1156,28 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       return
     }
 
-    await writeAudit({
-      user: req.user,
-      action: 'إنشاء جلسة ليزر وبند فوترة معلّق',
-      entityType: 'LaserSession',
-      entityId: s._id,
-      details: { billingItemId: String(bi._id), amountDueUsd },
-    })
+    try {
+      await writeAudit({
+        user: req.user,
+        action: 'إنشاء جلسة ليزر وبند فوترة معلّق',
+        entityType: 'LaserSession',
+        entityId: String(s._id),
+        details: { billingItemId: String(bi._id), amountDueUsd },
+      })
+    } catch (auditErr) {
+      console.error('writeAudit after laser session:', auditErr)
+    }
 
-    if (!patient.departments.includes('laser')) {
-      patient.departments = [...new Set([...patient.departments, 'laser'])]
-      patient.lastVisit = new Date()
-      await patient.save()
+    const patientDepts = Array.isArray(patient.departments) ? patient.departments : []
+    if (!patientDepts.includes('laser')) {
+      await Patient.updateOne(
+        { _id: patient._id },
+        { $addToSet: { departments: 'laser' }, $set: { lastVisit: new Date() } },
+      )
     }
 
     res.status(201).json({
-      session: s,
+      session: typeof s.toJSON === 'function' ? s.toJSON() : s,
       billingItem: {
         id: String(bi._id),
         status: bi.status,
