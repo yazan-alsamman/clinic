@@ -67,8 +67,8 @@ type LaserProcedureGroup = {
 
 const DAY_START_MIN = 9 * 60
 const DAY_END_MIN = 20 * 60
-/** خطوة فحص أوقات البداية الصالحة (مع المدة) — تسمح بظهور 11:30 بعد حجز 90 د من 10:00 */
-const BOOKING_START_PROBE_STEP_MIN = 15
+/** الفرق بين أوقات البداية المعروضة (ساعة)؛ يُضاف وقت غير على الساعة فقط عند نهاية حجز يخرج عن التوقيت الكامل */
+const HOURLY_DISPLAY_STEP_MIN = 60
 
 function toHm(min: number) {
   const h = Math.floor(min / 60)
@@ -354,24 +354,44 @@ export function ReceptionAppointmentPage() {
         .map((s) => slotIntervalFromRow(s.time, s.endTime))
         .filter((x): x is { start: number; end: number } => x != null)
       const dur = bookingDurationMinutes
-      const out: string[] = []
-      let t = DAY_START_MIN
-      while (t + dur <= DAY_END_MIN) {
+
+      const startFitsDayAndNoOverlap = (t: number): boolean => {
+        if (t + dur > DAY_END_MIN) return false
         const candEnd = t + dur
-        const overlapsApi = apiIntervals.some((iv) => intervalsOverlapHalfOpen(t, candEnd, iv.start, iv.end))
-        const overlapsDraft =
+        if (apiIntervals.some((iv) => intervalsOverlapHalfOpen(t, candEnd, iv.start, iv.end))) return false
+        if (
           draftBookingInterval &&
           channel === selectedChannel &&
           !(t === draftBookingInterval.start && candEnd === draftBookingInterval.end) &&
           intervalsOverlapHalfOpen(t, candEnd, draftBookingInterval.start, draftBookingInterval.end)
-        if (overlapsApi || overlapsDraft) {
-          t += BOOKING_START_PROBE_STEP_MIN
-          continue
+        ) {
+          return false
         }
-        out.push(toHm(t))
-        t += BOOKING_START_PROBE_STEP_MIN
+        return true
       }
-      return out
+
+      const seen = new Set<string>()
+      const addIfOk = (m: number) => {
+        if (!startFitsDayAndNoOverlap(m)) return
+        seen.add(toHm(m))
+      }
+
+      for (let m = DAY_START_MIN; m + dur <= DAY_END_MIN; m += HOURLY_DISPLAY_STEP_MIN) {
+        addIfOk(m)
+      }
+
+      const intervalEnds = new Set<number>()
+      for (const iv of apiIntervals) intervalEnds.add(iv.end)
+      if (draftBookingInterval && channel === selectedChannel) {
+        intervalEnds.add(draftBookingInterval.end)
+      }
+      for (const e of intervalEnds) {
+        if (e <= DAY_START_MIN || e >= DAY_END_MIN) continue
+        if (e % HOURLY_DISPLAY_STEP_MIN === 0) continue
+        addIfOk(e)
+      }
+
+      return [...seen].sort((a, b) => (hmToMinutes(a) || 0) - (hmToMinutes(b) || 0))
     },
     [channelBookedSlots, bookingDurationMinutes, draftBookingInterval, selectedChannel],
   )
@@ -404,7 +424,7 @@ export function ReceptionAppointmentPage() {
       const times = new Set<string>(availableStartTimes)
       for (const tm of bookedMap.keys()) times.add(tm)
       if (times.size === 0) {
-        for (let m = DAY_START_MIN; m + bookingDurationMinutes <= DAY_END_MIN; m += BOOKING_START_PROBE_STEP_MIN) {
+        for (let m = DAY_START_MIN; m + bookingDurationMinutes <= DAY_END_MIN; m += HOURLY_DISPLAY_STEP_MIN) {
           times.add(toHm(m))
         }
       }
@@ -652,8 +672,8 @@ export function ReceptionAppointmentPage() {
         <Link to="/appointments" style={{ color: 'var(--cyan)' }}>
           المواعيد المحجوزة
         </Link>{' '}
-        ليوم الموعد. الأوقات المتاحة تُعرض كجدول من 09:00 صباحاً حتى 20:00 مساءً، وعند تحديد مدة الموعد تنزاح
-        الأوقات الفارغة تلقائياً حسب الحجوزات الحالية.
+        ليوم الموعد. الأوقات الفارغة على شبكة ساعية (09:00، 10:00، …)، ويُضاف وقت بداية إضافي فقط بعد نهاية حجز
+        لا تقع على الساعة (مثل 11:30 بعد موعد 90 دقيقة من 10:00)؛ بقية الساعات تبقى كما هي.
       </p>
 
       {assignBlocked ? (
@@ -856,7 +876,8 @@ export function ReceptionAppointmentPage() {
           </div>
         )}
         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.75rem 0 0' }}>
-          بداية الدوام 09:00 ونهايته 20:00. المدد المحجوزة تؤثر مباشرة على الأوقات المتاحة التالية.
+          بداية الدوام 09:00 ونهايته 20:00. عرض الأوقات الفارغة بفاصل ساعة؛ أول وقت بداية بعد حجز قد يظهر على
+          الدقائق إذا انتهى الحجز بين ساعتين.
         </p>
       </div>
 
