@@ -927,8 +927,10 @@ export function ReceptionAppointmentPage() {
                 className="select"
                 style={{ width: '100%', maxWidth: 220 }}
                 value={String(bookingDurationMinutes)}
-                onChange={(e) => setBookingDurationMinutes(Math.max(15, Number(e.target.value) || 60))}
+                onChange={(e) => setBookingDurationMinutes(Math.max(5, Number(e.target.value) || 60))}
               >
+                <option value="5">5 دقائق</option>
+                <option value="15">15 دقيقة</option>
                 <option value="30">30 دقيقة</option>
                 <option value="45">45 دقيقة</option>
                 <option value="60">60 دقيقة</option>
