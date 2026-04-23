@@ -710,8 +710,33 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const packageMatch = findActiveLaserPackage(patient)
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
+
+    /** جلسة باكج: المبلغ المطلوب = مناطق خارج الباكج فقط (ليرة/دولار مع سعر اليوم) */
+    let packageAddOnGrossUsd = 0
+    if (isPackageSession) {
+      const addOnSypRaw = Number(body.additionalCostSyp)
+      const addOnUsdRaw = Number(body.additionalCostUsd)
+      const hasAddOnSyp = Number.isFinite(addOnSypRaw) && addOnSypRaw > 0
+      const hasAddOnUsd = Number.isFinite(addOnUsdRaw) && addOnUsdRaw > 0
+      if (hasAddOnSyp || hasAddOnUsd) {
+        const resolved = resolveUsdAmount({
+          usdRaw: hasAddOnUsd ? addOnUsdRaw : undefined,
+          sypRaw: hasAddOnSyp ? addOnSypRaw : undefined,
+          exchangeRate: req.businessDay?.exchangeRate,
+        })
+        if (resolved == null || resolved <= 0) {
+          res.status(400).json({
+            error:
+              'مبلغ المناطق خارج الباكج غير صالح — تأكد من سعر صرف يوم العمل عند الدفع بالليرة، أو أدخل المبلغ بالدولار.',
+          })
+          return
+        }
+        packageAddOnGrossUsd = round2(resolved)
+      }
+    }
+
     const costGross = isPackageSession
-      ? 0
+      ? packageAddOnGrossUsd
       : resolveUsdAmount({
           usdRaw: body.costUsd,
           sypRaw: body.costSyp,
@@ -721,7 +746,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر)' })
       return
     }
-    const amountDueUsd = isPackageSession ? 0 : round2(costGross * (1 - discountPercent / 100))
+    const amountDueUsd = isPackageSession ? round2(packageAddOnGrossUsd) : round2(costGross * (1 - discountPercent / 100))
     if (!isPackageSession && amountDueUsd <= 0) {
       res.status(400).json({ error: 'المبلغ بعد الحسم يجب أن يكون أكبر من صفر' })
       return
@@ -732,6 +757,15 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const manualAreaLabels = [
       ...new Set(
         manualRaw
+          .map((x) => String(x ?? '').trim().slice(0, 120))
+          .filter(Boolean),
+      ),
+    ].slice(0, 20)
+
+    const addonRaw = Array.isArray(body.addonManualLabels) ? body.addonManualLabels : []
+    const addonManualLabels = [
+      ...new Set(
+        addonRaw
           .map((x) => String(x ?? '').trim().slice(0, 120))
           .filter(Boolean),
       ),
@@ -784,7 +818,14 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       : ''
     const manualPart = manualAreaLabels.length ? manualAreaLabels.join('، ') : ''
     const areaPart = [catalogPart, manualPart].filter(Boolean).join(' — ') || 'بدون مناطق محددة'
-    const procedureDescription = `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}`.slice(0, 500)
+    const addonSuffix =
+      isPackageSession && addonManualLabels.length
+        ? ` — إضافات خارج الباكج: ${addonManualLabels.join('، ')}`
+        : ''
+    const procedureDescription = `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}${addonSuffix}`.slice(
+      0,
+      500,
+    )
 
     const treatmentNumber = await nextSequence('laserTreatment')
 

@@ -107,6 +107,48 @@ export function BillingPage() {
     }
   }
 
+  /** دفع إضافات خارج الباكج ثم إنقاص جلسة الباكج في خطوة واحدة */
+  async function completePackageAddonPayAndConsume() {
+    if (!payItem) return
+    const pkgId = payItem.patientPackageId
+    const sessId = payItem.patientPackageSessionId
+    const patientId = payItem.patientId
+    if (!pkgId || !sessId || !patientId) {
+      setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
+      return
+    }
+    setBusyId(payItem.id)
+    setErr('')
+    try {
+      const usd = Number(payUsd)
+      const syp = Number(paySyp)
+      await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
+        method: 'POST',
+        body: JSON.stringify({
+          method,
+          amountUsd: Number.isFinite(usd) && usd > 0 ? usd : undefined,
+          amountSyp: Number.isFinite(syp) && syp > 0 ? syp : undefined,
+        }),
+      })
+      await api(
+        `/api/patients/${encodeURIComponent(patientId)}/packages/${encodeURIComponent(pkgId)}/sessions/${encodeURIComponent(sessId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ completed: true }),
+        },
+      )
+      setPayOpen(false)
+      setPayItem(null)
+      setPayUsd('')
+      setPaySyp('')
+      await load()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'فشل إنقاص الجلسة والدفع')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function consumePackageSession(item: Item) {
     if (!item.patientId || !item.patientPackageId || !item.patientPackageSessionId) {
       setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
@@ -238,7 +280,22 @@ export function BillingPage() {
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {b.isPackagePrepaid ? (
+                  {b.isPackagePrepaid && (Number(b.amountDueUsd) || 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busyId === b.id}
+                      onClick={() => {
+                        setPayItem(b)
+                        setPayUsd(String(Number(b.amountDueUsd || 0)))
+                        setPaySyp('')
+                        setPayOpen(true)
+                      }}
+                    >
+                      {busyId === b.id ? 'جاري المعالجة…' : 'إنقاص جلسة و دفع'}
+                    </button>
+                  ) : null}
+                  {b.isPackagePrepaid && (Number(b.amountDueUsd) || 0) <= 0 ? (
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -248,22 +305,28 @@ export function BillingPage() {
                       {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={busyId === b.id || b.isPackagePrepaid === true}
-                    onClick={() => {
-                      if (b.isPackagePrepaid) return
-                      setPayItem(b)
-                      setPayUsd(String(Number(b.amountDueUsd || 0)))
-                      setPaySyp('')
-                      setPayOpen(true)
-                    }}
-                  >
-                    {b.isPackagePrepaid ? 'مدفوعة مسبقاً ضمن الباكج' : busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
-                  </button>
+                  {!b.isPackagePrepaid ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busyId === b.id}
+                      onClick={() => {
+                        setPayItem(b)
+                        setPayUsd(String(Number(b.amountDueUsd || 0)))
+                        setPaySyp('')
+                        setPayOpen(true)
+                      }}
+                    >
+                      {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
+                    </button>
+                  ) : null}
                 </div>
-                {b.isPackagePrepaid ? (
+                {b.isPackagePrepaid && (Number(b.amountDueUsd) || 0) > 0 ? (
+                  <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                    جلسة باكج مع مناطق إضافية خارج الباكج — استخدم «إنقاص جلسة و دفع» لتسجيل الدفعة ثم خصم جلسة من
+                    الباكج.
+                  </p>
+                ) : b.isPackagePrepaid ? (
                   <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                     هذه الجلسة مدفوعة مسبقاً — تأكد من إتمام جلسة من ضمن الباكج لهذا المريض.
                   </p>
@@ -276,7 +339,11 @@ export function BillingPage() {
       {payOpen && payItem ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setPayOpen(false)}>
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>تأكيد استلام الدفع</h3>
+            <h3 style={{ marginTop: 0 }}>
+              {payItem.isPackagePrepaid && (Number(payItem.amountDueUsd) || 0) > 0
+                ? 'إنقاص جلسة باكج ودفع الإضافات'
+                : 'تأكيد استلام الدفع'}
+            </h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem' }}>
               {payItem.patientName} — {payItem.procedureLabel}
             </p>
@@ -355,9 +422,17 @@ export function BillingPage() {
                 type="button"
                 className="btn btn-primary"
                 disabled={busyId === payItem.id}
-                onClick={() => void completePay(payItem.id)}
+                onClick={() =>
+                  void (payItem.isPackagePrepaid && (Number(payItem.amountDueUsd) || 0) > 0
+                    ? completePackageAddonPayAndConsume()
+                    : completePay(payItem.id))
+                }
               >
-                {busyId === payItem.id ? 'جاري الحفظ…' : 'تأكيد استلام الدفع'}
+                {busyId === payItem.id
+                  ? 'جاري الحفظ…'
+                  : payItem.isPackagePrepaid && (Number(payItem.amountDueUsd) || 0) > 0
+                    ? 'تأكيد الدفع وإنقاص الجلسة'
+                    : 'تأكيد استلام الدفع'}
               </button>
             </div>
           </div>

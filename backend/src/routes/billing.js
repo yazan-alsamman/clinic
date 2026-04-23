@@ -128,8 +128,13 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       return
     }
     if (bi.isPackagePrepaid === true) {
-      res.status(400).json({ error: 'هذه الجلسة مدفوعة مسبقاً ضمن باكج' })
-      return
+      const duePre = round2(Number(bi.amountDueUsd) || 0)
+      if (duePre <= 0) {
+        res.status(400).json({
+          error: 'هذه الجلسة مدفوعة مسبقاً ضمن باكج — استخدم «إنقاص جلسة» عند عدم وجود مبلغ إضافي خارج الباكج.',
+        })
+        return
+      }
     }
 
     const body = req.body ?? {}

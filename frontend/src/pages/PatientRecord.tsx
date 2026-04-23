@@ -534,6 +534,8 @@ export function PatientRecord() {
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
   const [selectedLaserItemIds, setSelectedLaserItemIds] = useState<string[]>([])
+  /** مناطق/عروض خارج الباكج — تُحسب على المريض فقط */
+  const [selectedLaserAddonItemIds, setSelectedLaserAddonItemIds] = useState<string[]>([])
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
@@ -875,6 +877,44 @@ export function PatientRecord() {
         .filter((x): x is LaserProcedureItem => Boolean(x)),
     [selectedLaserItemIds, laserItemById],
   )
+
+  const selectedLaserAddonItems = useMemo(
+    () =>
+      selectedLaserAddonItemIds
+        .map((id) => laserItemById.get(id))
+        .filter((x): x is LaserProcedureItem => Boolean(x)),
+    [selectedLaserAddonItemIds, laserItemById],
+  )
+
+  const laserAddonTotalSyp = useMemo(
+    () => selectedLaserAddonItems.reduce((sum, item) => sum + (Number(item.priceSyp) || 0), 0),
+    [selectedLaserAddonItems],
+  )
+
+  const combinedLaserSaveIds = useMemo(
+    () => [...new Set([...selectedLaserItemIds, ...selectedLaserAddonItemIds])],
+    [selectedLaserItemIds, selectedLaserAddonItemIds],
+  )
+
+  const combinedLaserSaveItems = useMemo(
+    () =>
+      combinedLaserSaveIds
+        .map((id) => laserItemById.get(id))
+        .filter((x): x is LaserProcedureItem => Boolean(x)),
+    [combinedLaserSaveIds, laserItemById],
+  )
+
+  const toggleLaserMainArea = useCallback((itemId: string) => {
+    setSelectedLaserItemIds((prev) => (prev.includes(itemId) ? prev.filter((x) => x !== itemId) : [...prev, itemId]))
+    setSelectedLaserAddonItemIds((prev) => prev.filter((x) => x !== itemId))
+  }, [])
+
+  const toggleLaserAddonArea = useCallback((itemId: string) => {
+    setSelectedLaserAddonItemIds((prev) =>
+      prev.includes(itemId) ? prev.filter((x) => x !== itemId) : [...prev, itemId],
+    )
+    setSelectedLaserItemIds((prev) => prev.filter((x) => x !== itemId))
+  }, [])
 
   const openLaserSessionDetail = useCallback(
     async (s: ClinicalLaserRow) => {
@@ -1280,6 +1320,12 @@ export function PatientRecord() {
     return Math.round((selectedLaserTotalSyp / rate) * 100) / 100
   }, [selectedLaserTotalSyp, usdSypRate])
 
+  const laserAddonNetDuePreview = useMemo(() => {
+    const rate = Number(usdSypRate || 0)
+    if (!(laserAddonTotalSyp > 0) || !(rate > 0)) return null
+    return Math.round((laserAddonTotalSyp / rate) * 100) / 100
+  }, [laserAddonTotalSyp, usdSypRate])
+
   const patientPackages: PatientPackage[] = useMemo(() => {
     if (!patient) return []
     const rows = Array.isArray(patient.sessionPackages) ? patient.sessionPackages : []
@@ -1314,6 +1360,10 @@ export function PatientRecord() {
       (pkg) => pkg.department === 'laser' && pkg.sessions.some((s) => !s.linkedLaserSessionId),
     )
   }, [patientPackages])
+
+  useEffect(() => {
+    if (!activeLaserPackage) setSelectedLaserAddonItemIds([])
+  }, [activeLaserPackage])
 
   const dentalPlanApproved = dentalPlan?.status === 'approved'
   const dentalPlanSummary =
@@ -2910,8 +2960,9 @@ export function PatientRecord() {
               </p>
               {activeLaserPackage ? (
                 <p style={{ margin: '0.45rem 0 0', color: 'var(--success)', fontSize: '0.86rem' }}>
-                  هذه الجلسة ستُسجّل ضمن الباكج: <strong>{activeLaserPackage.title || 'باكج ليزر'}</strong> — لن يظهر سعر
-                  جلسة جديد لأن الجلسة مدفوعة مسبقاً.
+                  هذه الجلسة تُسجّل ضمن الباكج: <strong>{activeLaserPackage.title || 'باكج ليزر'}</strong> — سعر الجلسة الأساسية
+                  مدفوع مسبقاً. يمكنك إضافة مناطق أو عروض <strong>خارج الباكج</strong> من نافذة الاختيار؛ يُعرض سعر
+                  الإضافات فقط ويُحصّلها الاستقبال عند «إنقاص جلسة و دفع».
                 </p>
               ) : null}
             </header>
@@ -2994,8 +3045,8 @@ export function PatientRecord() {
                             اختيار المناطق / العروض
                           </button>
                           <div style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-                            {selectedLaserItems.length > 0
-                              ? selectedLaserItems.map((x) => x.name).join(' + ')
+                            {combinedLaserSaveItems.length > 0
+                              ? combinedLaserSaveItems.map((x) => x.name).join(' + ')
                               : 'لم يتم اختيار مناطق بعد'}
                           </div>
                         </td>
@@ -3012,8 +3063,29 @@ export function PatientRecord() {
                   </table>
                 </div>
                 {activeLaserPackage ? (
-                  <div style={{ marginTop: '0.8rem', fontSize: '0.9rem', color: 'var(--success)' }}>
-                    <strong>جلسة ضمن باكج مدفوع مسبقاً</strong>
+                  <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
+                    <p style={{ margin: '0 0 0.35rem', color: 'var(--success)' }}>
+                      <strong>جلسة ضمن باكج مدفوع مسبقاً</strong> — لا يُحسب سعر المناطق ضمن الباكج على هذه الجلسة.
+                    </p>
+                    <p style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                      <strong>إضافات خارج الباكج:</strong>{' '}
+                      {laserAddonTotalSyp > 0 ? (
+                        <>
+                          {laserAddonTotalSyp.toLocaleString('en-US')} ل.س
+                          {laserAddonNetDuePreview != null ? (
+                            <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
+                              (~ {laserAddonNetDuePreview} USD)
+                            </span>
+                          ) : (
+                            <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
+                              (حدّد سعر صرف اليوم لعرض المبلغ بالدولار)
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>لا توجد إضافات خارج الباكج</span>
+                      )}
+                    </p>
                   </div>
                 ) : (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
@@ -3058,12 +3130,21 @@ export function PatientRecord() {
                   setLaserSessionErr('انتظر تحميل المناطق أولاً.')
                   return
                 }
-                if (selectedLaserItems.length === 0 || !(selectedLaserTotalSyp > 0)) {
-                  setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
+                if (combinedLaserSaveItems.length === 0) {
+                  setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل.')
                   return
                 }
-                if (!activeLaserPackage && !((usdSypRate ?? 0) > 0)) {
-                  setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
+                if (!activeLaserPackage) {
+                  if (!(selectedLaserTotalSyp > 0)) {
+                    setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
+                    return
+                  }
+                  if (!((usdSypRate ?? 0) > 0)) {
+                    setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
+                    return
+                  }
+                } else if (laserAddonTotalSyp > 0 && !((usdSypRate ?? 0) > 0)) {
+                  setLaserSessionErr('سعر الصرف لليوم غير متاح — لا يمكن احتساب مبلغ الإضافات خارج الباكج.')
                   return
                 }
                 setSavingLaser(true)
@@ -3082,20 +3163,26 @@ export function PatientRecord() {
                       shotCount,
                       notes: laserNotes,
                       areaIds: [],
-                      manualAreaLabels: selectedLaserItems.map((x) => x.name),
+                      manualAreaLabels: combinedLaserSaveItems.map((x) => x.name),
+                      addonManualLabels: activeLaserPackage ? selectedLaserAddonItems.map((x) => x.name) : undefined,
+                      additionalCostSyp: activeLaserPackage ? laserAddonTotalSyp : undefined,
                       status: activeLaserPackage ? 'completed_pending_collection' : 'in_progress',
                       costSyp: activeLaserPackage ? undefined : selectedLaserTotalSyp,
                       discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
                   })
+                  const due = Number(created.billingItem?.amountDueUsd || 0)
                   setLaserSessionOk(
                     created.billingItem?.isPackagePrepaid
-                      ? 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. سيظهر تنبيه خاص في قسم التحصيل للاستقبال.'
-                      : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${created.billingItem.amountDueUsd} USD (صفحة التحصيل للاستقبال).`,
+                      ? due > 0.0001
+                        ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${due} USD — في التحصيل استخدم «إنقاص جلسة و دفع».`
+                        : 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة» عند عدم وجود إضافات.'
+                      : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${due} USD (صفحة التحصيل للاستقبال).`,
                   )
                   setLaserNotes('')
                   setSelectedLaserItemIds([])
+                  setSelectedLaserAddonItemIds([])
                   setPw('')
                   setPulse('')
                   setShotCount('')
@@ -3134,6 +3221,11 @@ export function PatientRecord() {
                       <p style={{ color: 'var(--text-muted)' }}>جاري تحميل المناطق…</p>
                     ) : (
                       <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                          {activeLaserPackage
+                            ? 'المناطق التالية تُسجّل ضمن الجلسة (ضمن الباكج أو كجلسة واحدة). لإضافة سعر اختر قسم «خارج الباكج» أدناه.'
+                            : 'اختر المناطق أو العروض المطلوبة.'}
+                        </p>
                         {laserProcedureGroups.map((g) => (
                           <div key={g.id}>
                             <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
@@ -3151,21 +3243,55 @@ export function PatientRecord() {
                                       borderRadius: 999,
                                       borderColor: selected ? 'var(--cyan)' : 'var(--border)',
                                     }}
-                                    onClick={() =>
-                                      setSelectedLaserItemIds((prev) =>
-                                        prev.includes(item.id)
-                                          ? prev.filter((x) => x !== item.id)
-                                          : [...prev, item.id],
-                                      )
-                                    }
+                                    onClick={() => toggleLaserMainArea(item.id)}
                                   >
                                     {item.name}
+                                    {activeLaserPackage ? null : (
+                                      <span style={{ opacity: 0.85 }}> — {item.priceSyp.toLocaleString('en-US')} ل.س</span>
+                                    )}
                                   </button>
                                 )
                               })}
                             </div>
                           </div>
                         ))}
+                        {activeLaserPackage ? (
+                          <>
+                            <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '0.25rem 0' }} />
+                            <p style={{ margin: 0, fontSize: '0.88rem', fontWeight: 700, color: 'var(--amber)' }}>
+                              خارج الباكج — تُحسب على المريض
+                            </p>
+                            <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                              اختر هنا فقط المناطق الإضافية غير المشمولة بالباكج؛ يظهر السعر ويُحصّل في الاستقبال.
+                            </p>
+                            {laserProcedureGroups.map((g) => (
+                              <div key={`addon-${g.id}`}>
+                                <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
+                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                  {g.items.map((item) => {
+                                    const selected = selectedLaserAddonItemIds.includes(item.id)
+                                    return (
+                                      <button
+                                        key={`addon-${item.id}`}
+                                        type="button"
+                                        className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
+                                        style={{
+                                          fontSize: '0.82rem',
+                                          padding: '0.38rem 0.58rem',
+                                          borderRadius: 999,
+                                          borderColor: selected ? 'var(--cyan)' : 'var(--border)',
+                                        }}
+                                        onClick={() => toggleLaserAddonArea(item.id)}
+                                      >
+                                        {item.name} — {item.priceSyp.toLocaleString('en-US')} ل.س
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        ) : null}
                       </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
