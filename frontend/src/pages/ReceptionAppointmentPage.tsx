@@ -67,7 +67,8 @@ type LaserProcedureGroup = {
 
 const DAY_START_MIN = 9 * 60
 const DAY_END_MIN = 20 * 60
-const DEFAULT_SLOT_STEP_MIN = 60
+/** خطوة فحص أوقات البداية الصالحة (مع المدة) — تسمح بظهور 11:30 بعد حجز 90 د من 10:00 */
+const BOOKING_START_PROBE_STEP_MIN = 15
 
 function toHm(min: number) {
   const h = Math.floor(min / 60)
@@ -219,6 +220,16 @@ export function ReceptionAppointmentPage() {
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
   const [selectedLaserItemIds, setSelectedLaserItemIds] = useState<string[]>([])
 
+  /** فترة الحجز الجاري في النافذة — تُحسب كمحجوزة معاينة لنفس القناة */
+  const draftBookingInterval = useMemo(() => {
+    if (!bookingOpen) return null
+    const t = normalizeTime(appointmentTime)
+    if (!t) return null
+    const sm = hmToMinutes(t)
+    if (sm == null) return null
+    return { start: sm, end: sm + bookingDurationMinutes }
+  }, [bookingOpen, appointmentTime, bookingDurationMinutes])
+
   const loadSlots = useCallback(async () => {
     if (!canUse) return
     setSlotsErr('')
@@ -339,64 +350,98 @@ export function ReceptionAppointmentPage() {
 
   const availableStartTimesForChannel = useCallback(
     (channel: string) => {
-      const intervals = channelBookedSlots(channel)
-      .map((s) => slotIntervalFromRow(s.time, s.endTime))
-      .filter((x): x is { start: number; end: number } => x != null)
-      .sort((a, b) => a.start - b.start)
+      const apiIntervals = channelBookedSlots(channel)
+        .map((s) => slotIntervalFromRow(s.time, s.endTime))
+        .filter((x): x is { start: number; end: number } => x != null)
+      const dur = bookingDurationMinutes
       const out: string[] = []
       let t = DAY_START_MIN
-      while (t <= DAY_END_MIN - DEFAULT_SLOT_STEP_MIN) {
-        const overlap = intervals.find((iv) => t >= iv.start && t < iv.end)
-        if (overlap) {
-          t = overlap.end
+      while (t + dur <= DAY_END_MIN) {
+        const candEnd = t + dur
+        const overlapsApi = apiIntervals.some((iv) => intervalsOverlapHalfOpen(t, candEnd, iv.start, iv.end))
+        const overlapsDraft =
+          draftBookingInterval &&
+          channel === selectedChannel &&
+          !(t === draftBookingInterval.start && candEnd === draftBookingInterval.end) &&
+          intervalsOverlapHalfOpen(t, candEnd, draftBookingInterval.start, draftBookingInterval.end)
+        if (overlapsApi || overlapsDraft) {
+          t += BOOKING_START_PROBE_STEP_MIN
           continue
         }
         out.push(toHm(t))
-        t += DEFAULT_SLOT_STEP_MIN
+        t += BOOKING_START_PROBE_STEP_MIN
       }
       return out
     },
-    [channelBookedSlots],
+    [channelBookedSlots, bookingDurationMinutes, draftBookingInterval, selectedChannel],
   )
 
-  const appointmentRowsForChannel = useCallback((channel: string) => {
-    const bookedSlots = channelBookedSlots(channel)
-    const availableStartTimes = availableStartTimesForChannel(channel)
-    const bookedMap = new Map<string, SlotRow>()
-    for (const s of bookedSlots) {
-      const t = normalizeTime(s.time)
-      if (t) bookedMap.set(t, s)
-    }
-    const times = new Set<string>(availableStartTimes)
-    for (const t of bookedMap.keys()) times.add(t)
-    if (times.size === 0) {
-      for (let m = DAY_START_MIN; m <= DAY_END_MIN - DEFAULT_SLOT_STEP_MIN; m += DEFAULT_SLOT_STEP_MIN) {
-        times.add(toHm(m))
+  const appointmentRowsForChannel = useCallback(
+    (channel: string) => {
+      const bookedSlots = channelBookedSlots(channel)
+      let draftSlot: SlotRow | null = null
+      if (bookingOpen && channel === selectedChannel && draftBookingInterval) {
+        const startHm = normalizeTime(appointmentTime) || toHm(draftBookingInterval.start)
+        draftSlot = {
+          id: '__reception_draft__',
+          businessDate,
+          time: startHm,
+          endTime: toHm(draftBookingInterval.end),
+          providerName: channel,
+          procedureType: 'حجز قيد الإكمال',
+          status: 'busy',
+          patientId: null,
+          patientName: '—',
+        }
       }
-    }
-    return [...times]
-      .sort((a, b) => (hmToMinutes(a) || 0) - (hmToMinutes(b) || 0))
-      .map((time) => {
-        const busy = bookedMap.get(time)
-        if (busy) {
-          const iv = slotIntervalFromRow(busy.time, busy.endTime)
+      const bookedWithDraft = draftSlot ? [...bookedSlots, draftSlot] : bookedSlots
+      const availableStartTimes = availableStartTimesForChannel(channel)
+      const bookedMap = new Map<string, SlotRow>()
+      for (const s of bookedWithDraft) {
+        const ti = normalizeTime(s.time)
+        if (ti) bookedMap.set(ti, s)
+      }
+      const times = new Set<string>(availableStartTimes)
+      for (const tm of bookedMap.keys()) times.add(tm)
+      if (times.size === 0) {
+        for (let m = DAY_START_MIN; m + bookingDurationMinutes <= DAY_END_MIN; m += BOOKING_START_PROBE_STEP_MIN) {
+          times.add(toHm(m))
+        }
+      }
+      return [...times]
+        .sort((a, b) => (hmToMinutes(a) || 0) - (hmToMinutes(b) || 0))
+        .map((time) => {
+          const busy = bookedMap.get(time)
+          if (busy) {
+            const iv = slotIntervalFromRow(busy.time, busy.endTime)
+            return {
+              time,
+              status: 'busy' as const,
+              patientName: busy.patientName || '—',
+              procedureType: busy.procedureType?.trim() || '—',
+              range: iv ? `${toHm(iv.start)} — ${toHm(iv.end)}` : busy.time,
+            }
+          }
           return {
             time,
-            status: 'busy' as const,
-            patientName: busy.patientName || '—',
-            procedureType: busy.procedureType?.trim() || '—',
-            range: iv ? `${toHm(iv.start)} — ${toHm(iv.end)}` : busy.time,
+            status: 'free' as const,
+            patientName: '',
+            procedureType: '',
+            range: '—',
           }
-        }
-        return {
-          time,
-          status: 'free' as const,
-          patientName: '',
-          procedureType: '',
-          range: '—',
-        }
-      })
-  }, [channelBookedSlots, availableStartTimesForChannel])
+        })
+    },
+    [
+      appointmentTime,
+      availableStartTimesForChannel,
+      bookingDurationMinutes,
+      bookingOpen,
+      businessDate,
+      channelBookedSlots,
+      draftBookingInterval,
+      selectedChannel,
+    ],
+  )
 
   const selectedChannelRows = useMemo(
     () => appointmentRowsForChannel(selectedChannel),
@@ -428,7 +473,8 @@ export function ReceptionAppointmentPage() {
 
   useEffect(() => {
     if (selectedChannelAvailableTimes.length === 0) return
-    if (!selectedChannelAvailableTimes.includes(appointmentTime)) {
+    const norm = normalizeTime(appointmentTime)
+    if (!norm || !selectedChannelAvailableTimes.includes(norm)) {
       setAppointmentTime(selectedChannelAvailableTimes[0])
     }
   }, [selectedChannelAvailableTimes, appointmentTime])
