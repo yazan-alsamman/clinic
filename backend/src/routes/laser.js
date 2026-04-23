@@ -179,8 +179,8 @@ function sumLaserExpenseLinesUsdOnly(lines) {
 async function getOrCreateLaserSettings() {
   let doc = await LaserSettings.findById('default').lean()
   if (!doc) {
-    await LaserSettings.create({ _id: 'default', pricePerPulseUsd: 0 })
-    doc = { _id: 'default', pricePerPulseUsd: 0 }
+    await LaserSettings.create({ _id: 'default', pricePerPulseUsd: 0, pricePerPulseSyp: 0 })
+    doc = { _id: 'default', pricePerPulseUsd: 0, pricePerPulseSyp: 0 }
   }
   return doc
 }
@@ -233,7 +233,10 @@ laserRouter.get('/pricing-settings', async (req, res) => {
       return
     }
     const doc = await getOrCreateLaserSettings()
-    res.json({ pricePerPulseUsd: round2(Number(doc.pricePerPulseUsd) || 0) })
+    res.json({
+      pricePerPulseUsd: round2(Number(doc.pricePerPulseUsd) || 0),
+      pricePerPulseSyp: Math.max(0, Math.round(Number(doc.pricePerPulseSyp) || 0)),
+    })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -243,9 +246,10 @@ laserRouter.get('/pricing-settings', async (req, res) => {
 laserRouter.patch('/pricing-settings', requireRoles('super_admin'), async (req, res) => {
   try {
     const pricePerPulseUsd = round2(Math.max(0, Number(req.body?.pricePerPulseUsd) || 0))
+    const pricePerPulseSyp = Math.max(0, Math.round(Number(req.body?.pricePerPulseSyp) || 0))
     await LaserSettings.findOneAndUpdate(
       { _id: 'default' },
-      { $set: { pricePerPulseUsd } },
+      { $set: { pricePerPulseUsd, pricePerPulseSyp } },
       { upsert: true, new: true },
     )
     await writeAudit({
@@ -253,9 +257,9 @@ laserRouter.patch('/pricing-settings', requireRoles('super_admin'), async (req, 
       action: 'تحديث سعر ضربة الليزر (محاسبة بعدد الضربات)',
       entityType: 'LaserSettings',
       entityId: 'default',
-      details: { pricePerPulseUsd },
+      details: { pricePerPulseUsd, pricePerPulseSyp },
     })
-    res.json({ pricePerPulseUsd })
+    res.json({ pricePerPulseUsd, pricePerPulseSyp })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -937,14 +941,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       costGross = packageAddOnGrossUsd
     } else if (chargeByPulseCount) {
       const settings = await getOrCreateLaserSettings()
-      const ppu = round2(Number(settings.pricePerPulseUsd) || 0)
-      if (!(ppu > 0)) {
-        res.status(400).json({
-          error:
-            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض.',
-        })
-        return
-      }
+      const ppuUsd = round2(Number(settings.pricePerPulseUsd) || 0)
+      const ppuSyp = Math.max(0, Math.round(Number(settings.pricePerPulseSyp) || 0))
       const shots = parseShotCount(body.shotCount)
       if (!(shots > 0)) {
         res.status(400).json({
@@ -952,7 +950,29 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         })
         return
       }
-      costGross = round2(ppu * shots)
+      if (ppuUsd > 0) {
+        costGross = round2(ppuUsd * shots)
+      } else if (ppuSyp > 0) {
+        const grossSyp = ppuSyp * shots
+        const resolved = resolveUsdAmount({
+          sypRaw: grossSyp,
+          exchangeRate: req.businessDay?.exchangeRate,
+        })
+        if (resolved == null || !(resolved > 0)) {
+          res.status(400).json({
+            error:
+              'سعر الضربة بالليرة محدد — يجب تسجيل سعر صرف يوم العمل لتحويل المبلغ إلى الدولار، أو يحدد المدير سعر الضربة بالدولار.',
+          })
+          return
+        }
+        costGross = resolved
+      } else {
+        res.status(400).json({
+          error:
+            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض (دولار أو ليرة).',
+        })
+        return
+      }
     } else {
       costGross = resolveUsdAmount({
         usdRaw: body.costUsd,

@@ -58,6 +58,7 @@ export function AdminRooms() {
   const [editPrice, setEditPrice] = useState('')
   const [editSortOrder, setEditSortOrder] = useState('999')
   const [pulsePriceUsd, setPulsePriceUsd] = useState('0')
+  const [pulsePriceSyp, setPulsePriceSyp] = useState('0')
   const [pulsePriceSaving, setPulsePriceSaving] = useState(false)
   const [pulsePriceMsg, setPulsePriceMsg] = useState('')
 
@@ -68,10 +69,14 @@ export function AdminRooms() {
       const data = await api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options?includeInactive=1')
       setGroups(data.groups || [])
       try {
-        const pricing = await api<{ pricePerPulseUsd: number }>('/api/laser/pricing-settings')
+        const pricing = await api<{ pricePerPulseUsd: number; pricePerPulseSyp: number }>(
+          '/api/laser/pricing-settings',
+        )
         setPulsePriceUsd(String(Number(pricing.pricePerPulseUsd) || 0))
+        setPulsePriceSyp(String(Math.max(0, Math.round(Number(pricing.pricePerPulseSyp) || 0))))
       } catch {
         setPulsePriceUsd('0')
+        setPulsePriceSyp('0')
       }
     } catch {
       setGroups([])
@@ -249,7 +254,8 @@ export function AdminRooms() {
           <h3 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>سعر الضربة (محاسبة بعدد الضربات)</h3>
           <p style={{ margin: '0 0 0.55rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
             عندما يفعّل الأخصائي خيار «محاسبة على عدد الضربات» في ملف المريض، يُحسب سعر الجلسة ={' '}
-            <strong>سعر الضربة × عدد الضربات</strong> (بالدولار).
+            <strong>سعر الضربة × عدد الضربات</strong>. إذا حُدد سعر بالدولار (&gt; 0) يُستخدم للفوترة؛ وإلا يُحسب
+            من سعر الليرة مع سعر صرف يوم العمل.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem', alignItems: 'center' }}>
             <label className="form-label" htmlFor="pulse-price-usd" style={{ margin: 0 }}>
@@ -267,6 +273,21 @@ export function AdminRooms() {
                 setPulsePriceUsd(e.target.value)
               }}
             />
+            <label className="form-label" htmlFor="pulse-price-syp" style={{ margin: 0 }}>
+              سعر الضربة (ل.س)
+            </label>
+            <input
+              id="pulse-price-syp"
+              className="input"
+              dir="ltr"
+              inputMode="numeric"
+              style={{ maxWidth: 160 }}
+              value={pulsePriceSyp}
+              onChange={(e) => {
+                setPulsePriceMsg('')
+                setPulsePriceSyp(e.target.value)
+              }}
+            />
             <button
               type="button"
               className="btn btn-primary"
@@ -275,13 +296,18 @@ export function AdminRooms() {
                 setPulsePriceSaving(true)
                 setPulsePriceMsg('')
                 try {
-                  const n = Math.max(0, parseFloat(pulsePriceUsd.replace(/,/g, '')) || 0)
-                  const data = await api<{ pricePerPulseUsd: number }>('/api/laser/pricing-settings', {
-                    method: 'PATCH',
-                    body: JSON.stringify({ pricePerPulseUsd: n }),
-                  })
-                  setPulsePriceUsd(String(data.pricePerPulseUsd ?? n))
-                  setPulsePriceMsg('تم حفظ سعر الضربة.')
+                  const nUsd = Math.max(0, parseFloat(pulsePriceUsd.replace(/,/g, '')) || 0)
+                  const nSyp = Math.max(0, Math.round(parseFloat(pulsePriceSyp.replace(/,/g, '')) || 0))
+                  const data = await api<{ pricePerPulseUsd: number; pricePerPulseSyp: number }>(
+                    '/api/laser/pricing-settings',
+                    {
+                      method: 'PATCH',
+                      body: JSON.stringify({ pricePerPulseUsd: nUsd, pricePerPulseSyp: nSyp }),
+                    },
+                  )
+                  setPulsePriceUsd(String(data.pricePerPulseUsd ?? nUsd))
+                  setPulsePriceSyp(String(Math.max(0, Math.round(Number(data.pricePerPulseSyp) ?? nSyp))))
+                  setPulsePriceMsg('تم حفظ أسعار الضربة.')
                 } catch (e) {
                   setPulsePriceMsg(e instanceof ApiError ? e.message : 'تعذر الحفظ')
                 } finally {
@@ -289,7 +315,7 @@ export function AdminRooms() {
                 }
               }}
             >
-              {pulsePriceSaving ? 'جاري الحفظ…' : 'حفظ سعر الضربة'}
+              {pulsePriceSaving ? 'جاري الحفظ…' : 'حفظ أسعار الضربة'}
             </button>
           </div>
           {pulsePriceMsg ? (

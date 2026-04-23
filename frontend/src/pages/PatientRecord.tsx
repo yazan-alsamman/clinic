@@ -552,6 +552,7 @@ export function PatientRecord() {
   const [shotCount, setShotCount] = useState('')
   const [chargeLaserByPulse, setChargeLaserByPulse] = useState(false)
   const [laserPricePerPulseUsd, setLaserPricePerPulseUsd] = useState(0)
+  const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
   const [laserNotes, setLaserNotes] = useState('')
   const [nextTreatmentHint, setNextTreatmentHint] = useState('—')
   const [savingLaser, setSavingLaser] = useState(false)
@@ -1054,12 +1055,16 @@ export function PatientRecord() {
         const [catalogData, procData, pricingData] = await Promise.all([
           api<{ categories: LaserCategory[] }>('/api/laser/catalog'),
           api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options'),
-          api<{ pricePerPulseUsd: number }>('/api/laser/pricing-settings').catch(() => ({ pricePerPulseUsd: 0 })),
+          api<{ pricePerPulseUsd: number; pricePerPulseSyp: number }>('/api/laser/pricing-settings').catch(() => ({
+            pricePerPulseUsd: 0,
+            pricePerPulseSyp: 0,
+          })),
         ])
         if (!cancelled) {
           setLaserCatalog(catalogData.categories)
           setLaserProcedureGroups(procData.groups || [])
           setLaserPricePerPulseUsd(Number(pricingData.pricePerPulseUsd) || 0)
+          setLaserPricePerPulseSyp(Math.max(0, Math.round(Number(pricingData.pricePerPulseSyp) || 0)))
           setSelectedLaserItemIds((prev) => {
             const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
             if (!bookedLaserProcedureText) return validPrev
@@ -1377,10 +1382,21 @@ export function PatientRecord() {
   const laserPulsePricingUsd = useMemo(() => {
     if (!chargeLaserByPulse || activeLaserPackage) return null
     const shots = parseLaserShotsForPricing(shotCount)
-    const ppu = Number(laserPricePerPulseUsd) || 0
-    if (!(shots > 0) || !(ppu > 0)) return null
-    return Math.round(ppu * shots * 100) / 100
-  }, [chargeLaserByPulse, activeLaserPackage, shotCount, laserPricePerPulseUsd])
+    if (!(shots > 0)) return null
+    const ppuUsd = Number(laserPricePerPulseUsd) || 0
+    const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
+    const rate = Number(usdSypRate || 0)
+    if (ppuUsd > 0) return Math.round(ppuUsd * shots * 100) / 100
+    if (ppuSyp > 0 && rate > 0) return Math.round(((ppuSyp * shots) / rate) * 100) / 100
+    return null
+  }, [
+    chargeLaserByPulse,
+    activeLaserPackage,
+    shotCount,
+    laserPricePerPulseUsd,
+    laserPricePerPulseSyp,
+    usdSypRate,
+  ])
 
   useEffect(() => {
     if (activeLaserPackage) setChargeLaserByPulse(false)
@@ -3087,40 +3103,46 @@ export function PatientRecord() {
                     </tbody>
                   </table>
                 </div>
-                {!activeLaserPackage ? (
-                  <div
+                <div
+                  style={{
+                    marginTop: '0.65rem',
+                    padding: '0.55rem 0.65rem',
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface-solid)',
+                  }}
+                >
+                  <label
                     style={{
-                      marginTop: '0.65rem',
-                      padding: '0.55rem 0.65rem',
-                      borderRadius: 10,
-                      border: '1px solid var(--border)',
-                      background: 'var(--surface-solid)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      cursor: activeLaserPackage ? 'not-allowed' : 'pointer',
+                      fontSize: '0.9rem',
+                      fontWeight: 600,
+                      opacity: activeLaserPackage ? 0.72 : 1,
                     }}
                   >
-                    <label
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.45rem',
-                        cursor: 'pointer',
-                        fontSize: '0.9rem',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={chargeLaserByPulse}
-                        onChange={(e) => setChargeLaserByPulse(e.target.checked)}
-                      />
-                      محاسبة على عدد الضربات
-                    </label>
-                    {chargeLaserByPulse ? (
-                      <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                        سعر الجلسة = سعر الضربة ({laserPricePerPulseUsd > 0 ? `${laserPricePerPulseUsd} USD` : 'غير محدد — يضبطه المدير في صفحة الغرف وأسعار المناطق'}) × عدد الضربات في خانة «الضربات».
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
+                    <input
+                      type="checkbox"
+                      disabled={Boolean(activeLaserPackage)}
+                      checked={chargeLaserByPulse}
+                      onChange={(e) => setChargeLaserByPulse(e.target.checked)}
+                    />
+                    محاسبة على عدد الضربات
+                  </label>
+                  {activeLaserPackage ? (
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      غير متاح لهذه الجلسة لأنها ضمن باكج ليزر مدفوع مسبقاً. يُفعّل هذا الخيار تلقائياً عند تسجيل جلسة لمريض <strong>بدون</strong> باكج ليزر نشط يحتوي جلسة غير مربوطة.
+                    </p>
+                  ) : chargeLaserByPulse ? (
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      سعر الجلسة = سعر الضربة × عدد الضربات. إن وُجد سعر بالدولار (&gt; 0) يُستخدم؛ وإلا يُحسب من سعر الضربة بالليرة مع سعر صرف اليوم. الإعدادات من صفحة الغرف وأسعار المناطق — USD:{' '}
+                      {laserPricePerPulseUsd > 0 ? `${laserPricePerPulseUsd}` : '—'}، ل.س:{' '}
+                      {laserPricePerPulseSyp > 0 ? laserPricePerPulseSyp.toLocaleString('en-US') : '—'}.
+                    </p>
+                  ) : null}
+                </div>
                 {activeLaserPackage ? (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
                     <p style={{ margin: '0 0 0.35rem', color: 'var(--success)' }}>
@@ -3159,6 +3181,14 @@ export function PatientRecord() {
                     ) : laserPulsePricingUsd != null && !(fxRate > 0) ? (
                       <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
                         (سعر الصرف لليوم غير متاح لعرض المكافئ بالليرة)
+                      </span>
+                    ) : laserPulsePricingUsd == null &&
+                      parseLaserShotsForPricing(shotCount) > 0 &&
+                      laserPricePerPulseUsd <= 0 &&
+                      laserPricePerPulseSyp > 0 &&
+                      !(fxRate > 0) ? (
+                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
+                        (حدّد سعر صرف اليوم لاحتساب المبلغ من سعر الضربة بالليرة)
                       </span>
                     ) : null}
                   </div>
@@ -3211,8 +3241,16 @@ export function PatientRecord() {
                 }
                 if (!activeLaserPackage) {
                   if (chargeLaserByPulse) {
-                    if (!(laserPricePerPulseUsd > 0)) {
-                      setLaserSessionErr('سعر الضربة غير محدد — يضبطه المدير في «الغرف وتعيين أخصائيي الليزر» ضمن أسعار المناطق.')
+                    const ppuUsd = Number(laserPricePerPulseUsd) || 0
+                    const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
+                    if (!(ppuUsd > 0) && !(ppuSyp > 0)) {
+                      setLaserSessionErr(
+                        'سعر الضربة غير محدد — يضبطه المدير في «الغرف وتعيين أخصائيي الليزر» ضمن أسعار المناطق (دولار أو ليرة).',
+                      )
+                      return
+                    }
+                    if (!(ppuUsd > 0) && ppuSyp > 0 && !((usdSypRate ?? 0) > 0)) {
+                      setLaserSessionErr('سعر الصرف لليوم غير متاح — لا يمكن المحاسبة من سعر الضربة بالليرة.')
                       return
                     }
                     if (!(parseLaserShotsForPricing(shotCount) > 0)) {
