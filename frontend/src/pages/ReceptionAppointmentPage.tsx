@@ -94,9 +94,24 @@ function inferRoomNumber(channel: string) {
   return Number.isFinite(n) ? n : null
 }
 
+function patientDebtCreditUsd(p: Patient) {
+  return {
+    debt: Math.round((Number(p.outstandingDebtUsd) || 0) * 100) / 100,
+    credit: Math.round((Number(p.prepaidCreditUsd) || 0) * 100) / 100,
+  }
+}
+
+function fmtUsdSyp(usdRaw: number, rateRaw: number | null | undefined) {
+  const usd = Number(usdRaw) || 0
+  const usdText = `${usd.toFixed(2)} USD`
+  const r = rateRaw != null && Number.isFinite(Number(rateRaw)) && Number(rateRaw) > 0 ? Number(rateRaw) : null
+  const sypText = r ? `${Math.round(usd * r).toLocaleString('ar-SY')} ل.س` : null
+  return { usdText, sypText }
+}
+
 export function ReceptionAppointmentPage() {
   const { user } = useAuth()
-  const { dayActive } = useClinic()
+  const { dayActive, usdSypRate } = useClinic()
   const canUse = user?.role === 'super_admin' || user?.role === 'reception'
   const assignBlocked = user?.role === 'reception' && !dayActive
 
@@ -212,6 +227,29 @@ export function ReceptionAppointmentPage() {
       setDeclinedNewPatientForName(null)
     }
   }, [patientQ, declinedNewPatientForName])
+
+  /** تحديث الذمة/الرصيد من ملف المريض عند الاختيار */
+  useEffect(() => {
+    const id = picked?.id
+    if (!id) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api<{ patient: Patient }>(`/api/patients/${encodeURIComponent(id)}`)
+        if (cancelled || !data?.patient) return
+        setPicked((prev) => {
+          if (!prev || String(prev.id) !== String(id)) return prev
+          if (String(data.patient.id) !== String(id)) return prev
+          return data.patient
+        })
+      } catch {
+        /* الإبقاء على نتيجة البحث */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [picked?.id])
 
   const channelBookedSlots = useCallback(
     (channel: string) =>
@@ -731,12 +769,72 @@ export function ReceptionAppointmentPage() {
                 }}
               />
               {picked ? (
-                <p style={{ marginTop: '0.65rem', marginBottom: 0 }}>
-                  المختار: <strong>{picked.name}</strong>{' '}
-                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
-                    إلغاء الاختيار
-                  </button>
-                </p>
+                <div style={{ marginTop: '0.65rem' }}>
+                  <p style={{ marginBottom: 0 }}>
+                    المختار: <strong>{picked.name}</strong>{' '}
+                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
+                      إلغاء الاختيار
+                    </button>
+                  </p>
+                  {(() => {
+                    const { debt, credit } = patientDebtCreditUsd(picked)
+                    const hasDebt = debt > 0.0001
+                    const hasCredit = credit > 0.0001
+                    if (!hasDebt && !hasCredit) return null
+                    const debtFmt = fmtUsdSyp(debt, usdSypRate)
+                    const creditFmt = fmtUsdSyp(credit, usdSypRate)
+                    return (
+                      <div
+                        role="alert"
+                        style={{
+                          marginTop: '0.75rem',
+                          padding: '0.75rem 0.9rem',
+                          borderRadius: 'var(--radius)',
+                          border: '1px solid var(--warning, #d4a017)',
+                          background: 'var(--warning-bg, rgba(212, 160, 23, 0.12))',
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, marginBottom: '0.4rem', fontSize: '0.9rem' }}>تنبيه مالي</div>
+                        {hasDebt ? (
+                          <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
+                            <span style={{ color: 'var(--text-muted)' }}>ذمة على المريض: </span>
+                            <strong style={{ color: 'var(--danger)' }}>{debtFmt.usdText}</strong>
+                            {debtFmt.sypText ? (
+                              <>
+                                {' '}
+                                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
+                                <strong style={{ color: 'var(--danger)' }}>{debtFmt.sypText}</strong>
+                              </>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                {' '}
+                                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
+                              </span>
+                            )}
+                          </p>
+                        ) : null}
+                        {hasCredit ? (
+                          <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
+                            <span style={{ color: 'var(--text-muted)' }}>رصيد إضافي للمريض: </span>
+                            <strong style={{ color: 'var(--success)' }}>{creditFmt.usdText}</strong>
+                            {creditFmt.sypText ? (
+                              <>
+                                {' '}
+                                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
+                                <strong style={{ color: 'var(--success)' }}>{creditFmt.sypText}</strong>
+                              </>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                {' '}
+                                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
+                              </span>
+                            )}
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  })()}
+                </div>
               ) : patientSearchLoading && patientQ.trim().length >= 2 ? (
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem', marginBottom: 0 }}>
                   جاري البحث…
