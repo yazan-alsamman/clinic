@@ -9,6 +9,7 @@ import { BillingItem } from '../models/BillingItem.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { BusinessDay } from '../models/BusinessDay.js'
 import { LaserMonthlyExpenses } from '../models/LaserMonthlyExpenses.js'
+import { LaserSettings } from '../models/LaserSettings.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
@@ -175,6 +176,15 @@ function sumLaserExpenseLinesUsdOnly(lines) {
   return round2((lines || []).reduce((s, l) => s + (Number(l.amountUsd) || 0), 0))
 }
 
+async function getOrCreateLaserSettings() {
+  let doc = await LaserSettings.findById('default').lean()
+  if (!doc) {
+    await LaserSettings.create({ _id: 'default', pricePerPulseUsd: 0 })
+    doc = { _id: 'default', pricePerPulseUsd: 0 }
+  }
+  return doc
+}
+
 function findActiveLaserPackage(patientLike) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
@@ -210,6 +220,42 @@ laserRouter.get('/catalog', async (req, res) => {
       })
     }
     res.json({ categories: [...byCat.values()] })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.get('/pricing-settings', async (req, res) => {
+  try {
+    if (!LASER_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const doc = await getOrCreateLaserSettings()
+    res.json({ pricePerPulseUsd: round2(Number(doc.pricePerPulseUsd) || 0) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.patch('/pricing-settings', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const pricePerPulseUsd = round2(Math.max(0, Number(req.body?.pricePerPulseUsd) || 0))
+    await LaserSettings.findOneAndUpdate(
+      { _id: 'default' },
+      { $set: { pricePerPulseUsd } },
+      { upsert: true, new: true },
+    )
+    await writeAudit({
+      user: req.user,
+      action: 'تحديث سعر ضربة الليزر (محاسبة بعدد الضربات)',
+      entityType: 'LaserSettings',
+      entityId: 'default',
+      details: { pricePerPulseUsd },
+    })
+    res.json({ pricePerPulseUsd })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -885,13 +931,35 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       }
     }
 
-    const costGross = isPackageSession
-      ? packageAddOnGrossUsd
-      : resolveUsdAmount({
-          usdRaw: body.costUsd,
-          sypRaw: body.costSyp,
-          exchangeRate: req.businessDay?.exchangeRate,
+    const chargeByPulseCount = !isPackageSession && Boolean(body.chargeByPulseCount)
+    let costGross
+    if (isPackageSession) {
+      costGross = packageAddOnGrossUsd
+    } else if (chargeByPulseCount) {
+      const settings = await getOrCreateLaserSettings()
+      const ppu = round2(Number(settings.pricePerPulseUsd) || 0)
+      if (!(ppu > 0)) {
+        res.status(400).json({
+          error:
+            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض.',
         })
+        return
+      }
+      const shots = parseShotCount(body.shotCount)
+      if (!(shots > 0)) {
+        res.status(400).json({
+          error: 'عند تفعيل «محاسبة على عدد الضربات» يجب إدخال عدد ضربات أكبر من صفر.',
+        })
+        return
+      }
+      costGross = round2(ppu * shots)
+    } else {
+      costGross = resolveUsdAmount({
+        usdRaw: body.costUsd,
+        sypRaw: body.costSyp,
+        exchangeRate: req.businessDay?.exchangeRate,
+      })
+    }
     if (!isPackageSession && !(costGross > 0)) {
       res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر)' })
       return
@@ -992,6 +1060,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         pw: body.pw ?? '',
         pulse: body.pulse ?? '',
         shotCount: body.shotCount ?? '',
+        chargeByPulseCount: Boolean(chargeByPulseCount),
         notes: body.notes ?? '',
         areaIds,
         manualAreaLabels,

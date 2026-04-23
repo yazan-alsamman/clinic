@@ -12,6 +12,8 @@ const laserSessionSchema = new mongoose.Schema(
     pw: { type: String, default: '' },
     pulse: { type: String, default: '' },
     shotCount: { type: String, default: '' },
+    /** سعر الجلسة = سعر الضربة × عدد الضربات (يحدد المدير سعر الضربة) */
+    chargeByPulseCount: { type: Boolean, default: false },
     notes: { type: String, default: '' },
     areaIds: [{ type: String }],
     /** مناطق مذكورة يدوياً (نص حر) */

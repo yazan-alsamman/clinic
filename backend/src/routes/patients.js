@@ -506,6 +506,7 @@ patientsRouter.get('/:id/financial-billing-detail/:billingItemId', async (req, r
             pw: String(laser.pw || ''),
             pulse: String(laser.pulse || ''),
             shotCount: String(laser.shotCount || ''),
+            chargeByPulseCount: laser.chargeByPulseCount === true,
             notes: String(laser.notes || ''),
             areaIds: Array.isArray(laser.areaIds) ? laser.areaIds : [],
             manualAreaLabels: Array.isArray(laser.manualAreaLabels) ? laser.manualAreaLabels : [],

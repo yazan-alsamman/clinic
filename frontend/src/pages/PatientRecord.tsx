@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { canAccessTab } from '../data/nav'
 import { api, ApiError } from '../api/client'
+import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 import type { LaserCategory, Patient, Role } from '../types'
 
 type Tab =
@@ -18,6 +19,12 @@ type Tab =
   | 'solarium'
 
 const laserTypes = ['Mix', 'Yag', 'Alex'] as const
+
+function parseLaserShotsForPricing(raw: string) {
+  const num = Number.parseFloat(normalizeDecimalDigits(raw))
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.round(num)
+}
 
 type DentalPlanDto = {
   id: string
@@ -40,6 +47,7 @@ type ClinicalLaserRow = {
   pw: string
   pulse: string
   shotCount: string
+  chargeByPulseCount?: boolean
   costUsd: number
   discountPercent: number
   sessionTypeLabel: string
@@ -542,6 +550,8 @@ export function PatientRecord() {
   const [pw, setPw] = useState('')
   const [pulse, setPulse] = useState('')
   const [shotCount, setShotCount] = useState('')
+  const [chargeLaserByPulse, setChargeLaserByPulse] = useState(false)
+  const [laserPricePerPulseUsd, setLaserPricePerPulseUsd] = useState(0)
   const [laserNotes, setLaserNotes] = useState('')
   const [nextTreatmentHint, setNextTreatmentHint] = useState('—')
   const [savingLaser, setSavingLaser] = useState(false)
@@ -1041,13 +1051,15 @@ export function PatientRecord() {
       setLaserProcedureLoading(true)
       setLaserProcedureErr('')
       try {
-        const [catalogData, procData] = await Promise.all([
+        const [catalogData, procData, pricingData] = await Promise.all([
           api<{ categories: LaserCategory[] }>('/api/laser/catalog'),
           api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options'),
+          api<{ pricePerPulseUsd: number }>('/api/laser/pricing-settings').catch(() => ({ pricePerPulseUsd: 0 })),
         ])
         if (!cancelled) {
           setLaserCatalog(catalogData.categories)
           setLaserProcedureGroups(procData.groups || [])
+          setLaserPricePerPulseUsd(Number(pricingData.pricePerPulseUsd) || 0)
           setSelectedLaserItemIds((prev) => {
             const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
             if (!bookedLaserProcedureText) return validPrev
@@ -1086,6 +1098,7 @@ export function PatientRecord() {
           setLaserCatalog([])
           setLaserProcedureGroups([])
           setSelectedLaserItemIds([])
+          setLaserPricePerPulseUsd(0)
           setLaserProcedureErr('تعذر تحميل مناطق وعروض الليزر')
         }
       } finally {
@@ -1360,6 +1373,18 @@ export function PatientRecord() {
       (pkg) => pkg.department === 'laser' && pkg.sessions.some((s) => !s.linkedLaserSessionId),
     )
   }, [patientPackages])
+
+  const laserPulsePricingUsd = useMemo(() => {
+    if (!chargeLaserByPulse || activeLaserPackage) return null
+    const shots = parseLaserShotsForPricing(shotCount)
+    const ppu = Number(laserPricePerPulseUsd) || 0
+    if (!(shots > 0) || !(ppu > 0)) return null
+    return Math.round(ppu * shots * 100) / 100
+  }, [chargeLaserByPulse, activeLaserPackage, shotCount, laserPricePerPulseUsd])
+
+  useEffect(() => {
+    if (activeLaserPackage) setChargeLaserByPulse(false)
+  }, [activeLaserPackage])
 
   useEffect(() => {
     if (!activeLaserPackage) setSelectedLaserAddonItemIds([])
@@ -3062,6 +3087,40 @@ export function PatientRecord() {
                     </tbody>
                   </table>
                 </div>
+                {!activeLaserPackage ? (
+                  <div
+                    style={{
+                      marginTop: '0.65rem',
+                      padding: '0.55rem 0.65rem',
+                      borderRadius: 10,
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface-solid)',
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={chargeLaserByPulse}
+                        onChange={(e) => setChargeLaserByPulse(e.target.checked)}
+                      />
+                      محاسبة على عدد الضربات
+                    </label>
+                    {chargeLaserByPulse ? (
+                      <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                        سعر الجلسة = سعر الضربة ({laserPricePerPulseUsd > 0 ? `${laserPricePerPulseUsd} USD` : 'غير محدد — يضبطه المدير في صفحة الغرف وأسعار المناطق'}) × عدد الضربات في خانة «الضربات».
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 {activeLaserPackage ? (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
                     <p style={{ margin: '0 0 0.35rem', color: 'var(--success)' }}>
@@ -3086,6 +3145,22 @@ export function PatientRecord() {
                         <span style={{ color: 'var(--text-muted)' }}>لا توجد إضافات خارج الباكج</span>
                       )}
                     </p>
+                  </div>
+                ) : chargeLaserByPulse ? (
+                  <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
+                    <strong>سعر الجلسة (محاسبة الضربات):</strong>{' '}
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {laserPulsePricingUsd != null ? `${laserPulsePricingUsd} USD` : '—'}
+                    </span>
+                    {laserPulsePricingUsd != null && fxRate > 0 ? (
+                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
+                        (~ {(laserPulsePricingUsd * fxRate).toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س)
+                      </span>
+                    ) : laserPulsePricingUsd != null && !(fxRate > 0) ? (
+                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
+                        (سعر الصرف لليوم غير متاح لعرض المكافئ بالليرة)
+                      </span>
+                    ) : null}
                   </div>
                 ) : (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
@@ -3135,13 +3210,24 @@ export function PatientRecord() {
                   return
                 }
                 if (!activeLaserPackage) {
-                  if (!(selectedLaserTotalSyp > 0)) {
-                    setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
-                    return
-                  }
-                  if (!((usdSypRate ?? 0) > 0)) {
-                    setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
-                    return
+                  if (chargeLaserByPulse) {
+                    if (!(laserPricePerPulseUsd > 0)) {
+                      setLaserSessionErr('سعر الضربة غير محدد — يضبطه المدير في «الغرف وتعيين أخصائيي الليزر» ضمن أسعار المناطق.')
+                      return
+                    }
+                    if (!(parseLaserShotsForPricing(shotCount) > 0)) {
+                      setLaserSessionErr('عند «محاسبة على عدد الضربات» أدخل عدد ضربات أكبر من صفر.')
+                      return
+                    }
+                  } else {
+                    if (!(selectedLaserTotalSyp > 0)) {
+                      setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
+                      return
+                    }
+                    if (!((usdSypRate ?? 0) > 0)) {
+                      setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
+                      return
+                    }
                   }
                 } else if (laserAddonTotalSyp > 0 && !((usdSypRate ?? 0) > 0)) {
                   setLaserSessionErr('سعر الصرف لليوم غير متاح — لا يمكن احتساب مبلغ الإضافات خارج الباكج.')
@@ -3167,7 +3253,8 @@ export function PatientRecord() {
                       addonManualLabels: activeLaserPackage ? selectedLaserAddonItems.map((x) => x.name) : undefined,
                       additionalCostSyp: activeLaserPackage ? laserAddonTotalSyp : undefined,
                       status: activeLaserPackage ? 'completed_pending_collection' : 'in_progress',
-                      costSyp: activeLaserPackage ? undefined : selectedLaserTotalSyp,
+                      costSyp: activeLaserPackage || chargeLaserByPulse ? undefined : selectedLaserTotalSyp,
+                      chargeByPulseCount: !activeLaserPackage && chargeLaserByPulse,
                       discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
@@ -3183,6 +3270,7 @@ export function PatientRecord() {
                   setLaserNotes('')
                   setSelectedLaserItemIds([])
                   setSelectedLaserAddonItemIds([])
+                  setChargeLaserByPulse(false)
                   setPw('')
                   setPulse('')
                   setShotCount('')
@@ -4104,6 +4192,10 @@ export function PatientRecord() {
                 عدد الضربات
               </span>
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>{laserSessionDetail.shotCount || '—'}</span>
+              <span className="form-label" style={{ margin: 0 }}>
+                محاسبة الضربات
+              </span>
+              <span>{laserSessionDetail.chargeByPulseCount ? 'نعم (سعر × عدد الضربات)' : 'لا'}</span>
               <span className="form-label" style={{ margin: 0 }}>
                 الكلفة (USD)
               </span>

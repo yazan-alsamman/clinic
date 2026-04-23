@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 
 type RoomRow = {
   number: number
@@ -57,6 +57,9 @@ export function AdminRooms() {
   const [editKind, setEditKind] = useState<'area' | 'offer'>('area')
   const [editPrice, setEditPrice] = useState('')
   const [editSortOrder, setEditSortOrder] = useState('999')
+  const [pulsePriceUsd, setPulsePriceUsd] = useState('0')
+  const [pulsePriceSaving, setPulsePriceSaving] = useState(false)
+  const [pulsePriceMsg, setPulsePriceMsg] = useState('')
 
   async function loadProcedureOptions() {
     setProcLoading(true)
@@ -64,6 +67,12 @@ export function AdminRooms() {
     try {
       const data = await api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options?includeInactive=1')
       setGroups(data.groups || [])
+      try {
+        const pricing = await api<{ pricePerPulseUsd: number }>('/api/laser/pricing-settings')
+        setPulsePriceUsd(String(Number(pricing.pricePerPulseUsd) || 0))
+      } catch {
+        setPulsePriceUsd('0')
+      }
     } catch {
       setGroups([])
       setProcErr('تعذر تحميل مناطق وعروض الليزر')
@@ -228,6 +237,73 @@ export function AdminRooms() {
       <div className="card" style={{ marginTop: '1rem' }}>
         <h2 className="card-title">إدارة مناطق وعروض الليزر</h2>
         <p className="page-desc">يمكنك الإضافة والتعديل والحذف والتفعيل/الإيقاف من هنا.</p>
+        <div
+          style={{
+            marginBottom: '1rem',
+            padding: '0.9rem 1rem',
+            borderRadius: 12,
+            border: '1px solid var(--border)',
+            background: 'linear-gradient(135deg, #eef2ff 0%, #f0fdfa 100%)',
+          }}
+        >
+          <h3 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>سعر الضربة (محاسبة بعدد الضربات)</h3>
+          <p style={{ margin: '0 0 0.55rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            عندما يفعّل الأخصائي خيار «محاسبة على عدد الضربات» في ملف المريض، يُحسب سعر الجلسة ={' '}
+            <strong>سعر الضربة × عدد الضربات</strong> (بالدولار).
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem', alignItems: 'center' }}>
+            <label className="form-label" htmlFor="pulse-price-usd" style={{ margin: 0 }}>
+              سعر الضربة (USD)
+            </label>
+            <input
+              id="pulse-price-usd"
+              className="input"
+              dir="ltr"
+              inputMode="decimal"
+              style={{ maxWidth: 160 }}
+              value={pulsePriceUsd}
+              onChange={(e) => {
+                setPulsePriceMsg('')
+                setPulsePriceUsd(e.target.value)
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={pulsePriceSaving}
+              onClick={async () => {
+                setPulsePriceSaving(true)
+                setPulsePriceMsg('')
+                try {
+                  const n = Math.max(0, parseFloat(pulsePriceUsd.replace(/,/g, '')) || 0)
+                  const data = await api<{ pricePerPulseUsd: number }>('/api/laser/pricing-settings', {
+                    method: 'PATCH',
+                    body: JSON.stringify({ pricePerPulseUsd: n }),
+                  })
+                  setPulsePriceUsd(String(data.pricePerPulseUsd ?? n))
+                  setPulsePriceMsg('تم حفظ سعر الضربة.')
+                } catch (e) {
+                  setPulsePriceMsg(e instanceof ApiError ? e.message : 'تعذر الحفظ')
+                } finally {
+                  setPulsePriceSaving(false)
+                }
+              }}
+            >
+              {pulsePriceSaving ? 'جاري الحفظ…' : 'حفظ سعر الضربة'}
+            </button>
+          </div>
+          {pulsePriceMsg ? (
+            <p
+              style={{
+                margin: '0.5rem 0 0',
+                fontSize: '0.84rem',
+                color: pulsePriceMsg.includes('تعذر') ? 'var(--danger)' : 'var(--success)',
+              }}
+            >
+              {pulsePriceMsg}
+            </p>
+          ) : null}
+        </div>
         <div style={{ display: 'grid', gap: '0.6rem', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
           <input className="input" placeholder="اسم المنطقة/العرض" value={newName} onChange={(e) => setNewName(e.target.value)} />
           <select className="select" value={newGroup} onChange={(e) => setNewGroup(e.target.value)}>

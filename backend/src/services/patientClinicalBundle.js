@@ -83,6 +83,7 @@ export async function getClinicalBundleForPatientId(pid) {
       pw: s.pw || '',
       pulse: s.pulse || '',
       shotCount: s.shotCount || '',
+      chargeByPulseCount: s.chargeByPulseCount === true,
       costUsd: s.costUsd ?? 0,
       discountPercent: s.discountPercent ?? 0,
       sessionTypeLabel: s.sessionTypeLabel || '',
