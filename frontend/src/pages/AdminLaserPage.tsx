@@ -43,6 +43,12 @@ type MeterReconciliationRow = {
   matched: boolean | null
 }
 
+/** أرقام لاتينية واضحة لعمود USD (تفادي عرض الصفر كنقطة أو بشكل غير مقروء مع ar-SY) */
+function formatUsdTableAmount(value: number) {
+  const n = Math.round((Number(value) || 0) * 100) / 100
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
 function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterReconciliationRow }) {
   if (!row.complete) {
     return (
@@ -926,10 +932,7 @@ export function AdminLaserPage() {
                               fontVariantNumeric: 'tabular-nums',
                             }}
                           >
-                            {(row.totalUsd || 0).toLocaleString('ar-SY', {
-                              minimumFractionDigits: 0,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatUsdTableAmount(row.totalUsd)}
                           </td>
                         </tr>
                       ))}
@@ -963,10 +966,7 @@ export function AdminLaserPage() {
                             fontVariantNumeric: 'tabular-nums',
                           }}
                         >
-                          {laserReceivedTotals.totalUsd.toLocaleString('ar-SY', {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatUsdTableAmount(laserReceivedTotals.totalUsd)}
                         </td>
                       </tr>
                     </tfoot>
