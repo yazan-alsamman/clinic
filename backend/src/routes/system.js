@@ -26,7 +26,7 @@ systemRouter.post(
   '/start-day',
   authMiddleware,
   loadBusinessDay,
-  requireRoles('super_admin'),
+  requireRoles('super_admin', 'reception'),
   async (req, res) => {
     try {
       const room1MeterStart = Number(req.body?.room1MeterStart)
@@ -47,6 +47,13 @@ systemRouter.post(
         return
       }
       const d = req.businessDay
+      /** الاستقبال يبدأ اليوم فقط؛ إعادة فتح يوم أُغلق سابقاً للمدير فقط */
+      if (d.closedAt && req.user?.role !== 'super_admin') {
+        res.status(403).json({
+          error: 'إعادة تفعيل يوم كان قد أُغلق متاحة لمدير النظام فقط. اطلب من المدير إن لزم.',
+        })
+        return
+      }
       /** إعادة تفعيل اليوم نفسه (مثلاً بعد إغلاق بالخطأ): مسح الإغلاق ثم التفعيل */
       if (d.closedAt) {
         d.closedAt = null

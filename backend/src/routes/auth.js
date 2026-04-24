@@ -33,8 +33,8 @@ authRouter.post('/login', async (req, res) => {
         res.status(401).json({ error: 'بيانات الدخول غير صحيحة' })
         return
       }
-      // During Closed Day, only super admin can access staff app.
-      if (user.role !== 'super_admin') {
+      // يوم غير مفعّل: يسمح بتسجيل الدخول للمدير والاستقبال (لبدء يوم العمل)، بقية الأدوار لا يمكنهم الدخول.
+      if (user.role !== 'super_admin' && user.role !== 'reception') {
         const businessDate = todayBusinessDate()
         const d = await BusinessDay.findOne({ businessDate }).lean()
         if (!d?.active) {

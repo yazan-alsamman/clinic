@@ -26,6 +26,7 @@ export function DayBanner() {
   }, [showStart])
 
   const isReception = role === 'reception'
+  const canStartDay = role === 'super_admin' || role === 'reception'
 
   if (systemLoading && !dayActive) {
     return (
@@ -41,11 +42,11 @@ export function DayBanner() {
         <div className="day-banner locked" role="status">
           <div>
             <strong>اليوم غير مفعّل.</strong>{' '}
-            {role === 'super_admin'
-              ? 'ابدأ يوم العمل مع قراءة عدادات الليزر ليتمكن الفريق من العمل.'
-              : 'لا يمكن تنفيذ العمليات حتى يفعّل المدير يوم العمل من حسابه.'}
+            {canStartDay
+              ? 'ابدأ يوم العمل من هنا (عدادات الليزر + سعر الصرف) ليتمكن الفريق من العمل.'
+              : 'لا يمكن تنفيذ العمليات حتى يُفعَّل اليوم. يبدؤه مدير النظام أو قسم الاستقبال.'}
           </div>
-          {role === 'super_admin' && (
+          {canStartDay && (
             <button
               type="button"
               className="btn btn-primary"
@@ -61,7 +62,7 @@ export function DayBanner() {
             </button>
           )}
         </div>
-        {showStart && role === 'super_admin' && (
+        {showStart && canStartDay && (
           <div
             className="modal-backdrop"
             role="dialog"
