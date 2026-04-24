@@ -3,12 +3,14 @@ import mongoose from 'mongoose'
 import { authMiddleware, requireRoles } from '../middleware/auth.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
+import { BusinessDay } from '../models/BusinessDay.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
 import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
+import { round2 } from '../utils/money.js'
 export const billingRouter = Router()
 
 billingRouter.use(authMiddleware)
@@ -224,7 +226,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const body = req.body ?? {}
-    const amountSypRaw = Number(body.amountSyp)
+    const payCurrencyRaw = String(body.payCurrency || 'SYP').trim().toUpperCase()
+    const payCurrency = payCurrencyRaw === 'USD' ? 'USD' : 'SYP'
 
     const paymentChannel = String(body.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
     let bankName = ''
@@ -243,7 +246,33 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       }
     }
 
-    const receivedSyp = Number.isFinite(amountSypRaw) && amountSypRaw > 0 ? Math.round(amountSypRaw) : 0
+    let receivedSyp = 0
+    let receivedUsd = 0
+    if (payCurrency === 'USD') {
+      const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
+      const rate = Number(bd?.usdSypRate)
+      if (!Number.isFinite(rate) || rate <= 0) {
+        res.status(400).json({
+          error:
+            'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
+        })
+        return
+      }
+      const amountUsdRaw = Number(body.amountUsd)
+      if (!Number.isFinite(amountUsdRaw) || amountUsdRaw <= 0) {
+        res.status(400).json({ error: 'مبلغ الدفع بالدولار غير صالح' })
+        return
+      }
+      receivedUsd = round2(amountUsdRaw)
+      receivedSyp = Math.round(receivedUsd * rate)
+      if (receivedSyp <= 0) {
+        res.status(400).json({ error: 'المبلغ بالدولار صغير جداً بالنسبة لسعر الصرف.' })
+        return
+      }
+    } else {
+      const amountSypRaw = Number(body.amountSyp)
+      receivedSyp = Number.isFinite(amountSypRaw) && amountSypRaw > 0 ? Math.round(amountSypRaw) : 0
+    }
     if (receivedSyp <= 0) {
       res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
       return
@@ -264,6 +293,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       amountSyp: appliedAmountSyp,
       receivedAmountSyp: receivedSyp,
       settlementDeltaSyp,
+      payCurrency,
+      receivedAmountUsd: payCurrency === 'USD' ? receivedUsd : 0,
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
       method,
@@ -326,6 +357,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
           details: {
             error: String(postErr?.message || postErr),
             receivedSyp,
+            receivedUsd,
+            payCurrency,
             appliedAmountSyp,
             settlementDeltaSyp,
           },
@@ -339,6 +372,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
           amountSyp: payment.amountSyp,
           receivedAmountSyp: payment.receivedAmountSyp,
           settlementDeltaSyp: payment.settlementDeltaSyp,
+          payCurrency: payment.payCurrency,
+          receivedAmountUsd: payment.receivedAmountUsd,
           method: payment.method,
         },
         billingItem: { id: String(bi._id), status: bi.status },
@@ -360,6 +395,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         details: {
           paymentId: String(payment._id),
           receivedSyp,
+          receivedUsd,
+          payCurrency,
           appliedAmountSyp,
           settlementDeltaSyp,
           paymentChannel,
@@ -383,6 +420,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         amountSyp: payment.amountSyp,
         receivedAmountSyp: payment.receivedAmountSyp,
         settlementDeltaSyp: payment.settlementDeltaSyp,
+        payCurrency: payment.payCurrency,
+        receivedAmountUsd: payment.receivedAmountUsd,
         method: payment.method,
         paymentChannel: payment.paymentChannel,
         bankName: payment.bankName || undefined,

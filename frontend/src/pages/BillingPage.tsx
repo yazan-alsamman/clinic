@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
+import { normalizeDecimalDigits } from '../utils/normalizeDigits'
+
+function round2(n: number) {
+  return Math.round(Number(n) * 100) / 100
+}
 
 type Item = {
   id: string
@@ -28,7 +33,7 @@ const deptLabel: Record<string, string> = {
 
 export function BillingPage() {
   const { user } = useAuth()
-  const { businessDate } = useClinic()
+  const { businessDate, usdSypRate } = useClinic()
   const allowed = BILLING_ROLES.includes(user?.role as (typeof BILLING_ROLES)[number])
 
   const [date, setDate] = useState('')
@@ -41,6 +46,8 @@ export function BillingPage() {
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
   const [paySyp, setPaySyp] = useState('')
+  const [payUsd, setPayUsd] = useState('')
+  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [payChannel, setPayChannel] = useState<'cash' | 'bank'>('cash')
   const [payBankName, setPayBankName] = useState('')
   const [bankOptions, setBankOptions] = useState<{ id: string; name: string }[]>([])
@@ -108,20 +115,39 @@ export function BillingPage() {
       setErr('اختر البنك ثم أدخل المبلغ المستلم.')
       return
     }
+    if (payCurrency === 'SYP') {
+      const syp = Number(normalizeDecimalDigits(paySyp))
+      if (!Number.isFinite(syp) || syp <= 0) {
+        setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
+        return
+      }
+    } else {
+      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+      if (!Number.isFinite(usd) || usd <= 0) {
+        setErr('أدخل مبلغاً صالحاً بالدولار.')
+        return
+      }
+    }
     setBusyId(id)
     try {
-      const syp = Number(paySyp)
+      const syp = Number(normalizeDecimalDigits(paySyp))
+      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
+          payCurrency,
           paymentChannel: payChannel,
           bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
-          amountSyp: Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
+          amountSyp:
+            payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
+          amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
         }),
       })
       setPayOpen(false)
       setPayItem(null)
       setPaySyp('')
+      setPayUsd('')
+      setPayCurrency('SYP')
       setPayChannel('cash')
       setPayBankName('')
       await load()
@@ -147,15 +173,32 @@ export function BillingPage() {
       setErr('اختر البنك ثم أدخل المبلغ المستلم.')
       return
     }
+    if (payCurrency === 'SYP') {
+      const syp = Number(normalizeDecimalDigits(paySyp))
+      if (!Number.isFinite(syp) || syp <= 0) {
+        setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
+        return
+      }
+    } else {
+      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+      if (!Number.isFinite(usd) || usd <= 0) {
+        setErr('أدخل مبلغاً صالحاً بالدولار.')
+        return
+      }
+    }
     setBusyId(payItem.id)
     try {
-      const syp = Number(paySyp)
+      const syp = Number(normalizeDecimalDigits(paySyp))
+      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
+          payCurrency,
           paymentChannel: payChannel,
           bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
-          amountSyp: Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
+          amountSyp:
+            payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
+          amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
         }),
       })
       await api(
@@ -168,6 +211,8 @@ export function BillingPage() {
       setPayOpen(false)
       setPayItem(null)
       setPaySyp('')
+      setPayUsd('')
+      setPayCurrency('SYP')
       setPayChannel('cash')
       setPayBankName('')
       await load()
@@ -211,6 +256,18 @@ export function BillingPage() {
       </>
     )
   }
+
+  const payPreviewRate =
+    payItem?.businessDate &&
+    businessDate &&
+    payItem.businessDate === businessDate &&
+    usdSypRate != null &&
+    usdSypRate > 0
+      ? usdSypRate
+      : null
+  const dueSypRounded = payItem ? Math.round(Number(payItem.amountDueSyp || 0)) : 0
+  const dueUsdHint =
+    payPreviewRate && dueSypRounded > 0 ? round2(dueSypRounded / payPreviewRate) : null
 
   return (
     <>
@@ -296,6 +353,8 @@ export function BillingPage() {
                       onClick={() => {
                         setPayItem(b)
                         setPaySyp(String(Number(b.amountDueSyp || 0)))
+                        setPayUsd('')
+                        setPayCurrency('SYP')
                         setPayChannel('cash')
                         setPayBankName('')
                         setPayOpen(true)
@@ -322,6 +381,8 @@ export function BillingPage() {
                       onClick={() => {
                         setPayItem(b)
                         setPaySyp(String(Number(b.amountDueSyp || 0)))
+                        setPayUsd('')
+                        setPayCurrency('SYP')
                         setPayChannel('cash')
                         setPayBankName('')
                         setPayOpen(true)
@@ -364,11 +425,60 @@ export function BillingPage() {
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
               المستحق: {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
             </p>
+            {payPreviewRate != null && dueUsdHint != null ? (
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                وفق سعر اليوم ({payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD): المستحق ≈{' '}
+                <strong dir="ltr">{dueUsdHint.toLocaleString('ar-SY', { maximumFractionDigits: 2 })} USD</strong>
+              </p>
+            ) : payItem.businessDate && businessDate && payItem.businessDate !== businessDate ? (
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
+                تاريخ البند يختلف عن يوم العمل الحالي — عند الدفع بالدولار يُستخدم سعر الصرف المحفوظ لذلك التاريخ.
+              </p>
+            ) : payCurrency === 'USD' && !payPreviewRate ? (
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
+                لا يتوفر سعر صرف في الواجهة لهذا البند — سيتحقق الخادم من السعر المحفوظ لتاريخ البند.
+              </p>
+            ) : null}
             {Math.round(Number(payItem.amountDueSyp) || 0) <= 0 ? (
               <p style={{ color: 'var(--danger)', marginTop: '0.35rem', fontSize: '0.88rem' }}>
                 لا يمكن تأكيد الدفع: المستحق صفر. أغلق النافذة وراجع تسعير الجلسة في ملف المريض.
               </p>
             ) : null}
+            <div style={{ marginTop: '0.55rem' }}>
+              <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
+                عملة التحصيل
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="pay-currency"
+                    checked={payCurrency === 'SYP'}
+                    onChange={() => {
+                      setPayCurrency('SYP')
+                      setPaySyp(String(Math.round(Number(payItem.amountDueSyp || 0))))
+                    }}
+                  />
+                  ليرة سورية
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="pay-currency"
+                    checked={payCurrency === 'USD'}
+                    onChange={() => {
+                      setPayCurrency('USD')
+                      if (payPreviewRate && dueSypRounded > 0) {
+                        setPayUsd(String(round2(dueSypRounded / payPreviewRate)))
+                      } else {
+                        setPayUsd('')
+                      }
+                    }}
+                  />
+                  دولار أمريكي (USD)
+                </label>
+              </div>
+            </div>
             <div style={{ marginTop: '0.55rem' }}>
               <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
                 طريقة استلام الدفع
@@ -417,26 +527,57 @@ export function BillingPage() {
                   ))}
                 </select>
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  بعد اختيار البنك، أدخل المبلغ المستلم بالليرة أدناه.
+                  بعد اختيار البنك، أدخل المبلغ المستلم {payCurrency === 'USD' ? 'بالدولار' : 'بالليرة'} أدناه.
                 </p>
               </div>
             ) : null}
             <div style={{ marginTop: '0.5rem' }}>
-              <label className="form-label">المبلغ المستلم (ل.س)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={paySyp}
-                onChange={(e) => setPaySyp(e.target.value)}
-                placeholder="0"
-                style={{ marginTop: '0.25rem', maxWidth: 280 }}
-              />
+              {payCurrency === 'SYP' ? (
+                <>
+                  <label className="form-label">المبلغ المستلم (ل.س)</label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={paySyp}
+                    onChange={(e) => setPaySyp(e.target.value)}
+                    placeholder="0"
+                    style={{ marginTop: '0.25rem', maxWidth: 280 }}
+                  />
+                </>
+              ) : (
+                <>
+                  <label className="form-label">المبلغ المستلم (USD)</label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    value={payUsd}
+                    onChange={(e) => setPayUsd(e.target.value)}
+                    placeholder="0"
+                    style={{ marginTop: '0.25rem', maxWidth: 280 }}
+                  />
+                  {payPreviewRate ? (
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      يُحسب المقابل المحاسبي بالليرة: المبلغ × {payPreviewRate.toLocaleString('ar-SY')} (تقريب لليرة
+                      الصحيحة عند الحفظ).
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
             {(() => {
-              const syp = Number(paySyp)
-              const receivedSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
               const due = Math.round(Number(payItem.amountDueSyp || 0))
-              if (!(receivedSyp > 0) || !(due > 0)) return null
+              if (!(due > 0)) return null
+              let receivedSyp = 0
+              if (payCurrency === 'SYP') {
+                const syp = Number(normalizeDecimalDigits(paySyp))
+                receivedSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
+              } else {
+                const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+                if (!payPreviewRate || !Number.isFinite(usd) || usd <= 0) return null
+                receivedSyp = Math.round(usd * payPreviewRate)
+              }
+              if (!(receivedSyp > 0)) return null
               const delta = receivedSyp - due
               if (delta < 0) {
                 return (
@@ -456,7 +597,7 @@ export function BillingPage() {
               }
               return (
                 <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)' }}>
-                  المبلغ مطابق للمستحق.
+                  المبلغ مطابق للمستحق (محاسبياً بالليرة).
                 </p>
               )
             })()}

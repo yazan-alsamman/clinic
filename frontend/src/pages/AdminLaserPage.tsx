@@ -30,8 +30,9 @@ type FinanceMonthlyExtras = {
 }
 
 type LaserPaymentBreakdown = {
-  cash: { totalSyp: number }
-  banks: { bankName: string; totalSyp: number }[]
+  cash: { totalSyp: number; totalUsd: number }
+  banks: { bankName: string; totalSyp: number; totalUsd: number }[]
+  totals?: { totalSyp: number; totalUsd: number }
 }
 
 type BankEditorRow = { clientKey: string; name: string; active: boolean; sortOrder: string }
@@ -126,6 +127,8 @@ export function AdminLaserPage() {
   const [topSpecialist, setTopSpecialist] = useState<{ name: string; totalAmountSyp: number } | null>(null)
   const [financeMonthlyExtras, setFinanceMonthlyExtras] = useState<FinanceMonthlyExtras | null>(null)
   const [laserPaymentBreakdown, setLaserPaymentBreakdown] = useState<LaserPaymentBreakdown | null>(null)
+  /** سعر الصرف المحفوظ ليوم التقرير (يومي فقط) — ل.س لكل 1 USD */
+  const [laserFinanceUsdSypRate, setLaserFinanceUsdSypRate] = useState<number | null>(null)
   const [bankRows, setBankRows] = useState<BankEditorRow[]>([])
   const [bankLoading, setBankLoading] = useState(false)
   const [bankSaving, setBankSaving] = useState(false)
@@ -163,12 +166,45 @@ export function AdminLaserPage() {
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountSyp) || 0), 0),
     [financeRows],
   )
-  const totalLaserReceivedSyp = useMemo(() => {
+  const laserReceivedTotals = useMemo(() => {
     const b = laserPaymentBreakdown
-    if (!b) return 0
+    if (!b) return { totalSyp: 0, totalUsd: 0 }
+    if (b.totals) {
+      return {
+        totalSyp: Math.round(Number(b.totals.totalSyp) || 0),
+        totalUsd: Number(b.totals.totalUsd) || 0,
+      }
+    }
     let s = Number(b.cash?.totalSyp) || 0
-    for (const row of b.banks || []) s += Number(row.totalSyp) || 0
-    return Math.round(s)
+    let u = Number(b.cash?.totalUsd) || 0
+    for (const row of b.banks || []) {
+      s += Number(row.totalSyp) || 0
+      u += Number(row.totalUsd) || 0
+    }
+    return { totalSyp: Math.round(s), totalUsd: Math.round(u * 100) / 100 }
+  }, [laserPaymentBreakdown])
+
+  const laserBreakdownTableRows = useMemo(() => {
+    const b = laserPaymentBreakdown
+    if (!b) return []
+    type Row = { key: string; label: string; totalSyp: number; totalUsd: number }
+    const rows: Row[] = [
+      {
+        key: 'cash',
+        label: 'كاش',
+        totalSyp: Math.round(Number(b.cash?.totalSyp) || 0),
+        totalUsd: Math.round((Number(b.cash?.totalUsd) || 0) * 100) / 100,
+      },
+    ]
+    for (const bk of b.banks || []) {
+      rows.push({
+        key: `bank:${bk.bankName}`,
+        label: `بنك — ${bk.bankName}`,
+        totalSyp: Math.round(Number(bk.totalSyp) || 0),
+        totalUsd: Math.round((Number(bk.totalUsd) || 0) * 100) / 100,
+      })
+    }
+    return rows
   }, [laserPaymentBreakdown])
   const renderMoneySyp = (sypValue: number) => {
     const n = Math.round(Number(sypValue) || 0)
@@ -248,9 +284,24 @@ export function AdminLaserPage() {
         totalExpensesSyp?: number
         netProfitSyp?: number
         laserPaymentBreakdown?: LaserPaymentBreakdown
+        usdSypRate?: number | null
       }>(`${endpoint}${q}`)
       setFinanceRows(data.rows || [])
-      setLaserPaymentBreakdown(data.laserPaymentBreakdown ?? { cash: { totalSyp: 0 }, banks: [] })
+      if (period === 'daily') {
+        const rr = data.usdSypRate
+        setLaserFinanceUsdSypRate(
+          rr != null && Number.isFinite(Number(rr)) && Number(rr) > 0 ? Number(rr) : null,
+        )
+      } else {
+        setLaserFinanceUsdSypRate(null)
+      }
+      setLaserPaymentBreakdown(
+        data.laserPaymentBreakdown ?? {
+          cash: { totalSyp: 0, totalUsd: 0 },
+          banks: [],
+          totals: { totalSyp: 0, totalUsd: 0 },
+        },
+      )
       setTopSpecialist(
         data.topSpecialist
           ? { name: data.topSpecialist.name, totalAmountSyp: data.topSpecialist.totalAmountSyp }
@@ -277,6 +328,7 @@ export function AdminLaserPage() {
       setTopSpecialist(null)
       setFinanceMonthlyExtras(null)
       setLaserPaymentBreakdown(null)
+      setLaserFinanceUsdSypRate(null)
       setFinanceErr(e instanceof ApiError ? e.message : 'تعذر تحميل التقرير المالي')
     } finally {
       setFinanceLoading(false)
@@ -772,33 +824,171 @@ export function AdminLaserPage() {
                   background: 'var(--surface-solid)',
                 }}
               >
-                <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem' }}>تفصيل التحصيل (ليزر)</h3>
-                <p style={{ margin: '0.25rem 0', fontSize: '0.88rem', lineHeight: 1.55 }}>
-                  <strong>كاش:</strong>{' '}
-                  <span dir="ltr">{(Number(laserPaymentBreakdown.cash.totalSyp) || 0).toLocaleString('ar-SY')} ل.س</span>
-                </p>
-                {laserPaymentBreakdown.banks.length > 0 ? (
-                  <ul style={{ margin: '0.35rem 0 0', paddingInlineStart: '1.1rem', fontSize: '0.88rem' }}>
-                    {laserPaymentBreakdown.banks.map((bk) => (
-                      <li key={bk.bankName} style={{ marginBottom: '0.25rem' }}>
-                        <strong>بنك ({bk.bankName}):</strong>{' '}
-                        <span dir="ltr">{(Number(bk.totalSyp) || 0).toLocaleString('ar-SY')} ل.س</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    لا توجد دفعات مسجّلة كـ «بنك» في هذه الفترة.
+                <h3 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>تفصيل التحصيل (ليزر)</h3>
+                {period === 'daily' && laserFinanceUsdSypRate != null ? (
+                  <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    سعر الصرف المسجّل ليوم التقرير:{' '}
+                    <strong dir="ltr">{laserFinanceUsdSypRate.toLocaleString('ar-SY')}</strong> ل.س لكل{' '}
+                    <strong dir="ltr">1 USD</strong>
                   </p>
-                )}
-                {period === 'daily' ? (
-                  <p style={{ margin: '0.65rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                    <strong>إجمالي المُحصَّل اليوم (كاش + بنوك):</strong> {renderMoneySyp(totalLaserReceivedSyp)} — من بنود
-                    ليزر <strong>مدفوعة</strong> وجلساتها <strong>مكتملة ومنتهية</strong> فقط (لا تشمل بانتظار التحصيل).
-                    المجموع في الجدول = <strong>المستحق على البند</strong>؛ المستلم قد يختلف عند دفع جزئي أو زائد عن
-                    المستحق.
+                ) : period === 'monthly' ? (
+                  <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    تجميع شهري عبر عدة أيام عمل — سعر الصرف يختلف حسب يوم بدء العمل لكل تاريخ.
+                  </p>
+                ) : period === 'daily' ? (
+                  <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    لا يوجد سعر صرف مسجّل ليوم التقرير في النظام (يُحدَّد عند بدء يوم العمل).
                   </p>
                 ) : null}
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table
+                    style={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      fontSize: '0.88rem',
+                      lineHeight: 1.45,
+                      minWidth: 280,
+                    }}
+                  >
+                    <caption style={{ captionSide: 'bottom', paddingTop: '0.5rem', textAlign: 'start' }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        الأرقام حسب عملة التحصيل الفعلية (كاش أو بنك). صف الإجمالي = مجموع الأعمدة.
+                      </span>
+                    </caption>
+                    <thead>
+                      <tr style={{ background: 'var(--bg)', borderBottom: '2px solid var(--border)' }}>
+                        <th
+                          scope="col"
+                          style={{
+                            textAlign: 'start',
+                            padding: '0.55rem 0.65rem',
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          طريقة التحصيل
+                        </th>
+                        <th
+                          scope="col"
+                          style={{
+                            textAlign: 'end',
+                            padding: '0.55rem 0.65rem',
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          المبلغ (ل.س)
+                        </th>
+                        <th
+                          scope="col"
+                          style={{
+                            textAlign: 'end',
+                            padding: '0.55rem 0.65rem',
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          المبلغ (USD)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {laserBreakdownTableRows.map((row) => (
+                        <tr
+                          key={row.key}
+                          style={{ borderBottom: '1px solid var(--border)' }}
+                        >
+                          <th
+                            scope="row"
+                            style={{
+                              textAlign: 'start',
+                              padding: '0.5rem 0.65rem',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {row.label}
+                          </th>
+                          <td
+                            dir="ltr"
+                            style={{
+                              textAlign: 'end',
+                              padding: '0.5rem 0.65rem',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {(row.totalSyp || 0).toLocaleString('ar-SY')}
+                          </td>
+                          <td
+                            dir="ltr"
+                            style={{
+                              textAlign: 'end',
+                              padding: '0.5rem 0.65rem',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {(row.totalUsd || 0).toLocaleString('ar-SY', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr
+                        style={{
+                          background: 'var(--bg)',
+                          borderTop: '2px solid var(--border)',
+                          fontWeight: 800,
+                        }}
+                      >
+                        <th scope="row" style={{ textAlign: 'start', padding: '0.55rem 0.65rem' }}>
+                          الإجمالي (كاش + بنوك)
+                        </th>
+                        <td
+                          dir="ltr"
+                          style={{
+                            textAlign: 'end',
+                            padding: '0.55rem 0.65rem',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {laserReceivedTotals.totalSyp.toLocaleString('ar-SY')}
+                        </td>
+                        <td
+                          dir="ltr"
+                          style={{
+                            textAlign: 'end',
+                            padding: '0.55rem 0.65rem',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {laserReceivedTotals.totalUsd.toLocaleString('ar-SY', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 2,
+                          })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                {laserPaymentBreakdown.banks.length === 0 ? (
+                  <p style={{ margin: '0.5rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    لا توجد دفعات مسجّلة كـ «بنك» في هذه الفترة — يظهر صف الكاش فقط إن وُجد تحصيل كاش.
+                  </p>
+                ) : null}
+                {period === 'daily' ? (
+                  <p style={{ margin: '0.65rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                    من بنود ليزر <strong>مدفوعة</strong> وجلساتها <strong>مكتملة ومنتهية</strong> فقط (لا تشمل بانتظار
+                    التحصيل).                     أرقام الجدول أعلاه = <strong>المستلم</strong> حسب القناة والعملة؛ أما بطاقة «الأعلى مبلغاً»
+                    فتعتمد على <strong>المستحق على البند</strong> وقد يختلف المستلم عند دفع جزئي أو زائد.
+                  </p>
+                ) : (
+                  <p style={{ margin: '0.65rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                    تجميع الشهر من بنود ليزر <strong>مدفوعة</strong> وجلساتها <strong>مكتملة ومنتهية</strong> فقط. المبلغ
+                    المستلم قد يختلف عن المستحق عند دفع جزئي أو زائد.
+                  </p>
+                )}
               </div>
             ) : null}
             {period === 'monthly' && financeMonthlyExtras ? (

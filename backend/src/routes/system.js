@@ -9,10 +9,12 @@ export const systemRouter = Router()
 
 systemRouter.get('/status', loadBusinessDay, (_req, res) => {
   const d = _req.businessDay
+  const rate = d?.usdSypRate
   res.json({
     businessDate: _req.businessDate,
     dayActive: Boolean(d?.active),
     dayClosed: Boolean(d?.closedAt),
+    usdSypRate: rate != null && Number.isFinite(Number(rate)) && Number(rate) > 0 ? Number(rate) : null,
     room1MeterStart: d?.room1MeterStart ?? null,
     room2MeterStart: d?.room2MeterStart ?? null,
     room1MeterEnd: d?.room1MeterEnd ?? null,
@@ -37,6 +39,13 @@ systemRouter.post(
         res.status(400).json({ error: 'قراءة عداد غرفة 2 في بداية اليوم غير صالحة' })
         return
       }
+      const usdSypRate = Number(req.body?.usdSypRate)
+      if (!Number.isFinite(usdSypRate) || usdSypRate <= 0) {
+        res.status(400).json({
+          error: 'أدخل سعر صرف الدولار مقابل الليرة السورية (ليرة لكل 1 USD، رقم أكبر من صفر).',
+        })
+        return
+      }
       const d = req.businessDay
       /** إعادة تفعيل اليوم نفسه (مثلاً بعد إغلاق بالخطأ): مسح الإغلاق ثم التفعيل */
       if (d.closedAt) {
@@ -48,17 +57,19 @@ systemRouter.post(
       d.active = true
       d.room1MeterStart = room1MeterStart
       d.room2MeterStart = room2MeterStart
+      d.usdSypRate = usdSypRate
       await d.save()
       await writeAudit({
         user: req.user,
         action: 'تفعيل يوم العمل والعدادات',
         entityType: 'BusinessDay',
         entityId: d.businessDate,
-        details: { room1MeterStart, room2MeterStart },
+        details: { room1MeterStart, room2MeterStart, usdSypRate },
       })
       res.json({
         businessDate: d.businessDate,
         dayActive: true,
+        usdSypRate: d.usdSypRate,
         room1MeterStart: d.room1MeterStart,
         room2MeterStart: d.room2MeterStart,
       })

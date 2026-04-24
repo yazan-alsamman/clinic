@@ -11,6 +11,8 @@ export function DayBanner() {
   const [showStart, setShowStart] = useState(false)
   const [room1Input, setRoom1Input] = useState('')
   const [room2Input, setRoom2Input] = useState('')
+  /** ليرة سورية لكل 1 دولار */
+  const [usdSypRateInput, setUsdSypRateInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [startErr, setStartErr] = useState('')
 
@@ -19,6 +21,7 @@ export function DayBanner() {
       setStartErr('')
       setRoom1Input('')
       setRoom2Input('')
+      setUsdSypRateInput('')
     }
   }, [showStart])
 
@@ -50,6 +53,7 @@ export function DayBanner() {
                 setStartErr('')
                 setRoom1Input('')
                 setRoom2Input('')
+                setUsdSypRateInput('')
                 setShowStart(true)
               }}
             >
@@ -67,9 +71,27 @@ export function DayBanner() {
             <div className="modal">
               <h3 id="start-day-title">تفعيل يوم العمل</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                أدخل قراءة عداد الجهاز لكل غرفة في <strong>بداية</strong> هذا اليوم (قبل أول جلسة). المبالغ في
-                النظام بالليرة السورية فقط.
+                أدخل قراءة عداد الجهاز لكل غرفة في <strong>بداية</strong> هذا اليوم (قبل أول جلسة)، و<strong>
+                  سعر صرف الدولار مقابل الليرة السورية
+                </strong>{' '}
+                (عدد الليرات لكل <strong>1 USD</strong>) — يُستخدم لاحقاً لعرض المستحق بالدولار عند التحصيل
+                وفي التقارير المالية.
               </p>
+              <label className="form-label" htmlFor="usd-syp-rate" style={{ marginTop: '0.5rem' }}>
+                سعر الصرف: ليرة سورية لكل 1 دولار (USD)
+              </label>
+              <input
+                id="usd-syp-rate"
+                className="input"
+                inputMode="decimal"
+                dir="ltr"
+                value={usdSypRateInput}
+                onChange={(e) => {
+                  setStartErr('')
+                  setUsdSypRateInput(e.target.value)
+                }}
+                placeholder="مثال: 13000"
+              />
               <label className="form-label" htmlFor="meter-r1">
                 عداد الجهاز — غرفة 1 (Room 1)
               </label>
@@ -128,6 +150,7 @@ export function DayBanner() {
                     setStartErr('')
                     const m1 = parseFloat(normalizeDecimalDigits(room1Input))
                     const m2 = parseFloat(normalizeDecimalDigits(room2Input))
+                    const rate = parseFloat(normalizeDecimalDigits(usdSypRateInput))
                     if (!Number.isFinite(m1) || m1 < 0) {
                       setStartErr('أدخل قراءة صالحة لعداد غرفة 1 (رقم ≥ 0).')
                       return
@@ -136,11 +159,16 @@ export function DayBanner() {
                       setStartErr('أدخل قراءة صالحة لعداد غرفة 2 (رقم ≥ 0).')
                       return
                     }
+                    if (!Number.isFinite(rate) || rate <= 0) {
+                      setStartErr('أدخل سعر صرف صالحاً للدولار (ليرة لكل 1 USD، رقم أكبر من صفر).')
+                      return
+                    }
                     setBusy(true)
                     try {
                       await startDay({
                         room1MeterStart: m1,
                         room2MeterStart: m2,
+                        usdSypRate: rate,
                       })
                       setShowStart(false)
                     } catch (e) {

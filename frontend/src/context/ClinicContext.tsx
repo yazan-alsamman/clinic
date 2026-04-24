@@ -14,6 +14,8 @@ interface SystemStatus {
   businessDate: string
   dayActive: boolean
   dayClosed: boolean
+  /** ليرة سورية لكل 1 USD — يُحدَّد عند بدء يوم العمل */
+  usdSypRate: number | null
   room1MeterStart: number | null
   room2MeterStart: number | null
   room1MeterEnd: number | null
@@ -24,9 +26,15 @@ interface ClinicContextValue {
   dayActive: boolean
   businessDate: string | null
   dayClosed: boolean
+  /** سعر الصرف لليوم النشط (ل.س لكل 1 USD) أو null */
+  usdSypRate: number | null
   systemLoading: boolean
   refreshSystem: () => Promise<void>
-  startDay: (input: { room1MeterStart: number; room2MeterStart: number }) => Promise<void>
+  startDay: (input: {
+    room1MeterStart: number
+    room2MeterStart: number
+    usdSypRate: number
+  }) => Promise<void>
   endDay: (input: {
     room1MeterEnd: number
     room2MeterEnd: number
@@ -69,7 +77,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   }, [user, refreshSystem])
 
   const startDay = useCallback(
-    async (input: { room1MeterStart: number; room2MeterStart: number }) => {
+    async (input: { room1MeterStart: number; room2MeterStart: number; usdSypRate: number }) => {
       await api('/api/system/start-day', {
         method: 'POST',
         body: JSON.stringify(input),
@@ -99,6 +107,10 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       dayActive: Boolean(status?.dayActive),
       businessDate: status?.businessDate ?? null,
       dayClosed: Boolean(status?.dayClosed),
+      usdSypRate:
+        status?.usdSypRate != null && Number.isFinite(Number(status.usdSypRate)) && Number(status.usdSypRate) > 0
+          ? Number(status.usdSypRate)
+          : null,
       systemLoading,
       refreshSystem,
       startDay,
@@ -108,6 +120,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       status?.dayActive,
       status?.businessDate,
       status?.dayClosed,
+      status?.usdSypRate,
       systemLoading,
       refreshSystem,
       startDay,

@@ -500,12 +500,17 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
   }
 })
 
-/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) — بالليرة فقط؛ جلسة ليزر completed فقط */
+/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) — ل.س و USD حسب عملة التحصيل؛ جلسة ليزر completed فقط */
 async function buildLaserPaymentBreakdown(businessDateFilter) {
+  const empty = () => ({
+    cash: { totalSyp: 0, totalUsd: 0 },
+    banks: [],
+    totals: { totalSyp: 0, totalUsd: 0 },
+  })
   const itemFilter = { department: 'laser', status: 'paid', businessDate: businessDateFilter }
   const itemsRaw = await BillingItem.find(itemFilter).select('_id businessDate clinicalSessionId').lean()
   if (!itemsRaw.length) {
-    return { cash: { totalSyp: 0 }, banks: [] }
+    return empty()
   }
   const cids = [...new Set(itemsRaw.map((i) => i.clinicalSessionId).filter(Boolean))]
   const completedLasers = await LaserSession.find({
@@ -517,30 +522,47 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
   const completedSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
   const items = itemsRaw.filter((i) => completedSet.has(String(i.clinicalSessionId || '')))
   if (!items.length) {
-    return { cash: { totalSyp: 0 }, banks: [] }
+    return empty()
   }
   const itemByPayment = new Map(items.map((i) => [String(i._id), i]))
   const payments = await BillingPayment.find({ billingItemId: { $in: items.map((i) => i._id) } }).lean()
 
   let cashSyp = 0
+  let cashUsd = 0
   const bankMap = new Map()
 
   for (const p of payments) {
     if (!itemByPayment.get(String(p.billingItemId))) continue
+    const payCur = String(p.payCurrency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
     const sypPart = Math.round(Number(p.receivedAmountSyp) || 0)
+    const usdPart = round2(Number(p.receivedAmountUsd) || 0)
     const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
     if (channel === 'cash') {
-      cashSyp += sypPart
+      if (payCur === 'USD') {
+        cashUsd += usdPart
+      } else {
+        cashSyp += sypPart
+      }
     } else {
       const label = String(p.bankName || '').trim() || 'بنك'
-      const cur = bankMap.get(label) || { bankName: label, totalSyp: 0 }
-      cur.totalSyp += sypPart
+      const cur = bankMap.get(label) || { bankName: label, totalSyp: 0, totalUsd: 0 }
+      if (payCur === 'USD') {
+        cur.totalUsd = round2(cur.totalUsd + usdPart)
+      } else {
+        cur.totalSyp += sypPart
+      }
       bankMap.set(label, cur)
     }
   }
 
   const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
-  return { cash: { totalSyp: cashSyp }, banks }
+  const totalsSyp = cashSyp + banks.reduce((s, b) => s + (Math.round(Number(b.totalSyp)) || 0), 0)
+  const totalsUsd = round2(cashUsd + banks.reduce((s, b) => s + (Number(b.totalUsd) || 0), 0))
+  return {
+    cash: { totalSyp: cashSyp, totalUsd: round2(cashUsd) },
+    banks,
+    totals: { totalSyp: totalsSyp, totalUsd: totalsUsd },
+  }
 }
 
 /**
@@ -610,10 +632,15 @@ laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) 
     const { rows } = await buildLaserFinanceRowsBySpecialist(date)
     const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
     const laserPaymentBreakdown = await buildLaserPaymentBreakdown(date)
+    const bdRate = await BusinessDay.findOne({ businessDate: date }).select('usdSypRate').lean()
+    const r = bdRate?.usdSypRate
+    const usdSypRate =
+      r != null && Number.isFinite(Number(r)) && Number(r) > 0 ? Number(r) : null
     res.json({
       date,
       rows,
       topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountSyp: top.totalAmountSyp } : null,
+      usdSypRate,
       laserPaymentBreakdown,
     })
   } catch (e) {
