@@ -100,6 +100,10 @@ export function BillingPage() {
 
   async function completePay(id: string) {
     setErr('')
+    if (payItem && Math.round(Number(payItem.amountDueSyp) || 0) <= 0) {
+      setErr('لا يوجد مبلغ مستحق على هذا البند — راجع التسعير في ملف المريض.')
+      return
+    }
     if (payChannel === 'bank' && !payBankName.trim()) {
       setErr('اختر البنك ثم أدخل المبلغ المستلم.')
       return
@@ -310,7 +314,7 @@ export function BillingPage() {
                       {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
                     </button>
                   ) : null}
-                  {!b.isPackagePrepaid ? (
+                  {!b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) > 0 ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -325,6 +329,10 @@ export function BillingPage() {
                     >
                       {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                     </button>
+                  ) : !b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) <= 0 ? (
+                    <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
+                      مستحق ٠ — راجع الملف
+                    </span>
                   ) : null}
                 </div>
                 {b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) > 0 ? (
@@ -356,6 +364,11 @@ export function BillingPage() {
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
               المستحق: {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
             </p>
+            {Math.round(Number(payItem.amountDueSyp) || 0) <= 0 ? (
+              <p style={{ color: 'var(--danger)', marginTop: '0.35rem', fontSize: '0.88rem' }}>
+                لا يمكن تأكيد الدفع: المستحق صفر. أغلق النافذة وراجع تسعير الجلسة في ملف المريض.
+              </p>
+            ) : null}
             <div style={{ marginTop: '0.55rem' }}>
               <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
                 طريقة استلام الدفع
@@ -454,7 +467,7 @@ export function BillingPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={busyId === payItem.id}
+                disabled={busyId === payItem.id || Math.round(Number(payItem.amountDueSyp) || 0) <= 0}
                 onClick={() =>
                   void (payItem.isPackagePrepaid && (Number(payItem.amountDueSyp) || 0) > 0
                     ? completePackageAddonPayAndConsume()

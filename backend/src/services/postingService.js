@@ -249,6 +249,11 @@ export async function postBillingPayment(paymentId, postedBy) {
   const pay = await BillingPayment.findById(paymentId).lean()
   if (!pay) throw new Error('دفعة غير موجودة')
 
+  const appliedSyp = round2(Number(pay.amountSyp) || 0)
+  if (!(appliedSyp > 0)) {
+    return { skipped: true, reason: 'zero_applied_amount' }
+  }
+
   const bi = await BillingItem.findById(pay.billingItemId).lean()
   if (!bi || bi.status !== 'paid') throw new Error('بند الفوترة غير مؤكد كمسدد')
 
@@ -281,7 +286,7 @@ export async function postBillingPayment(paymentId, postedBy) {
     userId: String(providerId),
   })
   const input = {
-    gross_syp: round2(Number(pay.amountSyp) || 0),
+    gross_syp: appliedSyp,
     discount_percent: 0,
     material_cost_syp: material,
     doctor_share_percent: sharePct,

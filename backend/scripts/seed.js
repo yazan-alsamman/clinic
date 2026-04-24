@@ -51,8 +51,13 @@ const FRESH = process.argv.includes('--fresh')
 async function seedLaserSessionWithBilling(p) {
   const { patientId, operatorUserId, businessDate, treatmentNumber, row } = p
   const discount = Math.min(100, Math.max(0, Number(row.discountPercent) || 0))
-  const gross = Number(row.costSyp) || 0
-  const amountDueSyp = Math.round(gross * (1 - discount / 100))
+  const grossInput = Number(row.costSyp) || 0
+  const feeOverride = Number(row.sessionFeeSyp)
+  const amountDueSyp =
+    Number.isFinite(feeOverride) && feeOverride > 0
+      ? Math.round(feeOverride)
+      : Math.round(grossInput * (1 - discount / 100))
+  const gross = Math.max(grossInput, amountDueSyp)
   const areaPart = [...(row.areaIds || []), ...(row.manualAreaLabels || [])].filter(Boolean).join('، ') || 'تجريبي'
   const procedureDescription = `ليزر ${row.laserType} — ${areaPart}`.slice(0, 500)
 

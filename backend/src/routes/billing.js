@@ -9,8 +9,6 @@ import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
-import { round2 } from '../utils/money.js'
-
 export const billingRouter = Router()
 
 billingRouter.use(authMiddleware)
@@ -215,14 +213,14 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       res.status(400).json({ error: 'البند ليس في انتظار الدفع' })
       return
     }
-    if (bi.isPackagePrepaid === true) {
-      const duePre = round2(Number(bi.amountDueSyp) || 0)
-      if (duePre <= 0) {
-        res.status(400).json({
-          error: 'هذه الجلسة مدفوعة مسبقاً ضمن باكج — استخدم «إنقاص جلسة» عند عدم وجود مبلغ إضافي خارج الباكج.',
-        })
-        return
-      }
+    const amountDueSyp = Math.round(Number(bi.amountDueSyp) || 0)
+    if (amountDueSyp <= 0) {
+      res.status(400).json({
+        error: bi.isPackagePrepaid
+          ? 'هذه الجلسة ضمن باكج ولا يوجد مبلغ إضافي مستحق. استخدم «إنقاص جلسة» من صفحة التحصيل.'
+          : 'لا يوجد مبلغ مستحق على هذا البند. افتح ملف المريض وتأكد من تسعير الجلسة (ليزر / استقبال) بالليرة ثم أعد إنشاء البند إن لزم.',
+      })
+      return
     }
 
     const body = req.body ?? {}
@@ -252,7 +250,6 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
-    const amountDueSyp = Math.round(Number(bi.amountDueSyp) || 0)
     const appliedAmountSyp = Math.min(receivedSyp, amountDueSyp)
     const settlementDeltaSyp = receivedSyp - amountDueSyp
 
@@ -320,18 +317,22 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       posting = await postBillingPayment(payment._id, req.user._id)
     } catch (postErr) {
       console.error('postBillingPayment:', postErr)
-      await writeAudit({
-        user: req.user,
-        action: 'دفع مؤكد — فشل الترحيل المحاسبي',
-        entityType: 'BillingPayment',
-        entityId: payment._id,
-        details: {
-          error: String(postErr?.message || postErr),
-          receivedSyp,
-          appliedAmountSyp,
-          settlementDeltaSyp,
-        },
-      })
+      try {
+        await writeAudit({
+          user: req.user,
+          action: 'دفع مؤكد — فشل الترحيل المحاسبي',
+          entityType: 'BillingPayment',
+          entityId: payment._id,
+          details: {
+            error: String(postErr?.message || postErr),
+            receivedSyp,
+            appliedAmountSyp,
+            settlementDeltaSyp,
+          },
+        })
+      } catch (auditErr) {
+        console.error('writeAudit (posting failure):', auditErr)
+      }
       res.status(201).json({
         payment: {
           id: String(payment._id),
@@ -350,21 +351,25 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       return
     }
 
-    await writeAudit({
-      user: req.user,
-      action: 'تأكيد دفع بند فوترة',
-      entityType: 'BillingItem',
-      entityId: bi._id,
-      details: {
-        paymentId: String(payment._id),
-        receivedSyp,
-        appliedAmountSyp,
-        settlementDeltaSyp,
-        paymentChannel: payment.paymentChannel,
-        bankName: payment.bankName || undefined,
-        accountingSkipped: posting.skipped,
-      },
-    })
+    try {
+      await writeAudit({
+        user: req.user,
+        action: 'تأكيد دفع بند فوترة',
+        entityType: 'BillingItem',
+        entityId: bi._id,
+        details: {
+          paymentId: String(payment._id),
+          receivedSyp,
+          appliedAmountSyp,
+          settlementDeltaSyp,
+          paymentChannel,
+          bankName: paymentChannel === 'bank' ? bankName : undefined,
+          accountingSkipped: posting.skipped,
+        },
+      })
+    } catch (auditErr) {
+      console.error('writeAudit (payment success):', auditErr)
+    }
 
     const financialDocument = posting.document
       ? { id: String(posting.document._id), idempotencyKey: posting.document.idempotencyKey }

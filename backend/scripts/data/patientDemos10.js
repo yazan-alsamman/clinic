@@ -264,6 +264,7 @@ export const DEMO_PATIENTS_10 = [
 /**
  * جلسات ليزر تجريبية — fileNumber يربط بالمريض.
  * withBilling: إنشاء ClinicalSession + BillingItem مرتبطة (مثل مسار ملف المريض).
+ * sessionFeeSyp (اختياري): يُثبّت المبلغ المستحق على بند التحصيل صراحةً (يُفضّل لبذور التحصيل).
  */
 export const DEMO_LASER_SESSIONS_10 = [
   {
@@ -325,9 +326,10 @@ export const DEMO_LASER_SESSIONS_10 = [
     areaIds: [],
     manualAreaLabels: ['بطن', 'خط البطن'],
     status: 'completed_pending_collection',
-    costSyp: 1425000,
+    costSyp: 1850000,
+    sessionFeeSyp: 1850000,
     discountPercent: 0,
-    chargeByPulseCount: true,
+    chargeByPulseCount: false,
     withBilling: true,
   },
   {
@@ -340,9 +342,10 @@ export const DEMO_LASER_SESSIONS_10 = [
     notes: '',
     areaIds: ['legs-full'],
     manualAreaLabels: [],
-    status: 'completed',
-    costSyp: 3600000,
-    discountPercent: 5,
+    status: 'completed_pending_collection',
+    costSyp: 4200000,
+    sessionFeeSyp: 4200000,
+    discountPercent: 0,
     chargeByPulseCount: false,
     withBilling: true,
   },
@@ -357,7 +360,8 @@ export const DEMO_LASER_SESSIONS_10 = [
     areaIds: ['f-chin', 'f-nose'],
     manualAreaLabels: [],
     status: 'completed_pending_collection',
-    costSyp: 1800000,
+    costSyp: 2250000,
+    sessionFeeSyp: 2250000,
     discountPercent: 0,
     chargeByPulseCount: false,
     withBilling: true,
