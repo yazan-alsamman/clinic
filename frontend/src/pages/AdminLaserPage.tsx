@@ -850,12 +850,18 @@ export function AdminLaserPage() {
                   <table
                     style={{
                       width: '100%',
+                      tableLayout: 'fixed',
                       borderCollapse: 'collapse',
                       fontSize: '0.88rem',
                       lineHeight: 1.45,
                       minWidth: 280,
                     }}
                   >
+                    <colgroup>
+                      <col style={{ width: '42%' }} />
+                      <col style={{ width: '29%' }} />
+                      <col style={{ width: '29%' }} />
+                    </colgroup>
                     <caption style={{ captionSide: 'bottom', paddingTop: '0.5rem', textAlign: 'start' }}>
                       <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                         الأرقام حسب عملة التحصيل الفعلية (كاش أو بنك). صف الإجمالي = مجموع الأعمدة.
@@ -867,6 +873,7 @@ export function AdminLaserPage() {
                           scope="col"
                           style={{
                             textAlign: 'start',
+                            verticalAlign: 'bottom',
                             padding: '0.55rem 0.65rem',
                             fontWeight: 700,
                             whiteSpace: 'nowrap',
@@ -876,8 +883,10 @@ export function AdminLaserPage() {
                         </th>
                         <th
                           scope="col"
+                          dir="ltr"
                           style={{
-                            textAlign: 'end',
+                            textAlign: 'right',
+                            verticalAlign: 'bottom',
                             padding: '0.55rem 0.65rem',
                             fontWeight: 700,
                             whiteSpace: 'nowrap',
@@ -887,8 +896,10 @@ export function AdminLaserPage() {
                         </th>
                         <th
                           scope="col"
+                          dir="ltr"
                           style={{
-                            textAlign: 'end',
+                            textAlign: 'right',
+                            verticalAlign: 'bottom',
                             padding: '0.55rem 0.65rem',
                             fontWeight: 700,
                             whiteSpace: 'nowrap',
@@ -908,6 +919,7 @@ export function AdminLaserPage() {
                             scope="row"
                             style={{
                               textAlign: 'start',
+                              verticalAlign: 'middle',
                               padding: '0.5rem 0.65rem',
                               fontWeight: 600,
                             }}
@@ -917,7 +929,8 @@ export function AdminLaserPage() {
                           <td
                             dir="ltr"
                             style={{
-                              textAlign: 'end',
+                              textAlign: 'right',
+                              verticalAlign: 'middle',
                               padding: '0.5rem 0.65rem',
                               fontVariantNumeric: 'tabular-nums',
                             }}
@@ -927,7 +940,8 @@ export function AdminLaserPage() {
                           <td
                             dir="ltr"
                             style={{
-                              textAlign: 'end',
+                              textAlign: 'right',
+                              verticalAlign: 'middle',
                               padding: '0.5rem 0.65rem',
                               fontVariantNumeric: 'tabular-nums',
                             }}
@@ -945,13 +959,17 @@ export function AdminLaserPage() {
                           fontWeight: 800,
                         }}
                       >
-                        <th scope="row" style={{ textAlign: 'start', padding: '0.55rem 0.65rem' }}>
+                        <th
+                          scope="row"
+                          style={{ textAlign: 'start', verticalAlign: 'middle', padding: '0.55rem 0.65rem' }}
+                        >
                           الإجمالي (كاش + بنوك)
                         </th>
                         <td
                           dir="ltr"
                           style={{
-                            textAlign: 'end',
+                            textAlign: 'right',
+                            verticalAlign: 'middle',
                             padding: '0.55rem 0.65rem',
                             fontVariantNumeric: 'tabular-nums',
                           }}
@@ -961,7 +979,8 @@ export function AdminLaserPage() {
                         <td
                           dir="ltr"
                           style={{
-                            textAlign: 'end',
+                            textAlign: 'right',
+                            verticalAlign: 'middle',
                             padding: '0.55rem 0.65rem',
                             fontVariantNumeric: 'tabular-nums',
                           }}
@@ -980,7 +999,7 @@ export function AdminLaserPage() {
                 {period === 'daily' ? (
                   <p style={{ margin: '0.65rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
                     من بنود ليزر <strong>مدفوعة</strong> وجلساتها <strong>مكتملة ومنتهية</strong> فقط (لا تشمل بانتظار
-                    التحصيل).                     أرقام الجدول أعلاه = <strong>المستلم</strong> حسب القناة والعملة؛ أما بطاقة «الأعلى مبلغاً»
+                    التحصيل). أرقام الجدول أعلاه = <strong>المستلم</strong> حسب القناة والعملة؛ أما بطاقة «الأعلى مبلغاً»
                     فتعتمد على <strong>المستحق على البند</strong> وقد يختلف المستلم عند دفع جزئي أو زائد.
                   </p>
                 ) : (

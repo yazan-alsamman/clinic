@@ -3,10 +3,7 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
-
-function round2(n: number) {
-  return Math.round(Number(n) * 100) / 100
-}
+import { usdAmountStringMatchingDueSyp } from '../utils/usdExactDue'
 
 type Item = {
   id: string
@@ -122,7 +119,7 @@ export function BillingPage() {
         return
       }
     } else {
-      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+      const usd = parseFloat(normalizeDecimalDigits(payUsd))
       if (!Number.isFinite(usd) || usd <= 0) {
         setErr('أدخل مبلغاً صالحاً بالدولار.')
         return
@@ -131,7 +128,7 @@ export function BillingPage() {
     setBusyId(id)
     try {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+      const usd = parseFloat(normalizeDecimalDigits(payUsd))
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -180,7 +177,7 @@ export function BillingPage() {
         return
       }
     } else {
-      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+      const usd = parseFloat(normalizeDecimalDigits(payUsd))
       if (!Number.isFinite(usd) || usd <= 0) {
         setErr('أدخل مبلغاً صالحاً بالدولار.')
         return
@@ -189,7 +186,7 @@ export function BillingPage() {
     setBusyId(payItem.id)
     try {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+      const usd = parseFloat(normalizeDecimalDigits(payUsd))
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -266,8 +263,10 @@ export function BillingPage() {
       ? usdSypRate
       : null
   const dueSypRounded = payItem ? Math.round(Number(payItem.amountDueSyp || 0)) : 0
-  const dueUsdHint =
-    payPreviewRate && dueSypRounded > 0 ? round2(dueSypRounded / payPreviewRate) : null
+  const dueUsdExactStr =
+    payPreviewRate && dueSypRounded > 0
+      ? usdAmountStringMatchingDueSyp(dueSypRounded, payPreviewRate)
+      : null
 
   return (
     <>
@@ -425,10 +424,11 @@ export function BillingPage() {
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
               المستحق: {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
             </p>
-            {payPreviewRate != null && dueUsdHint != null ? (
-              <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                وفق سعر اليوم ({payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD): المستحق ≈{' '}
-                <strong dir="ltr">{dueUsdHint.toLocaleString('ar-SY', { maximumFractionDigits: 2 })} USD</strong>
+            {payPreviewRate != null && dueUsdExactStr ? (
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                وفق سعر اليوم ({payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD): مبلغ USD المضبوط لمطابقة
+                المستحق بالليرة: <strong dir="ltr">{dueUsdExactStr}</strong> USD (قد يتجاوز منزلتين عشريتين؛ استخدم
+                «تعبئة المبلغ» أو انسخ القيمة كما هي).
               </p>
             ) : payItem.businessDate && businessDate && payItem.businessDate !== businessDate ? (
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
@@ -469,7 +469,7 @@ export function BillingPage() {
                     onChange={() => {
                       setPayCurrency('USD')
                       if (payPreviewRate && dueSypRounded > 0) {
-                        setPayUsd(String(round2(dueSypRounded / payPreviewRate)))
+                        setPayUsd(usdAmountStringMatchingDueSyp(dueSypRounded, payPreviewRate))
                       } else {
                         setPayUsd('')
                       }
@@ -551,15 +551,29 @@ export function BillingPage() {
                     className="input"
                     inputMode="decimal"
                     dir="ltr"
+                    step="any"
                     value={payUsd}
                     onChange={(e) => setPayUsd(e.target.value)}
                     placeholder="0"
-                    style={{ marginTop: '0.25rem', maxWidth: 280 }}
+                    style={{ marginTop: '0.25rem', maxWidth: 320 }}
                   />
+                  {payPreviewRate && dueSypRounded > 0 ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ marginTop: '0.4rem', fontSize: '0.85rem' }}
+                      onClick={() =>
+                        setPayUsd(usdAmountStringMatchingDueSyp(dueSypRounded, payPreviewRate))
+                      }
+                    >
+                      تعبئة المبلغ بالدولار المطابق للمستحق بالليرة
+                    </button>
+                  ) : null}
                   {payPreviewRate ? (
                     <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      يُحسب المقابل المحاسبي بالليرة: المبلغ × {payPreviewRate.toLocaleString('ar-SY')} (تقريب لليرة
-                      الصحيحة عند الحفظ).
+                      يُحسب المقابل بالليرة بتقريب أقرب ليرة صحيحة: (المبلغ بالدولار ×{' '}
+                      {payPreviewRate.toLocaleString('ar-SY')}). لا يُقصّر مبلغ الدولار إلى منزلتين عشريتين قبل
+                      الضرب حتى يطابق المستحق بالليرة عند اختيار المبلغ المضبوط أعلاه.
                     </p>
                   ) : null}
                 </>
@@ -573,7 +587,7 @@ export function BillingPage() {
                 const syp = Number(normalizeDecimalDigits(paySyp))
                 receivedSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
               } else {
-                const usd = round2(parseFloat(normalizeDecimalDigits(payUsd)))
+                const usd = parseFloat(normalizeDecimalDigits(payUsd))
                 if (!payPreviewRate || !Number.isFinite(usd) || usd <= 0) return null
                 receivedSyp = Math.round(usd * payPreviewRate)
               }

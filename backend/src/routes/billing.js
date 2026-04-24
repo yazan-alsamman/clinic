@@ -10,7 +10,7 @@ import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
-import { round2 } from '../utils/money.js'
+import { round6 } from '../utils/money.js'
 export const billingRouter = Router()
 
 billingRouter.use(authMiddleware)
@@ -263,8 +263,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         res.status(400).json({ error: 'مبلغ الدفع بالدولار غير صالح' })
         return
       }
-      receivedUsd = round2(amountUsdRaw)
-      receivedSyp = Math.round(receivedUsd * rate)
+      /** لا نستخدم round2 قبل الضرب — وإلا يضيعت مطابقة المستحق (مثال 110000÷15000) */
+      receivedSyp = Math.round(amountUsdRaw * rate)
+      receivedUsd = round6(amountUsdRaw)
       if (receivedSyp <= 0) {
         res.status(400).json({ error: 'المبلغ بالدولار صغير جداً بالنسبة لسعر الصرف.' })
         return
