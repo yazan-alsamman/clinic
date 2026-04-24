@@ -163,6 +163,13 @@ export function AdminLaserPage() {
     () => financeRows.reduce((sum, r) => sum + (Number(r.totalAmountSyp) || 0), 0),
     [financeRows],
   )
+  const totalLaserReceivedSyp = useMemo(() => {
+    const b = laserPaymentBreakdown
+    if (!b) return 0
+    let s = Number(b.cash?.totalSyp) || 0
+    for (const row of b.banks || []) s += Number(row.totalSyp) || 0
+    return Math.round(s)
+  }, [laserPaymentBreakdown])
   const renderMoneySyp = (sypValue: number) => {
     const n = Math.round(Number(sypValue) || 0)
     return (
@@ -784,6 +791,29 @@ export function AdminLaserPage() {
                     لا توجد دفعات مسجّلة كـ «بنك» في هذه الفترة.
                   </p>
                 )}
+                {period === 'daily' ? (
+                  <>
+                    <p style={{ margin: '0.65rem 0 0.35rem', fontSize: '0.88rem', fontWeight: 700 }}>
+                      إجمالي المُحصَّل اليوم (كاش + بنوك): {renderMoneySyp(totalLaserReceivedSyp)}
+                    </p>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '0.8rem',
+                        color: 'var(--text-muted)',
+                        lineHeight: 1.55,
+                        maxWidth: 640,
+                      }}
+                    >
+                      <strong>لماذا قد يختلف عن «مجموع أسعار الجلسات»؟</strong> المجموع أسفل الجدول هو مجموع{' '}
+                      <strong>رسوم الجلسات المسجّلة</strong> في سجل كل أخصائي لجلسات ليزر <strong>منتهية تنفيذياً</strong> في
+                      هذا التاريخ — ويشمل الجلسات التي <strong>لم يُؤكَّد تحصيلها بعد</strong>. أما كاش/بنك فيحسب من
+                      بنود ليزر أصبحت <strong>مدفوعة</strong> فعلاً في التحصيل، أي المبلغ <strong>الذي دخل</strong> ذلك
+                      اليوم. يتطابق الرقمان تقريباً فقط عندما يُحصَّل كل المستحق لكل الجلسات المنتهية في نفس اليوم
+                      وبنفس المبالغ المسجّلة.
+                    </p>
+                  </>
+                ) : null}
               </div>
             ) : null}
             {period === 'monthly' && financeMonthlyExtras ? (
@@ -923,7 +953,7 @@ export function AdminLaserPage() {
               </div>
             ) : (
               <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                مجموع أسعار جلسات جميع الأخصائيين:{' '}
+                مجموع رسوم الجلسات المنفّذة (كل الأخصائيين — حسب السجل، قد يشمل غير المحصّل):{' '}
                 <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(totalFinanceSyp)}</strong>
               </div>
             )}
@@ -932,7 +962,7 @@ export function AdminLaserPage() {
                 <thead>
                   <tr>
                     <th>الأخصائي</th>
-                    <th>مجموع أسعار الجلسات</th>
+                    <th>مجموع رسوم الجلسات (السجل)</th>
                     <th>عدد الجلسات المنتهية</th>
                     <th>الحالة</th>
                   </tr>
