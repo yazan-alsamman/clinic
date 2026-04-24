@@ -31,6 +31,13 @@ type FinanceMonthlyExtras = {
   expenseConversionWarning: string | null
 }
 
+type LaserPaymentBreakdown = {
+  cash: { totalUsd: number; totalSyp: number }
+  banks: { bankName: string; totalUsd: number; totalSyp: number }[]
+}
+
+type BankEditorRow = { clientKey: string; name: string; active: boolean; sortOrder: string }
+
 type MeterReconciliationRow = {
   complete: boolean
   delta: number | null
@@ -120,6 +127,11 @@ export function AdminLaserPage() {
   const [financeErr, setFinanceErr] = useState('')
   const [topSpecialist, setTopSpecialist] = useState<{ name: string; totalAmountUsd: number } | null>(null)
   const [financeMonthlyExtras, setFinanceMonthlyExtras] = useState<FinanceMonthlyExtras | null>(null)
+  const [laserPaymentBreakdown, setLaserPaymentBreakdown] = useState<LaserPaymentBreakdown | null>(null)
+  const [bankRows, setBankRows] = useState<BankEditorRow[]>([])
+  const [bankLoading, setBankLoading] = useState(false)
+  const [bankSaving, setBankSaving] = useState(false)
+  const [bankErr, setBankErr] = useState('')
   const [expenseRows, setExpenseRows] = useState<LocalExpenseRow[]>([])
   const [expenseLoading, setExpenseLoading] = useState(false)
   const [expenseErr, setExpenseErr] = useState('')
@@ -247,8 +259,12 @@ export function AdminLaserPage() {
         netProfitUsd?: number
         monthAvgSypPerUsd?: number | null
         expenseConversionWarning?: string | null
+        laserPaymentBreakdown?: LaserPaymentBreakdown
       }>(`${endpoint}${q}`)
       setFinanceRows(data.rows || [])
+      setLaserPaymentBreakdown(
+        data.laserPaymentBreakdown ?? { cash: { totalUsd: 0, totalSyp: 0 }, banks: [] },
+      )
       setTopSpecialist(data.topSpecialist ? { name: data.topSpecialist.name, totalAmountUsd: data.topSpecialist.totalAmountUsd } : null)
       if (period === 'monthly' && data.totalSessionRevenueUsd != null && data.totalExpensesUsd != null && data.netProfitUsd != null) {
         setFinanceMonthlyExtras({
@@ -270,11 +286,70 @@ export function AdminLaserPage() {
       setFinanceRows([])
       setTopSpecialist(null)
       setFinanceMonthlyExtras(null)
+      setLaserPaymentBreakdown(null)
       setFinanceErr(e instanceof ApiError ? e.message : 'تعذر تحميل التقرير المالي')
     } finally {
       setFinanceLoading(false)
     }
   }, [allowed, date, month, period])
+
+  const loadBankSettings = useCallback(async () => {
+    if (!allowed) return
+    setBankErr('')
+    setBankLoading(true)
+    try {
+      const data = await api<{
+        banksAll: { id: string; name: string; active: boolean; sortOrder: number }[]
+      }>('/api/billing/payment-bank-options?admin=1')
+      const rows = (data.banksAll || []).map((b, i) => ({
+        clientKey: b.id,
+        name: b.name,
+        active: b.active !== false,
+        sortOrder: String(Number.isFinite(Number(b.sortOrder)) ? b.sortOrder : i),
+      }))
+      setBankRows(
+        rows.length > 0
+          ? rows
+          : [{ clientKey: crypto.randomUUID(), name: '', active: true, sortOrder: '0' }],
+      )
+    } catch (e) {
+      setBankErr(e instanceof ApiError ? e.message : 'تعذر تحميل قائمة البنوك')
+    } finally {
+      setBankLoading(false)
+    }
+  }, [allowed])
+
+  const saveBankSettings = useCallback(async () => {
+    if (!allowed) return
+    setBankErr('')
+    setBankSaving(true)
+    try {
+      const banks = bankRows
+        .map((r, i) => ({
+          name: r.name.trim(),
+          active: r.active,
+          sortOrder: Math.max(0, parseInt(r.sortOrder, 10) || i),
+        }))
+        .filter((b) => b.name.length > 0)
+      if (banks.length === 0) {
+        setBankErr('أضف اسماً لبنك واحد على الأقل.')
+        return
+      }
+      await api('/api/billing/payment-bank-options', {
+        method: 'PUT',
+        body: JSON.stringify({ banks }),
+      })
+      await loadBankSettings()
+    } catch (e) {
+      setBankErr(e instanceof ApiError ? e.message : 'تعذر حفظ البنوك')
+    } finally {
+      setBankSaving(false)
+    }
+  }, [allowed, bankRows, loadBankSettings])
+
+  useEffect(() => {
+    if (tab === 'financial' && allowed) void loadBankSettings()
+  }, [tab, allowed, loadBankSettings])
 
   const loadExpenses = useCallback(async () => {
     if (!allowed || !expenseMonth) return
@@ -762,6 +837,43 @@ export function AdminLaserPage() {
             <h2 className="card-title" style={{ marginBottom: '0.55rem' }}>
               مالية جلسات الليزر — {period === 'daily' ? `تاريخ ${date || '—'}` : `شهر ${month || '—'}`}
             </h2>
+            {laserPaymentBreakdown && !financeLoading ? (
+              <div
+                style={{
+                  marginBottom: '1rem',
+                  padding: '0.75rem 0.9rem',
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-solid)',
+                }}
+              >
+                <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem' }}>تفصيل التحصيل (ليزر)</h3>
+                <p style={{ margin: '0.25rem 0', fontSize: '0.88rem', lineHeight: 1.55 }}>
+                  <strong>كاش:</strong>{' '}
+                  <span dir="ltr">{Number(laserPaymentBreakdown.cash.totalUsd || 0).toFixed(2)} USD</span>
+                  {' — '}
+                  <span dir="ltr">
+                    {(Number(laserPaymentBreakdown.cash.totalSyp) || 0).toLocaleString('en-US')} ل.س
+                  </span>
+                </p>
+                {laserPaymentBreakdown.banks.length > 0 ? (
+                  <ul style={{ margin: '0.35rem 0 0', paddingInlineStart: '1.1rem', fontSize: '0.88rem' }}>
+                    {laserPaymentBreakdown.banks.map((bk) => (
+                      <li key={bk.bankName} style={{ marginBottom: '0.25rem' }}>
+                        <strong>بنك ({bk.bankName}):</strong>{' '}
+                        <span dir="ltr">{Number(bk.totalUsd || 0).toFixed(2)} USD</span>
+                        {' — '}
+                        <span dir="ltr">{(Number(bk.totalSyp) || 0).toLocaleString('en-US')} ل.س</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    لا توجد دفعات مسجّلة كـ «بنك» في هذه الفترة.
+                  </p>
+                )}
+              </div>
+            ) : null}
             {period === 'monthly' && financeMonthlyExtras ? (
               <div style={{ marginBottom: '1.35rem' }}>
                 <p
@@ -968,6 +1080,117 @@ export function AdminLaserPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+          <div className="card" style={{ marginTop: '1rem' }}>
+            <h2 className="card-title" style={{ marginBottom: '0.45rem' }}>
+              إدارة بنوك التحصيل
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginBottom: '0.65rem' }}>
+              تظهر في نافذة «تأكيد استلام الدفع» عند اختيار <strong>بنك</strong>. يمكن تعطيل بنك دون حذفه.
+            </p>
+            {bankErr ? <p style={{ color: 'var(--danger)', marginBottom: '0.5rem' }}>{bankErr}</p> : null}
+            {bankLoading ? (
+              <p style={{ color: 'var(--text-muted)' }}>جاري تحميل البنوك…</p>
+            ) : (
+              <>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>اسم البنك</th>
+                        <th>فعّال</th>
+                        <th>ترتيب</th>
+                        <th style={{ width: 88 }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bankRows.map((row) => (
+                        <tr key={row.clientKey}>
+                          <td>
+                            <input
+                              className="input"
+                              dir="rtl"
+                              value={row.name}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                setBankRows((prev) =>
+                                  prev.map((r) => (r.clientKey === row.clientKey ? { ...r, name: v } : r)),
+                                )
+                              }}
+                              placeholder="مثال: بيمو"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row.active}
+                              onChange={(e) => {
+                                const v = e.target.checked
+                                setBankRows((prev) =>
+                                  prev.map((r) => (r.clientKey === row.clientKey ? { ...r, active: v } : r)),
+                                )
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="input"
+                              dir="ltr"
+                              inputMode="numeric"
+                              style={{ maxWidth: 88 }}
+                              value={row.sortOrder}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                setBankRows((prev) =>
+                                  prev.map((r) => (r.clientKey === row.clientKey ? { ...r, sortOrder: v } : r)),
+                                )
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '0.82rem' }}
+                              onClick={() =>
+                                setBankRows((prev) => {
+                                  if (prev.length <= 1) return prev
+                                  return prev.filter((r) => r.clientKey !== row.clientKey)
+                                })
+                              }
+                            >
+                              حذف
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() =>
+                      setBankRows((prev) => [
+                        ...prev,
+                        { clientKey: crypto.randomUUID(), name: '', active: true, sortOrder: String(prev.length) },
+                      ])
+                    }
+                  >
+                    + بنك
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={bankSaving}
+                    onClick={() => void saveBankSettings()}
+                  >
+                    {bankSaving ? 'جاري الحفظ…' : 'حفظ قائمة البنوك'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </>
       ) : null}

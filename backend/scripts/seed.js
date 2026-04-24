@@ -29,6 +29,7 @@ import { BillingItem } from '../src/models/BillingItem.js'
 import { Counter } from '../src/models/Counter.js'
 import { ScheduleSlot } from '../src/models/ScheduleSlot.js'
 import { todayBusinessDate } from '../src/utils/date.js'
+import { PaymentSettings } from '../src/models/PaymentSettings.js'
 import { CalculationProfile } from '../src/models/CalculationProfile.js'
 import { AccountingParameterDefinition } from '../src/models/AccountingParameterDefinition.js'
 import { GlAccount } from '../src/models/GlAccount.js'
@@ -385,6 +386,21 @@ async function seed() {
     { upsert: true },
   )
   console.log('BusinessDay (اليوم، نشط):', businessDate, 'سعر 14850')
+
+  await PaymentSettings.findOneAndUpdate(
+    { _id: 'default' },
+    {
+      $setOnInsert: {
+        banks: [
+          { name: 'بيمو', active: true, sortOrder: 0 },
+          { name: 'العربي الإسلامي', active: true, sortOrder: 1 },
+          { name: 'سورية و الخليج', active: true, sortOrder: 2 },
+        ],
+      },
+    },
+    { upsert: true },
+  )
+  console.log('PaymentSettings: قائمة بنوك التحصيل (إن لم تكن موجودة)')
 
   const demoLiyan = patientByFile.get('P-DEMO-001')
   const demoOmar = patientByFile.get('P-DEMO-002')

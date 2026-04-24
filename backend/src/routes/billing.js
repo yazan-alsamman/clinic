@@ -6,6 +6,7 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
 import { BusinessDay } from '../models/BusinessDay.js'
+import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
@@ -16,6 +17,25 @@ export const billingRouter = Router()
 billingRouter.use(authMiddleware)
 
 const BILLING_ROLES = ['super_admin', 'reception']
+
+const DEFAULT_BANK_SEED = [
+  { name: 'بيمو', active: true, sortOrder: 0 },
+  { name: 'العربي الإسلامي', active: true, sortOrder: 1 },
+  { name: 'سورية و الخليج', active: true, sortOrder: 2 },
+]
+
+async function getOrCreatePaymentSettings() {
+  let doc = await PaymentSettings.findById('default').lean()
+  if (!doc) {
+    await PaymentSettings.create({ _id: 'default', banks: DEFAULT_BANK_SEED })
+    doc = await PaymentSettings.findById('default').lean()
+  }
+  if (!Array.isArray(doc.banks) || doc.banks.length === 0) {
+    await PaymentSettings.updateOne({ _id: 'default' }, { $set: { banks: DEFAULT_BANK_SEED } })
+    doc = await PaymentSettings.findById('default').lean()
+  }
+  return doc
+}
 
 function billingItemDto(b, patientName, providerName) {
   const patientIdRaw =
@@ -109,6 +129,75 @@ billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) 
   }
 })
 
+/** قائمة البنوك المعتمدة للتحصيل (كاش/بنك) */
+billingRouter.get('/payment-bank-options', requireRoles(...BILLING_ROLES), async (req, res) => {
+  try {
+    const doc = await getOrCreatePaymentSettings()
+    const allBanks = (doc.banks || [])
+      .map((b) => ({
+        id: String(b._id),
+        name: String(b.name || '').trim(),
+        active: b.active !== false,
+        sortOrder: Number(b.sortOrder) || 0,
+      }))
+      .filter((b) => b.name)
+      .sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name, 'ar'))
+    const banks = allBanks.filter((b) => b.active).map(({ id, name }) => ({ id, name }))
+    if (req.user.role === 'super_admin' && String(req.query.admin || '') === '1') {
+      res.json({ banks, banksAll: allBanks })
+      return
+    }
+    res.json({ banks })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** تحديث قائمة البنوك — مدير النظام */
+billingRouter.put('/payment-bank-options', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const raw = Array.isArray(req.body?.banks) ? req.body.banks : []
+    const banks = raw
+      .map((b, i) => ({
+        name: String(b?.name ?? '')
+          .trim()
+          .slice(0, 80),
+        active: b?.active !== false,
+        sortOrder: Number.isFinite(Number(b?.sortOrder)) ? Number(b.sortOrder) : i,
+      }))
+      .filter((b) => b.name.length > 0)
+      .slice(0, 40)
+    if (banks.length === 0) {
+      res.status(400).json({ error: 'أضف اسماً لبنك واحد على الأقل' })
+      return
+    }
+    await PaymentSettings.findOneAndUpdate(
+      { _id: 'default' },
+      { $set: { banks } },
+      { upsert: true, new: true },
+    )
+    await writeAudit({
+      user: req.user,
+      action: 'تحديث قائمة بنوك التحصيل',
+      entityType: 'PaymentSettings',
+      entityId: 'default',
+      details: { count: banks.length },
+    })
+    const doc = await getOrCreatePaymentSettings()
+    const out = (doc.banks || []).map((b) => ({
+      id: String(b._id),
+      name: String(b.name || '').trim(),
+      active: b.active !== false,
+      sortOrder: Number(b.sortOrder) || 0,
+    }))
+    res.json({ banks: out })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 /** تأكيد استلام الدفع → ترحيل محاسبي */
 billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
@@ -138,11 +227,28 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const body = req.body ?? {}
-    const methodRaw = String(body.method || 'cash').toLowerCase()
-    const method = ['cash', 'card', 'transfer', 'other'].includes(methodRaw) ? methodRaw : 'cash'
     const amountUsdRaw = Number(body.amountUsd)
     const amountSypRaw = Number(body.amountSyp)
+
+    const paymentChannel = String(body.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
+    let bankName = ''
+    if (paymentChannel === 'bank') {
+      bankName = String(body.bankName || '').trim()
+      const settings = await getOrCreatePaymentSettings()
+      const allowedNames = new Set(
+        (settings.banks || [])
+          .filter((b) => b.active !== false)
+          .map((b) => String(b.name || '').trim())
+          .filter(Boolean),
+      )
+      if (!bankName || !allowedNames.has(bankName)) {
+        res.status(400).json({ error: 'اختر البنك من القائمة المعتمدة' })
+        return
+      }
+    }
+
     let receivedUsd = 0
+    let receivedSypRecorded = null
     if (Number.isFinite(amountUsdRaw) && amountUsdRaw > 0) {
       receivedUsd = round2(amountUsdRaw)
     } else if (Number.isFinite(amountSypRaw) && amountSypRaw > 0) {
@@ -152,12 +258,15 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         res.status(400).json({ error: 'سعر الصرف غير متاح لهذا اليوم' })
         return
       }
+      receivedSypRecorded = Math.round(amountSypRaw)
       receivedUsd = round2(amountSypRaw / rate)
     }
     if (receivedUsd <= 0) {
       res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
       return
     }
+
+    const method = paymentChannel === 'bank' ? 'bank' : 'cash'
     const amountDueUsd = round2(Number(bi.amountDueUsd) || 0)
     const appliedAmountUsd = round2(Math.min(receivedUsd, amountDueUsd))
     const settlementDeltaUsd = round2(receivedUsd - amountDueUsd)
@@ -173,6 +282,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       amountUsd: appliedAmountUsd,
       receivedAmountUsd: receivedUsd,
       settlementDeltaUsd,
+      paymentChannel,
+      bankName: paymentChannel === 'bank' ? bankName : '',
+      receivedAmountSypRecorded: receivedSypRecorded,
       method,
       receivedBy: req.user._id,
     })
@@ -264,6 +376,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         receivedUsd,
         appliedAmountUsd,
         settlementDeltaUsd,
+        paymentChannel: payment.paymentChannel,
+        bankName: payment.bankName || undefined,
         accountingSkipped: posting.skipped,
       },
     })
@@ -281,6 +395,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         receivedAmountUsd: payment.receivedAmountUsd,
         settlementDeltaUsd: payment.settlementDeltaUsd,
         method: payment.method,
+        paymentChannel: payment.paymentChannel,
+        bankName: payment.bankName || undefined,
       },
       billingItem: { id: String(bi._id), status: bi.status },
       patientSettlement: {

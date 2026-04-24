@@ -426,6 +426,12 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
         settlementDeltaUsd: Math.round(delta * 100) / 100,
         settlementType,
         method: pay.method,
+        paymentChannel: pay.paymentChannel === 'bank' ? 'bank' : 'cash',
+        bankName: pay.bankName ? String(pay.bankName) : undefined,
+        receivedAmountSypRecorded:
+          pay.receivedAmountSypRecorded != null && Number.isFinite(Number(pay.receivedAmountSypRecorded))
+            ? Math.round(Number(pay.receivedAmountSypRecorded))
+            : undefined,
         receivedAt: pay.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
         receivedByName: String(pay.receivedBy?.name || '').trim(),
       }

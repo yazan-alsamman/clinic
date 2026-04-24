@@ -10,6 +10,7 @@ import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { BusinessDay } from '../models/BusinessDay.js'
 import { LaserMonthlyExpenses } from '../models/LaserMonthlyExpenses.js'
 import { LaserSettings } from '../models/LaserSettings.js'
+import { BillingPayment } from '../models/BillingPayment.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
@@ -533,6 +534,58 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
   }
 })
 
+/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) */
+async function buildLaserPaymentBreakdown(businessDateFilter) {
+  const itemFilter = { department: 'laser', status: 'paid', businessDate: businessDateFilter }
+  const items = await BillingItem.find(itemFilter).select('_id businessDate').lean()
+  if (!items.length) {
+    return { cash: { totalUsd: 0, totalSyp: 0 }, banks: [] }
+  }
+  const itemByPayment = new Map(items.map((i) => [String(i._id), i]))
+  const payments = await BillingPayment.find({ billingItemId: { $in: items.map((i) => i._id) } }).lean()
+
+  const dates = [...new Set(items.map((i) => i.businessDate).filter(Boolean))]
+  const rateRows =
+    dates.length > 0
+      ? await BusinessDay.find({ businessDate: { $in: dates } })
+          .select('businessDate exchangeRate')
+          .lean()
+      : []
+  const rateByDate = new Map(rateRows.map((r) => [r.businessDate, Number(r.exchangeRate) || 0]))
+
+  let cashUsd = 0
+  let cashSyp = 0
+  const bankMap = new Map()
+
+  for (const p of payments) {
+    const bi = itemByPayment.get(String(p.billingItemId))
+    if (!bi) continue
+    const rate = rateByDate.get(bi.businessDate) || 0
+    const usd = round2(Number(p.receivedAmountUsd) || 0)
+    let sypPart = 0
+    if (p.receivedAmountSypRecorded != null && Number.isFinite(Number(p.receivedAmountSypRecorded))) {
+      sypPart = Math.round(Number(p.receivedAmountSypRecorded))
+    } else if (rate > 0) {
+      sypPart = Math.round(usd * rate)
+    }
+
+    const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
+    if (channel === 'cash') {
+      cashUsd = round2(cashUsd + usd)
+      cashSyp += sypPart
+    } else {
+      const label = String(p.bankName || '').trim() || 'بنك'
+      const cur = bankMap.get(label) || { bankName: label, totalUsd: 0, totalSyp: 0 }
+      cur.totalUsd = round2(cur.totalUsd + usd)
+      cur.totalSyp += sypPart
+      bankMap.set(label, cur)
+    }
+  }
+
+  const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
+  return { cash: { totalUsd: round2(cashUsd), totalSyp: Math.round(cashSyp) }, banks }
+}
+
 laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) => {
   try {
     const date = String(req.query.date || '').trim() || req.businessDate || todayBusinessDate()
@@ -586,10 +639,12 @@ laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) 
     })
 
     const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
+    const laserPaymentBreakdown = await buildLaserPaymentBreakdown(date)
     res.json({
       date,
       rows,
       topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountUsd: top.totalAmountUsd } : null,
+      laserPaymentBreakdown,
     })
   } catch (e) {
     console.error(e)
@@ -725,6 +780,7 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
       totalExpensesUsd = sumLaserExpenseLinesUsdOnly(expDoc?.lines)
     }
     const netProfitUsd = round2(totalSessionRevenueUsd - totalExpensesUsd)
+    const laserPaymentBreakdown = await buildLaserPaymentBreakdown(new RegExp(`^${month}-`))
     res.json({
       month,
       rows,
@@ -734,6 +790,7 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
       netProfitUsd,
       monthAvgSypPerUsd,
       expenseConversionWarning,
+      laserPaymentBreakdown,
     })
   } catch (e) {
     console.error(e)

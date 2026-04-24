@@ -9,7 +9,13 @@ const billingPaymentSchema = new mongoose.Schema(
     receivedAmountUsd: { type: Number, default: 0, min: 0 },
     /** الفرق: موجب = رصيد إضافي، سالب = ذمة */
     settlementDeltaUsd: { type: Number, default: 0 },
-    method: { type: String, enum: ['cash', 'card', 'transfer', 'other'], default: 'cash' },
+    /** كاش أو بنك — للتقارير المالية */
+    paymentChannel: { type: String, enum: ['cash', 'bank'], default: 'cash' },
+    /** اسم البنك عند paymentChannel === bank (نسخة وقت الدفع) */
+    bankName: { type: String, default: '', trim: true },
+    /** المبلغ المستلم بالليرة إن أُدخل صراحةً (للعرض في التقارير) */
+    receivedAmountSypRecorded: { type: Number, default: null },
+    method: { type: String, enum: ['cash', 'card', 'transfer', 'other', 'bank'], default: 'cash' },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     receivedAt: { type: Date, default: () => new Date() },
     /** يُملأ بعد نجاح الترحيل المحاسبي */

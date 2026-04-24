@@ -38,15 +38,33 @@ export function BillingPage() {
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
-  const [method, setMethod] = useState<'cash' | 'card' | 'transfer' | 'other'>('cash')
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
   const [payUsd, setPayUsd] = useState('')
   const [paySyp, setPaySyp] = useState('')
+  const [payChannel, setPayChannel] = useState<'cash' | 'bank'>('cash')
+  const [payBankName, setPayBankName] = useState('')
+  const [bankOptions, setBankOptions] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
     if (businessDate && !date) setDate(businessDate)
   }, [businessDate, date])
+
+  useEffect(() => {
+    if (!payOpen || !allowed) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api<{ banks: { id: string; name: string }[] }>('/api/billing/payment-bank-options')
+        if (!cancelled) setBankOptions(data.banks || [])
+      } catch {
+        if (!cancelled) setBankOptions([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [payOpen, allowed])
 
   const load = useCallback(async () => {
     if (!allowed) {
@@ -82,15 +100,20 @@ export function BillingPage() {
   }, [load])
 
   async function completePay(id: string) {
-    setBusyId(id)
     setErr('')
+    if (payChannel === 'bank' && !payBankName.trim()) {
+      setErr('اختر البنك ثم أدخل المبلغ المستلم.')
+      return
+    }
+    setBusyId(id)
     try {
       const usd = Number(payUsd)
       const syp = Number(paySyp)
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
-          method,
+          paymentChannel: payChannel,
+          bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
           amountUsd: Number.isFinite(usd) && usd > 0 ? usd : undefined,
           amountSyp: Number.isFinite(syp) && syp > 0 ? syp : undefined,
         }),
@@ -99,6 +122,8 @@ export function BillingPage() {
       setPayItem(null)
       setPayUsd('')
       setPaySyp('')
+      setPayChannel('cash')
+      setPayBankName('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل التحصيل')
@@ -117,15 +142,20 @@ export function BillingPage() {
       setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
       return
     }
-    setBusyId(payItem.id)
     setErr('')
+    if (payChannel === 'bank' && !payBankName.trim()) {
+      setErr('اختر البنك ثم أدخل المبلغ المستلم.')
+      return
+    }
+    setBusyId(payItem.id)
     try {
       const usd = Number(payUsd)
       const syp = Number(paySyp)
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
-          method,
+          paymentChannel: payChannel,
+          bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
           amountUsd: Number.isFinite(usd) && usd > 0 ? usd : undefined,
           amountSyp: Number.isFinite(syp) && syp > 0 ? syp : undefined,
         }),
@@ -141,6 +171,8 @@ export function BillingPage() {
       setPayItem(null)
       setPayUsd('')
       setPaySyp('')
+      setPayChannel('cash')
+      setPayBankName('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل إنقاص الجلسة والدفع')
@@ -214,21 +246,6 @@ export function BillingPage() {
             <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </label>
         ) : null}
-        <label>
-          <span style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem' }}>
-            طريقة الدفع
-          </span>
-          <select
-            className="input"
-            value={method}
-            onChange={(e) => setMethod(e.target.value as typeof method)}
-          >
-            <option value="cash">نقد</option>
-            <option value="card">بطاقة</option>
-            <option value="transfer">تحويل</option>
-            <option value="other">أخرى</option>
-          </select>
-        </label>
         <button type="button" className="btn btn-secondary" onClick={() => void load()}>
           تحديث
         </button>
@@ -289,6 +306,8 @@ export function BillingPage() {
                         setPayItem(b)
                         setPayUsd(String(Number(b.amountDueUsd || 0)))
                         setPaySyp('')
+                        setPayChannel('cash')
+                        setPayBankName('')
                         setPayOpen(true)
                       }}
                     >
@@ -314,6 +333,8 @@ export function BillingPage() {
                         setPayItem(b)
                         setPayUsd(String(Number(b.amountDueUsd || 0)))
                         setPaySyp('')
+                        setPayChannel('cash')
+                        setPayBankName('')
                         setPayOpen(true)
                       }}
                     >
@@ -356,6 +377,58 @@ export function BillingPage() {
                 </span>
               ) : null}
             </p>
+            <div style={{ marginTop: '0.55rem' }}>
+              <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
+                طريقة استلام الدفع
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="pay-channel"
+                    checked={payChannel === 'cash'}
+                    onChange={() => {
+                      setPayChannel('cash')
+                      setPayBankName('')
+                    }}
+                  />
+                  كاش
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="pay-channel"
+                    checked={payChannel === 'bank'}
+                    onChange={() => setPayChannel('bank')}
+                  />
+                  بنك
+                </label>
+              </div>
+            </div>
+            {payChannel === 'bank' ? (
+              <div style={{ marginTop: '0.55rem' }}>
+                <label className="form-label" htmlFor="pay-bank-select">
+                  البنك
+                </label>
+                <select
+                  id="pay-bank-select"
+                  className="select"
+                  value={payBankName}
+                  onChange={(e) => setPayBankName(e.target.value)}
+                  style={{ maxWidth: '100%', marginTop: '0.25rem' }}
+                >
+                  <option value="">— اختر البنك —</option>
+                  {bankOptions.map((bk) => (
+                    <option key={bk.id} value={bk.name}>
+                      {bk.name}
+                    </option>
+                  ))}
+                </select>
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  بعد اختيار البنك، أدخل المبلغ المستلم بالدولار أو بالليرة أدناه.
+                </p>
+              </div>
+            ) : null}
             <div className="grid-2" style={{ marginTop: '0.5rem' }}>
               <div>
                 <label className="form-label">المبلغ المستلم (USD)</label>
