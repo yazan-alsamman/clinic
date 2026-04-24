@@ -1,6 +1,9 @@
 /**
  * Seeder شامل لكل كيانات المشروع (MongoDB).
  *
+ * المرضى التجريبيون (10) وحقولهم الكاملة وجلساتهم مُعرَّفون في:
+ *   `scripts/data/patientDemos10.js`
+ *
  * استخدام:
  *   npm run seed          — بذور تدريجية (upsert)، لا يحذف البيانات الموجودة
  *   npm run seed:fresh    — حذف قاعدة البيانات بالكامل ثم إعادة البذر
@@ -21,6 +24,8 @@ import { LaserSession } from '../src/models/LaserSession.js'
 import { DermatologyVisit } from '../src/models/DermatologyVisit.js'
 import { DentalMasterPlan } from '../src/models/DentalMasterPlan.js'
 import { AuditLog } from '../src/models/AuditLog.js'
+import { ClinicalSession } from '../src/models/ClinicalSession.js'
+import { BillingItem } from '../src/models/BillingItem.js'
 import { Counter } from '../src/models/Counter.js'
 import { ScheduleSlot } from '../src/models/ScheduleSlot.js'
 import { todayBusinessDate } from '../src/utils/date.js'
@@ -29,8 +34,73 @@ import { AccountingParameterDefinition } from '../src/models/AccountingParameter
 import { GlAccount } from '../src/models/GlAccount.js'
 import { backfillFinancialDocuments } from '../src/services/postingService.js'
 import { provisionPortalCredentials } from '../src/utils/patientPortalCredentials.js'
+import {
+  DEMO_DENTAL_PLANS_10,
+  DEMO_DERM_VISITS_10,
+  DEMO_LASER_SESSIONS_10,
+  DEMO_PATIENTS_10,
+} from './data/patientDemos10.js'
 
 const FRESH = process.argv.includes('--fresh')
+
+/**
+ * جلسة ليزر + جلسة سريرية + بند فوترة (للبذر التجريبي فقط).
+ * @param {{ patientId: import('mongoose').Types.ObjectId; operatorUserId: import('mongoose').Types.ObjectId; businessDate: string; treatmentNumber: number; row: Record<string, unknown> }} p
+ */
+async function seedLaserSessionWithBilling(p) {
+  const { patientId, operatorUserId, businessDate, treatmentNumber, row } = p
+  const discount = Math.min(100, Math.max(0, Number(row.discountPercent) || 0))
+  const gross = Number(row.costUsd) || 0
+  const amountDueUsd = Math.round(gross * (1 - discount / 100) * 100) / 100
+  const areaPart = [...(row.areaIds || []), ...(row.manualAreaLabels || [])].filter(Boolean).join('، ') || 'تجريبي'
+  const procedureDescription = `ليزر ${row.laserType} — ${areaPart}`.slice(0, 500)
+
+  const s = await LaserSession.create({
+    treatmentNumber,
+    patientId,
+    operatorUserId,
+    room: String(row.room ?? '1'),
+    laserType: row.laserType,
+    pw: row.pw ?? '',
+    pulse: row.pulse ?? '',
+    shotCount: row.shotCount ?? '',
+    chargeByPulseCount: Boolean(row.chargeByPulseCount),
+    notes: row.notes ?? '',
+    areaIds: Array.isArray(row.areaIds) ? row.areaIds : [],
+    manualAreaLabels: Array.isArray(row.manualAreaLabels) ? row.manualAreaLabels : [],
+    status: row.status || 'scheduled',
+    costUsd: gross,
+    discountPercent: discount,
+  })
+
+  const cs = await ClinicalSession.create({
+    patientId,
+    providerUserId: operatorUserId,
+    department: 'laser',
+    procedureDescription,
+    sessionFeeUsd: amountDueUsd,
+    businessDate,
+    notes: String(row.notes ?? '').trim().slice(0, 2000),
+    laserSessionId: s._id,
+    materials: [],
+    materialCostUsdTotal: 0,
+  })
+  const bi = await BillingItem.create({
+    clinicalSessionId: cs._id,
+    patientId,
+    providerUserId: operatorUserId,
+    department: 'laser',
+    procedureLabel: procedureDescription.slice(0, 200),
+    amountDueUsd,
+    businessDate,
+    status: 'pending_payment',
+  })
+  cs.billingItemId = bi._id
+  await cs.save()
+  s.billingItemId = bi._id
+  s.clinicalSessionId = cs._id
+  await s.save()
+}
 
 function yesterdayBusinessDate() {
   const d = new Date()
@@ -208,93 +278,31 @@ async function seed() {
   const laser2 = userByEmail.get('laser2@clinic.local')
   const reception = userByEmail.get('reception@clinic.local')
 
-  const patientsData = [
-    {
-      name: 'سارة أحمد المحمد',
-      dob: '1992-03-15',
-      marital: 'متزوجة',
-      occupation: 'مهندسة',
-      medicalHistory: 'ضغط خفيف — تحت المتابعة',
-      surgicalHistory: 'لا يوجد',
-      allergies: 'البنسلين',
-      departments: ['laser', 'dermatology'],
+  const patientByFile = new Map()
+  for (const p of DEMO_PATIENTS_10) {
+    const { sessionPackages, ...rest } = p
+    const payload = {
+      ...rest,
       lastVisit: new Date(),
-      phone: '+963930000001',
-    },
-    {
-      name: 'Lina K. Mansour',
-      dob: '1988-11-02',
-      marital: 'عزباء',
-      occupation: 'محاسبة',
-      medicalHistory: 'سليمة',
-      surgicalHistory: 'استئصال زائدة (2010)',
-      allergies: 'لا يوجد',
-      departments: ['dental', 'laser'],
-      lastVisit: new Date(),
-      phone: '+963930000002',
-    },
-    {
-      name: 'خالد يوسف',
-      dob: '1975-07-22',
-      marital: 'متزوج',
-      occupation: 'تاجر',
-      medicalHistory: 'سكري النوع الثاني',
-      surgicalHistory: 'لا يوجد',
-      allergies: 'لا يوجد',
-      departments: ['dermatology'],
-      lastVisit: new Date(Date.now() - 86400000),
-      phone: '+963930000003',
-    },
-    {
-      name: 'رنا صالح',
-      dob: '1995-06-01',
-      marital: 'عزباء',
-      occupation: 'مصممة',
-      medicalHistory: 'لا يوجد',
-      surgicalHistory: 'لا يوجد',
-      allergies: 'لا يوجد',
-      departments: ['laser'],
-      lastVisit: new Date(Date.now() - 2 * 86400000),
-      phone: '+963930000004',
-    },
-    {
-      name: 'محمد علي الحسن',
-      dob: '1982-12-20',
-      marital: 'متزوج',
-      occupation: 'موظف بنك',
-      medicalHistory: 'ارتجاع معدي',
-      surgicalHistory: 'لا يوجد',
-      allergies: 'الإيبوبروفين',
-      departments: ['dental', 'dermatology'],
-      lastVisit: new Date(Date.now() - 3 * 86400000),
-      phone: '+963930000005',
-    },
-    {
-      name: 'نورا فهد',
-      dob: '1990-04-18',
-      marital: 'متزوجة',
-      occupation: 'ربة منزل',
-      medicalHistory: 'ربو خفيف',
-      surgicalHistory: 'قيصرية (2018)',
-      allergies: 'لا يوجد',
-      departments: ['laser', 'dermatology', 'dental'],
-      lastVisit: new Date(),
-      phone: '+963930000006',
-    },
-  ]
-
-  const patientByName = new Map()
-  for (const p of patientsData) {
+      ...(sessionPackages
+        ? {
+            sessionPackages: sessionPackages.map((pkg) => ({
+              ...pkg,
+              createdByUserId: admin._id,
+            })),
+          }
+        : {}),
+    }
     const doc = await Patient.findOneAndUpdate(
-      { name: p.name },
-      { $set: p },
+      { fileNumber: p.fileNumber },
+      { $set: payload },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     )
-    patientByName.set(p.name, doc)
-    console.log('Patient:', p.name)
+    patientByFile.set(p.fileNumber, doc)
+    console.log('Patient:', p.fileNumber, p.name)
   }
 
-  const portalDemo = patientByName.get('نورا فهد')
+  const portalDemo = patientByFile.get('P-DEMO-010')
   if (portalDemo) {
     await Patient.updateOne(
       { _id: portalDemo._id },
@@ -302,7 +310,7 @@ async function seed() {
     )
     const fresh = await Patient.findById(portalDemo._id)
     const { username, plainPassword } = await provisionPortalCredentials(fresh)
-    console.log('بوابة مريض (تجريبي — نورا فهد):', username, plainPassword)
+    console.log('بوابة مريض (تجريبي — ياسر علوان P-DEMO-010):', username, plainPassword)
   }
 
   let sortOrder = 0
@@ -378,29 +386,31 @@ async function seed() {
   )
   console.log('BusinessDay (اليوم، نشط):', businessDate, 'سعر 14850')
 
-  const sarah = patientByName.get('سارة أحمد المحمد')
-  const lina = patientByName.get('Lina K. Mansour')
-  const rana = patientByName.get('رنا صالح')
+  const demoLiyan = patientByFile.get('P-DEMO-001')
+  const demoOmar = patientByFile.get('P-DEMO-002')
 
   await ScheduleSlot.deleteMany({ businessDate, patientId: null })
-  const scheduleRows = [
-    {
+  const scheduleRows = []
+  if (demoLiyan) {
+    scheduleRows.push({
       providerName: 'د. لورا',
       time: '09:30',
       endTime: '10:00',
       procedureType: 'كشف',
-      patientId: sarah._id,
-      patientName: sarah.name,
-    },
-    {
+      patientId: demoLiyan._id,
+      patientName: demoLiyan.name,
+    })
+  }
+  if (demoOmar) {
+    scheduleRows.push({
       providerName: 'أخصائية ليزر',
       time: '10:00',
       endTime: '10:45',
       procedureType: 'جلسة ليزر',
-      patientId: lina._id,
-      patientName: lina.name,
-    },
-  ]
+      patientId: demoOmar._id,
+      patientName: demoOmar.name,
+    })
+  }
   for (const row of scheduleRows) {
     await ScheduleSlot.findOneAndUpdate(
       { businessDate, time: row.time, providerName: row.providerName },
@@ -426,170 +436,111 @@ async function seed() {
 
     const startOfDay = new Date()
     startOfDay.setHours(8, 0, 0, 0)
-    const t1 = new Date(startOfDay.getTime() + 1 * 3600000)
-    const t2 = new Date(startOfDay.getTime() + 2 * 3600000)
-
-    const sessions = [
-      {
-        treatmentNumber: 1,
-        patientId: sarah._id,
-        operatorUserId: laser1._id,
-        room: '1',
-        laserType: 'Alex',
-        pw: '12',
-        pulse: '10',
-        shotCount: '450',
-        notes: 'بشرة حساسة — تخفيف الطاقة',
-        areaIds: ['f-forehead', 'armpits'],
-        status: 'completed',
-        costUsd: 180,
-        discountPercent: 0,
-        createdAt: t1,
-      },
-      {
-        treatmentNumber: 2,
-        patientId: lina._id,
-        operatorUserId: laser2._id,
-        room: '2',
-        laserType: 'Mix',
-        pw: '15',
-        pulse: '8',
-        shotCount: '320',
-        notes: '',
-        areaIds: ['armpits', 'forearms'],
-        status: 'scheduled',
-        costUsd: 0,
-        discountPercent: 0,
-        createdAt: t2,
-      },
-      {
-        treatmentNumber: 3,
-        patientId: rana._id,
-        operatorUserId: laser1._id,
-        room: '1',
-        laserType: 'Yag',
-        pw: '10',
-        pulse: '12',
-        shotCount: '200',
-        notes: 'متابعة بعد أسبوعين',
-        areaIds: ['neck-full'],
-        status: 'scheduled',
-        costUsd: 0,
-        discountPercent: 0,
-        createdAt: new Date(startOfDay.getTime() + 30 * 60000),
-      },
-    ]
-
-    for (const s of sessions) {
-      await LaserSession.create(s)
+    let treatmentSeq = 0
+    for (const row of DEMO_LASER_SESSIONS_10) {
+      const pat = patientByFile.get(row.fileNumber)
+      if (!pat) continue
+      treatmentSeq += 1
+      const operatorUserId = treatmentSeq % 2 === 0 ? laser2._id : laser1._id
+      if (row.withBilling) {
+        await seedLaserSessionWithBilling({
+          patientId: pat._id,
+          operatorUserId,
+          businessDate,
+          treatmentNumber: treatmentSeq,
+          row,
+        })
+      } else {
+        const discount = Math.min(100, Math.max(0, Number(row.discountPercent) || 0))
+        await LaserSession.create({
+          treatmentNumber: treatmentSeq,
+          patientId: pat._id,
+          operatorUserId,
+          room: String(row.room ?? '1'),
+          laserType: row.laserType,
+          pw: row.pw ?? '',
+          pulse: row.pulse ?? '',
+          shotCount: row.shotCount ?? '',
+          chargeByPulseCount: Boolean(row.chargeByPulseCount),
+          notes: row.notes ?? '',
+          areaIds: Array.isArray(row.areaIds) ? row.areaIds : [],
+          manualAreaLabels: Array.isArray(row.manualAreaLabels) ? row.manualAreaLabels : [],
+          status: row.status || 'scheduled',
+          costUsd: Number(row.costUsd) || 0,
+          discountPercent: discount,
+          createdAt: new Date(startOfDay.getTime() + treatmentSeq * 45 * 60000),
+        })
+      }
     }
     await Counter.findOneAndUpdate(
       { _id: 'laserTreatment' },
-      { $set: { seq: sessions.length } },
+      { $set: { seq: treatmentSeq } },
       { upsert: true },
     )
-    console.log('LaserSession:', sessions.length, 'جلسة (اليوم)')
+    console.log('LaserSession:', treatmentSeq, 'جلسة (بيانات العشرة التجريبية)')
   } else {
     console.log('LaserSession: تخطي (يوجد بيانات — استخدم npm run seed:fresh)')
   }
 
-  const laura = userByEmail.get('laura@clinic.local')
-  await DermatologyVisit.findOneAndUpdate(
-    { businessDate, patientId: lina._id },
-    {
-      $set: {
-        businessDate,
-        patientId: lina._id,
-        areaTreatment: 'فيلر شفاه',
-        sessionType: 'جلدية / تجميل',
-        costUsd: 350,
-        discountPercent: 10,
-        providerUserId: laura._id,
-        notes: 'خصم عرض',
-      },
-    },
-    { upsert: true },
-  )
-  console.log('DermatologyVisit: صف تجريبي (فيلر شفاه) ليوم', businessDate)
+  const resolveVisitDate = (token) => {
+    if (token === '__TODAY__') return businessDate
+    if (token === '__YESTERDAY__') return yDate
+    return String(token || businessDate)
+  }
 
-  const samy = userByEmail.get('samy@clinic.local')
-  await DermatologyVisit.findOneAndUpdate(
-    { businessDate, patientId: sarah._id, providerUserId: samy._id },
-    {
-      $set: {
-        businessDate,
-        patientId: sarah._id,
-        areaTreatment: 'مادة نضارة',
-        sessionType: 'جلدية / تجميل',
-        costUsd: 200,
-        discountPercent: 0,
-        providerUserId: samy._id,
-        notes: '',
+  for (const v of DEMO_DERM_VISITS_10) {
+    const pat = patientByFile.get(v.fileNumber)
+    const prov = userByEmail.get(v.providerEmail)
+    if (!pat || !prov) continue
+    const bd = resolveVisitDate(v.businessDate)
+    await DermatologyVisit.findOneAndUpdate(
+      { businessDate: bd, patientId: pat._id, areaTreatment: v.areaTreatment },
+      {
+        $set: {
+          businessDate: bd,
+          patientId: pat._id,
+          areaTreatment: v.areaTreatment,
+          sessionType: v.sessionType || 'جلدية / تجميل',
+          costUsd: Number(v.costUsd) || 0,
+          discountPercent: Math.min(100, Math.max(0, Number(v.discountPercent) || 0)),
+          providerUserId: prov._id,
+          notes: v.notes ?? '',
+        },
       },
-    },
-    { upsert: true },
-  )
-  console.log('DermatologyVisit: صف تجريبي (نضارة — د. سامي)')
+      { upsert: true },
+    )
+  }
+  console.log('DermatologyVisit:', DEMO_DERM_VISITS_10.length, 'زيارة (مجموعة العشرة)')
 
-  const khaled = patientByName.get('خالد يوسف')
-  const mohammad = patientByName.get('محمد علي الحسن')
+  const lauraUser = userByEmail.get('laura@clinic.local')
 
-  await DentalMasterPlan.findOneAndUpdate(
-    { patientId: lina._id },
-    {
-      $set: {
-        status: 'approved',
-        items: [
-          { label: 'تقويم للفكين', tooth: null },
-          { label: 'حشو 11، 12', tooth: 11 },
-          { label: 'متابعة تنظيف دوري', tooth: null },
-        ],
-        createdBy: admin._id,
-        approvedBy: admin._id,
-        approvedAt: new Date(Date.now() - 86400000),
+  for (const plan of DEMO_DENTAL_PLANS_10) {
+    const pat = patientByFile.get(plan.fileNumber)
+    if (!pat) continue
+    const approved = plan.status === 'approved'
+    await DentalMasterPlan.findOneAndUpdate(
+      { patientId: pat._id },
+      {
+        $set: {
+          status: plan.status,
+          items: plan.items,
+          createdBy: approved ? admin._id : lauraUser?._id ?? admin._id,
+          approvedBy: approved ? admin._id : null,
+          approvedAt: approved ? new Date(Date.now() - 43200000) : null,
+        },
       },
-    },
-    { upsert: true },
-  )
-  console.log('DentalMasterPlan: Lina (معتمدة)')
-
-  await DentalMasterPlan.findOneAndUpdate(
-    { patientId: khaled._id },
-    {
-      $set: {
-        status: 'draft',
-        items: [{ label: 'مراجعة تصبغات — جلسة نضارة تجريبية', note: 'مسودة' }],
-        createdBy: userByEmail.get('laura@clinic.local')._id,
-        approvedBy: null,
-        approvedAt: null,
-      },
-    },
-    { upsert: true },
-  )
-  console.log('DentalMasterPlan: خالد (مسودة)')
-
-  await DentalMasterPlan.findOneAndUpdate(
-    { patientId: mohammad._id },
-    {
-      $set: {
-        status: 'approved',
-        items: [
-          { label: 'خلع 28', tooth: 28 },
-          { label: 'تاج 36', tooth: 36 },
-        ],
-        createdBy: admin._id,
-        approvedBy: admin._id,
-        approvedAt: new Date(),
-      },
-    },
-    { upsert: true },
-  )
-  console.log('DentalMasterPlan: محمد (معتمدة)')
+      { upsert: true },
+    )
+  }
+  console.log('DentalMasterPlan:', DEMO_DENTAL_PLANS_10.length, 'خطة (مجموعة العشرة)')
 
   const shouldSeedAudit = FRESH || (await AuditLog.countDocuments()) === 0
   if (shouldSeedAudit) {
     if (!FRESH) await AuditLog.deleteMany({})
 
+    const auditP1 = patientByFile.get('P-DEMO-001')
+    const auditP2 = patientByFile.get('P-DEMO-002')
+    const auditP4 = patientByFile.get('P-DEMO-004')
     const samples = [
       {
         userId: admin._id,
@@ -605,7 +556,7 @@ async function seed() {
         userName: reception.name,
         action: 'إنشاء زيارة / تحديث مريض',
         entityType: 'Patient',
-        entityId: String(sarah._id),
+        entityId: auditP1 ? String(auditP1._id) : 'patient-demo-1',
         details: null,
         createdAt: new Date(Date.now() - 3600000),
       },
@@ -614,7 +565,7 @@ async function seed() {
         userName: admin.name,
         action: 'اعتماد الخطة العلاجية الرئيسية',
         entityType: 'DentalMasterPlan',
-        entityId: String(lina._id),
+        entityId: auditP2 ? String(auditP2._id) : 'patient-demo-2',
         details: null,
         createdAt: new Date(Date.now() - 80000000),
       },
@@ -632,7 +583,7 @@ async function seed() {
         userName: 'د. لورا',
         action: 'تحديث خطة علاج أسنان',
         entityType: 'DentalMasterPlan',
-        entityId: String(khaled._id),
+        entityId: auditP4 ? String(auditP4._id) : 'patient-demo-4',
         details: null,
         createdAt: new Date(Date.now() - 5400000),
       },
