@@ -500,10 +500,22 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
   }
 })
 
-/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) — بالليرة فقط */
+/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) — بالليرة فقط؛ جلسة ليزر completed فقط */
 async function buildLaserPaymentBreakdown(businessDateFilter) {
   const itemFilter = { department: 'laser', status: 'paid', businessDate: businessDateFilter }
-  const items = await BillingItem.find(itemFilter).select('_id businessDate').lean()
+  const itemsRaw = await BillingItem.find(itemFilter).select('_id businessDate clinicalSessionId').lean()
+  if (!itemsRaw.length) {
+    return { cash: { totalSyp: 0 }, banks: [] }
+  }
+  const cids = [...new Set(itemsRaw.map((i) => i.clinicalSessionId).filter(Boolean))]
+  const completedLasers = await LaserSession.find({
+    clinicalSessionId: { $in: cids },
+    status: 'completed',
+  })
+    .select('clinicalSessionId')
+    .lean()
+  const completedSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
+  const items = itemsRaw.filter((i) => completedSet.has(String(i.clinicalSessionId || '')))
   if (!items.length) {
     return { cash: { totalSyp: 0 }, banks: [] }
   }
@@ -531,58 +543,71 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
   return { cash: { totalSyp: cashSyp }, banks }
 }
 
+/**
+ * صفوف تقرير مالية الليزر: بند مدفوع + جلسة ليزر بحالة completed فقط
+ * (لا يُحسب completed_pending_collection ولا غير المحصّل).
+ * @param {string|RegExp} businessDateFilter
+ */
+async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
+  const specialists = await User.find({ role: 'laser' }).select('_id name active').sort({ name: 1 }).lean()
+  const specialistIdSet = new Set(specialists.map((s) => String(s._id)))
+
+  const paidItems = await BillingItem.find({
+    department: 'laser',
+    status: 'paid',
+    businessDate: businessDateFilter,
+  })
+    .select('clinicalSessionId providerUserId amountDueSyp')
+    .lean()
+
+  if (!paidItems.length) {
+    const rows = specialists.map((sp) => ({
+      userId: String(sp._id),
+      name: String(sp.name || '').trim() || '—',
+      active: sp.active !== false,
+      totalAmountSyp: 0,
+      sessionsCount: 0,
+    }))
+    return { rows }
+  }
+
+  const clinicalIds = [...new Set(paidItems.map((i) => i.clinicalSessionId).filter(Boolean))]
+  const completedLasers = await LaserSession.find({
+    clinicalSessionId: { $in: clinicalIds },
+    status: 'completed',
+  })
+    .select('clinicalSessionId')
+    .lean()
+  const completedClinicalIdSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
+
+  const totals = new Map()
+  for (const bi of paidItems) {
+    if (!completedClinicalIdSet.has(String(bi.clinicalSessionId || ''))) continue
+    const uid = String(bi.providerUserId || '')
+    if (!specialistIdSet.has(uid)) continue
+    const prev = totals.get(uid) || { totalAmountSyp: 0, sessionsCount: 0 }
+    prev.totalAmountSyp += Number(bi.amountDueSyp) || 0
+    prev.sessionsCount += 1
+    totals.set(uid, prev)
+  }
+
+  const rows = specialists.map((sp) => {
+    const current = totals.get(String(sp._id)) || { totalAmountSyp: 0, sessionsCount: 0 }
+    return {
+      userId: String(sp._id),
+      name: String(sp.name || '').trim() || '—',
+      active: sp.active !== false,
+      totalAmountSyp: Math.round(current.totalAmountSyp),
+      sessionsCount: current.sessionsCount,
+    }
+  })
+  return { rows }
+}
+
 laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) => {
   try {
     const date = String(req.query.date || '').trim() || req.businessDate || todayBusinessDate()
-    const specialists = await User.find({ role: 'laser' }).select('_id name active').sort({ name: 1 }).lean()
-    const specialistIds = specialists.map((x) => x._id)
-    const clinicalRows =
-      specialistIds.length > 0
-        ? await ClinicalSession.find({
-            department: 'laser',
-            businessDate: date,
-            providerUserId: { $in: specialistIds },
-          })
-            .select('_id providerUserId sessionFeeSyp')
-            .lean()
-        : []
-
-    const sessionIds = clinicalRows.map((x) => x._id)
-    const doneStatuses = ['completed', 'completed_pending_collection']
-    const doneLaserRows =
-      sessionIds.length > 0
-        ? await LaserSession.find({
-            clinicalSessionId: { $in: sessionIds },
-            status: { $in: doneStatuses },
-          })
-            .select('clinicalSessionId')
-            .lean()
-        : []
-    const doneClinicalIds = new Set(doneLaserRows.map((x) => String(x.clinicalSessionId || '')))
-
-    const totals = new Map()
-    for (const row of clinicalRows) {
-      const sid = String(row._id)
-      if (!doneClinicalIds.has(sid)) continue
-      const uid = String(row.providerUserId || '')
-      if (!uid) continue
-      const prev = totals.get(uid) || { totalAmountSyp: 0, sessionsCount: 0 }
-      prev.totalAmountSyp += Number(row.sessionFeeSyp) || 0
-      prev.sessionsCount += 1
-      totals.set(uid, prev)
-    }
-
-    const rows = specialists.map((sp) => {
-      const current = totals.get(String(sp._id)) || { totalAmountSyp: 0, sessionsCount: 0 }
-      return {
-        userId: String(sp._id),
-        name: String(sp.name || '').trim() || '—',
-        active: sp.active !== false,
-        totalAmountSyp: Math.round(current.totalAmountSyp),
-        sessionsCount: current.sessionsCount,
-      }
-    })
-
+    const { rows } = await buildLaserFinanceRowsBySpecialist(date)
     const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
     const laserPaymentBreakdown = await buildLaserPaymentBreakdown(date)
     res.json({
@@ -661,61 +686,14 @@ laserRouter.get('/shots-monthly', requireRoles('super_admin'), async (req, res) 
 laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res) => {
   try {
     const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
-    const specialists = await User.find({ role: 'laser' }).select('_id name active').sort({ name: 1 }).lean()
-    const specialistIds = specialists.map((x) => x._id)
-    const clinicalRows =
-      specialistIds.length > 0
-        ? await ClinicalSession.find({
-            department: 'laser',
-            businessDate: new RegExp(`^${month}-`),
-            providerUserId: { $in: specialistIds },
-          })
-            .select('_id providerUserId sessionFeeSyp')
-            .lean()
-        : []
-
-    const sessionIds = clinicalRows.map((x) => x._id)
-    const doneStatuses = ['completed', 'completed_pending_collection']
-    const doneLaserRows =
-      sessionIds.length > 0
-        ? await LaserSession.find({
-            clinicalSessionId: { $in: sessionIds },
-            status: { $in: doneStatuses },
-          })
-            .select('clinicalSessionId')
-            .lean()
-        : []
-    const doneClinicalIds = new Set(doneLaserRows.map((x) => String(x.clinicalSessionId || '')))
-
-    const totals = new Map()
-    for (const row of clinicalRows) {
-      const sid = String(row._id)
-      if (!doneClinicalIds.has(sid)) continue
-      const uid = String(row.providerUserId || '')
-      if (!uid) continue
-      const prev = totals.get(uid) || { totalAmountSyp: 0, sessionsCount: 0 }
-      prev.totalAmountSyp += Number(row.sessionFeeSyp) || 0
-      prev.sessionsCount += 1
-      totals.set(uid, prev)
-    }
-
-    const rows = specialists.map((sp) => {
-      const current = totals.get(String(sp._id)) || { totalAmountSyp: 0, sessionsCount: 0 }
-      return {
-        userId: String(sp._id),
-        name: String(sp.name || '').trim() || '—',
-        active: sp.active !== false,
-        totalAmountSyp: Math.round(current.totalAmountSyp),
-        sessionsCount: current.sessionsCount,
-      }
-    })
-
+    const monthRe = new RegExp(`^${month}-`)
+    const { rows } = await buildLaserFinanceRowsBySpecialist(monthRe)
     const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
     const totalSessionRevenueSyp = Math.round(rows.reduce((s, r) => s + (Number(r.totalAmountSyp) || 0), 0))
     const expDoc = await LaserMonthlyExpenses.findOne({ month }).select('lines').lean()
     const totalExpensesSyp = sumLaserExpenseLinesSyp(expDoc?.lines)
     const netProfitSyp = totalSessionRevenueSyp - totalExpensesSyp
-    const laserPaymentBreakdown = await buildLaserPaymentBreakdown(new RegExp(`^${month}-`))
+    const laserPaymentBreakdown = await buildLaserPaymentBreakdown(monthRe)
     res.json({
       month,
       rows,

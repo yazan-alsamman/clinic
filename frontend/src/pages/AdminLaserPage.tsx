@@ -792,27 +792,12 @@ export function AdminLaserPage() {
                   </p>
                 )}
                 {period === 'daily' ? (
-                  <>
-                    <p style={{ margin: '0.65rem 0 0.35rem', fontSize: '0.88rem', fontWeight: 700 }}>
-                      إجمالي المُحصَّل اليوم (كاش + بنوك): {renderMoneySyp(totalLaserReceivedSyp)}
-                    </p>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '0.8rem',
-                        color: 'var(--text-muted)',
-                        lineHeight: 1.55,
-                        maxWidth: 640,
-                      }}
-                    >
-                      <strong>لماذا قد يختلف عن «مجموع أسعار الجلسات»؟</strong> المجموع أسفل الجدول هو مجموع{' '}
-                      <strong>رسوم الجلسات المسجّلة</strong> في سجل كل أخصائي لجلسات ليزر <strong>منتهية تنفيذياً</strong> في
-                      هذا التاريخ — ويشمل الجلسات التي <strong>لم يُؤكَّد تحصيلها بعد</strong>. أما كاش/بنك فيحسب من
-                      بنود ليزر أصبحت <strong>مدفوعة</strong> فعلاً في التحصيل، أي المبلغ <strong>الذي دخل</strong> ذلك
-                      اليوم. يتطابق الرقمان تقريباً فقط عندما يُحصَّل كل المستحق لكل الجلسات المنتهية في نفس اليوم
-                      وبنفس المبالغ المسجّلة.
-                    </p>
-                  </>
+                  <p style={{ margin: '0.65rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                    <strong>إجمالي المُحصَّل اليوم (كاش + بنوك):</strong> {renderMoneySyp(totalLaserReceivedSyp)} — من بنود
+                    ليزر <strong>مدفوعة</strong> وجلساتها <strong>مكتملة ومنتهية</strong> فقط (لا تشمل بانتظار التحصيل).
+                    المجموع في الجدول = <strong>المستحق على البند</strong>؛ المستلم قد يختلف عند دفع جزئي أو زائد عن
+                    المستحق.
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -826,7 +811,8 @@ export function AdminLaserPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  ملخص الشهر: مقارنة بين إيراد الجلسات والمصاريف المسجّلة، ثم <strong style={{ color: 'var(--text)' }}>الربح الصافي</strong>.
+                  ملخص الشهر: إيراد جلسات ليزر <strong>محصّلة ومنتهية</strong> فقط، مقابل المصاريف المسجّلة، ثم{' '}
+                  <strong style={{ color: 'var(--text)' }}>الربح الصافي</strong>.
                 </p>
                 <div
                   style={{
@@ -862,7 +848,7 @@ export function AdminLaserPage() {
                       <span aria-hidden>↑</span> إيراد الجلسات
                     </div>
                     <div style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 700, marginBottom: '0.2rem' }}>
-                      مجموع أسعار الجلسات
+                      جلسات محصّلة ومنتهية
                     </div>
                     <div style={{ fontWeight: 800, color: '#064e3b', fontSize: '0.95rem' }}>
                       {renderMoneySyp(financeMonthlyExtras.totalSessionRevenueSyp)}
@@ -953,7 +939,7 @@ export function AdminLaserPage() {
               </div>
             ) : (
               <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                مجموع رسوم الجلسات المنفّذة (كل الأخصائيين — حسب السجل، قد يشمل غير المحصّل):{' '}
+                مجموع رسوم الجلسات المحصّلة والمنتهية (كل الأخصائيين):{' '}
                 <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(totalFinanceSyp)}</strong>
               </div>
             )}
@@ -962,8 +948,8 @@ export function AdminLaserPage() {
                 <thead>
                   <tr>
                     <th>الأخصائي</th>
-                    <th>مجموع رسوم الجلسات (السجل)</th>
-                    <th>عدد الجلسات المنتهية</th>
+                    <th>مجموع رسوم الجلسات المحصّلة</th>
+                    <th>عدد الجلسات المحصّلة والمنتهية</th>
                     <th>الحالة</th>
                   </tr>
                 </thead>
