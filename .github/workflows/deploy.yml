@@ -1,0 +1,59 @@
+# Deploy to Hostinger VPS on every push to main.
+#
+# GitHub Secrets required (Settings → Secrets → Actions):
+#   VPS_HOST              — 187.127.76.76
+#   VPS_USER              — root
+#   VPS_SSH_KEY           — private SSH key (ed25519 recommended)
+#   VPS_BACKEND_ENV_B64   — base64 of backend/.env
+#                           Generate: base64 -w0 backend/.env  (Linux)
+#                                     base64 backend/.env      (macOS)
+
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: SSH deploy → 187.127.76.76
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: VPS_BACKEND_ENV_B64
+          script: |
+            set -e
+            APP=/var/www/clinic
+
+            echo "--- Pulling latest code ---"
+            cd $APP
+            git pull origin main
+
+            echo "--- Writing backend .env ---"
+            printf '%s' "$VPS_BACKEND_ENV_B64" | base64 -d > $APP/backend/.env
+
+            echo "--- Installing backend dependencies ---"
+            cd $APP/backend
+            npm ci --omit=dev
+
+            echo "--- Building frontend ---"
+            cd $APP/frontend
+            npm ci
+            VITE_API_BASE_URL= npm run build
+
+            echo "--- Restarting backend ---"
+            cd $APP
+            pm2 restart clinic-api --update-env
+            pm2 save
+
+            echo "--- Deploy done ---"
+            pm2 status
+        env:
+          VPS_BACKEND_ENV_B64: ${{ secrets.VPS_BACKEND_ENV_B64 }}

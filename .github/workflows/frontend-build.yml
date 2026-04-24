@@ -11,11 +11,14 @@
 name: Frontend build
 
 on:
-  push:
-    branches: [main]
+  pull_request:
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-build.yml'
+  push:
+    branches-ignore: [main]   # deploy.yml handles main
+    paths:
+      - 'frontend/**'
   workflow_dispatch:
     inputs:
       ftp_upload:
