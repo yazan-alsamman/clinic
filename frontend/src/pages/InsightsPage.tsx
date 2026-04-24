@@ -9,11 +9,11 @@ type InsightLine = {
   sourceLabel: string
   description: string
   revenueDeptLabel: string
-  grossUsd: number
+  grossSyp: number
   discountPercent: number
-  netUsd: number
+  netSyp: number
   appliedSharePercent: number
-  shareUsd: number
+  shareSyp: number
   explanation: string
 }
 
@@ -23,18 +23,18 @@ type InsightDoctor = {
   role: string
   department: string
   sharePercent: number
-  totalShareUsd: number
+  totalShareSyp: number
   lines: InsightLine[]
 }
 
 type InsightsPayload = {
   startDate: string
   endDate: string
-  totalRevenueUsd: number
-  totalDoctorSharesUsd: number
-  estimatedNetProfitUsd: number
-  topDepartment: { key: string | null; label: string; revenueUsd: number }
-  revenueByDepartment: { key: string; label: string; revenueUsd: number; lineCount: number }[]
+  totalRevenueSyp: number
+  totalDoctorSharesSyp: number
+  estimatedNetProfitSyp: number
+  topDepartment: { key: string | null; label: string; revenueSyp: number }
+  revenueByDepartment: { key: string; label: string; revenueSyp: number; lineCount: number }[]
   doctors: InsightDoctor[]
   reportingBasis?: 'posted_ledger' | 'operational_estimate'
 }
@@ -49,8 +49,8 @@ function todayYmd() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function fmtUsd(n: number) {
-  return `${new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n)} USD`
+function fmtSyp(n: number) {
+  return `${new Intl.NumberFormat('ar-SY', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n)} ل.س`
 }
 
 function escapeHtml(text: string): string {
@@ -61,10 +61,10 @@ function escapeHtml(text: string): string {
 
 function buildInsightsPdfHtml(data: InsightsPayload) {
   const revRows = data.revenueByDepartment
-    .filter((r) => r.lineCount > 0 || r.revenueUsd > 0)
+    .filter((r) => r.lineCount > 0 || r.revenueSyp > 0)
     .map(
       (r) =>
-        `<tr><td>${escapeHtml(r.label)}</td><td>${escapeHtml(String(r.lineCount))}</td><td>${escapeHtml(fmtUsd(r.revenueUsd))}</td></tr>`,
+        `<tr><td>${escapeHtml(r.label)}</td><td>${escapeHtml(String(r.lineCount))}</td><td>${escapeHtml(fmtSyp(r.revenueSyp))}</td></tr>`,
     )
     .join('')
 
@@ -79,23 +79,23 @@ function buildInsightsPdfHtml(data: InsightsPayload) {
             <td>${escapeHtml(ln.sourceLabel)}</td>
             <td>${escapeHtml(ln.description)}</td>
             <td>${escapeHtml(ln.revenueDeptLabel)}</td>
-            <td>${escapeHtml(fmtUsd(ln.grossUsd))}</td>
+            <td>${escapeHtml(fmtSyp(ln.grossSyp))}</td>
             <td>${escapeHtml(String(ln.discountPercent))}%</td>
-            <td>${escapeHtml(fmtUsd(ln.netUsd))}</td>
+            <td>${escapeHtml(fmtSyp(ln.netSyp))}</td>
             <td>${escapeHtml(String(ln.appliedSharePercent))}%</td>
-            <td>${escapeHtml(fmtUsd(ln.shareUsd))}</td>
+            <td>${escapeHtml(fmtSyp(ln.shareSyp))}</td>
           </tr>`,
         )
         .join('')
       const explainRows = doc.lines
         .map(
           (ln) =>
-            `<li><strong>${escapeHtml(ln.date)}</strong> — ${escapeHtml(ln.patientName)}: ${escapeHtml(ln.explanation)} → ${escapeHtml(fmtUsd(ln.shareUsd))}</li>`,
+            `<li><strong>${escapeHtml(ln.date)}</strong> — ${escapeHtml(ln.patientName)}: ${escapeHtml(ln.explanation)} → ${escapeHtml(fmtSyp(ln.shareSyp))}</li>`,
         )
         .join('')
       return `
         <section style="margin-top:18px;page-break-inside:avoid">
-          <h2 style="font-size:14px;margin:0 0 8px">${escapeHtml(doc.name)} — ${escapeHtml(doc.department)} — النسبة المعرفة: ${doc.sharePercent}% — الإجمالي: ${escapeHtml(fmtUsd(doc.totalShareUsd))}</h2>
+          <h2 style="font-size:14px;margin:0 0 8px">${escapeHtml(doc.name)} — ${escapeHtml(doc.department)} — النسبة المعرفة: ${doc.sharePercent}% — الإجمالي: ${escapeHtml(fmtSyp(doc.totalShareSyp))}</h2>
           <p style="font-size:11px;color:#333;margin:0 0 6px">تفصيل الاستحقاق (من أين جاء كل مبلغ):</p>
           <ul style="font-size:10px;margin:0 0 10px;padding-right:18px">${explainRows}</ul>
           <table>
@@ -133,14 +133,14 @@ function buildInsightsPdfHtml(data: InsightsPayload) {
   <h1>تقرير ذكاء الأعمال</h1>
   <p style="margin:0 0 12px">الفترة: ${escapeHtml(data.startDate)} إلى ${escapeHtml(data.endDate)}</p>
   <div class="kpi">
-    <div><div class="l">صافي الربح (تقديري)</div><div class="v">${escapeHtml(fmtUsd(data.estimatedNetProfitUsd))}</div></div>
-    <div><div class="l">إجمالي الإيرادات (صافي الأسطر)</div><div class="v">${escapeHtml(fmtUsd(data.totalRevenueUsd))}</div></div>
-    <div><div class="l">مجموع مستحقات الأطباء</div><div class="v">${escapeHtml(fmtUsd(data.totalDoctorSharesUsd))}</div></div>
-    <div><div class="l">أكثر قسم إيراداً</div><div class="v">${escapeHtml(data.topDepartment.label)} (${escapeHtml(fmtUsd(data.topDepartment.revenueUsd))})</div></div>
+    <div><div class="l">صافي الربح (تقديري)</div><div class="v">${escapeHtml(fmtSyp(data.estimatedNetProfitSyp))}</div></div>
+    <div><div class="l">إجمالي الإيرادات (صافي الأسطر)</div><div class="v">${escapeHtml(fmtSyp(data.totalRevenueSyp))}</div></div>
+    <div><div class="l">مجموع مستحقات الأطباء</div><div class="v">${escapeHtml(fmtSyp(data.totalDoctorSharesSyp))}</div></div>
+    <div><div class="l">أكثر قسم إيراداً</div><div class="v">${escapeHtml(data.topDepartment.label)} (${escapeHtml(fmtSyp(data.topDepartment.revenueSyp))})</div></div>
   </div>
   <h2 style="font-size:14px;margin:16px 0 8px">الإيراد حسب القسم</h2>
   <table>
-    <thead><tr><th>القسم</th><th>عدد الأسطر</th><th>الصافي USD</th></tr></thead>
+    <thead><tr><th>القسم</th><th>عدد الأسطر</th><th>الصافي (ل.س)</th></tr></thead>
     <tbody>${revRows || '<tr><td colspan="3">لا بيانات</td></tr>'}</tbody>
   </table>
   ${doctorSections}
@@ -243,7 +243,7 @@ export function InsightsPage() {
         <button
           type="button"
           className="btn btn-primary"
-          disabled={loading || !data || (data.totalRevenueUsd <= 0 && data.doctors.length === 0)}
+          disabled={loading || !data || (data.totalRevenueSyp <= 0 && data.doctors.length === 0)}
           onClick={() => data && openInsightsPdf(data)}
         >
           تصدير PDF
@@ -262,10 +262,10 @@ export function InsightsPage() {
             <div className="stat-card">
               <div className="lbl">صافي الربح (تقديري)</div>
               <div className="val" style={{ color: 'var(--cyan)' }}>
-                {fmtUsd(data.estimatedNetProfitUsd)}
+                {fmtSyp(data.estimatedNetProfitSyp)}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                إيرادات {fmtUsd(data.totalRevenueUsd)} − مستحقات {fmtUsd(data.totalDoctorSharesUsd)}
+                إيرادات {fmtSyp(data.totalRevenueSyp)} − مستحقات {fmtSyp(data.totalDoctorSharesSyp)}
               </div>
             </div>
             <div className="stat-card">
@@ -274,7 +274,7 @@ export function InsightsPage() {
                 {data.topDepartment.label}
               </div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                {fmtUsd(data.topDepartment.revenueUsd)} في الفترة
+                {fmtSyp(data.topDepartment.revenueSyp)} في الفترة
               </div>
             </div>
           </div>
@@ -295,7 +295,7 @@ export function InsightsPage() {
                     <tr key={r.key}>
                       <td>{r.label}</td>
                       <td>{r.lineCount}</td>
-                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(r.revenueUsd)}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSyp(r.revenueSyp)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -326,7 +326,7 @@ export function InsightsPage() {
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                       نسبة الاستحقاق: {doc.sharePercent}%
                     </span>
-                    <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{fmtUsd(doc.totalShareUsd)}</span>
+                    <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{fmtSyp(doc.totalShareSyp)}</span>
                   </div>
                   <div className="table-wrap" style={{ marginTop: '0.65rem' }}>
                     <table className="data-table">
@@ -350,8 +350,8 @@ export function InsightsPage() {
                             <td style={{ maxWidth: 200, whiteSpace: 'normal', fontSize: '0.85rem' }}>
                               {ln.description}
                             </td>
-                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(ln.netUsd)}</td>
-                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(ln.shareUsd)}</td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSyp(ln.netSyp)}</td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSyp(ln.shareSyp)}</td>
                             <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: 220, whiteSpace: 'normal' }}>
                               {ln.explanation}
                             </td>

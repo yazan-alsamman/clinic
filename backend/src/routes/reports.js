@@ -1,6 +1,5 @@
 import { Router } from 'express'
 import { authMiddleware, requireRoles } from '../middleware/auth.js'
-import { BusinessDay } from '../models/BusinessDay.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
 import { LaserAreaCatalog } from '../models/LaserAreaCatalog.js'
@@ -34,10 +33,10 @@ function round2(n) {
   return Math.round(Number(n) * 100) / 100
 }
 
-function netLineUsd(cost, disc) {
+function netLineSyp(cost, disc) {
   const c = Number(cost) || 0
   const d = Math.min(100, Math.max(0, Number(disc) || 0))
-  return round2(c * (1 - d / 100))
+  return Math.round(c * (1 - d / 100))
 }
 
 function toYmdLocal(d) {
@@ -108,7 +107,7 @@ async function buildInsightsFromPostedLedger(startDate, endDate) {
 
   const revenueByDept = { laser: 0, dermatology: 0, dental: 0 }
   const deptLineCount = { laser: 0, dermatology: 0, dental: 0 }
-  /** @type {Map<string, { userId: string, name: string, role: string, department: string, sharePercent: number, lines: object[], totalShareUsd: number }>} */
+  /** @type {Map<string, { userId: string, name: string, role: string, department: string, sharePercent: number, lines: object[], totalShareSyp: number }>} */
   const doctorMap = new Map()
 
   function ensureDoctor(user) {
@@ -124,7 +123,7 @@ async function buildInsightsFromPostedLedger(startDate, endDate) {
         department: roleToDeptColumn(role),
         sharePercent: pct,
         lines: [],
-        totalShareUsd: 0,
+        totalShareSyp: 0,
       })
     }
     return doctorMap.get(id)
@@ -135,9 +134,9 @@ async function buildInsightsFromPostedLedger(startDate, endDate) {
       d.department === 'laser' ? 'laser' : d.department === 'dermatology' ? 'dermatology' : 'dental'
     const netLine = (d.lines || []).find((l) => l.lineType === 'net_revenue')
     const shareLine = (d.lines || []).find((l) => l.lineType === 'doctor_share')
-    const net = round2(netLine?.amountUsd ?? 0)
-    const shareUsd = round2(shareLine?.amountUsd ?? 0)
-    revenueByDept[deptKey] = round2(revenueByDept[deptKey] + net)
+    const net = Math.round(Number(netLine?.amountSyp) || 0)
+    const shareSyp = Math.round(Number(shareLine?.amountSyp) || 0)
+    revenueByDept[deptKey] = Math.round(revenueByDept[deptKey] + net)
     deptLineCount[deptKey] += 1
 
     const op = d.providerUserId
@@ -145,7 +144,7 @@ async function buildInsightsFromPostedLedger(startDate, endDate) {
     const snapPct = Number(d.parameterSnapshot?.resolvedDoctorSharePercent)
     const pct = Number.isFinite(snapPct) ? snapPct : entry ? entry.sharePercent : 0
     const inp = d.sourceInputSnapshot && typeof d.sourceInputSnapshot === 'object' ? d.sourceInputSnapshot : {}
-    const grossUsd = round2(Number(inp.gross_usd) || 0)
+    const grossSyp = Math.round(Number(inp.gross_syp) || 0)
     const discountPercent = Number(inp.discount_percent) || 0
     const patientName = d.patientId?.name ?? ''
     const descParts = [d.department, d.calculationProfileCode].filter(Boolean)
@@ -157,32 +156,32 @@ async function buildInsightsFromPostedLedger(startDate, endDate) {
       description: descParts.join(' — ') || '—',
       revenueDept: deptKey,
       revenueDeptLabel: REV_DEPT_LABEL[deptKey] ?? deptKey,
-      grossUsd,
+      grossSyp,
       discountPercent,
-      netUsd: net,
+      netSyp: net,
       appliedSharePercent: pct,
-      shareUsd,
-      explanation: `مستند مالي ${String(d._id).slice(-6)} — صافي ${net} USD — نسبة مرجعية ${pct}%`,
+      shareSyp,
+      explanation: `مستند مالي ${String(d._id).slice(-6)} — صافي ${net} ل.س — نسبة مرجعية ${pct}%`,
     }
     if (entry) {
       entry.lines.push(line)
-      entry.totalShareUsd = round2(entry.totalShareUsd + shareUsd)
+      entry.totalShareSyp = Math.round(entry.totalShareSyp + shareSyp)
     }
   }
 
-  const totalRevenueUsd = round2(revenueByDept.laser + revenueByDept.dermatology + revenueByDept.dental)
+  const totalRevenueSyp = Math.round(revenueByDept.laser + revenueByDept.dermatology + revenueByDept.dental)
   const doctors = [...doctorMap.values()]
     .filter((doc) => doc.lines.length > 0)
-    .sort((a, b) => b.totalShareUsd - a.totalShareUsd)
-  const totalDoctorSharesUsd = round2(doctors.reduce((s, doc) => s + doc.totalShareUsd, 0))
-  const clinicNetFromDocs = round2(
+    .sort((a, b) => b.totalShareSyp - a.totalShareSyp)
+  const totalDoctorSharesSyp = Math.round(doctors.reduce((s, doc) => s + doc.totalShareSyp, 0))
+  const clinicNetFromDocs = Math.round(
     docs.reduce((s, doc) => {
       const ln = (doc.lines || []).find((l) => l.lineType === 'clinic_net')
-      return s + round2(ln?.amountUsd ?? 0)
+      return s + Math.round(Number(ln?.amountSyp) || 0)
     }, 0),
   )
-  const estimatedNetProfitUsd =
-    clinicNetFromDocs > 0 ? clinicNetFromDocs : round2(totalRevenueUsd - totalDoctorSharesUsd)
+  const estimatedNetProfitSyp =
+    clinicNetFromDocs > 0 ? clinicNetFromDocs : Math.round(totalRevenueSyp - totalDoctorSharesSyp)
 
   let topDepartmentKey = 'laser'
   let topRev = -1
@@ -194,27 +193,27 @@ async function buildInsightsFromPostedLedger(startDate, endDate) {
     }
   }
   const topDepartment =
-    totalRevenueUsd <= 0
-      ? { key: null, label: '—', revenueUsd: 0 }
+    totalRevenueSyp <= 0
+      ? { key: null, label: '—', revenueSyp: 0 }
       : {
           key: topDepartmentKey,
           label: REV_DEPT_LABEL[topDepartmentKey] ?? topDepartmentKey,
-          revenueUsd: round2(topRev),
+          revenueSyp: Math.round(topRev),
         }
 
   const revenueByDepartment = ['laser', 'dermatology', 'dental'].map((key) => ({
     key,
     label: REV_DEPT_LABEL[key],
-    revenueUsd: round2(revenueByDept[key]),
+    revenueSyp: Math.round(revenueByDept[key]),
     lineCount: deptLineCount[key],
   }))
 
   return {
     startDate,
     endDate,
-    totalRevenueUsd,
-    totalDoctorSharesUsd,
-    estimatedNetProfitUsd,
+    totalRevenueSyp,
+    totalDoctorSharesSyp,
+    estimatedNetProfitSyp,
     topDepartment,
     revenueByDepartment,
     doctors,
@@ -270,7 +269,7 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
     const revenueByDept = { laser: 0, dermatology: 0, dental: 0 }
     const deptLineCount = { laser: 0, dermatology: 0, dental: 0 }
 
-    /** @type {Map<string, { userId: string, name: string, role: string, department: string, sharePercent: number, lines: object[], totalShareUsd: number }>} */
+    /** @type {Map<string, { userId: string, name: string, role: string, department: string, sharePercent: number, lines: object[], totalShareSyp: number }>} */
     const doctorMap = new Map()
 
     function ensureDoctor(user) {
@@ -286,20 +285,20 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
           department: roleToDeptColumn(role),
           sharePercent: pct,
           lines: [],
-          totalShareUsd: 0,
+          totalShareSyp: 0,
         })
       }
       return doctorMap.get(id)
     }
 
     for (const s of laserSessions) {
-      const net = netLineUsd(s.costUsd, s.discountPercent)
-      revenueByDept.laser = round2(revenueByDept.laser + net)
+      const net = netLineSyp(s.costSyp, s.discountPercent)
+      revenueByDept.laser = Math.round(revenueByDept.laser + net)
       deptLineCount.laser += 1
       const op = s.operatorUserId
       const entry = ensureDoctor(op)
       const pct = entry ? entry.sharePercent : 0
-      const shareUsd = round2(net * (pct / 100))
+      const shareSyp = Math.round(net * (pct / 100))
       const patientName = s.patientId?.name ?? ''
       const sessionType =
         (s.sessionTypeLabel && String(s.sessionTypeLabel).trim()) || `جلسة ليزر ${s.laserType}`
@@ -312,27 +311,27 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
         description: desc,
         revenueDept: 'laser',
         revenueDeptLabel: REV_DEPT_LABEL.laser,
-        grossUsd: round2(Number(s.costUsd) || 0),
+        grossSyp: Math.round(Number(s.costSyp) || 0),
         discountPercent: Number(s.discountPercent) || 0,
-        netUsd: net,
+        netSyp: net,
         appliedSharePercent: pct,
-        shareUsd,
-        explanation: `صافي السطر ${net} USD × نسبة الاستحقاق المعرفة للمستخدم (${pct}%)`,
+        shareSyp,
+        explanation: `صافي السطر ${net} ل.س × نسبة الاستحقاق المعرفة للمستخدم (${pct}%)`,
       }
       if (entry) {
         entry.lines.push(line)
-        entry.totalShareUsd = round2(entry.totalShareUsd + shareUsd)
+        entry.totalShareSyp = Math.round(entry.totalShareSyp + shareSyp)
       }
     }
 
     for (const v of dermVisits) {
-      const net = netLineUsd(v.costUsd, v.discountPercent)
-      revenueByDept.dermatology = round2(revenueByDept.dermatology + net)
+      const net = netLineSyp(v.costSyp, v.discountPercent)
+      revenueByDept.dermatology = Math.round(revenueByDept.dermatology + net)
       deptLineCount.dermatology += 1
       const prov = v.providerUserId
       const entry = ensureDoctor(prov)
       const pct = entry ? entry.sharePercent : 0
-      const shareUsd = round2(net * (pct / 100))
+      const shareSyp = Math.round(net * (pct / 100))
       const patientName = v.patientId?.name ?? ''
       const desc = [v.areaTreatment, v.sessionType].filter(Boolean).join(' — ')
       const line = {
@@ -343,27 +342,27 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
         description: desc || '—',
         revenueDept: 'dermatology',
         revenueDeptLabel: REV_DEPT_LABEL.dermatology,
-        grossUsd: round2(Number(v.costUsd) || 0),
+        grossSyp: Math.round(Number(v.costSyp) || 0),
         discountPercent: Number(v.discountPercent) || 0,
-        netUsd: net,
+        netSyp: net,
         appliedSharePercent: pct,
-        shareUsd,
-        explanation: `صافي السطر ${net} USD × نسبة الاستحقاق المعرفة للمستخدم (${pct}%)`,
+        shareSyp,
+        explanation: `صافي السطر ${net} ل.س × نسبة الاستحقاق المعرفة للمستخدم (${pct}%)`,
       }
       if (entry) {
         entry.lines.push(line)
-        entry.totalShareUsd = round2(entry.totalShareUsd + shareUsd)
+        entry.totalShareSyp = Math.round(entry.totalShareSyp + shareSyp)
       }
     }
 
-    const totalRevenueUsd = round2(revenueByDept.laser + revenueByDept.dermatology + revenueByDept.dental)
+    const totalRevenueSyp = Math.round(revenueByDept.laser + revenueByDept.dermatology + revenueByDept.dental)
 
     const doctors = [...doctorMap.values()]
       .filter((d) => d.lines.length > 0)
-      .sort((a, b) => b.totalShareUsd - a.totalShareUsd)
+      .sort((a, b) => b.totalShareSyp - a.totalShareSyp)
 
-    const totalDoctorSharesUsd = round2(doctors.reduce((s, d) => s + d.totalShareUsd, 0))
-    const estimatedNetProfitUsd = round2(totalRevenueUsd - totalDoctorSharesUsd)
+    const totalDoctorSharesSyp = Math.round(doctors.reduce((s, d) => s + d.totalShareSyp, 0))
+    const estimatedNetProfitSyp = Math.round(totalRevenueSyp - totalDoctorSharesSyp)
 
     let topDepartmentKey = 'laser'
     let topRev = -1
@@ -375,23 +374,23 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
       }
     }
     const topDepartment =
-      totalRevenueUsd <= 0
-        ? { key: null, label: '—', revenueUsd: 0 }
-        : { key: topDepartmentKey, label: REV_DEPT_LABEL[topDepartmentKey] ?? topDepartmentKey, revenueUsd: round2(topRev) }
+      totalRevenueSyp <= 0
+        ? { key: null, label: '—', revenueSyp: 0 }
+        : { key: topDepartmentKey, label: REV_DEPT_LABEL[topDepartmentKey] ?? topDepartmentKey, revenueSyp: Math.round(topRev) }
 
     const revenueByDepartment = ['laser', 'dermatology', 'dental'].map((key) => ({
       key,
       label: REV_DEPT_LABEL[key],
-      revenueUsd: round2(revenueByDept[key]),
+      revenueSyp: Math.round(revenueByDept[key]),
       lineCount: deptLineCount[key],
     }))
 
     res.json({
       startDate,
       endDate,
-      totalRevenueUsd,
-      totalDoctorSharesUsd,
-      estimatedNetProfitUsd,
+      totalRevenueSyp,
+      totalDoctorSharesSyp,
+      estimatedNetProfitSyp,
       topDepartment,
       revenueByDepartment,
       doctors,
@@ -412,9 +411,6 @@ reportsRouter.get('/daily', requireRoles(...REPORT_ROLES), async (req, res) => {
     }
     const { start, end } = parsed
     const dateStr = `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`
-
-    const bd = await BusinessDay.findOne({ businessDate: dateStr }).lean()
-    const exchangeRate = bd?.exchangeRate ?? null
 
     const [catalogRows, laserSessions, dermVisits] = await Promise.all([
       LaserAreaCatalog.find({}).lean(),
@@ -445,7 +441,7 @@ reportsRouter.get('/daily', requireRoles(...REPORT_ROLES), async (req, res) => {
       patientName: s.patientId?.name ?? '',
       areaTreatment: areaLabels(s.areaIds),
       sessionType: (s.sessionTypeLabel && String(s.sessionTypeLabel).trim()) || `جلسة ليزر ${s.laserType}`,
-      costUsd: Number(s.costUsd) || 0,
+      costSyp: Number(s.costSyp) || 0,
       discountPercent: Number(s.discountPercent) || 0,
       providerName: s.operatorUserId?.name ?? '',
       notes: s.notes || '',
@@ -458,7 +454,7 @@ reportsRouter.get('/daily', requireRoles(...REPORT_ROLES), async (req, res) => {
       patientName: v.patientId?.name ?? '',
       areaTreatment: v.areaTreatment || '',
       sessionType: v.sessionType || 'جلدية / تجميل',
-      costUsd: Number(v.costUsd) || 0,
+      costSyp: Number(v.costSyp) || 0,
       discountPercent: Number(v.discountPercent) || 0,
       providerName: v.providerUserId?.name ?? '',
       notes: v.notes || '',
@@ -476,8 +472,8 @@ reportsRouter.get('/daily', requireRoles(...REPORT_ROLES), async (req, res) => {
 
     const rows = merged.map((r, i) => {
       const disc = r.discountPercent
-      const netUsd = r.costUsd * (1 - disc / 100)
-      let finalSyp = exchangeRate != null ? Math.round(netUsd * exchangeRate) : null
+      const netSyp = Math.round(r.costSyp * (1 - disc / 100))
+      let finalSyp = netSyp
       const lk = `${r.kind === 'laser' ? 'laser_session' : 'dermatology_visit'}:${r.id}`
       const fd = ledgerBySource.get(lk)
       if (fd) {
@@ -489,7 +485,7 @@ reportsRouter.get('/daily', requireRoles(...REPORT_ROLES), async (req, res) => {
         patientName: r.patientName,
         areaTreatment: r.areaTreatment,
         sessionType: r.sessionType,
-        costUsd: r.costUsd,
+        costSyp: r.costSyp,
         discountPercent: r.discountPercent,
         providerName: r.providerName,
         finalSyp,
@@ -502,7 +498,6 @@ reportsRouter.get('/daily', requireRoles(...REPORT_ROLES), async (req, res) => {
 
     res.json({
       date: dateStr,
-      exchangeRate,
       rows,
       reportingBasis: ledgerDocs.length ? 'posted_ledger_mixed' : 'operational_only',
     })

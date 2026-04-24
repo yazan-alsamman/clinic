@@ -62,7 +62,7 @@ export async function getClinicalBundleForPatientId(pid) {
   const laserSessions = laserRows.map((s) => {
     const bi = s.billingItemId ? itemById.get(String(s.billingItemId)) : null
     const pay = bi?.paymentId && bi.status === 'paid' ? payById.get(String(bi.paymentId)) : null
-    const collectedAmountUsd = pay && Number.isFinite(pay.amountUsd) ? pay.amountUsd : null
+    const collectedAmountSyp = pay && Number.isFinite(pay.amountSyp) ? pay.amountSyp : null
     let effectiveStatus = s.status
     if (bi?.status === 'paid') {
       effectiveStatus = 'completed'
@@ -84,12 +84,12 @@ export async function getClinicalBundleForPatientId(pid) {
       pulse: s.pulse || '',
       shotCount: s.shotCount || '',
       chargeByPulseCount: s.chargeByPulseCount === true,
-      costUsd: s.costUsd ?? 0,
+      costSyp: s.costSyp ?? 0,
       discountPercent: s.discountPercent ?? 0,
       sessionTypeLabel: s.sessionTypeLabel || '',
       billingItemId: s.billingItemId ? String(s.billingItemId) : null,
       billingItemStatus: bi?.status ?? null,
-      collectedAmountUsd,
+      collectedAmountSyp,
       manualAreaLabels: Array.isArray(s.manualAreaLabels) ? s.manualAreaLabels : [],
       isPackageSession: s.isPackageSession === true,
       patientPackageId: String(s.patientPackageId || ''),
@@ -102,7 +102,7 @@ export async function getClinicalBundleForPatientId(pid) {
     businessDate: v.businessDate,
     areaTreatment: v.areaTreatment || '',
     sessionType: v.sessionType || '',
-    costUsd: v.costUsd ?? 0,
+    costSyp: v.costSyp ?? 0,
     discountPercent: v.discountPercent ?? 0,
     providerName: v.providerUserId?.name || '—',
     notes: v.notes || '',

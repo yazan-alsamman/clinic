@@ -127,35 +127,23 @@ function inferRoomNumber(channel: string) {
   return Number.isFinite(n) ? n : null
 }
 
-function patientDebtCreditUsd(p: Patient) {
+function patientDebtCreditSyp(p: Patient) {
   return {
-    debt: Math.round((Number(p.outstandingDebtUsd) || 0) * 100) / 100,
-    credit: Math.round((Number(p.prepaidCreditUsd) || 0) * 100) / 100,
+    debt: Math.round(Number(p.outstandingDebtSyp) || 0),
+    credit: Math.round(Number(p.prepaidCreditSyp) || 0),
   }
 }
 
-function fmtUsdSyp(usdRaw: number, rateRaw: number | null | undefined) {
-  const usd = Number(usdRaw) || 0
-  const usdText = `${usd.toFixed(2)} USD`
-  const r = rateRaw != null && Number.isFinite(Number(rateRaw)) && Number(rateRaw) > 0 ? Number(rateRaw) : null
-  const sypText = r ? `${Math.round(usd * r).toLocaleString('ar-SY')} ل.س` : null
-  return { usdText, sypText }
+function fmtSypAmount(n: number) {
+  return `${(Number(n) || 0).toLocaleString('ar-SY')} ل.س`
 }
 
 /** تنبيه ذمة/رصيد — يُعرض أعلى نافذة الحجز ليبقى ظاهراً عند التمرير */
-function BookingFinancialStickyAlert({
-  picked,
-  usdSypRate,
-}: {
-  picked: Patient
-  usdSypRate: number | null | undefined
-}) {
-  const { debt, credit } = patientDebtCreditUsd(picked)
-  const hasDebt = debt > 0.0001
-  const hasCredit = credit > 0.0001
+function BookingFinancialStickyAlert({ picked }: { picked: Patient }) {
+  const { debt, credit } = patientDebtCreditSyp(picked)
+  const hasDebt = debt > 0
+  const hasCredit = credit > 0
   if (!hasDebt && !hasCredit) return null
-  const debtFmt = fmtUsdSyp(debt, usdSypRate)
-  const creditFmt = fmtUsdSyp(credit, usdSypRate)
   return (
     <div
       style={{
@@ -181,37 +169,13 @@ function BookingFinancialStickyAlert({
         {hasDebt ? (
           <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
             <span style={{ color: 'var(--text-muted)' }}>ذمة على المريض: </span>
-            <strong style={{ color: 'var(--danger)' }}>{debtFmt.usdText}</strong>
-            {debtFmt.sypText ? (
-              <>
-                {' '}
-                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
-                <strong style={{ color: 'var(--danger)' }}>{debtFmt.sypText}</strong>
-              </>
-            ) : (
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                {' '}
-                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
-              </span>
-            )}
+            <strong style={{ color: 'var(--danger)' }}>{fmtSypAmount(debt)}</strong>
           </p>
         ) : null}
         {hasCredit ? (
           <p style={{ margin: '0.2rem 0', fontSize: '0.88rem', lineHeight: 1.45 }}>
             <span style={{ color: 'var(--text-muted)' }}>رصيد إضافي للمريض: </span>
-            <strong style={{ color: 'var(--success)' }}>{creditFmt.usdText}</strong>
-            {creditFmt.sypText ? (
-              <>
-                {' '}
-                <span style={{ color: 'var(--text-muted)' }}>≈</span>{' '}
-                <strong style={{ color: 'var(--success)' }}>{creditFmt.sypText}</strong>
-              </>
-            ) : (
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                {' '}
-                (تعادل الليرة غير متاح — حدّد سعر صرف اليوم)
-              </span>
-            )}
+            <strong style={{ color: 'var(--success)' }}>{fmtSypAmount(credit)}</strong>
           </p>
         ) : null}
       </div>
@@ -221,7 +185,7 @@ function BookingFinancialStickyAlert({
 
 export function ReceptionAppointmentPage() {
   const { user } = useAuth()
-  const { dayActive, usdSypRate } = useClinic()
+  const { dayActive } = useClinic()
   const canUse = user?.role === 'super_admin' || user?.role === 'reception'
   const assignBlocked = user?.role === 'reception' && !dayActive
 
@@ -656,17 +620,13 @@ export function ReceptionAppointmentPage() {
       const specialistPart = data?.slot?.assignedSpecialistName
         ? ` — الأخصائي: ${data.slot.assignedSpecialistName}`
         : ''
-      const { debt: finDebt, credit: finCredit } = patientDebtCreditUsd(picked)
+      const { debt: finDebt, credit: finCredit } = patientDebtCreditSyp(picked)
       let financialReminder = ''
-      if (finDebt > 0.0001) {
-        const f = fmtUsdSyp(finDebt, usdSypRate)
-        financialReminder += ` — تنبيه: على المريض ذمة ${f.usdText}`
-        if (f.sypText) financialReminder += ` (≈ ${f.sypText})`
+      if (finDebt > 0) {
+        financialReminder += ` — تنبيه: على المريض ذمة ${fmtSypAmount(finDebt)}`
       }
-      if (finCredit > 0.0001) {
-        const f = fmtUsdSyp(finCredit, usdSypRate)
-        financialReminder += ` — رصيد إضافي للمريض ${f.usdText}`
-        if (f.sypText) financialReminder += ` (≈ ${f.sypText})`
+      if (finCredit > 0) {
+        financialReminder += ` — رصيد إضافي للمريض ${fmtSypAmount(finCredit)}`
       }
       setSuccessMsg(
         `تم تسجيل الموعد: ${picked.name} — ${providerName} — ${proc} — ${time}–${endTime} (${bookingDurationMinutes} دقيقة) — ${businessDate}${specialistPart}${financialReminder}`,
@@ -719,7 +679,7 @@ export function ReceptionAppointmentPage() {
       {assignBlocked ? (
         <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--warning)' }}>
           <p style={{ margin: 0, color: 'var(--amber)' }}>
-            يوم العمل غير مفعّل. اطلب من المدير تفعيل اليوم وسعر الصرف قبل حجز المواعيد من الاستقبال.
+            يوم العمل غير مفعّل. اطلب من المدير تفعيل اليوم قبل حجز المواعيد من الاستقبال.
           </p>
         </div>
       ) : null}
@@ -943,7 +903,7 @@ export function ReceptionAppointmentPage() {
               الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{bookingDurationMinutes} دقيقة</strong> — التاريخ:{' '}
               <strong>{businessDate}</strong>
             </p>
-            {picked ? <BookingFinancialStickyAlert picked={picked} usdSypRate={usdSypRate} /> : null}
+            {picked ? <BookingFinancialStickyAlert picked={picked} /> : null}
             <div className="card" style={{ marginBottom: '0.85rem' }}>
               <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>مدة الموعد</h4>
               <select

@@ -16,9 +16,9 @@ export const ACCOUNTING_TAG_AR: Record<string, string> = {
 export const STEP_KEY_AR: Record<string, string> = {
   net_gross: 'صافي الإيراد بعد الحسم',
   net_after_material: 'صافي بعد خصم تكلفة المواد',
-  doctor_share_usd: 'حصة الطبيب / الأخصائي (دولار)',
-  clinic_net_usd: 'صافي العيادة (دولار)',
-  material_cost_usd: 'تكلفة المواد (دولار)',
+  doctor_share_usd: 'حصة الطبيب / الأخصائي (ل.س)',
+  clinic_net_usd: 'صافي العيادة (ل.س)',
+  material_cost_usd: 'تكلفة المواد (ل.س)',
 }
 
 export const PROFILE_CODE_AR: Record<string, string> = {

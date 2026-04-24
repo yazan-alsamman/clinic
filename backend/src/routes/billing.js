@@ -5,7 +5,6 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
-import { BusinessDay } from '../models/BusinessDay.js'
 import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
@@ -53,8 +52,8 @@ function billingItemDto(b, patientName, providerName) {
     providerUserId: String(providerIdRaw || ''),
     department: b.department,
     procedureLabel: b.procedureLabel || '—',
-    amountDueUsd: b.amountDueUsd,
-    currency: b.currency || 'USD',
+    amountDueSyp: b.amountDueSyp,
+    currency: b.currency || 'SYP',
     businessDate: b.businessDate,
     status: b.status,
     isPackagePrepaid: b.isPackagePrepaid === true,
@@ -217,7 +216,7 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       return
     }
     if (bi.isPackagePrepaid === true) {
-      const duePre = round2(Number(bi.amountDueUsd) || 0)
+      const duePre = round2(Number(bi.amountDueSyp) || 0)
       if (duePre <= 0) {
         res.status(400).json({
           error: 'هذه الجلسة مدفوعة مسبقاً ضمن باكج — استخدم «إنقاص جلسة» عند عدم وجود مبلغ إضافي خارج الباكج.',
@@ -227,7 +226,6 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const body = req.body ?? {}
-    const amountUsdRaw = Number(body.amountUsd)
     const amountSypRaw = Number(body.amountSyp)
 
     const paymentChannel = String(body.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
@@ -247,29 +245,16 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       }
     }
 
-    let receivedUsd = 0
-    let receivedSypRecorded = null
-    if (Number.isFinite(amountUsdRaw) && amountUsdRaw > 0) {
-      receivedUsd = round2(amountUsdRaw)
-    } else if (Number.isFinite(amountSypRaw) && amountSypRaw > 0) {
-      const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
-      const rate = Number(bd?.exchangeRate)
-      if (!Number.isFinite(rate) || rate <= 0) {
-        res.status(400).json({ error: 'سعر الصرف غير متاح لهذا اليوم' })
-        return
-      }
-      receivedSypRecorded = Math.round(amountSypRaw)
-      receivedUsd = round2(amountSypRaw / rate)
-    }
-    if (receivedUsd <= 0) {
+    const receivedSyp = Number.isFinite(amountSypRaw) && amountSypRaw > 0 ? Math.round(amountSypRaw) : 0
+    if (receivedSyp <= 0) {
       res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
       return
     }
 
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
-    const amountDueUsd = round2(Number(bi.amountDueUsd) || 0)
-    const appliedAmountUsd = round2(Math.min(receivedUsd, amountDueUsd))
-    const settlementDeltaUsd = round2(receivedUsd - amountDueUsd)
+    const amountDueSyp = Math.round(Number(bi.amountDueSyp) || 0)
+    const appliedAmountSyp = Math.min(receivedSyp, amountDueSyp)
+    const settlementDeltaSyp = receivedSyp - amountDueSyp
 
     const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
     if (existingPay) {
@@ -279,12 +264,11 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
 
     const payment = await BillingPayment.create({
       billingItemId: bi._id,
-      amountUsd: appliedAmountUsd,
-      receivedAmountUsd: receivedUsd,
-      settlementDeltaUsd,
+      amountSyp: appliedAmountSyp,
+      receivedAmountSyp: receivedSyp,
+      settlementDeltaSyp,
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
-      receivedAmountSypRecorded: receivedSypRecorded,
       method,
       receivedBy: req.user._id,
     })
@@ -299,36 +283,36 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const patient = await Patient.findById(bi.patientId).lean()
-    let outstandingDebtUsd = 0
-    let prepaidCreditUsd = 0
+    let outstandingDebtSyp = 0
+    let prepaidCreditSyp = 0
     if (patient) {
-      let debt = round2(Number(patient.outstandingDebtUsd) || 0)
-      let credit = round2(Number(patient.prepaidCreditUsd) || 0)
-      if (settlementDeltaUsd < 0) {
-        let need = round2(Math.abs(settlementDeltaUsd))
-        const useCredit = round2(Math.min(credit, need))
-        credit = round2(credit - useCredit)
-        need = round2(need - useCredit)
-        debt = round2(debt + need)
-      } else if (settlementDeltaUsd > 0) {
-        let extra = round2(settlementDeltaUsd)
-        const settleDebt = round2(Math.min(debt, extra))
-        debt = round2(debt - settleDebt)
-        extra = round2(extra - settleDebt)
-        credit = round2(credit + extra)
+      let debt = Math.round(Number(patient.outstandingDebtSyp) || 0)
+      let credit = Math.round(Number(patient.prepaidCreditSyp) || 0)
+      if (settlementDeltaSyp < 0) {
+        let need = Math.abs(settlementDeltaSyp)
+        const useCredit = Math.min(credit, need)
+        credit -= useCredit
+        need -= useCredit
+        debt += need
+      } else if (settlementDeltaSyp > 0) {
+        let extra = settlementDeltaSyp
+        const settleDebt = Math.min(debt, extra)
+        debt -= settleDebt
+        extra -= settleDebt
+        credit += extra
       }
       // Avoid full document validation on legacy patient records (e.g. missing newer required fields).
       await Patient.updateOne(
         { _id: bi.patientId },
         {
           $set: {
-            outstandingDebtUsd: debt,
-            prepaidCreditUsd: credit,
+            outstandingDebtSyp: debt,
+            prepaidCreditSyp: credit,
           },
         },
       )
-      outstandingDebtUsd = debt
-      prepaidCreditUsd = credit
+      outstandingDebtSyp = debt
+      prepaidCreditSyp = credit
     }
 
     let posting = { skipped: true, reason: 'unknown' }
@@ -343,23 +327,23 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         entityId: payment._id,
         details: {
           error: String(postErr?.message || postErr),
-          receivedUsd,
-          appliedAmountUsd,
-          settlementDeltaUsd,
+          receivedSyp,
+          appliedAmountSyp,
+          settlementDeltaSyp,
         },
       })
       res.status(201).json({
         payment: {
           id: String(payment._id),
-          amountUsd: payment.amountUsd,
-          receivedAmountUsd: payment.receivedAmountUsd,
-          settlementDeltaUsd: payment.settlementDeltaUsd,
+          amountSyp: payment.amountSyp,
+          receivedAmountSyp: payment.receivedAmountSyp,
+          settlementDeltaSyp: payment.settlementDeltaSyp,
           method: payment.method,
         },
         billingItem: { id: String(bi._id), status: bi.status },
         patientSettlement: {
-          outstandingDebtUsd,
-          prepaidCreditUsd,
+          outstandingDebtSyp,
+          prepaidCreditSyp,
         },
         accountingWarning: String(postErr?.message || postErr),
       })
@@ -373,9 +357,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       entityId: bi._id,
       details: {
         paymentId: String(payment._id),
-        receivedUsd,
-        appliedAmountUsd,
-        settlementDeltaUsd,
+        receivedSyp,
+        appliedAmountSyp,
+        settlementDeltaSyp,
         paymentChannel: payment.paymentChannel,
         bankName: payment.bankName || undefined,
         accountingSkipped: posting.skipped,
@@ -391,17 +375,17 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     res.status(201).json({
       payment: {
         id: String(payment._id),
-        amountUsd: payment.amountUsd,
-        receivedAmountUsd: payment.receivedAmountUsd,
-        settlementDeltaUsd: payment.settlementDeltaUsd,
+        amountSyp: payment.amountSyp,
+        receivedAmountSyp: payment.receivedAmountSyp,
+        settlementDeltaSyp: payment.settlementDeltaSyp,
         method: payment.method,
         paymentChannel: payment.paymentChannel,
         bankName: payment.bankName || undefined,
       },
       billingItem: { id: String(bi._id), status: bi.status },
       patientSettlement: {
-        outstandingDebtUsd,
-        prepaidCreditUsd,
+        outstandingDebtSyp,
+        prepaidCreditSyp,
       },
       financialDocument,
       accountingSkipped: posting.skipped,

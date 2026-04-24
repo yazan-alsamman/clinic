@@ -3,7 +3,6 @@ import mongoose from 'mongoose'
 const expenseLineSchema = new mongoose.Schema(
   {
     reason: { type: String, default: '' },
-    amountUsd: { type: Number, default: 0 },
     amountSyp: { type: Number, default: 0 },
   },
   { _id: true },

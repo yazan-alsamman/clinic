@@ -8,7 +8,7 @@ type DailyRow = {
   patientName: string
   areaTreatment: string
   sessionType: string
-  costUsd: number
+  costSyp: number
   discountPercent: number
   providerName: string
   finalSyp: number | null
@@ -17,8 +17,8 @@ type DailyRow = {
 
 type DailyReportPayload = {
   date: string
-  exchangeRate: number | null
   rows: DailyRow[]
+  reportingBasis?: string
 }
 
 const REPORT_ROLES = ['super_admin'] as const
@@ -30,11 +30,6 @@ function todayYmd() {
 
 function formatSyp(n: number) {
   return new Intl.NumberFormat('ar-SY', { maximumFractionDigits: 0 }).format(n)
-}
-
-function formatRate(rate: number | null) {
-  if (rate == null) return null
-  return new Intl.NumberFormat('ar-SY').format(rate)
 }
 
 function escapeHtml(text: string): string {
@@ -52,7 +47,7 @@ function buildTableBodyHtml(rows: DailyRow[]) {
       <td>${escapeHtml(r.patientName)}</td>
       <td>${escapeHtml(r.areaTreatment)}</td>
       <td>${escapeHtml(r.sessionType)}</td>
-      <td>${escapeHtml(String(r.costUsd))} USD</td>
+      <td>${escapeHtml(formatSyp(Number(r.costSyp) || 0))} ل.س</td>
       <td>${escapeHtml(String(r.discountPercent))}%</td>
       <td>${escapeHtml(r.providerName)}</td>
       <td>${r.finalSyp != null ? escapeHtml(formatSyp(r.finalSyp)) + ' ل.س' : '—'}</td>
@@ -62,14 +57,10 @@ function buildTableBodyHtml(rows: DailyRow[]) {
     .join('')
 }
 
-function openPrintableReport(payload: { date: string; exchangeRate: number | null; rows: DailyRow[] }) {
-  const rateLine =
-    payload.exchangeRate != null
-      ? `${formatRate(payload.exchangeRate)} = USD/SYP`
-      : 'سعر الصرف غير مسجّل لهذا اليوم في النظام'
+function openPrintableReport(payload: { date: string; rows: DailyRow[] }) {
   const thead = `<tr>
     <th>رقم العملية</th><th>المريض</th><th>المنطقة / المعالجة</th><th>نوع الجلسة</th>
-    <th>الكلفة</th><th>الحسم</th><th>المسؤول</th><th>السعر النهائي (بعد الصرف)</th><th>ملاحظات</th>
+    <th>الكلفة (ل.س)</th><th>الحسم</th><th>المسؤول</th><th>الصافي (ل.س)</th><th>ملاحظات</th>
   </tr>`
   const html = `<!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -87,7 +78,7 @@ function openPrintableReport(payload: { date: string; exchangeRate: number | nul
 </head>
 <body>
   <h1>تقرير الجرد اليومي — ${escapeHtml(payload.date)}</h1>
-  <div class="meta">${escapeHtml(rateLine)}</div>
+  <div class="meta">جميع المبالغ بالليرة السورية (ل.س).</div>
   <table>
     <thead>${thead}</thead>
     <tbody>${buildTableBodyHtml(payload.rows)}</tbody>
@@ -112,7 +103,6 @@ export function DailyReport() {
 
   const [date, setDate] = useState(todayYmd)
   const [rows, setRows] = useState<DailyRow[]>([])
-  const [exchangeRate, setExchangeRate] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
@@ -124,10 +114,8 @@ export function DailyReport() {
       const q = new URLSearchParams({ date })
       const data = await api<DailyReportPayload>(`/api/reports/daily?${q}`)
       setRows(data.rows)
-      setExchangeRate(data.exchangeRate)
     } catch (e) {
       setRows([])
-      setExchangeRate(null)
       setErr(e instanceof ApiError ? e.message : 'تعذر تحميل التقرير')
     } finally {
       setLoading(false)
@@ -144,10 +132,10 @@ export function DailyReport() {
       'المريض',
       'المنطقة / المعالجة',
       'نوع الجلسة',
-      'الكلفة (USD)',
+      'الكلفة (ل.س)',
       'الحسم %',
       'المسؤول',
-      'السعر النهائي (ل.س)',
+      'الصافي (ل.س)',
       'ملاحظات',
     ]
     const aoa: (string | number)[][] = [
@@ -157,7 +145,7 @@ export function DailyReport() {
         r.patientName,
         r.areaTreatment,
         r.sessionType,
-        r.costUsd,
+        r.costSyp,
         r.discountPercent,
         r.providerName,
         r.finalSyp ?? '',
@@ -171,7 +159,7 @@ export function DailyReport() {
   }
 
   const exportPdf = () => {
-    openPrintableReport({ date, exchangeRate, rows })
+    openPrintableReport({ date, rows })
   }
 
   const printPage = () => window.print()
@@ -184,8 +172,6 @@ export function DailyReport() {
       </>
     )
   }
-
-  const rateText = formatRate(exchangeRate)
 
   return (
     <>
@@ -212,61 +198,52 @@ export function DailyReport() {
       ) : null}
       <div id="daily-report-print">
         <h1 className="page-title">تقرير الجرد اليومي</h1>
-        <p className="page-desc">نهاية الدوام — جميع الأقسام</p>
-        {rateText != null ? (
-          <p className="page-desc" style={{ marginTop: '-0.25rem', color: 'var(--cyan)' }}>
-            {rateText} = USD/SYP
-          </p>
-        ) : (
-          <p className="page-desc" style={{ marginTop: '-0.25rem', color: 'var(--warning)' }}>
-            لا يوجد سعر صرف مسجّل ليوم {date} — السعر النهائي بالليرة سيظهر كـ «—»
-          </p>
-        )}
+        <p className="page-desc">نهاية الدوام — جميع الأقسام — المبالغ بالليرة السورية</p>
         <div className="table-wrap" style={{ marginTop: '1rem' }}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>رقم العملية</th>
-              <th>المريض</th>
-              <th>المنطقة / المعالجة</th>
-              <th>نوع الجلسة</th>
-              <th>الكلفة</th>
-              <th>الحسم</th>
-              <th>المسؤول</th>
-              <th>السعر النهائي (بعد الصرف)</th>
-              <th>ملاحظات</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+          <table className="data-table">
+            <thead>
               <tr>
-                <td colSpan={9}>جاري التحميل…</td>
+                <th>رقم العملية</th>
+                <th>المريض</th>
+                <th>المنطقة / المعالجة</th>
+                <th>نوع الجلسة</th>
+                <th>الكلفة (ل.س)</th>
+                <th>الحسم</th>
+                <th>المسؤول</th>
+                <th>الصافي (ل.س)</th>
+                <th>ملاحظات</th>
               </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={9} style={{ color: 'var(--text-muted)' }}>
-                  لا توجد عمليات مكتملة أو زيارات جلدية مسجّلة لهذا التاريخ
-                </td>
-              </tr>
-            ) : (
-              rows.map((r, i) => (
-                <tr key={`${r.operationNumber}-${i}`}>
-                  <td>{r.operationNumber}</td>
-                  <td>{r.patientName}</td>
-                  <td>{r.areaTreatment}</td>
-                  <td>{r.sessionType}</td>
-                  <td>{r.costUsd} USD</td>
-                  <td>{r.discountPercent}%</td>
-                  <td>{r.providerName}</td>
-                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    {r.finalSyp != null ? `${formatSyp(r.finalSyp)} ل.س` : '—'}
-                  </td>
-                  <td style={{ maxWidth: 160, whiteSpace: 'normal' }}>{r.notes}</td>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={9}>جاري التحميل…</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ color: 'var(--text-muted)' }}>
+                    لا توجد عمليات مكتملة أو زيارات جلدية مسجّلة لهذا التاريخ
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r, i) => (
+                  <tr key={`${r.operationNumber}-${i}`}>
+                    <td>{r.operationNumber}</td>
+                    <td>{r.patientName}</td>
+                    <td>{r.areaTreatment}</td>
+                    <td>{r.sessionType}</td>
+                    <td>{formatSyp(Number(r.costSyp) || 0)} ل.س</td>
+                    <td>{r.discountPercent}%</td>
+                    <td>{r.providerName}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {r.finalSyp != null ? `${formatSyp(r.finalSyp)} ل.س` : '—'}
+                    </td>
+                    <td style={{ maxWidth: 160, whiteSpace: 'normal' }}>{r.notes}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </>

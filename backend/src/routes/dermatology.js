@@ -12,16 +12,10 @@ import { postDermatologyVisit } from '../services/postingService.js'
 export const dermatologyRouter = Router()
 
 dermatologyRouter.use(authMiddleware, loadBusinessDay, requireRoles('super_admin', 'dermatology'))
-function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
-  const usd = Number(usdRaw)
-  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return usd
-  const syp = Number(sypRaw)
-  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
-    const rate = Number(exchangeRate)
-    if (!Number.isFinite(rate) || rate <= 0) return null
-    return syp / rate
-  }
-  return null
+
+function parseNonNegativeSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  return Number.isFinite(n) && n >= 0 ? n : null
 }
 
 function startEndOfLocalDay(d = new Date()) {
@@ -94,26 +88,20 @@ dermatologyRouter.post('/visits', requireActiveDay, async (req, res) => {
       return
     }
     const businessDate = String(body.businessDate || '').trim() || todayBusinessDate()
-    const costUsd = resolveUsdAmount({
-      usdRaw: body.costUsd,
-      sypRaw: body.costSyp,
-      exchangeRate: req.businessDay?.exchangeRate,
-      allowZero: true,
-    })
-    const materialCostUsd = resolveUsdAmount({
-      usdRaw: body.materialCostUsd,
-      sypRaw: body.materialCostSyp,
-      exchangeRate: req.businessDay?.exchangeRate,
-      allowZero: true,
-    })
+    const costSyp = parseNonNegativeSypInteger(body.costSyp)
+    const materialCostSyp = parseNonNegativeSypInteger(body.materialCostSyp)
+    if (costSyp == null || materialCostSyp == null) {
+      res.status(400).json({ error: 'أدخل المبالغ بالليرة (أرقام صحيحة غير سالبة)' })
+      return
+    }
     const v = await DermatologyVisit.create({
       businessDate,
       patientId: patient._id,
       areaTreatment: String(body.areaTreatment ?? ''),
       sessionType: String(body.sessionType ?? 'جلدية / تجميل'),
-      costUsd: Math.max(0, Number(costUsd) || 0),
+      costSyp,
       discountPercent: Math.min(100, Math.max(0, Number(body.discountPercent) || 0)),
-      materialCostUsd: Math.max(0, Number(materialCostUsd) || 0),
+      materialCostSyp,
       procedureClass: ['cosmetic', 'ortho', 'general'].includes(body.procedureClass)
         ? body.procedureClass
         : 'cosmetic',

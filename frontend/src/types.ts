@@ -48,8 +48,8 @@ export interface Patient {
   phone?: string
   /** ذكر / أنثى — فارغ إن لم يُحدَّد */
   gender?: 'male' | 'female' | ''
-  outstandingDebtUsd?: number
-  prepaidCreditUsd?: number
+  outstandingDebtSyp?: number
+  prepaidCreditSyp?: number
   paperLaserEntries?: Array<{
     therapist: string
     sessionDate: string
@@ -65,9 +65,9 @@ export interface Patient {
     department: 'laser'
     title: string
     sessionsCount: number
-    packageTotalUsd: number
-    paidAmountUsd: number
-    settlementDeltaUsd: number
+    packageTotalSyp: number
+    paidAmountSyp: number
+    settlementDeltaSyp: number
     notes: string
     createdAt: string | null
     sessions: Array<{

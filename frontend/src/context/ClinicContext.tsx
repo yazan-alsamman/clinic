@@ -13,7 +13,6 @@ import { useAuth } from './AuthContext'
 interface SystemStatus {
   businessDate: string
   dayActive: boolean
-  usdSypRate: number | null
   dayClosed: boolean
   room1MeterStart: number | null
   room2MeterStart: number | null
@@ -24,21 +23,15 @@ interface SystemStatus {
 interface ClinicContextValue {
   dayActive: boolean
   businessDate: string | null
-  usdSypRate: number | null
   dayClosed: boolean
   systemLoading: boolean
   refreshSystem: () => Promise<void>
-  startDay: (input: {
-    rate: number
-    room1MeterStart: number
-    room2MeterStart: number
-  }) => Promise<void>
+  startDay: (input: { room1MeterStart: number; room2MeterStart: number }) => Promise<void>
   endDay: (input: {
     room1MeterEnd: number
     room2MeterEnd: number
     confirm: string
   }) => Promise<void>
-  updateExchangeRate: (rate: number) => Promise<void>
 }
 
 const ClinicContext = createContext<ClinicContextValue | null>(null)
@@ -76,11 +69,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   }, [user, refreshSystem])
 
   const startDay = useCallback(
-    async (input: {
-      rate: number
-      room1MeterStart: number
-      room2MeterStart: number
-    }) => {
+    async (input: { room1MeterStart: number; room2MeterStart: number }) => {
       await api('/api/system/start-day', {
         method: 'POST',
         body: JSON.stringify(input),
@@ -105,39 +94,24 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     [refreshSystem],
   )
 
-  const updateExchangeRate = useCallback(
-    async (rate: number) => {
-      await api('/api/system/exchange-rate', {
-        method: 'PATCH',
-        body: JSON.stringify({ rate }),
-      })
-      await refreshSystem()
-    },
-    [refreshSystem],
-  )
-
   const value = useMemo(
     () => ({
       dayActive: Boolean(status?.dayActive),
       businessDate: status?.businessDate ?? null,
-      usdSypRate: status?.usdSypRate ?? null,
       dayClosed: Boolean(status?.dayClosed),
       systemLoading,
       refreshSystem,
       startDay,
       endDay,
-      updateExchangeRate,
     }),
     [
       status?.dayActive,
       status?.businessDate,
-      status?.usdSypRate,
       status?.dayClosed,
       systemLoading,
       refreshSystem,
       startDay,
       endDay,
-      updateExchangeRate,
     ],
   )
 

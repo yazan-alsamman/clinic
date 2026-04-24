@@ -37,16 +37,16 @@ async function generateInventorySku(department) {
   }
   throw new Error('تعذر توليد SKU تلقائي فريد')
 }
-function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
-  const usd = Number(usdRaw)
-  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return usd
-  const syp = Number(sypRaw)
-  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
-    const rate = Number(exchangeRate)
-    if (!Number.isFinite(rate) || rate <= 0) return null
-    return syp / rate
+function parseNonNegativeUnitCostSyp(body) {
+  if (body.unitCostSyp != null) {
+    const n = Math.round(Number(body.unitCostSyp))
+    if (Number.isFinite(n) && n >= 0) return n
   }
-  return null
+  if (body.unitCost != null) {
+    const n = Math.round(Number(body.unitCost))
+    if (Number.isFinite(n) && n >= 0) return n
+  }
+  return 0
 }
 
 function itemDto(i) {
@@ -99,12 +99,7 @@ inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => 
     }
     const department = normalizeDepartment(body.department)
     const sku = await generateInventorySku(department)
-    const unitCostResolved = resolveUsdAmount({
-      usdRaw: body.unitCost,
-      sypRaw: body.unitCostSyp,
-      exchangeRate: req.businessDay?.exchangeRate,
-      allowZero: true,
-    })
+    const unitCostSyp = parseNonNegativeUnitCostSyp(body)
     const doc = await InventoryItem.create({
       sku,
       name,
@@ -113,7 +108,7 @@ inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => 
       unit: String(body.unit || 'unit').trim() || 'unit',
       quantity: Number(body.quantity) || 0,
       safetyStockLevel: Number(body.safetyStockLevel) || 0,
-      unitCost: Math.max(0, unitCostResolved ?? 0),
+      unitCost: unitCostSyp,
     })
     await writeAudit({
       user: req.user,
@@ -160,13 +155,7 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin'), async (req, res
     if (body.safetyStockLevel != null)
       item.safetyStockLevel = Math.max(0, Number(body.safetyStockLevel))
     if (body.unitCost != null || body.unitCostSyp != null) {
-      const unitCostResolved = resolveUsdAmount({
-        usdRaw: body.unitCost,
-        sypRaw: body.unitCostSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-        allowZero: true,
-      })
-      item.unitCost = Math.max(0, Number(unitCostResolved) || 0)
+      item.unitCost = parseNonNegativeUnitCostSyp(body)
     }
 
     await item.save()

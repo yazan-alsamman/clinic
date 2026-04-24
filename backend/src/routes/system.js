@@ -12,7 +12,6 @@ systemRouter.get('/status', loadBusinessDay, (_req, res) => {
   res.json({
     businessDate: _req.businessDate,
     dayActive: Boolean(d?.active),
-    usdSypRate: d?.exchangeRate ?? null,
     dayClosed: Boolean(d?.closedAt),
     room1MeterStart: d?.room1MeterStart ?? null,
     room2MeterStart: d?.room2MeterStart ?? null,
@@ -28,13 +27,8 @@ systemRouter.post(
   requireRoles('super_admin'),
   async (req, res) => {
     try {
-      const rate = Number(req.body?.rate)
       const room1MeterStart = Number(req.body?.room1MeterStart)
       const room2MeterStart = Number(req.body?.room2MeterStart)
-      if (!Number.isFinite(rate) || rate <= 0) {
-        res.status(400).json({ error: 'سعر صرف غير صالح' })
-        return
-      }
       if (!Number.isFinite(room1MeterStart) || room1MeterStart < 0) {
         res.status(400).json({ error: 'قراءة عداد غرفة 1 في بداية اليوم غير صالحة' })
         return
@@ -52,62 +46,22 @@ systemRouter.post(
         d.room2MeterEnd = null
       }
       d.active = true
-      d.exchangeRate = rate
-      d.rateSetBy = req.user._id
-      d.rateSetAt = new Date()
       d.room1MeterStart = room1MeterStart
       d.room2MeterStart = room2MeterStart
       await d.save()
       await writeAudit({
         user: req.user,
-        action: 'تفعيل يوم العمل وتحديد سعر الصرف والعدادات',
+        action: 'تفعيل يوم العمل والعدادات',
         entityType: 'BusinessDay',
         entityId: d.businessDate,
-        details: { rate, room1MeterStart, room2MeterStart },
+        details: { room1MeterStart, room2MeterStart },
       })
       res.json({
         businessDate: d.businessDate,
         dayActive: true,
-        usdSypRate: d.exchangeRate,
         room1MeterStart: d.room1MeterStart,
         room2MeterStart: d.room2MeterStart,
       })
-    } catch (e) {
-      console.error(e)
-      res.status(500).json({ error: 'خطأ في الخادم' })
-    }
-  },
-)
-
-systemRouter.patch(
-  '/exchange-rate',
-  authMiddleware,
-  loadBusinessDay,
-  requireRoles('super_admin'),
-  async (req, res) => {
-    try {
-      const rate = Number(req.body?.rate)
-      if (!Number.isFinite(rate) || rate <= 0) {
-        res.status(400).json({ error: 'سعر صرف غير صالح' })
-        return
-      }
-      const d = req.businessDay
-      if (!d.active) {
-        res.status(400).json({ error: 'فعّل اليوم أولاً' })
-        return
-      }
-      d.exchangeRate = rate
-      d.rateSetBy = req.user._id
-      d.rateSetAt = new Date()
-      await d.save()
-      await writeAudit({
-        user: req.user,
-        action: 'تعديل سعر الصرف',
-        entityType: 'BusinessDay',
-        entityId: d.businessDate,
-        details: { rate },
-      })
-      res.json({ usdSypRate: d.exchangeRate })
     } catch (e) {
       console.error(e)
       res.status(500).json({ error: 'خطأ في الخادم' })
@@ -164,7 +118,6 @@ systemRouter.post(
       res.json({
         businessDate: d.businessDate,
         dayActive: false,
-        usdSypRate: d.exchangeRate,
         dayClosed: true,
         room1MeterEnd: d.room1MeterEnd,
         room2MeterEnd: d.room2MeterEnd,

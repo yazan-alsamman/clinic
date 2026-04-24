@@ -18,7 +18,7 @@ const laserSessionSchema = new mongoose.Schema(
     areaIds: [{ type: String }],
     /** مناطق مذكورة يدوياً (نص حر) */
     manualAreaLabels: [{ type: String, trim: true }],
-    costUsd: { type: Number, default: 0 },
+    costSyp: { type: Number, default: 0 },
     discountPercent: { type: Number, default: 0 },
     sessionTypeLabel: { type: String, default: '' },
     status: {

@@ -5,7 +5,6 @@ import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle
 import { todayBusinessDate } from '../utils/date.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
-import { BusinessDay } from '../models/BusinessDay.js'
 
 export const patientPortalRouter = Router()
 patientPortalRouter.use(patientAuthMiddleware)
@@ -92,22 +91,16 @@ patientPortalRouter.get('/dashboard', async (req, res) => {
 patientPortalRouter.get('/financial', async (req, res) => {
   try {
     const p = req.patient
-    const bd = await BusinessDay.findOne({ businessDate: todayBusinessDate() }).lean()
-    const usdSypRate =
-      bd?.exchangeRate != null && Number.isFinite(Number(bd.exchangeRate))
-        ? Number(bd.exchangeRate)
-        : null
     const items = await BillingItem.find({ patientId: p._id })
-      .select('_id amountDueUsd businessDate procedureLabel')
+      .select('_id amountDueSyp businessDate procedureLabel')
       .lean()
     const byId = new Map(items.map((x) => [String(x._id), x]))
     const itemIds = [...byId.keys()]
     if (itemIds.length === 0) {
       res.json({
-        usdSypRate,
         summary: {
-          outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
-          prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
+          outstandingDebtSyp: Number(p.outstandingDebtSyp) || 0,
+          prepaidCreditSyp: Number(p.prepaidCreditSyp) || 0,
         },
         entries: [],
       })
@@ -121,22 +114,22 @@ patientPortalRouter.get('/financial', async (req, res) => {
     const entries = payments.map((pay) => {
       const key = String(pay.billingItemId)
       const bi = byId.get(key)
-      const due = Number(bi?.amountDueUsd) || 0
-      const applied = Number(pay.amountUsd) || 0
-      const received = Number(pay.receivedAmountUsd ?? pay.amountUsd) || 0
-      const delta = Number(pay.settlementDeltaUsd ?? received - due) || 0
+      const due = Math.round(Number(bi?.amountDueSyp) || 0)
+      const applied = Math.round(Number(pay.amountSyp) || 0)
+      const received = Math.round(Number(pay.receivedAmountSyp ?? pay.amountSyp) || 0)
+      const delta = Math.round(Number(pay.settlementDeltaSyp ?? received - due) || 0)
       let settlementType = 'exact'
-      if (delta < -0.0001) settlementType = 'debt'
-      else if (delta > 0.0001) settlementType = 'credit'
+      if (delta < 0) settlementType = 'debt'
+      else if (delta > 0) settlementType = 'credit'
       return {
         id: String(pay._id),
         billingItemId: key,
         businessDate: String(bi?.businessDate || '').trim(),
         procedureLabel: String(bi?.procedureLabel || '').trim(),
-        amountDueUsd: due,
-        appliedAmountUsd: applied,
-        receivedAmountUsd: received,
-        settlementDeltaUsd: Math.round(delta * 100) / 100,
+        amountDueSyp: due,
+        appliedAmountSyp: applied,
+        receivedAmountSyp: received,
+        settlementDeltaSyp: delta,
         settlementType,
         method: pay.method,
         receivedAt: pay.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
@@ -144,10 +137,9 @@ patientPortalRouter.get('/financial', async (req, res) => {
     })
 
     res.json({
-      usdSypRate,
       summary: {
-        outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
-        prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
+        outstandingDebtSyp: Number(p.outstandingDebtSyp) || 0,
+        prepaidCreditSyp: Number(p.prepaidCreditSyp) || 0,
       },
       entries,
     })

@@ -7,10 +7,10 @@ const dermatologyVisitSchema = new mongoose.Schema(
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
     areaTreatment: { type: String, default: '' },
     sessionType: { type: String, default: 'جلدية / تجميل' },
-    costUsd: { type: Number, default: 0 },
+    costSyp: { type: Number, default: 0 },
     discountPercent: { type: Number, default: 0 },
     /** تكلفة المواد (مستودع) — تُخصم من الأساس قبل نسبة الطبيب وفق ملف الحساب */
-    materialCostUsd: { type: Number, default: 0, min: 0 },
+    materialCostSyp: { type: Number, default: 0, min: 0 },
     /** cosmetic | ortho — لربط أسنان تقويم لاحقاً */
     procedureClass: { type: String, enum: ['cosmetic', 'ortho', 'general'], default: 'cosmetic' },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

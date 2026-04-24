@@ -44,16 +44,17 @@ function normalizePaperLaserEntries(raw) {
     .slice(0, 300)
 }
 
-function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
-  const usd = Number(usdRaw)
-  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return usd
-  const syp = Number(sypRaw)
-  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
-    const rate = Number(exchangeRate)
-    if (!Number.isFinite(rate) || rate <= 0) throw new Error('سعر الصرف غير متاح')
-    return syp / rate
-  }
-  throw new Error('المبلغ غير صالح')
+/** مبلغ ليرة صحيح موجب */
+function parsePositiveSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+function parseNonNegativeSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n) || n < 0) return null
+  return n
 }
 
 function normalizeYesNo(raw) {
@@ -120,9 +121,9 @@ function serializePackage(pkg) {
     department: String(pkg?.department || 'laser'),
     title: String(pkg?.title || ''),
     sessionsCount: Number(pkg?.sessionsCount) || 0,
-    packageTotalUsd: Number(pkg?.packageTotalUsd) || 0,
-    paidAmountUsd: Number(pkg?.paidAmountUsd) || 0,
-    settlementDeltaUsd: Number(pkg?.settlementDeltaUsd) || 0,
+    packageTotalSyp: Number(pkg?.packageTotalSyp) || 0,
+    paidAmountSyp: Number(pkg?.paidAmountSyp) || 0,
+    settlementDeltaSyp: Number(pkg?.settlementDeltaSyp) || 0,
     notes: String(pkg?.notes || ''),
     createdAt: pkg?.createdAt ? new Date(pkg.createdAt).toISOString() : null,
     sessions: Array.isArray(pkg?.sessions)
@@ -172,16 +173,16 @@ patientsRouter.get('/financial-balances', async (req, res) => {
     }
     const debtDept = parseFinancialBalanceDept(req.query.debtDepartment)
     const creditDept = parseFinancialBalanceDept(req.query.creditDepartment)
-    const select = 'fileNumber name outstandingDebtUsd prepaidCreditUsd sessionPackages'
+    const select = 'fileNumber name outstandingDebtSyp prepaidCreditSyp sessionPackages'
     const [debtPatients, creditPatients] = await Promise.all([
-      Patient.find({ outstandingDebtUsd: { $gt: 0.0001 } })
+      Patient.find({ outstandingDebtSyp: { $gt: 0 } })
         .select(select)
-        .sort({ outstandingDebtUsd: -1, name: 1 })
+        .sort({ outstandingDebtSyp: -1, name: 1 })
         .limit(5000)
         .lean(),
-      Patient.find({ prepaidCreditUsd: { $gt: 0.0001 } })
+      Patient.find({ prepaidCreditSyp: { $gt: 0 } })
         .select(select)
-        .sort({ prepaidCreditUsd: -1, name: 1 })
+        .sort({ prepaidCreditSyp: -1, name: 1 })
         .limit(5000)
         .lean(),
     ])
@@ -197,12 +198,9 @@ patientsRouter.get('/financial-balances', async (req, res) => {
       if (!creditDept) return true
       return row.department === creditDept
     })
-    const rateRaw = req.businessDay?.exchangeRate
-    const usdSypRate = rateRaw != null && Number.isFinite(Number(rateRaw)) ? Number(rateRaw) : null
     res.json({
       debtLines,
       creditLines,
-      usdSypRate,
     })
   } catch (e) {
     console.error(e)
@@ -385,15 +383,15 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
     }
 
     const items = await BillingItem.find({ patientId: p._id })
-      .select('_id amountDueUsd businessDate procedureLabel')
+      .select('_id amountDueSyp businessDate procedureLabel')
       .lean()
     const byId = new Map(items.map((x) => [String(x._id), x]))
     const itemIds = [...byId.keys()]
     if (itemIds.length === 0) {
       res.json({
         summary: {
-          outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
-          prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
+          outstandingDebtSyp: Number(p.outstandingDebtSyp) || 0,
+          prepaidCreditSyp: Number(p.prepaidCreditSyp) || 0,
         },
         entries: [],
       })
@@ -408,30 +406,26 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
     const entries = payments.map((pay) => {
       const key = String(pay.billingItemId)
       const bi = byId.get(key)
-      const due = Number(bi?.amountDueUsd) || 0
-      const applied = Number(pay.amountUsd) || 0
-      const received = Number(pay.receivedAmountUsd ?? pay.amountUsd) || 0
-      const delta = Number(pay.settlementDeltaUsd ?? received - due) || 0
+      const due = Math.round(Number(bi?.amountDueSyp) || 0)
+      const applied = Math.round(Number(pay.amountSyp) || 0)
+      const received = Math.round(Number(pay.receivedAmountSyp ?? pay.amountSyp) || 0)
+      const delta = Math.round(Number(pay.settlementDeltaSyp ?? received - due) || 0)
       let settlementType = 'exact'
-      if (delta < -0.0001) settlementType = 'debt'
-      else if (delta > 0.0001) settlementType = 'credit'
+      if (delta < 0) settlementType = 'debt'
+      else if (delta > 0) settlementType = 'credit'
       return {
         id: String(pay._id),
         billingItemId: key,
         businessDate: String(bi?.businessDate || '').trim(),
         procedureLabel: String(bi?.procedureLabel || '').trim(),
-        amountDueUsd: due,
-        appliedAmountUsd: applied,
-        receivedAmountUsd: received,
-        settlementDeltaUsd: Math.round(delta * 100) / 100,
+        amountDueSyp: due,
+        appliedAmountSyp: applied,
+        receivedAmountSyp: received,
+        settlementDeltaSyp: delta,
         settlementType,
         method: pay.method,
         paymentChannel: pay.paymentChannel === 'bank' ? 'bank' : 'cash',
         bankName: pay.bankName ? String(pay.bankName) : undefined,
-        receivedAmountSypRecorded:
-          pay.receivedAmountSypRecorded != null && Number.isFinite(Number(pay.receivedAmountSypRecorded))
-            ? Math.round(Number(pay.receivedAmountSypRecorded))
-            : undefined,
         receivedAt: pay.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
         receivedByName: String(pay.receivedBy?.name || '').trim(),
       }
@@ -439,8 +433,8 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
 
     res.json({
       summary: {
-        outstandingDebtUsd: Number(p.outstandingDebtUsd) || 0,
-        prepaidCreditUsd: Number(p.prepaidCreditUsd) || 0,
+        outstandingDebtSyp: Number(p.outstandingDebtSyp) || 0,
+        prepaidCreditSyp: Number(p.prepaidCreditSyp) || 0,
       },
       entries,
     })
@@ -486,7 +480,7 @@ patientsRouter.get('/:id/financial-billing-detail/:billingItemId', async (req, r
         id: String(bi._id),
         department: bi.department,
         procedureLabel: String(bi.procedureLabel || ''),
-        amountDueUsd: Number(bi.amountDueUsd) || 0,
+        amountDueSyp: Number(bi.amountDueSyp) || 0,
         businessDate: String(bi.businessDate || ''),
         status: bi.status,
         paidAt: bi.paidAt ? new Date(bi.paidAt).toISOString() : null,
@@ -495,11 +489,11 @@ patientsRouter.get('/:id/financial-billing-detail/:billingItemId', async (req, r
         ? {
             id: String(cs._id),
             procedureDescription: String(cs.procedureDescription || ''),
-            sessionFeeUsd: Number(cs.sessionFeeUsd) || 0,
+            sessionFeeSyp: Number(cs.sessionFeeSyp) || 0,
             businessDate: String(cs.businessDate || ''),
             notes: String(cs.notes || ''),
-            materialCostUsdTotal: Number(cs.materialCostUsdTotal) || 0,
-            materialChargeUsdTotal: Number(cs.materialChargeUsdTotal) || 0,
+            materialCostSypTotal: Number(cs.materialCostSypTotal) || 0,
+            materialChargeSypTotal: Number(cs.materialChargeSypTotal) || 0,
             materials: Array.isArray(cs.materials) ? cs.materials : [],
             providerName: String(cs.providerUserId?.name || '').trim(),
             isPackageSession: cs.isPackageSession === true,
@@ -519,7 +513,7 @@ patientsRouter.get('/:id/financial-billing-detail/:billingItemId', async (req, r
             room: String(laser.room || ''),
             sessionTypeLabel: String(laser.sessionTypeLabel || ''),
             discountPercent: Number(laser.discountPercent) || 0,
-            costUsd: Number(laser.costUsd) || 0,
+            costSyp: Number(laser.costSyp) || 0,
             status: laser.status,
             operatorName: String(laser.operatorUserId?.name || '').trim(),
             treatmentNumber: laser.treatmentNumber,
@@ -574,36 +568,25 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    let enteredUsd = 0
-    try {
-      enteredUsd = resolveUsdAmount({
-        usdRaw: req.body?.amountUsd,
-        sypRaw: req.body?.amountSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-      })
-    } catch (err) {
-      res.status(400).json({ error: String(err?.message || 'المبلغ غير صالح') })
-      return
-    }
-    enteredUsd = Math.round(enteredUsd * 100) / 100
-    if (!(enteredUsd > 0)) {
-      res.status(400).json({ error: 'أدخل مبلغاً أكبر من الصفر' })
+    const enteredSyp = parsePositiveSypInteger(req.body?.amountSyp)
+    if (enteredSyp == null) {
+      res.status(400).json({ error: 'أدخل مبلغاً بالليرة أكبر من الصفر' })
       return
     }
 
-    const debtBefore = Math.round((Number(p.outstandingDebtUsd) || 0) * 100) / 100
-    const creditBefore = Math.round((Number(p.prepaidCreditUsd) || 0) * 100) / 100
-    const appliedToDebtUsd = Math.round(Math.min(debtBefore, enteredUsd) * 100) / 100
-    const extraToCreditUsd = Math.round((enteredUsd - appliedToDebtUsd) * 100) / 100
-    const debtAfter = Math.round((debtBefore - appliedToDebtUsd) * 100) / 100
-    const creditAfter = Math.round((creditBefore + extraToCreditUsd) * 100) / 100
+    const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
+    const appliedToDebtSyp = Math.min(debtBefore, enteredSyp)
+    const extraToCreditSyp = enteredSyp - appliedToDebtSyp
+    const debtAfter = debtBefore - appliedToDebtSyp
+    const creditAfter = creditBefore + extraToCreditSyp
 
     await Patient.updateOne(
       { _id: p._id },
       {
         $set: {
-          outstandingDebtUsd: debtAfter,
-          prepaidCreditUsd: creditAfter,
+          outstandingDebtSyp: debtAfter,
+          prepaidCreditSyp: creditAfter,
         },
       },
     )
@@ -611,9 +594,9 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
     const outcome =
       debtBefore <= 0
         ? 'credit_only'
-        : enteredUsd < debtBefore
+        : enteredSyp < debtBefore
           ? 'partial'
-          : enteredUsd === debtBefore
+          : enteredSyp === debtBefore
             ? 'exact'
             : 'overpay'
 
@@ -623,31 +606,31 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       entityType: 'Patient',
       entityId: p._id,
       details: {
-        enteredUsd,
+        enteredSyp,
         debtBefore,
         debtAfter,
         creditBefore,
         creditAfter,
-        appliedToDebtUsd,
-        extraToCreditUsd,
+        appliedToDebtSyp,
+        extraToCreditSyp,
         outcome,
       },
     })
 
     res.status(201).json({
       settlement: {
-        enteredUsd,
+        enteredSyp,
         debtBefore,
         debtAfter,
         creditBefore,
         creditAfter,
-        appliedToDebtUsd,
-        extraToCreditUsd,
+        appliedToDebtSyp,
+        extraToCreditSyp,
         outcome,
       },
       summary: {
-        outstandingDebtUsd: debtAfter,
-        prepaidCreditUsd: creditAfter,
+        outstandingDebtSyp: debtAfter,
+        prepaidCreditSyp: creditAfter,
       },
     })
   } catch (e) {
@@ -696,45 +679,26 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       res.status(400).json({ error: 'عدد الجلسات غير صالح' })
       return
     }
-    let packageTotalUsd = 0
-    let paidAmountUsd = 0
-    try {
-      packageTotalUsd = resolveUsdAmount({
-        usdRaw: req.body?.packageTotalUsd,
-        sypRaw: req.body?.packageTotalSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-        allowZero: true,
-      })
-      paidAmountUsd = resolveUsdAmount({
-        usdRaw: req.body?.paidAmountUsd,
-        sypRaw: req.body?.paidAmountSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-        allowZero: true,
-      })
-    } catch (err) {
-      res.status(400).json({ error: String(err?.message || 'المبلغ غير صالح') })
+    const packageTotalSyp = parsePositiveSypInteger(req.body?.packageTotalSyp)
+    if (packageTotalSyp == null) {
+      res.status(400).json({ error: 'أدخل إجمالي سعر الباكج بالليرة' })
       return
     }
-    packageTotalUsd = Math.round((Number(packageTotalUsd) || 0) * 100) / 100
-    paidAmountUsd = Math.round((Number(paidAmountUsd) || 0) * 100) / 100
-    if (!(packageTotalUsd > 0)) {
-      res.status(400).json({ error: 'أدخل إجمالي سعر الباكج (USD أو SYP)' })
-      return
-    }
-    if (!(paidAmountUsd >= 0)) {
+    const paidAmountSyp = parseNonNegativeSypInteger(req.body?.paidAmountSyp)
+    if (paidAmountSyp == null) {
       res.status(400).json({ error: 'مبلغ المدفوع غير صالح' })
       return
     }
 
-    const debtBefore = Math.round((Number(p.outstandingDebtUsd) || 0) * 100) / 100
-    const creditBefore = Math.round((Number(p.prepaidCreditUsd) || 0) * 100) / 100
-    const settlementDeltaUsd = Math.round((paidAmountUsd - packageTotalUsd) * 100) / 100
+    const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
+    const settlementDeltaSyp = paidAmountSyp - packageTotalSyp
     let debtAfter = debtBefore
     let creditAfter = creditBefore
-    if (settlementDeltaUsd < 0) {
-      debtAfter = Math.round((debtAfter + Math.abs(settlementDeltaUsd)) * 100) / 100
-    } else if (settlementDeltaUsd > 0) {
-      creditAfter = Math.round((creditAfter + settlementDeltaUsd) * 100) / 100
+    if (settlementDeltaSyp < 0) {
+      debtAfter += Math.abs(settlementDeltaSyp)
+    } else if (settlementDeltaSyp > 0) {
+      creditAfter += settlementDeltaSyp
     }
 
     const packageId = new mongoose.Types.ObjectId()
@@ -754,9 +718,9 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       department: 'laser',
       title,
       sessionsCount,
-      packageTotalUsd,
-      paidAmountUsd,
-      settlementDeltaUsd,
+      packageTotalSyp,
+      paidAmountSyp,
+      settlementDeltaSyp,
       notes,
       createdByUserId: req.user._id,
       sessions,
@@ -769,8 +733,8 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       {
         $push: { sessionPackages: packageDoc },
         $set: {
-          outstandingDebtUsd: debtAfter,
-          prepaidCreditUsd: creditAfter,
+          outstandingDebtSyp: debtAfter,
+          prepaidCreditSyp: creditAfter,
         },
       },
     )
@@ -784,17 +748,17 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         packageId: String(packageId),
         department: 'laser',
         sessionsCount,
-        packageTotalUsd,
-        paidAmountUsd,
-        settlementDeltaUsd,
+        packageTotalSyp,
+        paidAmountSyp,
+        settlementDeltaSyp,
       },
     })
 
     res.status(201).json({
       package: serializePackage(packageDoc),
       summary: {
-        outstandingDebtUsd: debtAfter,
-        prepaidCreditUsd: creditAfter,
+        outstandingDebtSyp: debtAfter,
+        prepaidCreditSyp: creditAfter,
       },
     })
   } catch (e) {

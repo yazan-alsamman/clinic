@@ -31,9 +31,9 @@ const patientPackageSchema = new mongoose.Schema(
     department: { type: String, enum: ['laser'], default: 'laser' },
     title: { type: String, default: '' },
     sessionsCount: { type: Number, default: 0, min: 1 },
-    packageTotalUsd: { type: Number, default: 0, min: 0 },
-    paidAmountUsd: { type: Number, default: 0, min: 0 },
-    settlementDeltaUsd: { type: Number, default: 0 },
+    packageTotalSyp: { type: Number, default: 0, min: 0 },
+    paidAmountSyp: { type: Number, default: 0, min: 0 },
+    settlementDeltaSyp: { type: Number, default: 0 },
     notes: { type: String, default: '' },
     createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     sessions: { type: [packageSessionSchema], default: [] },
@@ -66,9 +66,9 @@ const patientSchema = new mongoose.Schema(
     phone: { type: String, default: '' },
     gender: { type: String, default: '' },
     /** رصيد مستحق على المريض (ذمم) */
-    outstandingDebtUsd: { type: Number, default: 0, min: 0 },
+    outstandingDebtSyp: { type: Number, default: 0, min: 0 },
     /** رصيد إضافي مدفوع مسبقاً للمريض */
-    prepaidCreditUsd: { type: Number, default: 0, min: 0 },
+    prepaidCreditSyp: { type: Number, default: 0, min: 0 },
     /** إدخالات أرشيف ورقي (ليزر/جلسات قديمة) */
     paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
     /** باقات جلسات مسبقة الدفع (حالياً: ليزر) */

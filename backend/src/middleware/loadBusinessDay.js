@@ -7,7 +7,7 @@ export async function loadBusinessDay(req, _res, next) {
     const businessDate = todayBusinessDate()
     let doc = await BusinessDay.findOne({ businessDate })
     if (!doc) {
-      doc = await BusinessDay.create({ businessDate, active: false, exchangeRate: null })
+      doc = await BusinessDay.create({ businessDate, active: false })
     }
     req.businessDay = doc
     req.businessDate = businessDate

@@ -5,30 +5,25 @@ type FinancialEntry = {
   id: string
   businessDate: string
   procedureLabel: string
-  amountDueUsd: number
-  receivedAmountUsd: number
-  settlementDeltaUsd: number
+  amountDueSyp: number
+  appliedAmountSyp: number
+  receivedAmountSyp: number
+  settlementDeltaSyp: number
   settlementType: 'exact' | 'debt' | 'credit'
   method: string
   receivedAt: string | null
 }
 
 type FinancialPayload = {
-  usdSypRate?: number | null
   summary: {
-    outstandingDebtUsd: number
-    prepaidCreditUsd: number
+    outstandingDebtSyp: number
+    prepaidCreditSyp: number
   }
   entries: FinancialEntry[]
 }
 
-function moneyDual(usdRaw: number, rateRaw: number | null | undefined) {
-  const usd = Number(usdRaw) || 0
-  const usdText = `${usd.toFixed(2)} USD`
-  const rate = Number(rateRaw || 0)
-  const sypText =
-    rate > 0 ? `${Math.round(usd * rate).toLocaleString('ar-SY')} ل.س` : '— ل.س'
-  return { usdText, sypText }
+function fmtSyp(n: number) {
+  return `${(Number(n) || 0).toLocaleString('ar-SY')} ل.س`
 }
 
 const settlementTypeAr: Record<FinancialEntry['settlementType'], string> = {
@@ -61,7 +56,7 @@ export function PatientPortalFinancial() {
 
   const openEntries = useMemo(() => {
     if (!data) return []
-    return data.entries.filter((x) => Math.abs(Number(x.settlementDeltaUsd) || 0) > 0.0001)
+    return data.entries.filter((x) => Math.abs(Number(x.settlementDeltaSyp) || 0) > 0)
   }, [data])
 
   if (err) {
@@ -80,25 +75,19 @@ export function PatientPortalFinancial() {
     <>
       <div className="patient-hero">
         <h1>المالية</h1>
-        <p>عرض الرصيد الإضافي والذمم مع تفاصيل الحركات المالية الخاصة بملفك.</p>
+        <p>عرض الرصيد الإضافي والذمم مع تفاصيل الحركات المالية الخاصة بملفك (بالليرة السورية).</p>
       </div>
 
       <div className="patient-stat-grid">
         <div className="patient-stat">
           <div className="n" style={{ color: 'var(--danger)', fontSize: '1.2rem' }}>
-            {moneyDual(data.summary.outstandingDebtUsd, data.usdSypRate).usdText}
-          </div>
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.86rem' }}>
-            {moneyDual(data.summary.outstandingDebtUsd, data.usdSypRate).sypText}
+            {fmtSyp(data.summary.outstandingDebtSyp)}
           </div>
           <div className="l">الذمم المستحقة</div>
         </div>
         <div className="patient-stat">
           <div className="n" style={{ color: 'var(--success)', fontSize: '1.2rem' }}>
-            {moneyDual(data.summary.prepaidCreditUsd, data.usdSypRate).usdText}
-          </div>
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.86rem' }}>
-            {moneyDual(data.summary.prepaidCreditUsd, data.usdSypRate).sypText}
+            {fmtSyp(data.summary.prepaidCreditSyp)}
           </div>
           <div className="l">الرصيد الإضافي</div>
         </div>
@@ -128,24 +117,9 @@ export function PatientPortalFinancial() {
                   <tr key={e.id}>
                     <td>{e.businessDate || '—'}</td>
                     <td>{e.procedureLabel || '—'}</td>
-                    <td>
-                      {moneyDual(e.amountDueUsd, data.usdSypRate).usdText}
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                        {moneyDual(e.amountDueUsd, data.usdSypRate).sypText}
-                      </div>
-                    </td>
-                    <td>
-                      {moneyDual(e.receivedAmountUsd, data.usdSypRate).usdText}
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                        {moneyDual(e.receivedAmountUsd, data.usdSypRate).sypText}
-                      </div>
-                    </td>
-                    <td>
-                      {moneyDual(e.settlementDeltaUsd, data.usdSypRate).usdText}
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                        {moneyDual(e.settlementDeltaUsd, data.usdSypRate).sypText}
-                      </div>
-                    </td>
+                    <td>{fmtSyp(e.amountDueSyp)}</td>
+                    <td>{fmtSyp(e.receivedAmountSyp)}</td>
+                    <td>{fmtSyp(e.settlementDeltaSyp)}</td>
                     <td>{settlementTypeAr[e.settlementType] || '—'}</td>
                   </tr>
                 ))}

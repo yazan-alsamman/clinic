@@ -51,8 +51,8 @@ const FRESH = process.argv.includes('--fresh')
 async function seedLaserSessionWithBilling(p) {
   const { patientId, operatorUserId, businessDate, treatmentNumber, row } = p
   const discount = Math.min(100, Math.max(0, Number(row.discountPercent) || 0))
-  const gross = Number(row.costUsd) || 0
-  const amountDueUsd = Math.round(gross * (1 - discount / 100) * 100) / 100
+  const gross = Number(row.costSyp) || 0
+  const amountDueSyp = Math.round(gross * (1 - discount / 100))
   const areaPart = [...(row.areaIds || []), ...(row.manualAreaLabels || [])].filter(Boolean).join('، ') || 'تجريبي'
   const procedureDescription = `ليزر ${row.laserType} — ${areaPart}`.slice(0, 500)
 
@@ -70,7 +70,7 @@ async function seedLaserSessionWithBilling(p) {
     areaIds: Array.isArray(row.areaIds) ? row.areaIds : [],
     manualAreaLabels: Array.isArray(row.manualAreaLabels) ? row.manualAreaLabels : [],
     status: row.status || 'scheduled',
-    costUsd: gross,
+    costSyp: gross,
     discountPercent: discount,
   })
 
@@ -79,12 +79,12 @@ async function seedLaserSessionWithBilling(p) {
     providerUserId: operatorUserId,
     department: 'laser',
     procedureDescription,
-    sessionFeeUsd: amountDueUsd,
+    sessionFeeSyp: amountDueSyp,
     businessDate,
     notes: String(row.notes ?? '').trim().slice(0, 2000),
     laserSessionId: s._id,
     materials: [],
-    materialCostUsdTotal: 0,
+    materialCostSypTotal: 0,
   })
   const bi = await BillingItem.create({
     clinicalSessionId: cs._id,
@@ -92,7 +92,7 @@ async function seedLaserSessionWithBilling(p) {
     providerUserId: operatorUserId,
     department: 'laser',
     procedureLabel: procedureDescription.slice(0, 200),
-    amountDueUsd,
+    amountDueSyp,
     businessDate,
     status: 'pending_payment',
   })
@@ -191,19 +191,19 @@ const laserCatalog = [
 ]
 
 const inventorySeed = [
-  { sku: 'LAS-GEL-001', name: 'جيل ليزر', department: 'laser', unit: 'عبوة', quantity: 40, safetyStockLevel: 10, unitCost: 8 },
-  { sku: 'LAS-CRYO-001', name: 'كريم تبريد ليزر', department: 'laser', unit: 'عبوة', quantity: 20, safetyStockLevel: 6, unitCost: 10 },
-  { sku: 'DERM-BOT-001', name: 'بوتوكس وحدة', department: 'dermatology', unit: 'وحدة', quantity: 24, safetyStockLevel: 6, unitCost: 85 },
-  { sku: 'DERM-FILL-001', name: 'فيلر شفاه (أمبول)', department: 'dermatology', unit: 'أمبول', quantity: 12, safetyStockLevel: 5, unitCost: 120 },
-  { sku: 'DERM-GLOW-001', name: 'مادة نضارة', department: 'dermatology', unit: 'جلسة', quantity: 18, safetyStockLevel: 6, unitCost: 35 },
-  { sku: 'SKIN-MASK-001', name: 'ماسك علاجي للبشرة', department: 'skin', unit: 'علبة', quantity: 30, safetyStockLevel: 8, unitCost: 14 },
-  { sku: 'SKIN-PEEL-001', name: 'محلول تقشير بارد', department: 'skin', unit: 'عبوة', quantity: 16, safetyStockLevel: 5, unitCost: 22 },
-  { sku: 'SOL-LOTION-001', name: 'لوشن سولاريوم', department: 'solarium', unit: 'عبوة', quantity: 22, safetyStockLevel: 7, unitCost: 11 },
-  { sku: 'SOL-EYE-001', name: 'نظارات حماية سولاريوم', department: 'solarium', unit: 'قطعة', quantity: 35, safetyStockLevel: 10, unitCost: 4 },
-  { sku: 'DEN-FILL-001', name: 'حشوة مركبة', department: 'dental', unit: 'جرعة', quantity: 40, safetyStockLevel: 10, unitCost: 12 },
-  { sku: 'DEN-BOND-001', name: 'لاصق سنّي', department: 'dental', unit: 'عبوة', quantity: 15, safetyStockLevel: 4, unitCost: 28 },
-  { sku: 'WIPES-001', name: 'مناديل تعقيم', department: 'dermatology', unit: 'علبة', quantity: 18, safetyStockLevel: 6, unitCost: 3 },
-  { sku: 'NEEDLE-001', name: 'إبر تعقيم', department: 'dermatology', unit: 'علبة', quantity: 50, safetyStockLevel: 15, unitCost: 2 },
+  { sku: 'LAS-GEL-001', name: 'جيل ليزر', department: 'laser', unit: 'عبوة', quantity: 40, safetyStockLevel: 10, unitCost: 120000 },
+  { sku: 'LAS-CRYO-001', name: 'كريم تبريد ليزر', department: 'laser', unit: 'عبوة', quantity: 20, safetyStockLevel: 6, unitCost: 150000 },
+  { sku: 'DERM-BOT-001', name: 'بوتوكس وحدة', department: 'dermatology', unit: 'وحدة', quantity: 24, safetyStockLevel: 6, unitCost: 1275000 },
+  { sku: 'DERM-FILL-001', name: 'فيلر شفاه (أمبول)', department: 'dermatology', unit: 'أمبول', quantity: 12, safetyStockLevel: 5, unitCost: 1800000 },
+  { sku: 'DERM-GLOW-001', name: 'مادة نضارة', department: 'dermatology', unit: 'جلسة', quantity: 18, safetyStockLevel: 6, unitCost: 525000 },
+  { sku: 'SKIN-MASK-001', name: 'ماسك علاجي للبشرة', department: 'skin', unit: 'علبة', quantity: 30, safetyStockLevel: 8, unitCost: 210000 },
+  { sku: 'SKIN-PEEL-001', name: 'محلول تقشير بارد', department: 'skin', unit: 'عبوة', quantity: 16, safetyStockLevel: 5, unitCost: 330000 },
+  { sku: 'SOL-LOTION-001', name: 'لوشن سولاريوم', department: 'solarium', unit: 'عبوة', quantity: 22, safetyStockLevel: 7, unitCost: 165000 },
+  { sku: 'SOL-EYE-001', name: 'نظارات حماية سولاريوم', department: 'solarium', unit: 'قطعة', quantity: 35, safetyStockLevel: 10, unitCost: 60000 },
+  { sku: 'DEN-FILL-001', name: 'حشوة مركبة', department: 'dental', unit: 'جرعة', quantity: 40, safetyStockLevel: 10, unitCost: 180000 },
+  { sku: 'DEN-BOND-001', name: 'لاصق سنّي', department: 'dental', unit: 'عبوة', quantity: 15, safetyStockLevel: 4, unitCost: 420000 },
+  { sku: 'WIPES-001', name: 'مناديل تعقيم', department: 'dermatology', unit: 'علبة', quantity: 18, safetyStockLevel: 6, unitCost: 45000 },
+  { sku: 'NEEDLE-001', name: 'إبر تعقيم', department: 'dermatology', unit: 'علبة', quantity: 50, safetyStockLevel: 15, unitCost: 30000 },
 ]
 
 async function seed() {
@@ -363,9 +363,6 @@ async function seed() {
     { businessDate: yDate },
     {
       active: false,
-      exchangeRate: 14700,
-      rateSetBy: admin._id,
-      rateSetAt: new Date(Date.now() - 86400000),
       closedAt: new Date(Date.now() - 43200000),
       closedBy: admin._id,
     },
@@ -377,15 +374,12 @@ async function seed() {
     { businessDate },
     {
       active: true,
-      exchangeRate: 14850,
-      rateSetBy: admin._id,
-      rateSetAt: new Date(),
       closedAt: null,
       closedBy: null,
     },
     { upsert: true },
   )
-  console.log('BusinessDay (اليوم، نشط):', businessDate, 'سعر 14850')
+  console.log('BusinessDay (اليوم، نشط):', businessDate)
 
   await PaymentSettings.findOneAndUpdate(
     { _id: 'default' },
@@ -482,7 +476,7 @@ async function seed() {
           areaIds: Array.isArray(row.areaIds) ? row.areaIds : [],
           manualAreaLabels: Array.isArray(row.manualAreaLabels) ? row.manualAreaLabels : [],
           status: row.status || 'scheduled',
-          costUsd: Number(row.costUsd) || 0,
+          costSyp: Number(row.costSyp) || 0,
           discountPercent: discount,
           createdAt: new Date(startOfDay.getTime() + treatmentSeq * 45 * 60000),
         })
@@ -517,7 +511,7 @@ async function seed() {
           patientId: pat._id,
           areaTreatment: v.areaTreatment,
           sessionType: v.sessionType || 'جلدية / تجميل',
-          costUsd: Number(v.costUsd) || 0,
+          costSyp: Number(v.costSyp) || 0,
           discountPercent: Math.min(100, Math.max(0, Number(v.discountPercent) || 0)),
           providerUserId: prov._id,
           notes: v.notes ?? '',
@@ -561,10 +555,10 @@ async function seed() {
       {
         userId: admin._id,
         userName: admin.name,
-        action: 'تعديل سعر الصرف',
+        action: 'أرشفة يوم عمل',
         entityType: 'BusinessDay',
         entityId: yDate,
-        details: { rate: 14700 },
+        details: {},
         createdAt: new Date(Date.now() - 86400000),
       },
       {
@@ -618,25 +612,25 @@ async function seed() {
       order: 0,
       key: 'net_gross',
       expression:
-        'round2(input.gross_usd * (1 - min(input.discount_percent, param.discount_percent_cap) / 100))',
+        'round2(input.gross_syp * (1 - min(input.discount_percent, param.discount_percent_cap) / 100))',
       description: 'صافي الإيراد بعد الحسم (مع سقف حسم من المعاملات)',
     },
     {
       order: 1,
       key: 'net_after_material',
-      expression: 'round2(step.net_gross - input.material_cost_usd)',
+      expression: 'round2(step.net_gross - input.material_cost_syp)',
       description: 'بعد خصم تكلفة المواد',
     },
     {
       order: 2,
-      key: 'doctor_share_usd',
+      key: 'doctor_share_syp',
       expression: 'round2(step.net_after_material * input.doctor_share_percent / 100)',
       description: 'حصة الطبيب/الأخصائي',
     },
     {
       order: 3,
-      key: 'clinic_net_usd',
-      expression: 'round2(step.net_after_material - step.doctor_share_usd)',
+      key: 'clinic_net_syp',
+      expression: 'round2(step.net_after_material - step.doctor_share_syp)',
       description: 'صافي العيادة',
     },
   ]
@@ -647,19 +641,19 @@ async function seed() {
       order: 0,
       key: 'net_gross',
       expression:
-        'round2(input.gross_usd * (1 - min(input.discount_percent, param.discount_percent_cap) / 100))',
+        'round2(input.gross_syp * (1 - min(input.discount_percent, param.discount_percent_cap) / 100))',
       description: 'صافي الإيراد بعد الحسم',
     },
     {
       order: 1,
-      key: 'doctor_share_usd',
+      key: 'doctor_share_syp',
       expression: 'round2(step.net_gross * input.doctor_share_percent / 100)',
       description: 'حصة الطبيب من صافي الإيراد بعد الحسم',
     },
     {
       order: 2,
-      key: 'clinic_net_usd',
-      expression: 'round2(step.net_gross - step.doctor_share_usd)',
+      key: 'clinic_net_syp',
+      expression: 'round2(step.net_gross - step.doctor_share_syp)',
       description: 'صافي العيادة — بدون خصم مواد (تُحتسب على حساب المركز)',
     },
   ]

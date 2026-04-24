@@ -48,12 +48,12 @@ type ClinicalLaserRow = {
   pulse: string
   shotCount: string
   chargeByPulseCount?: boolean
-  costUsd: number
+  costSyp: number
   discountPercent: number
   sessionTypeLabel: string
   billingItemId?: string | null
   billingItemStatus?: string | null
-  collectedAmountUsd?: number | null
+  collectedAmountSyp?: number | null
   manualAreaLabels?: string[]
   isPackageSession?: boolean
   patientPackageId?: string
@@ -65,7 +65,7 @@ type ClinicalDermRow = {
   businessDate: string
   areaTreatment: string
   sessionType: string
-  costUsd: number
+  costSyp: number
   discountPercent: number
   providerName: string
   notes: string
@@ -111,10 +111,10 @@ type DermatologySessionRow = {
   businessDate: string
   department: string
   procedureDescription: string
-  sessionFeeUsd: number
-  materialCostUsdTotal: number
-  materialChargeUsdTotal: number
-  amountDueUsd: number
+  sessionFeeSyp: number
+  materialCostSypTotal: number
+  materialChargeSypTotal: number
+  amountDueSyp: number
   billingStatus: string
   providerName: string
   providerUserId?: string
@@ -125,8 +125,8 @@ type DermatologySessionRow = {
   materials: Array<{
     name: string
     quantity: number
-    chargedUnitPriceUsd?: number
-    lineChargeUsd?: number
+    chargedUnitPriceSyp?: number
+    lineChargeSyp?: number
   }>
 }
 
@@ -145,9 +145,9 @@ type PatientPackage = {
   department: 'laser'
   title: string
   sessionsCount: number
-  packageTotalUsd: number
-  paidAmountUsd: number
-  settlementDeltaUsd: number
+  packageTotalSyp: number
+  paidAmountSyp: number
+  settlementDeltaSyp: number
   notes: string
   createdAt: string | null
   sessions: PatientPackageSession[]
@@ -193,9 +193,9 @@ const laserStatusAr: Record<string, string> = {
   completed: 'مكتمل',
 }
 
-function formatLaserCollectedUsd(amount: number | null | undefined): string {
+function formatLaserCollectedSyp(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount) || amount <= 0) return '—'
-  return `${amount.toLocaleString('ar-SY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
+  return `${Math.round(Number(amount)).toLocaleString('ar-SY')} ل.س`
 }
 
 function formatClinicDate(iso: string | undefined) {
@@ -417,7 +417,7 @@ function buildPatientRecordPrintHtml(opts: {
                   <td>${escapeHtmlPdf(laserStatusAr[s.status] ?? s.status)}</td>
                   <td>${escapeHtmlPdf(s.operatorName)}</td>
                   <td>${escapeHtmlPdf(areas)}</td>
-                  <td>${escapeHtmlPdf(formatLaserCollectedUsd(s.collectedAmountUsd ?? null))}</td>
+                  <td>${escapeHtmlPdf(formatLaserCollectedSyp(s.collectedAmountSyp ?? null))}</td>
                   <td>${escapeHtmlPdf(s.notes?.trim() || '—')}</td>
                 </tr>`
               })
@@ -434,11 +434,11 @@ function buildPatientRecordPrintHtml(opts: {
           : clinicalHistory.dermatologyVisits
               .map(
                 (v) =>
-                  `<tr><td>${escapeHtmlPdf(v.businessDate)}</td><td>${escapeHtmlPdf(v.sessionType || '—')}</td><td>${escapeHtmlPdf(v.areaTreatment || '—')}</td><td>${escapeHtmlPdf(v.providerName)}</td><td>${v.costUsd}</td><td>${v.discountPercent}%</td><td>${escapeHtmlPdf(v.notes?.trim() || '—')}</td></tr>`,
+                  `<tr><td>${escapeHtmlPdf(v.businessDate)}</td><td>${escapeHtmlPdf(v.sessionType || '—')}</td><td>${escapeHtmlPdf(v.areaTreatment || '—')}</td><td>${escapeHtmlPdf(v.providerName)}</td><td>${v.costSyp}</td><td>${v.discountPercent}%</td><td>${escapeHtmlPdf(v.notes?.trim() || '—')}</td></tr>`,
               )
               .join('')
       parts.push(
-        `<h2>معاينات وإجراءات الجلدية</h2><table><thead><tr><th>يوم العمل</th><th>نوع الجلسة</th><th>المنطقة / المعالجة</th><th>المقدّم</th><th>الكلفة (USD)</th><th>الحسم</th><th>ملاحظات</th></tr></thead><tbody>${rows}</tbody></table>`,
+        `<h2>معاينات وإجراءات الجلدية</h2><table><thead><tr><th>يوم العمل</th><th>نوع الجلسة</th><th>المنطقة / المعالجة</th><th>المقدّم</th><th>الكلفة (ل.س)</th><th>الحسم</th><th>ملاحظات</th></tr></thead><tbody>${rows}</tbody></table>`,
       )
     }
 
@@ -512,7 +512,7 @@ export function PatientRecord() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
-  const { businessDate: clinicBusinessDate, usdSypRate } = useClinic()
+  const { businessDate: clinicBusinessDate } = useClinic()
   const role = user?.role as Role | undefined
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
@@ -551,7 +551,6 @@ export function PatientRecord() {
   const [pulse, setPulse] = useState('')
   const [shotCount, setShotCount] = useState('')
   const [chargeLaserByPulse, setChargeLaserByPulse] = useState(false)
-  const [laserPricePerPulseUsd, setLaserPricePerPulseUsd] = useState(0)
   const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
   const [laserNotes, setLaserNotes] = useState('')
   const [nextTreatmentHint, setNextTreatmentHint] = useState('—')
@@ -565,7 +564,6 @@ export function PatientRecord() {
   const [approvingPlan, setApprovingPlan] = useState(false)
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
   const [dermNotes, setDermNotes] = useState('')
-  const [dermSessionFeeUsd, setDermSessionFeeUsd] = useState('')
   const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
   const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
   const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
@@ -581,7 +579,6 @@ export function PatientRecord() {
   const [recvDept, setRecvDept] = useState<'laser' | 'dermatology' | 'dental' | 'solarium'>('dermatology')
   const [recvProviders, setRecvProviders] = useState<{ id: string; name: string }[]>([])
   const [recvProviderId, setRecvProviderId] = useState('')
-  const [recvFeeUsd, setRecvFeeUsd] = useState('')
   const [recvFeeSyp, setRecvFeeSyp] = useState('')
   const [recvSaving, setRecvSaving] = useState(false)
   const [recvErr, setRecvErr] = useState('')
@@ -622,10 +619,10 @@ export function PatientRecord() {
     billingItemId: string
     businessDate: string
     procedureLabel: string
-    amountDueUsd: number
-    appliedAmountUsd: number
-    receivedAmountUsd: number
-    settlementDeltaUsd: number
+    amountDueSyp: number
+    appliedAmountSyp: number
+    receivedAmountSyp: number
+    settlementDeltaSyp: number
     settlementType: 'exact' | 'debt' | 'credit' | string
     method: string
     receivedAt: string | null
@@ -635,7 +632,6 @@ export function PatientRecord() {
   const [financialLoading, setFinancialLoading] = useState(false)
   const [financialErr, setFinancialErr] = useState('')
   const [financialSettleOpen, setFinancialSettleOpen] = useState(false)
-  const [financialSettleUsd, setFinancialSettleUsd] = useState('')
   const [financialSettleSyp, setFinancialSettleSyp] = useState('')
   const [financialSettleBusy, setFinancialSettleBusy] = useState(false)
   const [financialSettleErr, setFinancialSettleErr] = useState('')
@@ -644,9 +640,7 @@ export function PatientRecord() {
   const [packageOk, setPackageOk] = useState('')
   const [packageTitle, setPackageTitle] = useState('')
   const [packageSessionsCount, setPackageSessionsCount] = useState('6')
-  const [packageTotalUsd, setPackageTotalUsd] = useState('')
   const [packageTotalSyp, setPackageTotalSyp] = useState('')
-  const [packagePaidUsd, setPackagePaidUsd] = useState('')
   const [packagePaidSyp, setPackagePaidSyp] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
@@ -1055,15 +1049,13 @@ export function PatientRecord() {
         const [catalogData, procData, pricingData] = await Promise.all([
           api<{ categories: LaserCategory[] }>('/api/laser/catalog'),
           api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options'),
-          api<{ pricePerPulseUsd: number; pricePerPulseSyp: number }>('/api/laser/pricing-settings').catch(() => ({
-            pricePerPulseUsd: 0,
+          api<{ pricePerPulseSyp: number }>('/api/laser/pricing-settings').catch(() => ({
             pricePerPulseSyp: 0,
           })),
         ])
         if (!cancelled) {
           setLaserCatalog(catalogData.categories)
           setLaserProcedureGroups(procData.groups || [])
-          setLaserPricePerPulseUsd(Number(pricingData.pricePerPulseUsd) || 0)
           setLaserPricePerPulseSyp(Math.max(0, Math.round(Number(pricingData.pricePerPulseSyp) || 0)))
           setSelectedLaserItemIds((prev) => {
             const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
@@ -1103,7 +1095,7 @@ export function PatientRecord() {
           setLaserCatalog([])
           setLaserProcedureGroups([])
           setSelectedLaserItemIds([])
-          setLaserPricePerPulseUsd(0)
+          setLaserPricePerPulseSyp(0)
           setLaserProcedureErr('تعذر تحميل مناطق وعروض الليزر')
         }
       } finally {
@@ -1226,7 +1218,7 @@ export function PatientRecord() {
     if (!id) return
     try {
       const data = await api<{
-        summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+        summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
         entries: FinancialEntry[]
       }>(`/api/patients/${encodeURIComponent(id)}/financial-ledger`)
       setFinancialEntries(data.entries || [])
@@ -1234,8 +1226,8 @@ export function PatientRecord() {
         prev
           ? {
               ...prev,
-              outstandingDebtUsd: Number(data.summary?.outstandingDebtUsd) || 0,
-              prepaidCreditUsd: Number(data.summary?.prepaidCreditUsd) || 0,
+              outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
+              prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
             }
           : prev,
       )
@@ -1254,7 +1246,7 @@ export function PatientRecord() {
     ;(async () => {
       try {
         const data = await api<{
-          summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+          summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
           entries: FinancialEntry[]
         }>(`/api/patients/${encodeURIComponent(id)}/financial-ledger`)
         if (cancelled) return
@@ -1263,8 +1255,8 @@ export function PatientRecord() {
           prev
             ? {
                 ...prev,
-                outstandingDebtUsd: Number(data.summary?.outstandingDebtUsd) || 0,
-                prepaidCreditUsd: Number(data.summary?.prepaidCreditUsd) || 0,
+                outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
+                prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
               }
             : prev,
         )
@@ -1332,18 +1324,6 @@ export function PatientRecord() {
     [selectedLaserItems],
   )
 
-  const laserNetDuePreview = useMemo(() => {
-    const rate = Number(usdSypRate || 0)
-    if (!(selectedLaserTotalSyp > 0) || !(rate > 0)) return null
-    return Math.round((selectedLaserTotalSyp / rate) * 100) / 100
-  }, [selectedLaserTotalSyp, usdSypRate])
-
-  const laserAddonNetDuePreview = useMemo(() => {
-    const rate = Number(usdSypRate || 0)
-    if (!(laserAddonTotalSyp > 0) || !(rate > 0)) return null
-    return Math.round((laserAddonTotalSyp / rate) * 100) / 100
-  }, [laserAddonTotalSyp, usdSypRate])
-
   const patientPackages: PatientPackage[] = useMemo(() => {
     if (!patient) return []
     const rows = Array.isArray(patient.sessionPackages) ? patient.sessionPackages : []
@@ -1354,9 +1334,9 @@ export function PatientRecord() {
         department: 'laser',
         title: String(x.title || ''),
         sessionsCount: Number(x.sessionsCount) || 0,
-        packageTotalUsd: Number(x.packageTotalUsd) || 0,
-        paidAmountUsd: Number(x.paidAmountUsd) || 0,
-        settlementDeltaUsd: Number(x.settlementDeltaUsd) || 0,
+        packageTotalSyp: Number(x.packageTotalSyp) || 0,
+        paidAmountSyp: Number(x.paidAmountSyp) || 0,
+        settlementDeltaSyp: Number(x.settlementDeltaSyp) || 0,
         notes: String(x.notes || ''),
         createdAt: x.createdAt ?? null,
         sessions: Array.isArray(x.sessions)
@@ -1379,24 +1359,14 @@ export function PatientRecord() {
     )
   }, [patientPackages])
 
-  const laserPulsePricingUsd = useMemo(() => {
+  const laserPulsePricingSyp = useMemo(() => {
     if (!chargeLaserByPulse || activeLaserPackage) return null
     const shots = parseLaserShotsForPricing(shotCount)
     if (!(shots > 0)) return null
-    const ppuUsd = Number(laserPricePerPulseUsd) || 0
     const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
-    const rate = Number(usdSypRate || 0)
-    if (ppuUsd > 0) return Math.round(ppuUsd * shots * 100) / 100
-    if (ppuSyp > 0 && rate > 0) return Math.round(((ppuSyp * shots) / rate) * 100) / 100
-    return null
-  }, [
-    chargeLaserByPulse,
-    activeLaserPackage,
-    shotCount,
-    laserPricePerPulseUsd,
-    laserPricePerPulseSyp,
-    usdSypRate,
-  ])
+    if (!(ppuSyp > 0)) return null
+    return Math.round(ppuSyp * shots)
+  }, [chargeLaserByPulse, activeLaserPackage, shotCount, laserPricePerPulseSyp])
 
   useEffect(() => {
     if (activeLaserPackage) setChargeLaserByPulse(false)
@@ -1418,16 +1388,9 @@ export function PatientRecord() {
     [dermSelectedMaterials],
   )
   const dermGrossTotal = useMemo(() => {
-    const usdRaw = parseFloat(dermSessionFeeUsd)
-    const sypRaw = parseFloat(dermSessionFeeSyp)
-    const fee =
-      usdRaw > 0
-        ? usdRaw
-        : sypRaw > 0 && (usdSypRate ?? 0) > 0
-          ? sypRaw / Number(usdSypRate)
-          : 0
-    return Math.round((fee + dermMaterialChargeTotal) * 100) / 100
-  }, [dermMaterialChargeTotal, dermSessionFeeUsd, dermSessionFeeSyp, usdSypRate])
+    const sypRaw = Math.max(0, parseFloat(dermSessionFeeSyp) || 0)
+    return Math.round(sypRaw + dermMaterialChargeTotal)
+  }, [dermMaterialChargeTotal, dermSessionFeeSyp])
 
   function toggleDermMaterial(materialId: string, checked: boolean) {
     setDermSelectedMaterials((prev) => {
@@ -1472,31 +1435,22 @@ export function PatientRecord() {
 
   if (!patient || !role) return null
 
-  const fxRate = Number(usdSypRate || 0)
-  const renderMoneyDual = (usdValue: number) => {
-    const usd = Number(usdValue) || 0
-    const usdText = `${usd.toFixed(2)} USD`
-    if (!(fxRate > 0)) return <span>{usdText}</span>
-    const syp = usd * fxRate
+  const renderMoneySyp = (sypValue: number) => {
+    const n = Math.round(Number(sypValue) || 0)
     return (
-      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '0.1rem' }}>
-        <span>{usdText}</span>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-          {syp.toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س
-        </span>
-      </span>
+      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{n.toLocaleString('ar-SY')} ل.س</span>
     )
   }
 
   const financialNonMatchingEntries = financialEntries.filter((x) => {
     if (x.settlementType === 'debt' || x.settlementType === 'credit') return true
-    return Math.abs(Number(x.settlementDeltaUsd) || 0) > 0.0001
+    return Math.abs(Number(x.settlementDeltaSyp) || 0) > 0.0001
   })
-  let remainingDebt = Number(patient.outstandingDebtUsd) || 0
-  let remainingCredit = Number(patient.prepaidCreditUsd) || 0
+  let remainingDebt = Number(patient.outstandingDebtSyp) || 0
+  let remainingCredit = Number(patient.prepaidCreditSyp) || 0
   const financialOpenEntries = financialNonMatchingEntries
     .map((entry) => {
-      const delta = Number(entry.settlementDeltaUsd) || 0
+      const delta = Number(entry.settlementDeltaSyp) || 0
       if (delta < 0) {
         if (!(remainingDebt > 0)) return null
         const unresolved = Math.min(Math.abs(delta), remainingDebt)
@@ -1504,7 +1458,7 @@ export function PatientRecord() {
         return {
           ...entry,
           settlementType: 'debt',
-          settlementDeltaUsd: -Math.round(unresolved * 100) / 100,
+          settlementDeltaSyp: -Math.round(unresolved * 100) / 100,
         }
       }
       if (delta > 0) {
@@ -1514,7 +1468,7 @@ export function PatientRecord() {
         return {
           ...entry,
           settlementType: 'credit',
-          settlementDeltaUsd: Math.round(unresolved * 100) / 100,
+          settlementDeltaSyp: Math.round(unresolved * 100) / 100,
         }
       }
       return null
@@ -1527,10 +1481,10 @@ export function PatientRecord() {
       billingItemId: '',
       businessDate: clinicBusinessDate || '',
       procedureLabel: 'ذمة متبقية على المريض',
-      amountDueUsd: remainingDebt,
-      appliedAmountUsd: 0,
-      receivedAmountUsd: 0,
-      settlementDeltaUsd: -Math.round(remainingDebt * 100) / 100,
+      amountDueSyp: remainingDebt,
+      appliedAmountSyp: 0,
+      receivedAmountSyp: 0,
+      settlementDeltaSyp: -Math.round(remainingDebt * 100) / 100,
       settlementType: 'debt',
       method: 'manual',
       receivedAt: null,
@@ -1543,10 +1497,10 @@ export function PatientRecord() {
       billingItemId: '',
       businessDate: clinicBusinessDate || '',
       procedureLabel: 'رصيد إضافي متبقٍ للمريض',
-      amountDueUsd: 0,
-      appliedAmountUsd: 0,
-      receivedAmountUsd: remainingCredit,
-      settlementDeltaUsd: Math.round(remainingCredit * 100) / 100,
+      amountDueSyp: 0,
+      appliedAmountSyp: 0,
+      receivedAmountSyp: remainingCredit,
+      settlementDeltaSyp: Math.round(remainingCredit * 100) / 100,
       settlementType: 'credit',
       method: 'manual',
       receivedAt: null,
@@ -1554,18 +1508,12 @@ export function PatientRecord() {
     })
   }
 
-  const debtNow = Number(patient.outstandingDebtUsd) || 0
-  const settlePreviewUsd = Math.max(0, parseFloat(financialSettleUsd) || 0)
-  const settlePreviewSyp = Math.max(0, parseFloat(financialSettleSyp) || 0)
-  const settleEnteredUsd =
-    settlePreviewUsd > 0
-      ? settlePreviewUsd
-      : settlePreviewSyp > 0 && fxRate > 0
-        ? settlePreviewSyp / fxRate
-        : 0
-  const settleWillCoverUsd = Math.min(debtNow, settleEnteredUsd)
-  const settleWillRemainDebtUsd = Math.max(0, debtNow - settleEnteredUsd)
-  const settleWillAddCreditUsd = Math.max(0, settleEnteredUsd - debtNow)
+  const debtNow = Math.round(Number(patient.outstandingDebtSyp) || 0)
+  const settlePreviewSyp = Math.max(0, Math.round(parseFloat(financialSettleSyp) || 0))
+  const settleEnteredSyp = settlePreviewSyp
+  const settleWillCoverSyp = Math.min(debtNow, settleEnteredSyp)
+  const settleWillRemainDebtSyp = Math.max(0, debtNow - settleEnteredSyp)
+  const settleWillAddCreditSyp = Math.max(0, settleEnteredSyp - debtNow)
 
   return (
     <>
@@ -2122,7 +2070,7 @@ export function PatientRecord() {
                                   : '—'}
                               </td>
                               <td style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
-                                {formatLaserCollectedUsd(s.collectedAmountUsd ?? null)}
+                                {formatLaserCollectedSyp(s.collectedAmountSyp ?? null)}
                               </td>
                               <td style={{ fontSize: '0.85rem' }}>{s.notes?.trim() || '—'}</td>
                             </tr>
@@ -2157,7 +2105,7 @@ export function PatientRecord() {
                             <th>نوع الجلسة</th>
                             <th>المنطقة / المعالجة</th>
                             <th>المقدّم</th>
-                            <th>الكلفة (USD)</th>
+                            <th>الكلفة (ل.س)</th>
                             <th>الحسم</th>
                             <th>ملاحظات</th>
                           </tr>
@@ -2169,7 +2117,7 @@ export function PatientRecord() {
                               <td>{v.sessionType || '—'}</td>
                               <td>{v.areaTreatment || '—'}</td>
                               <td>{v.providerName}</td>
-                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{v.costUsd}</td>
+                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{v.costSyp}</td>
                               <td style={{ fontVariantNumeric: 'tabular-nums' }}>{v.discountPercent}%</td>
                               <td style={{ fontSize: '0.85rem' }}>{v.notes?.trim() || '—'}</td>
                             </tr>
@@ -2392,17 +2340,7 @@ export function PatientRecord() {
               />
             </div>
             <div>
-              <label className="form-label">إجمالي سعر الباكج (USD)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={packageTotalUsd}
-                onChange={(e) => setPackageTotalUsd(e.target.value)}
-                placeholder="0"
-              />
-            </div>
-            <div>
-              <label className="form-label">إجمالي سعر الباكج (SYP)</label>
+              <label className="form-label">إجمالي سعر الباكج (ل.س)</label>
               <input
                 className="input"
                 inputMode="decimal"
@@ -2412,17 +2350,7 @@ export function PatientRecord() {
               />
             </div>
             <div>
-              <label className="form-label">المدفوع حالياً (USD)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={packagePaidUsd}
-                onChange={(e) => setPackagePaidUsd(e.target.value)}
-                placeholder="0"
-              />
-            </div>
-            <div>
-              <label className="form-label">المدفوع حالياً (SYP)</label>
+              <label className="form-label">المدفوع حالياً (ل.س)</label>
               <input
                 className="input"
                 inputMode="decimal"
@@ -2458,33 +2386,29 @@ export function PatientRecord() {
                 setPackageErr('حدد عدد جلسات صالح.')
                 return
               }
-              const totalUsd = Math.max(0, parseFloat(packageTotalUsd) || 0)
-              const totalSyp = Math.max(0, parseFloat(packageTotalSyp) || 0)
-              const paidUsd = Math.max(0, parseFloat(packagePaidUsd) || 0)
-              const paidSyp = Math.max(0, parseFloat(packagePaidSyp) || 0)
-              if (!(totalUsd > 0) && !(totalSyp > 0)) {
-                setPackageErr('أدخل إجمالي سعر الباكج بالدولار أو الليرة.')
+              const totalSyp = Math.max(0, Math.round(parseFloat(packageTotalSyp) || 0))
+              const paidSyp = Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0))
+              if (!(totalSyp > 0)) {
+                setPackageErr('أدخل إجمالي سعر الباكج بالليرة.')
                 return
               }
-              if (!(paidUsd > 0) && !(paidSyp > 0) && !(paidUsd === 0 && paidSyp === 0)) {
-                setPackageErr('المبلغ المدفوع غير صالح.')
+              if (paidSyp < 0 || paidSyp > totalSyp) {
+                setPackageErr('المبلغ المدفوع يجب أن يكون بين 0 وإجمالي الباكج.')
                 return
               }
               setPackageBusy(true)
               try {
                 const data = await api<{
                   package: PatientPackage
-                  summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+                  summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
                 }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
                   method: 'POST',
                   body: JSON.stringify({
                     department: 'laser',
                     title: packageTitle.trim() || undefined,
                     sessionsCount,
-                    packageTotalUsd: totalUsd > 0 ? totalUsd : undefined,
-                    packageTotalSyp: totalUsd > 0 ? undefined : totalSyp,
-                    paidAmountUsd: paidUsd > 0 ? paidUsd : undefined,
-                    paidAmountSyp: paidUsd > 0 ? undefined : paidSyp,
+                    packageTotalSyp: totalSyp,
+                    paidAmountSyp: paidSyp,
                     notes: packageNotes.trim(),
                   }),
                 })
@@ -2492,8 +2416,8 @@ export function PatientRecord() {
                   prev
                     ? {
                         ...prev,
-                        outstandingDebtUsd: Number(data.summary?.outstandingDebtUsd) || 0,
-                        prepaidCreditUsd: Number(data.summary?.prepaidCreditUsd) || 0,
+                        outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
+                        prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
                         sessionPackages: [...(Array.isArray(prev.sessionPackages) ? prev.sessionPackages : []), data.package],
                       }
                     : prev,
@@ -2501,9 +2425,7 @@ export function PatientRecord() {
                 setPackageOk('تم حفظ الباكج بنجاح.')
                 setPackageTitle('')
                 setPackageSessionsCount('6')
-                setPackageTotalUsd('')
                 setPackageTotalSyp('')
-                setPackagePaidUsd('')
                 setPackagePaidSyp('')
                 setPackageNotes('')
               } catch (e) {
@@ -2541,15 +2463,15 @@ export function PatientRecord() {
                     </span>
                   </div>
                   <p style={{ margin: '0.45rem 0', fontSize: '0.88rem' }}>
-                    إجمالي الباكج: <strong>{renderMoneyDual(pkg.packageTotalUsd)}</strong> — المدفوع:{' '}
-                    <strong>{renderMoneyDual(pkg.paidAmountUsd)}</strong>
+                    إجمالي الباكج: <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
+                    <strong>{renderMoneySyp(pkg.paidAmountSyp)}</strong>
                   </p>
                   <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
                     حالة التسوية:{' '}
-                    {pkg.settlementDeltaUsd < 0
-                      ? `ذمة ${Math.abs(pkg.settlementDeltaUsd).toFixed(2)} USD`
-                      : pkg.settlementDeltaUsd > 0
-                        ? `رصيد إضافي ${pkg.settlementDeltaUsd.toFixed(2)} USD`
+                    {pkg.settlementDeltaSyp < 0
+                      ? `ذمة ${Math.abs(pkg.settlementDeltaSyp).toLocaleString('ar-SY')} ل.س`
+                      : pkg.settlementDeltaSyp > 0
+                        ? `رصيد إضافي ${pkg.settlementDeltaSyp.toLocaleString('ar-SY')} ل.س`
                         : 'متوازن'}
                   </p>
                   <div style={{ display: 'grid', gap: '0.4rem' }}>
@@ -2633,13 +2555,13 @@ export function PatientRecord() {
             <div>
               <span className="form-label">إجمالي الذمم</span>
               <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
-                {renderMoneyDual(Number(patient.outstandingDebtUsd) || 0)}
+                {renderMoneySyp(Number(patient.outstandingDebtSyp) || 0)}
               </div>
             </div>
             <div>
               <span className="form-label">الرصيد الإضافي</span>
               <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
-                {renderMoneyDual(Number(patient.prepaidCreditUsd) || 0)}
+                {renderMoneySyp(Number(patient.prepaidCreditSyp) || 0)}
               </div>
             </div>
           </div>
@@ -2673,7 +2595,6 @@ export function PatientRecord() {
                       style={{ cursor: 'pointer' }}
                       onClick={() => {
                         setFinancialSettleErr('')
-                        setFinancialSettleUsd('')
                         setFinancialSettleSyp('')
                         setFinancialSettleOpen(true)
                       }}
@@ -2681,16 +2602,15 @@ export function PatientRecord() {
                         if (e.key !== 'Enter' && e.key !== ' ') return
                         e.preventDefault()
                         setFinancialSettleErr('')
-                        setFinancialSettleUsd('')
                         setFinancialSettleSyp('')
                         setFinancialSettleOpen(true)
                       }}
                     >
                       <td>{x.businessDate || '—'}</td>
                       <td>{x.procedureLabel || '—'}</td>
-                      <td>{renderMoneyDual(Number(x.amountDueUsd) || 0)}</td>
-                      <td>{renderMoneyDual(Number(x.receivedAmountUsd) || 0)}</td>
-                      <td>{renderMoneyDual(Number(x.settlementDeltaUsd) || 0)}</td>
+                      <td>{renderMoneySyp(Number(x.amountDueSyp) || 0)}</td>
+                      <td>{renderMoneySyp(Number(x.receivedAmountSyp) || 0)}</td>
+                      <td>{renderMoneySyp(Number(x.settlementDeltaSyp) || 0)}</td>
                       <td>
                         {x.settlementType === 'debt'
                           ? 'ذمة'
@@ -2725,46 +2645,31 @@ export function PatientRecord() {
               يتم مقارنة المبلغ المُدخل مع إجمالي الذمة الحالية ومعالجته تلقائياً (جزئي/مطابق/فائض).
             </p>
 
-            <div className="grid-2" style={{ marginTop: '0.5rem' }}>
-              <div>
-                <label className="form-label">المبلغ المدخل (USD)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={financialSettleUsd}
-                  onChange={(e) => setFinancialSettleUsd(e.target.value)}
-                  placeholder="0"
-                  disabled={financialSettleBusy}
-                />
-              </div>
-              <div>
-                <label className="form-label">المبلغ المدخل (SYP)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={financialSettleSyp}
-                  onChange={(e) => setFinancialSettleSyp(e.target.value)}
-                  placeholder="0"
-                  disabled={financialSettleBusy}
-                />
-              </div>
+            <div style={{ marginTop: '0.5rem' }}>
+              <label className="form-label">المبلغ المدخل (ل.س)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={financialSettleSyp}
+                onChange={(e) => setFinancialSettleSyp(e.target.value)}
+                placeholder="0"
+                disabled={financialSettleBusy}
+                style={{ marginTop: '0.25rem' }}
+              />
             </div>
-            <p style={{ color: 'var(--text-muted)', marginTop: '0.45rem', fontSize: '0.82rem' }}>
-              يكفي إدخال حقل واحد.
-            </p>
 
             <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.35rem', fontSize: '0.87rem' }}>
               <div>
-                الذمة الحالية: <strong>{renderMoneyDual(debtNow)}</strong>
+                الذمة الحالية: <strong>{renderMoneySyp(debtNow)}</strong>
               </div>
               <div>
-                سيُغطّى من الذمة: <strong>{renderMoneyDual(settleWillCoverUsd)}</strong>
+                سيُغطّى من الذمة: <strong>{renderMoneySyp(settleWillCoverSyp)}</strong>
               </div>
               <div>
-                الذمة المتبقية بعد العملية: <strong>{renderMoneyDual(settleWillRemainDebtUsd)}</strong>
+                الذمة المتبقية بعد العملية: <strong>{renderMoneySyp(settleWillRemainDebtSyp)}</strong>
               </div>
               <div>
-                الرصيد الإضافي الناتج: <strong>{renderMoneyDual(settleWillAddCreditUsd)}</strong>
+                الرصيد الإضافي الناتج: <strong>{renderMoneySyp(settleWillAddCreditSyp)}</strong>
               </div>
             </div>
 
@@ -2788,29 +2693,27 @@ export function PatientRecord() {
                 onClick={async () => {
                   if (!id) return
                   setFinancialSettleErr('')
-                  const usd = Math.max(0, parseFloat(financialSettleUsd) || 0)
-                  const syp = Math.max(0, parseFloat(financialSettleSyp) || 0)
-                  if (!(usd > 0) && !(syp > 0 && fxRate > 0)) {
-                    setFinancialSettleErr('أدخل مبلغاً بالدولار أو الليرة.')
+                  const syp = Math.max(0, Math.round(parseFloat(financialSettleSyp) || 0))
+                  if (!(syp > 0)) {
+                    setFinancialSettleErr('أدخل مبلغاً بالليرة.')
                     return
                   }
                   setFinancialSettleBusy(true)
                   try {
                     const result = await api<{
-                      summary: { outstandingDebtUsd: number; prepaidCreditUsd: number }
+                      summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
                     }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
                       method: 'POST',
                       body: JSON.stringify({
-                        amountUsd: usd > 0 ? usd : undefined,
-                        amountSyp: usd > 0 ? undefined : syp,
+                        amountSyp: syp,
                       }),
                     })
                     setPatient((prev) =>
                       prev
                         ? {
                             ...prev,
-                            outstandingDebtUsd: Number(result.summary?.outstandingDebtUsd) || 0,
-                            prepaidCreditUsd: Number(result.summary?.prepaidCreditUsd) || 0,
+                            outstandingDebtSyp: Number(result.summary?.outstandingDebtSyp) || 0,
+                            prepaidCreditSyp: Number(result.summary?.prepaidCreditSyp) || 0,
                           }
                         : prev,
                     )
@@ -2870,17 +2773,7 @@ export function PatientRecord() {
                 </select>
               </div>
               <div>
-                <label className="form-label">المستحق (USD)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={recvFeeUsd}
-                  onChange={(e) => setRecvFeeUsd(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="form-label">المستحق (SYP)</label>
+                <label className="form-label">المستحق (ل.س)</label>
                 <input
                   className="input"
                   inputMode="decimal"
@@ -2891,7 +2784,7 @@ export function PatientRecord() {
               </div>
             </div>
             <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-              يكفي إدخال المبلغ بدولار أو ليرة واحدة.
+              أدخل المبلغ بالليرة السورية.
             </p>
             {recvErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{recvErr}</p> : null}
             {recvOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{recvOk}</p> : null}
@@ -2904,10 +2797,9 @@ export function PatientRecord() {
                 if (!id) return
                 setRecvErr('')
                 setRecvOk('')
-                const u = Math.max(0, parseFloat(recvFeeUsd) || 0)
-                const sy = Math.max(0, parseFloat(recvFeeSyp) || 0)
-                if (!(u > 0) && !(sy > 0 && (usdSypRate ?? 0) > 0)) {
-                  setRecvErr('أدخل مبلغ التحصيل بالدولار أو الليرة.')
+                const feeSyp = Math.max(0, Math.round(parseFloat(recvFeeSyp) || 0))
+                if (!(feeSyp > 0)) {
+                  setRecvErr('أدخل مبلغ التحصيل بالليرة.')
                   return
                 }
                 setRecvSaving(true)
@@ -2918,13 +2810,11 @@ export function PatientRecord() {
                       patientId: id,
                       department: recvDept,
                       providerUserId: recvProviderId,
-                      sessionFeeUsd: u > 0 ? u : undefined,
-                      sessionFeeSyp: u > 0 ? undefined : sy,
+                      sessionFeeSyp: feeSyp,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
                   })
                   setRecvOk('تم إنشاء الجلسة وبند التحصيل.')
-                  setRecvFeeUsd('')
                   setRecvFeeSyp('')
                   await refreshClinicalSessionLists()
                 } catch (e) {
@@ -2962,7 +2852,7 @@ export function PatientRecord() {
                         <td>{clinicalDeptLabelAr(s.department)}</td>
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
-                        <td>{s.amountDueUsd} USD</td>
+                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
                         <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
                           <button
@@ -3137,9 +3027,10 @@ export function PatientRecord() {
                     </p>
                   ) : chargeLaserByPulse ? (
                     <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      سعر الجلسة = سعر الضربة × عدد الضربات. إن وُجد سعر بالدولار (&gt; 0) يُستخدم؛ وإلا يُحسب من سعر الضربة بالليرة مع سعر صرف اليوم. الإعدادات من صفحة الغرف وأسعار المناطق — USD:{' '}
-                      {laserPricePerPulseUsd > 0 ? `${laserPricePerPulseUsd}` : '—'}، ل.س:{' '}
-                      {laserPricePerPulseSyp > 0 ? laserPricePerPulseSyp.toLocaleString('en-US') : '—'}.
+                      سعر الجلسة = سعر الضربة × عدد الضربات (بالليرة). يُضبط سعر الضربة من صفحة الغرف وأسعار المناطق — الحالي:{' '}
+                      {laserPricePerPulseSyp > 0
+                        ? `${laserPricePerPulseSyp.toLocaleString('ar-SY')} ل.س`
+                        : '—'}.
                     </p>
                   ) : null}
                 </div>
@@ -3151,18 +3042,7 @@ export function PatientRecord() {
                     <p style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>
                       <strong>إضافات خارج الباكج:</strong>{' '}
                       {laserAddonTotalSyp > 0 ? (
-                        <>
-                          {laserAddonTotalSyp.toLocaleString('en-US')} ل.س
-                          {laserAddonNetDuePreview != null ? (
-                            <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
-                              (~ {laserAddonNetDuePreview} USD)
-                            </span>
-                          ) : (
-                            <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
-                              (حدّد سعر صرف اليوم لعرض المبلغ بالدولار)
-                            </span>
-                          )}
-                        </>
+                        <>{laserAddonTotalSyp.toLocaleString('ar-SY')} ل.س</>
                       ) : (
                         <span style={{ color: 'var(--text-muted)' }}>لا توجد إضافات خارج الباكج</span>
                       )}
@@ -3172,23 +3052,13 @@ export function PatientRecord() {
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
                     <strong>سعر الجلسة (محاسبة الضربات):</strong>{' '}
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {laserPulsePricingUsd != null ? `${laserPulsePricingUsd} USD` : '—'}
+                      {laserPulsePricingSyp != null
+                        ? `${laserPulsePricingSyp.toLocaleString('ar-SY')} ل.س`
+                        : '—'}
                     </span>
-                    {laserPulsePricingUsd != null && fxRate > 0 ? (
-                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
-                        (~ {(laserPulsePricingUsd * fxRate).toLocaleString('ar-SY', { maximumFractionDigits: 0 })} ل.س)
-                      </span>
-                    ) : laserPulsePricingUsd != null && !(fxRate > 0) ? (
+                    {laserPulsePricingSyp == null && parseLaserShotsForPricing(shotCount) > 0 ? (
                       <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
-                        (سعر الصرف لليوم غير متاح لعرض المكافئ بالليرة)
-                      </span>
-                    ) : laserPulsePricingUsd == null &&
-                      parseLaserShotsForPricing(shotCount) > 0 &&
-                      laserPricePerPulseUsd <= 0 &&
-                      laserPricePerPulseSyp > 0 &&
-                      !(fxRate > 0) ? (
-                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
-                        (حدّد سعر صرف اليوم لاحتساب المبلغ من سعر الضربة بالليرة)
+                        (أدخل عدد ضربات أكبر من صفر وحدّد سعر الضربة بالليرة)
                       </span>
                     ) : null}
                   </div>
@@ -3196,17 +3066,8 @@ export function PatientRecord() {
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
                     <strong>سعر الجلسة:</strong>{' '}
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('en-US') : '0'} ل.س
+                      {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('ar-SY') : '0'} ل.س
                     </span>
-                    {laserNetDuePreview != null ? (
-                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--text-muted)' }}>
-                        (~ {laserNetDuePreview} USD)
-                      </span>
-                    ) : selectedLaserTotalSyp > 0 ? (
-                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
-                        (لا يمكن تحويله للدولار قبل تحديد سعر الصرف لليوم)
-                      </span>
-                    ) : null}
                   </div>
                 )}
                 {laserProcedureErr ? (
@@ -3241,16 +3102,11 @@ export function PatientRecord() {
                 }
                 if (!activeLaserPackage) {
                   if (chargeLaserByPulse) {
-                    const ppuUsd = Number(laserPricePerPulseUsd) || 0
                     const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
-                    if (!(ppuUsd > 0) && !(ppuSyp > 0)) {
+                    if (!(ppuSyp > 0)) {
                       setLaserSessionErr(
-                        'سعر الضربة غير محدد — يضبطه المدير في «الغرف وتعيين أخصائيي الليزر» ضمن أسعار المناطق (دولار أو ليرة).',
+                        'سعر الضربة غير محدد — يضبطه المدير في «الغرف وتعيين أخصائيي الليزر» ضمن أسعار المناطق (بالليرة).',
                       )
-                      return
-                    }
-                    if (!(ppuUsd > 0) && ppuSyp > 0 && !((usdSypRate ?? 0) > 0)) {
-                      setLaserSessionErr('سعر الصرف لليوم غير متاح — لا يمكن المحاسبة من سعر الضربة بالليرة.')
                       return
                     }
                     if (!(parseLaserShotsForPricing(shotCount) > 0)) {
@@ -3262,19 +3118,12 @@ export function PatientRecord() {
                       setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
                       return
                     }
-                    if (!((usdSypRate ?? 0) > 0)) {
-                      setLaserSessionErr('سعر الصرف لليوم غير متاح، لا يمكن إتمام الفوترة.')
-                      return
-                    }
                   }
-                } else if (laserAddonTotalSyp > 0 && !((usdSypRate ?? 0) > 0)) {
-                  setLaserSessionErr('سعر الصرف لليوم غير متاح — لا يمكن احتساب مبلغ الإضافات خارج الباكج.')
-                  return
                 }
                 setSavingLaser(true)
                 try {
                   const created = await api<{
-                    billingItem: { amountDueUsd: number; isPackagePrepaid?: boolean }
+                    billingItem: { amountDueSyp: number; isPackagePrepaid?: boolean }
                   }>('/api/laser/sessions', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -3297,13 +3146,14 @@ export function PatientRecord() {
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
                   })
-                  const due = Number(created.billingItem?.amountDueUsd || 0)
+                  const due = Number(created.billingItem?.amountDueSyp || 0)
+                  const dueFmt = due.toLocaleString('ar-SY')
                   setLaserSessionOk(
                     created.billingItem?.isPackagePrepaid
                       ? due > 0.0001
-                        ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${due} USD — في التحصيل استخدم «إنقاص جلسة و دفع».`
+                        ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع».`
                         : 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة» عند عدم وجود إضافات.'
-                      : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${due} USD (صفحة التحصيل للاستقبال).`,
+                      : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`,
                   )
                   setLaserNotes('')
                   setSelectedLaserItemIds([])
@@ -3454,7 +3304,7 @@ export function PatientRecord() {
                           <tr key={s.id}>
                             <td>{s.businessDate}</td>
                             <td>{s.procedureDescription || '—'}</td>
-                            <td>{s.amountDueUsd} USD</td>
+                            <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
                             <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                             <td>
                               {canEditClinicalSessionRow(
@@ -3507,31 +3357,17 @@ export function PatientRecord() {
                 placeholder="مثال: حقن تجميلي للوجه"
               />
             </div>
-            <div className="grid-2" style={{ marginTop: '0.75rem' }}>
-              <div>
-                <label className="form-label">رسوم الجلسة الأساسية (USD)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={dermSessionFeeUsd}
-                  onChange={(e) => setDermSessionFeeUsd(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="form-label">رسوم الجلسة الأساسية (SYP)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={dermSessionFeeSyp}
-                  onChange={(e) => setDermSessionFeeSyp(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
+            <div style={{ marginTop: '0.75rem' }}>
+              <label className="form-label">رسوم الجلسة الأساسية (ل.س)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={dermSessionFeeSyp}
+                onChange={(e) => setDermSessionFeeSyp(e.target.value)}
+                placeholder="0"
+                style={{ marginTop: '0.25rem' }}
+              />
             </div>
-            <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-              يكفي إدخال السعر في أحد الحقلين فقط.
-            </p>
             <div style={{ marginTop: '0.85rem' }}>
               <label className="form-label">ملاحظات طبية</label>
               <textarea
@@ -3588,8 +3424,8 @@ export function PatientRecord() {
               </div>
             )}
             <div style={{ marginTop: '0.85rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              رسوم الجلسة: <strong>{dermGrossTotal} USD</strong> — الإجمالي للتحصيل:{' '}
-              <strong>{dermGrossTotal} USD</strong>
+              رسوم الجلسة: <strong>{dermGrossTotal.toLocaleString('ar-SY')} ل.س</strong> — الإجمالي للتحصيل:{' '}
+              <strong>{dermGrossTotal.toLocaleString('ar-SY')} ل.س</strong>
             </div>
             {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
             {dermOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{dermOk}</p> : null}
@@ -3602,16 +3438,9 @@ export function PatientRecord() {
                 if (!id) return
                 setDermErr('')
                 setDermOk('')
-                const feeUsdRaw = Math.max(0, parseFloat(dermSessionFeeUsd) || 0)
-                const feeSypRaw = Math.max(0, parseFloat(dermSessionFeeSyp) || 0)
-                const fee =
-                  feeUsdRaw > 0
-                    ? feeUsdRaw
-                    : feeSypRaw > 0 && (usdSypRate ?? 0) > 0
-                      ? feeSypRaw / Number(usdSypRate)
-                      : 0
-                if (fee <= 0) {
-                  setDermErr('أدخل رسوم الجلسة الأساسية بالدولار أو الليرة (قيمة أكبر من صفر).')
+                const feeSyp = Math.max(0, Math.round(parseFloat(dermSessionFeeSyp) || 0))
+                if (!(feeSyp > 0)) {
+                  setDermErr('أدخل رسوم الجلسة الأساسية بالليرة (قيمة أكبر من صفر).')
                   return
                 }
                 const payloadMaterials = dermSelectedMaterials
@@ -3623,14 +3452,13 @@ export function PatientRecord() {
                 setDermSaving(true)
                 try {
                   const created = await api<{
-                    billingItem: { amountDueUsd: number; id: string }
+                    billingItem: { amountDueSyp: number; id: string }
                   }>('/api/clinical/sessions', {
                     method: 'POST',
                     body: JSON.stringify({
                       department: 'dermatology',
                       patientId: id,
-                      sessionFeeUsd: feeUsdRaw > 0 ? feeUsdRaw : undefined,
-                      sessionFeeSyp: feeUsdRaw > 0 ? undefined : feeSypRaw,
+                      sessionFeeSyp: feeSyp,
                       procedureDescription: dermProcedureDescription.trim(),
                       notes: dermNotes.trim(),
                       materials: payloadMaterials,
@@ -3646,12 +3474,11 @@ export function PatientRecord() {
                   )
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')
-                  setDermSessionFeeUsd('')
                   setDermSessionFeeSyp('')
                   setDermNotes('')
                   setDermSelectedMaterials([])
                   setDermOk(
-                    `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${created.billingItem.amountDueUsd} USD. يظهر في صفحة التحصيل للاستقبال.`,
+                    `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`,
                   )
                 } catch (e) {
                   setDermErr(e instanceof ApiError ? e.message : 'تعذر حفظ جلسة الجلدية')
@@ -3677,7 +3504,7 @@ export function PatientRecord() {
                       <th>التاريخ</th>
                       <th>الوصف</th>
                       <th>المعالج</th>
-                      <th>الإجمالي (USD)</th>
+                      <th>الإجمالي (ل.س)</th>
                       <th>حالة التحصيل</th>
                       <th>إجراء</th>
                     </tr>
@@ -3688,7 +3515,7 @@ export function PatientRecord() {
                         <td>{s.businessDate}</td>
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
-                        <td>{s.amountDueUsd}</td>
+                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
                         <td>
                           {s.isPackagePrepaid
                             ? 'مدفوعة مسبقاً (باكج)'
@@ -3844,16 +3671,16 @@ export function PatientRecord() {
             <div className="grid-2">
               <div className="stat-card">
                 <div className="lbl">الإجمالي</div>
-                <div className="val">2٬400 USD</div>
+                <div className="val">2٬400 ل.س</div>
               </div>
               <div className="stat-card">
                 <div className="lbl">المدفوع</div>
-                <div className="val">1٬000 USD</div>
+                <div className="val">1٬000 ل.س</div>
               </div>
               <div className="stat-card" style={{ borderColor: 'var(--warning)' }}>
                 <div className="lbl">المتبقي</div>
                 <div className="val" style={{ color: 'var(--warning)' }}>
-                  1٬400 USD
+                  1٬400 ل.س
                 </div>
               </div>
             </div>
@@ -3884,7 +3711,7 @@ export function PatientRecord() {
                         <td>{s.businessDate}</td>
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
-                        <td>{s.amountDueUsd} USD</td>
+                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
                         <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
                           {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
@@ -3943,7 +3770,7 @@ export function PatientRecord() {
                         <td>{s.businessDate}</td>
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
-                        <td>{s.amountDueUsd} USD</td>
+                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
                         <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
                           {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
@@ -4235,10 +4062,10 @@ export function PatientRecord() {
               </span>
               <span>{laserSessionDetail.chargeByPulseCount ? 'نعم (سعر × عدد الضربات)' : 'لا'}</span>
               <span className="form-label" style={{ margin: 0 }}>
-                الكلفة (USD)
+                الكلفة (ل.س)
               </span>
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {Number(laserSessionDetail.costUsd).toLocaleString('ar-SY', { maximumFractionDigits: 2 })}
+                {Number(laserSessionDetail.costSyp).toLocaleString('ar-SY', { maximumFractionDigits: 2 })}
               </span>
               <span className="form-label" style={{ margin: 0 }}>
                 نسبة الحسم
@@ -4256,7 +4083,7 @@ export function PatientRecord() {
                 التحصيل
               </span>
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {formatLaserCollectedUsd(laserSessionDetail.collectedAmountUsd ?? null)}
+                {formatLaserCollectedSyp(laserSessionDetail.collectedAmountSyp ?? null)}
               </span>
               <span className="form-label" style={{ margin: 0, alignSelf: 'start' }}>
                 المناطق المعالجة

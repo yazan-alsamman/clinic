@@ -1,5 +1,4 @@
 import mongoose from 'mongoose'
-import { BusinessDay } from '../models/BusinessDay.js'
 import { FinancialDocument } from '../models/FinancialDocument.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
@@ -9,7 +8,7 @@ import { ClinicalSession } from '../models/ClinicalSession.js'
 import { User } from '../models/User.js'
 import { runCalculationProfile } from './calculationEngine.js'
 import { buildParamBagForCalculation, resolveNumber, resolveString } from './parameterService.js'
-import { round2, usdToSypInteger } from '../utils/money.js'
+import { round2 } from '../utils/money.js'
 
 export function toYmdLocal(d) {
   const x = d instanceof Date ? d : new Date(d)
@@ -27,19 +26,23 @@ const GL = {
   doctor_payable: '2100',
 }
 
+/** تحويل مبلغ محسوب (قد يكون بكسور) إلى ليرة صحيحة للتخزين في سطور المستند */
+function toSypInteger(n) {
+  return Math.round(Number(n) || 0)
+}
+
 /**
  * @param {Record<string, number>} stepResults
- * @param {number|null} exchangeRate
  * @param {string} revenueGl
  * @param {import('mongoose').Types.ObjectId|null} patientId
  * @param {string} department
- * @param {number} materialUsd — من المدخلات (المخزون / التكلفة المباشرة)
+ * @param {number} materialSyp — من المدخلات (المخزون / التكلفة المباشرة)
  */
-function buildLinesFromSteps(stepResults, exchangeRate, revenueGl, patientId, department, materialUsd = 0) {
+function buildLinesFromSteps(stepResults, revenueGl, patientId, department, materialSyp = 0) {
   const netGross = round2(stepResults.net_gross ?? 0)
-  const material = round2(materialUsd)
-  const doctorShare = round2(stepResults.doctor_share_usd ?? 0)
-  const clinicNet = round2(stepResults.clinic_net_usd ?? netGross - doctorShare)
+  const material = round2(materialSyp)
+  const doctorShare = round2(stepResults.doctor_share_syp ?? 0)
+  const clinicNet = round2(stepResults.clinic_net_syp ?? netGross - doctorShare)
 
   const dims = {
     department,
@@ -49,38 +52,29 @@ function buildLinesFromSteps(stepResults, exchangeRate, revenueGl, patientId, de
   return [
     {
       lineType: 'net_revenue',
-      amountUsd: netGross,
-      amountSyp: usdToSypInteger(netGross, exchangeRate),
+      amountSyp: toSypInteger(netGross),
       glAccountCode: revenueGl,
       dimensions: { ...dims },
     },
     {
       lineType: 'material_cost',
-      amountUsd: material,
-      amountSyp: usdToSypInteger(material, exchangeRate),
+      amountSyp: toSypInteger(material),
       glAccountCode: GL.cogs,
       dimensions: { ...dims },
     },
     {
       lineType: 'doctor_share',
-      amountUsd: doctorShare,
-      amountSyp: usdToSypInteger(doctorShare, exchangeRate),
+      amountSyp: toSypInteger(doctorShare),
       glAccountCode: GL.doctor_payable,
       dimensions: { ...dims },
     },
     {
       lineType: 'clinic_net',
-      amountUsd: clinicNet,
-      amountSyp: usdToSypInteger(clinicNet, exchangeRate),
+      amountSyp: toSypInteger(clinicNet),
       glAccountCode: '5900',
       dimensions: { ...dims },
     },
   ]
-}
-
-async function loadExchangeRate(businessDate) {
-  const bd = await BusinessDay.findOne({ businessDate }).lean()
-  return bd?.exchangeRate != null && Number.isFinite(bd.exchangeRate) ? bd.exchangeRate : null
 }
 
 /**
@@ -126,7 +120,6 @@ export async function postLaserSessionIfCompleted(session, postedBy) {
   if (existing) return { skipped: true, reason: 'already_posted', documentId: String(existing._id) }
 
   const businessDate = toYmdLocal(s.createdAt || new Date())
-  const exchangeRate = await loadExchangeRate(businessDate)
   const providerId = s.operatorUserId
   const department = 'laser'
   const sharePct = await resolveDoctorSharePercent(providerId, department)
@@ -143,9 +136,9 @@ export async function postLaserSessionIfCompleted(session, postedBy) {
   const discount = Math.min(100, Math.max(0, Number(s.discountPercent) || 0))
 
   const input = {
-    gross_usd: Number(s.costUsd) || 0,
+    gross_syp: Number(s.costSyp) || 0,
     discount_percent: discount,
-    material_cost_usd: 0,
+    material_cost_syp: 0,
     doctor_share_percent: sharePct,
   }
 
@@ -156,14 +149,7 @@ export async function postLaserSessionIfCompleted(session, postedBy) {
     discount_percent_cap: param.discount_percent_cap,
   }
 
-  const lines = buildLinesFromSteps(
-    calc.stepResults,
-    exchangeRate,
-    GL.revenue_laser,
-    s.patientId,
-    department,
-    0,
-  )
+  const lines = buildLinesFromSteps(calc.stepResults, GL.revenue_laser, s.patientId, department, 0)
 
   const doc = await FinancialDocument.create({
     idempotencyKey: idem,
@@ -173,7 +159,6 @@ export async function postLaserSessionIfCompleted(session, postedBy) {
     patientId: s.patientId,
     providerUserId: providerId,
     department,
-    exchangeRate,
     calculationProfileCode: calc.profileCode,
     parameterSnapshot: fullSnapshot,
     sourceInputSnapshot: input,
@@ -197,7 +182,6 @@ export async function postDermatologyVisit(visit, postedBy) {
   if (existing) return { skipped: true, reason: 'already_posted', documentId: String(existing._id) }
 
   const businessDate = v.businessDate || toYmdLocal(v.createdAt || new Date())
-  const exchangeRate = await loadExchangeRate(businessDate)
   const providerId = v.providerUserId
   const department = 'dermatology'
   const sharePct = await resolveDoctorSharePercent(providerId, department)
@@ -212,12 +196,12 @@ export async function postDermatologyVisit(visit, postedBy) {
     userId: String(providerId),
   })
   const discount = Math.min(100, Math.max(0, Number(v.discountPercent) || 0))
-  const material = Math.max(0, Number(v.materialCostUsd) || 0)
+  const material = Math.max(0, Number(v.materialCostSyp) || 0)
 
   const input = {
-    gross_usd: Number(v.costUsd) || 0,
+    gross_syp: Number(v.costSyp) || 0,
     discount_percent: discount,
-    material_cost_usd: material,
+    material_cost_syp: material,
     doctor_share_percent: sharePct,
   }
 
@@ -226,17 +210,10 @@ export async function postDermatologyVisit(visit, postedBy) {
     ...snapshot,
     resolvedDoctorSharePercent: sharePct,
     discount_percent_cap: param.discount_percent_cap,
-    materialCostUsd: material,
+    materialCostSyp: material,
   }
 
-  const lines = buildLinesFromSteps(
-    calc.stepResults,
-    exchangeRate,
-    GL.revenue_derm,
-    v.patientId,
-    department,
-    material,
-  )
+  const lines = buildLinesFromSteps(calc.stepResults, GL.revenue_derm, v.patientId, department, material)
 
   const doc = await FinancialDocument.create({
     idempotencyKey: idem,
@@ -246,7 +223,6 @@ export async function postDermatologyVisit(visit, postedBy) {
     patientId: v.patientId,
     providerUserId: providerId,
     department,
-    exchangeRate,
     calculationProfileCode: calc.profileCode,
     parameterSnapshot: fullSnapshot,
     sourceInputSnapshot: input,
@@ -280,10 +256,9 @@ export async function postBillingPayment(paymentId, postedBy) {
   if (!cs) throw new Error('الجلسة السريرية غير موجودة')
 
   const businessDate = bi.businessDate
-  const exchangeRate = await loadExchangeRate(businessDate)
   const department = bi.department
   const providerId = bi.providerUserId
-  const material = round2(Number(cs.materialCostUsdTotal) || 0)
+  const material = round2(Number(cs.materialCostSypTotal) || 0)
 
   const sharePct = await resolveDoctorSharePercent(providerId, department)
 
@@ -306,9 +281,9 @@ export async function postBillingPayment(paymentId, postedBy) {
     userId: String(providerId),
   })
   const input = {
-    gross_usd: round2(Number(pay.amountUsd) || 0),
+    gross_syp: round2(Number(pay.amountSyp) || 0),
     discount_percent: 0,
-    material_cost_usd: material,
+    material_cost_syp: material,
     doctor_share_percent: sharePct,
   }
 
@@ -329,14 +304,7 @@ export async function postBillingPayment(paymentId, postedBy) {
         ? GL.revenue_derm
         : GL.revenue_dental
 
-  const lines = buildLinesFromSteps(
-    calc.stepResults,
-    exchangeRate,
-    revenueGl,
-    bi.patientId,
-    department,
-    material,
-  )
+  const lines = buildLinesFromSteps(calc.stepResults, revenueGl, bi.patientId, department, material)
 
   const doc = await FinancialDocument.create({
     idempotencyKey: idem,
@@ -346,7 +314,6 @@ export async function postBillingPayment(paymentId, postedBy) {
     patientId: bi.patientId,
     providerUserId: providerId,
     department,
-    exchangeRate,
     calculationProfileCode: calc.profileCode,
     parameterSnapshot: fullSnapshot,
     sourceInputSnapshot: input,

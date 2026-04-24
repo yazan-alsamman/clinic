@@ -5,7 +5,7 @@ import { roleLabel } from '../data/nav'
 
 export function Dashboard() {
   const { user } = useAuth()
-  const { dayActive, usdSypRate } = useClinic()
+  const { dayActive } = useClinic()
   const role = user?.role
 
   return (
@@ -23,9 +23,9 @@ export function Dashboard() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="lbl">سعر الصرف الحالي</div>
+          <div className="lbl">العملة</div>
           <div className="val" style={{ marginTop: '0.35rem' }}>
-            {usdSypRate != null ? usdSypRate.toLocaleString('ar-SY') : '—'}
+            ليرة سورية (ل.س) فقط
           </div>
         </div>
       </div>

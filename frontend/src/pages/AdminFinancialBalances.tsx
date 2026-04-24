@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
-import { useClinic } from '../context/ClinicContext'
 
 type DeptFilter = '' | 'laser' | 'dermatology' | 'dental'
 
@@ -16,7 +15,7 @@ type FinLine = {
   department: string | null
   businessDate: string
   procedureLabel: string
-  amountUsd: number
+  amountSyp: number
   synthetic?: boolean
   /** من الخادم: billing | package | synthetic */
   source?: 'billing' | 'package' | 'synthetic'
@@ -29,9 +28,9 @@ type PackageDetailPayload = {
     department: string
     title: string
     sessionsCount: number
-    packageTotalUsd: number
-    paidAmountUsd: number
-    settlementDeltaUsd: number
+    packageTotalSyp: number
+    paidAmountSyp: number
+    settlementDeltaSyp: number
     notes: string
     createdAt: string | null
     sessions: Array<{
@@ -59,7 +58,7 @@ type BillingDetailPayload = {
     id: string
     department: string
     procedureLabel: string
-    amountDueUsd: number
+    amountDueSyp: number
     businessDate: string
     status: string
     paidAt: string | null
@@ -67,17 +66,17 @@ type BillingDetailPayload = {
   clinicalSession: {
     id: string
     procedureDescription: string
-    sessionFeeUsd: number
+    sessionFeeSyp: number
     businessDate: string
     notes: string
-    materialCostUsdTotal: number
-    materialChargeUsdTotal: number
+    materialCostSypTotal: number
+    materialChargeSypTotal: number
     materials: Array<{
       name?: string
       sku?: string
       quantity?: number
-      lineChargeUsd?: number
-      lineCostUsd?: number
+      lineChargeSyp?: number
+      lineCostSyp?: number
     }>
     providerName: string
     isPackageSession: boolean
@@ -94,54 +93,18 @@ type BillingDetailPayload = {
     room: string
     sessionTypeLabel: string
     discountPercent: number
-    costUsd: number
+    costSyp: number
     status: string
     operatorName: string
     treatmentNumber: number
   } | null
 }
 
-/** سعر صرف فعّال: من استجابة الذمم ثم من حالة اليوم في النظام */
-function pickUsdSypRate(
-  fromApi: number | null | undefined,
-  fromClinic: number | null | undefined,
-): number | null {
-  const a = fromApi != null && Number.isFinite(Number(fromApi)) && Number(fromApi) > 0 ? Number(fromApi) : null
-  if (a) return a
-  const b =
-    fromClinic != null && Number.isFinite(Number(fromClinic)) && Number(fromClinic) > 0
-      ? Number(fromClinic)
-      : null
-  return b
-}
-
-function MoneyUsdSyp({
-  usdAmount,
-  rate,
-  tone,
-}: {
-  usdAmount: number
-  rate: number | null
-  tone: 'debt' | 'credit' | 'neutral'
-}) {
-  const usd = Number(usdAmount) || 0
+function MoneySyp({ amountSyp, tone }: { amountSyp: number; tone: 'debt' | 'credit' | 'neutral' }) {
+  const n = Math.round(Number(amountSyp) || 0)
   const color = tone === 'debt' ? 'var(--danger)' : tone === 'credit' ? 'var(--success)' : 'var(--text)'
-  const syp = rate && rate > 0 ? Math.round(usd * rate) : null
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', lineHeight: 1.35 }}>
-      <div style={{ fontSize: '0.88rem' }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>دولار أمريكي: </span>
-        <strong style={{ color }}>{usd.toFixed(2)} USD</strong>
-      </div>
-      <div style={{ fontSize: '0.88rem' }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>ليرة سورية: </span>
-        {syp != null ? (
-          <strong style={{ color }}>{syp.toLocaleString('ar-SY')} ل.س</strong>
-        ) : (
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>— (لم يُحدَّد سعر الصرف)</span>
-        )}
-      </div>
-    </div>
+    <strong style={{ color, fontVariantNumeric: 'tabular-nums' }}>{n.toLocaleString('ar-SY')} ل.س</strong>
   )
 }
 
@@ -164,13 +127,11 @@ function rowKey(prefix: string, r: FinLine, idx: number) {
 
 export function AdminFinancialBalances() {
   const { user } = useAuth()
-  const { usdSypRate: clinicUsdSypRate } = useClinic()
   const allowed = user?.role === 'super_admin'
   const [debtDept, setDebtDept] = useState<DeptFilter>('')
   const [creditDept, setCreditDept] = useState<DeptFilter>('')
   const [debtLines, setDebtLines] = useState<FinLine[]>([])
   const [creditLines, setCreditLines] = useState<FinLine[]>([])
-  const [usdSypRate, setUsdSypRate] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
@@ -191,12 +152,9 @@ export function AdminFinancialBalances() {
       const data = await api<{
         debtLines: FinLine[]
         creditLines: FinLine[]
-        usdSypRate?: number | null
       }>(`/api/patients/financial-balances${suffix}`)
       setDebtLines(Array.isArray(data.debtLines) ? data.debtLines : [])
       setCreditLines(Array.isArray(data.creditLines) ? data.creditLines : [])
-      const r = data.usdSypRate
-      setUsdSypRate(r != null && Number.isFinite(Number(r)) ? Number(r) : null)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'تعذر التحميل')
       setDebtLines([])
@@ -241,17 +199,12 @@ export function AdminFinancialBalances() {
   }, [detailTarget])
 
   const debtTotal = useMemo(
-    () => debtLines.reduce((s, r) => s + (Number(r.amountUsd) || 0), 0),
+    () => debtLines.reduce((s, r) => s + (Number(r.amountSyp) || 0), 0),
     [debtLines],
   )
   const creditTotal = useMemo(
-    () => creditLines.reduce((s, r) => s + (Number(r.amountUsd) || 0), 0),
+    () => creditLines.reduce((s, r) => s + (Number(r.amountSyp) || 0), 0),
     [creditLines],
-  )
-
-  const effectiveRate = useMemo(
-    () => pickUsdSypRate(usdSypRate, clinicUsdSypRate),
-    [usdSypRate, clinicUsdSypRate],
   )
 
   const filterSelect = (value: DeptFilter, onChange: (v: DeptFilter) => void) => (
@@ -329,7 +282,7 @@ export function AdminFinancialBalances() {
         </div>
         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
           <div style={{ marginBottom: '0.25rem', fontWeight: 600 }}>إجمالي الظاهر</div>
-          <MoneyUsdSyp usdAmount={debtTotal} rate={effectiveRate} tone="neutral" />
+          <MoneySyp amountSyp={debtTotal} tone="neutral" />
         </div>
         <div className="table-wrap">
           <table className="data-table">
@@ -339,7 +292,7 @@ export function AdminFinancialBalances() {
                 <th>الاسم</th>
                 <th>البيان</th>
                 <th>مصدر الذمة</th>
-                <th>المبلغ (دولار / ليرة)</th>
+                <th>المبلغ (ل.س)</th>
                 <th>الملف</th>
               </tr>
             </thead>
@@ -393,7 +346,7 @@ export function AdminFinancialBalances() {
                         )}
                       </td>
                       <td>
-                        <MoneyUsdSyp usdAmount={r.amountUsd} rate={effectiveRate} tone="debt" />
+                        <MoneySyp amountSyp={r.amountSyp} tone="debt" />
                       </td>
                       <td>
                         <Link to={`/patients/${r.patientId}`} style={{ fontSize: '0.88rem' }}>
@@ -430,7 +383,7 @@ export function AdminFinancialBalances() {
         </div>
         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
           <div style={{ marginBottom: '0.25rem', fontWeight: 600 }}>إجمالي الظاهر</div>
-          <MoneyUsdSyp usdAmount={creditTotal} rate={effectiveRate} tone="neutral" />
+          <MoneySyp amountSyp={creditTotal} tone="neutral" />
         </div>
         <div className="table-wrap">
           <table className="data-table">
@@ -440,7 +393,7 @@ export function AdminFinancialBalances() {
                 <th>الاسم</th>
                 <th>البيان</th>
                 <th>مصدر الرصيد</th>
-                <th>المبلغ (دولار / ليرة)</th>
+                <th>المبلغ (ل.س)</th>
                 <th>الملف</th>
               </tr>
             </thead>
@@ -494,7 +447,7 @@ export function AdminFinancialBalances() {
                         )}
                       </td>
                       <td>
-                        <MoneyUsdSyp usdAmount={r.amountUsd} rate={effectiveRate} tone="credit" />
+                        <MoneySyp amountSyp={r.amountSyp} tone="credit" />
                       </td>
                       <td>
                         <Link to={`/patients/${r.patientId}`} style={{ fontSize: '0.88rem' }}>
@@ -533,7 +486,10 @@ export function AdminFinancialBalances() {
                         <ul style={{ margin: 0, paddingRight: '1.1rem', color: 'var(--text-muted)' }}>
                           <li>القسم: {deptLabel(detailData.billingItem.department)}</li>
                           <li>البيان: {detailData.billingItem.procedureLabel || '—'}</li>
-                          <li>المستحق على البند: {detailData.billingItem.amountDueUsd.toFixed(2)} USD</li>
+                          <li>
+                            المستحق على البند:{' '}
+                            {Math.round(Number(detailData.billingItem.amountDueSyp) || 0).toLocaleString('ar-SY')} ل.س
+                          </li>
                           <li>تاريخ العمل: {detailData.billingItem.businessDate || '—'}</li>
                           <li>الحالة: {detailData.billingItem.status}</li>
                         </ul>
@@ -543,7 +499,11 @@ export function AdminFinancialBalances() {
                           <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>الجلسة السريرية</h4>
                           <ul style={{ margin: 0, paddingRight: '1.1rem', color: 'var(--text-muted)' }}>
                             <li>الوصف: {detailData.clinicalSession.procedureDescription || '—'}</li>
-                            <li>أجرة الجلسة: {detailData.clinicalSession.sessionFeeUsd.toFixed(2)} USD</li>
+                            <li>
+                              أجرة الجلسة:{' '}
+                              {Math.round(Number(detailData.clinicalSession.sessionFeeSyp) || 0).toLocaleString('ar-SY')}{' '}
+                              ل.س
+                            </li>
                             <li>المعالج: {detailData.clinicalSession.providerName || '—'}</li>
                             <li>التاريخ: {detailData.clinicalSession.businessDate || '—'}</li>
                             {detailData.clinicalSession.isPackageSession ? <li>جلسة ضمن باكج</li> : null}
@@ -554,8 +514,15 @@ export function AdminFinancialBalances() {
                               </li>
                             ) : null}
                             <li>
-                              مواد: تكلفة {detailData.clinicalSession.materialCostUsdTotal.toFixed(2)} USD — محسوبة على
-                              المريض {detailData.clinicalSession.materialChargeUsdTotal.toFixed(2)} USD
+                              مواد: تكلفة{' '}
+                              {Math.round(Number(detailData.clinicalSession.materialCostSypTotal) || 0).toLocaleString(
+                                'ar-SY',
+                              )}{' '}
+                              ل.س — محسوبة على المريض{' '}
+                              {Math.round(Number(detailData.clinicalSession.materialChargeSypTotal) || 0).toLocaleString(
+                                'ar-SY',
+                              )}{' '}
+                              ل.س
                             </li>
                           </ul>
                           {detailData.clinicalSession.materials?.length ? (
@@ -573,7 +540,9 @@ export function AdminFinancialBalances() {
                                     <tr key={mi}>
                                       <td>{mat.name || mat.sku || '—'}</td>
                                       <td>{mat.quantity ?? '—'}</td>
-                                      <td>{Number(mat.lineChargeUsd || 0).toFixed(2)}</td>
+                                      <td>
+                                        {Math.round(Number(mat.lineChargeSyp || 0) || 0).toLocaleString('ar-SY')} ل.س
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -601,7 +570,7 @@ export function AdminFinancialBalances() {
                             <li>نوع الجلسة: {detailData.laserSession.sessionTypeLabel || '—'}</li>
                             <li>
                               حسم: {detailData.laserSession.discountPercent}% — كلفة الجلسة{' '}
-                              {detailData.laserSession.costUsd.toFixed(2)} USD
+                              {Math.round(Number(detailData.laserSession.costSyp) || 0).toLocaleString('ar-SY')} ل.س
                             </li>
                             <li>حالة الجلسة: {detailData.laserSession.status}</li>
                             {detailData.laserSession.notes ? (
@@ -622,7 +591,7 @@ export function AdminFinancialBalances() {
               <div style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {(() => {
                   const pkg = detailPayload.data.package
-                  const delta = Number(pkg.settlementDeltaUsd) || 0
+                  const delta = Number(pkg.settlementDeltaSyp) || 0
                   return (
                     <>
                       <section>
@@ -631,10 +600,14 @@ export function AdminFinancialBalances() {
                           <li>العنوان: {pkg.title || '—'}</li>
                           <li>القسم: {deptLabel(pkg.department)}</li>
                           <li>عدد الجلسات: {pkg.sessionsCount}</li>
-                          <li>إجمالي الباكج: {pkg.packageTotalUsd.toFixed(2)} USD</li>
-                          <li>المدفوع عند الشراء: {pkg.paidAmountUsd.toFixed(2)} USD</li>
                           <li>
-                            الفرق عند الإنشاء: {delta.toFixed(2)} USD
+                            إجمالي الباكج: {Math.round(Number(pkg.packageTotalSyp) || 0).toLocaleString('ar-SY')} ل.س
+                          </li>
+                          <li>
+                            المدفوع عند الشراء: {Math.round(Number(pkg.paidAmountSyp) || 0).toLocaleString('ar-SY')} ل.س
+                          </li>
+                          <li>
+                            الفرق عند الإنشاء: {Math.round(delta).toLocaleString('ar-SY')} ل.س
                             {delta < -0.0001 ? ' (ذمة على المريض)' : delta > 0.0001 ? ' (رصيد إضافي)' : ''}
                           </li>
                           {pkg.createdAt ? <li>تاريخ الإنشاء: {pkg.createdAt.slice(0, 10)}</li> : null}

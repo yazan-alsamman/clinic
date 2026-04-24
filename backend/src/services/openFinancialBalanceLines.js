@@ -1,8 +1,8 @@
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 
-function round2(n) {
-  return Math.round((Number(n) || 0) * 100) / 100
+function roundMoney(n) {
+  return Math.round(Number(n) || 0)
 }
 
 /** مطابقة لمسار financial-ledger + تبويب المريض المالي */
@@ -11,13 +11,13 @@ export function buildLedgerEntriesFromBilling(items, payments) {
   return payments.map((pay) => {
     const key = String(pay.billingItemId)
     const bi = byId.get(key)
-    const due = round2(Number(bi?.amountDueUsd) || 0)
-    const applied = round2(Number(pay.amountUsd) || 0)
-    const received = round2(Number(pay.receivedAmountUsd ?? pay.amountUsd) || 0)
-    const delta = round2(Number(pay.settlementDeltaUsd ?? received - due) || 0)
+    const due = roundMoney(Number(bi?.amountDueSyp) || 0)
+    const applied = roundMoney(Number(pay.amountSyp) || 0)
+    const received = roundMoney(Number(pay.receivedAmountSyp ?? pay.amountSyp) || 0)
+    const delta = roundMoney(Number(pay.settlementDeltaSyp ?? received - due) || 0)
     let settlementType = 'exact'
-    if (delta < -0.0001) settlementType = 'debt'
-    else if (delta > 0.0001) settlementType = 'credit'
+    if (delta < 0) settlementType = 'debt'
+    else if (delta > 0) settlementType = 'credit'
     return {
       id: String(pay._id),
       billingItemId: key,
@@ -25,31 +25,31 @@ export function buildLedgerEntriesFromBilling(items, payments) {
       department: bi?.department ?? null,
       businessDate: String(bi?.businessDate || '').trim(),
       procedureLabel: String(bi?.procedureLabel || '').trim(),
-      amountDueUsd: due,
-      appliedAmountUsd: applied,
-      receivedAmountUsd: received,
-      settlementDeltaUsd: delta,
+      amountDueSyp: due,
+      appliedAmountSyp: applied,
+      receivedAmountSyp: received,
+      settlementDeltaSyp: delta,
       settlementType,
     }
   })
 }
 
-export function computeOpenFinancialLineBuckets(entries, outstandingDebtUsd, prepaidCreditUsd) {
+export function computeOpenFinancialLineBuckets(entries, outstandingDebtSyp, prepaidCreditSyp) {
   const financialNonMatchingEntries = entries.filter((x) => {
     if (x.settlementType === 'debt' || x.settlementType === 'credit') return true
-    return Math.abs(Number(x.settlementDeltaUsd) || 0) > 0.0001
+    return Math.abs(Number(x.settlementDeltaSyp) || 0) > 0
   })
-  let remainingDebt = round2(outstandingDebtUsd)
-  let remainingCredit = round2(prepaidCreditUsd)
+  let remainingDebt = roundMoney(outstandingDebtSyp)
+  let remainingCredit = roundMoney(prepaidCreditSyp)
   const openDebtLines = []
   const openCreditLines = []
 
   for (const entry of financialNonMatchingEntries) {
-    const delta = Number(entry.settlementDeltaUsd) || 0
+    const delta = Number(entry.settlementDeltaSyp) || 0
     if (delta < 0) {
-      if (!(remainingDebt > 0.0001)) continue
-      const unresolved = round2(Math.min(Math.abs(delta), remainingDebt))
-      remainingDebt = round2(remainingDebt - unresolved)
+      if (!(remainingDebt > 0)) continue
+      const unresolved = roundMoney(Math.min(Math.abs(delta), remainingDebt))
+      remainingDebt = roundMoney(remainingDebt - unresolved)
       openDebtLines.push({
         paymentEntryId: entry.id,
         billingItemId: entry.billingItemId,
@@ -57,12 +57,12 @@ export function computeOpenFinancialLineBuckets(entries, outstandingDebtUsd, pre
         department: entry.department,
         businessDate: entry.businessDate,
         procedureLabel: entry.procedureLabel,
-        amountUsd: unresolved,
+        amountSyp: unresolved,
       })
     } else if (delta > 0) {
-      if (!(remainingCredit > 0.0001)) continue
-      const unresolved = round2(Math.min(delta, remainingCredit))
-      remainingCredit = round2(remainingCredit - unresolved)
+      if (!(remainingCredit > 0)) continue
+      const unresolved = roundMoney(Math.min(delta, remainingCredit))
+      remainingCredit = roundMoney(remainingCredit - unresolved)
       openCreditLines.push({
         paymentEntryId: entry.id,
         billingItemId: entry.billingItemId,
@@ -70,7 +70,7 @@ export function computeOpenFinancialLineBuckets(entries, outstandingDebtUsd, pre
         department: entry.department,
         businessDate: entry.businessDate,
         procedureLabel: entry.procedureLabel,
-        amountUsd: unresolved,
+        amountSyp: unresolved,
       })
     }
   }
@@ -89,18 +89,18 @@ function sortPackagesChronological(packages) {
 
 /** يوزّع المتبقي من الذمة بعد التحصيل على باكجات ذات settlementDelta سالب (من الأقدم للأحدث) */
 export function allocatePackageDebtRemainderLines(remainingDebt, sessionPackages) {
-  let r = round2(remainingDebt)
+  let r = roundMoney(remainingDebt)
   const lines = []
   const pkgs = sortPackagesChronological(
-    (sessionPackages || []).filter((p) => (Number(p.settlementDeltaUsd) || 0) < -0.0001),
+    (sessionPackages || []).filter((p) => (Number(p.settlementDeltaSyp) || 0) < 0),
   )
   for (const pkg of pkgs) {
-    if (!(r > 0.0001)) break
-    const cap = round2(Math.abs(Number(pkg.settlementDeltaUsd) || 0))
-    const take = round2(Math.min(r, cap))
-    if (take > 0.0001) {
+    if (!(r > 0)) break
+    const cap = roundMoney(Math.abs(Number(pkg.settlementDeltaSyp) || 0))
+    const take = roundMoney(Math.min(r, cap))
+    if (take > 0) {
       const title = String(pkg.title || '').trim() || 'باكج ليزر'
-      const isPartial = take + 0.0001 < cap
+      const isPartial = take < cap
       lines.push({
         paymentEntryId: '',
         billingItemId: '',
@@ -108,12 +108,12 @@ export function allocatePackageDebtRemainderLines(remainingDebt, sessionPackages
         department: String(pkg.department || 'laser'),
         businessDate: pkg.createdAt ? new Date(pkg.createdAt).toISOString().slice(0, 10) : '',
         procedureLabel: isPartial ? `باكج (جزء): ${title}` : `باكج: ${title}`,
-        amountUsd: take,
+        amountSyp: take,
         synthetic: false,
         source: 'package',
         patientPackageId: String(pkg._id),
       })
-      r = round2(r - take)
+      r = roundMoney(r - take)
     }
   }
   return { packageDebtLines: lines, remainingDebtAfterPackages: r }
@@ -121,18 +121,18 @@ export function allocatePackageDebtRemainderLines(remainingDebt, sessionPackages
 
 /** يوزّع المتبقي من الرصيد الإضافي على باكجات ذات settlementDelta موجب */
 export function allocatePackageCreditRemainderLines(remainingCredit, sessionPackages) {
-  let r = round2(remainingCredit)
+  let r = roundMoney(remainingCredit)
   const lines = []
   const pkgs = sortPackagesChronological(
-    (sessionPackages || []).filter((p) => (Number(p.settlementDeltaUsd) || 0) > 0.0001),
+    (sessionPackages || []).filter((p) => (Number(p.settlementDeltaSyp) || 0) > 0),
   )
   for (const pkg of pkgs) {
-    if (!(r > 0.0001)) break
-    const cap = round2(Number(pkg.settlementDeltaUsd) || 0)
-    const take = round2(Math.min(r, cap))
-    if (take > 0.0001) {
+    if (!(r > 0)) break
+    const cap = roundMoney(Number(pkg.settlementDeltaSyp) || 0)
+    const take = roundMoney(Math.min(r, cap))
+    if (take > 0) {
       const title = String(pkg.title || '').trim() || 'باكج ليزر'
-      const isPartial = take + 0.0001 < cap
+      const isPartial = take < cap
       lines.push({
         paymentEntryId: '',
         billingItemId: '',
@@ -140,12 +140,12 @@ export function allocatePackageCreditRemainderLines(remainingCredit, sessionPack
         department: String(pkg.department || 'laser'),
         businessDate: pkg.createdAt ? new Date(pkg.createdAt).toISOString().slice(0, 10) : '',
         procedureLabel: isPartial ? `باكج (جزء): ${title}` : `باكج: ${title}`,
-        amountUsd: take,
+        amountSyp: take,
         synthetic: false,
         source: 'package',
         patientPackageId: String(pkg._id),
       })
-      r = round2(r - take)
+      r = roundMoney(r - take)
     }
   }
   return { packageCreditLines: lines, remainingCreditAfterPackages: r }
@@ -154,7 +154,7 @@ export function allocatePackageCreditRemainderLines(remainingCredit, sessionPack
 export async function loadBillingItemsAndPaymentsForPatients(patientIds) {
   if (!patientIds.length) return { items: [], payments: [] }
   const items = await BillingItem.find({ patientId: { $in: patientIds } })
-    .select('_id patientId department clinicalSessionId amountDueUsd businessDate procedureLabel')
+    .select('_id patientId department clinicalSessionId amountDueSyp businessDate procedureLabel')
     .lean()
   const itemIds = items.map((i) => i._id)
   const payments =
@@ -166,7 +166,7 @@ export async function loadBillingItemsAndPaymentsForPatients(patientIds) {
   return { items, payments }
 }
 
-/** patientDocs: lean documents with _id, fileNumber, name, outstandingDebtUsd, prepaidCreditUsd, sessionPackages */
+/** patientDocs: lean documents with _id, fileNumber, name, outstandingDebtSyp, prepaidCreditSyp, sessionPackages */
 export async function buildAdminOpenFinancialLines(patientDocs, mode) {
   if (!patientDocs.length) return []
   const patientIds = patientDocs.map((p) => p._id)
@@ -188,8 +188,8 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
     const entries = buildLedgerEntriesFromBilling(pitems, pPayments)
     const { openDebtLines, openCreditLines, remainingDebt, remainingCredit } = computeOpenFinancialLineBuckets(
       entries,
-      Number(p.outstandingDebtUsd) || 0,
-      Number(p.prepaidCreditUsd) || 0,
+      Number(p.outstandingDebtSyp) || 0,
+      Number(p.prepaidCreditSyp) || 0,
     )
     const sessionPackages = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
 
@@ -201,7 +201,7 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
         sessionPackages,
       )
       const synthetic =
-        remainingDebtAfterPackages > 0.0001
+        remainingDebtAfterPackages > 0
           ? [
               {
                 paymentEntryId: '',
@@ -210,7 +210,7 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
                 department: null,
                 businessDate: '',
                 procedureLabel: 'ذمة غير مربوطة بجلسة أو باكج في السجل',
-                amountUsd: round2(remainingDebtAfterPackages),
+                amountSyp: roundMoney(remainingDebtAfterPackages),
                 synthetic: true,
                 source: 'synthetic',
               },
@@ -224,7 +224,7 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
         sessionPackages,
       )
       const synthetic =
-        remainingCreditAfterPackages > 0.0001
+        remainingCreditAfterPackages > 0
           ? [
               {
                 paymentEntryId: '',
@@ -233,7 +233,7 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
                 department: null,
                 businessDate: '',
                 procedureLabel: 'رصيد إضافي غير مربوط بجلسة أو باكج في السجل',
-                amountUsd: round2(remainingCreditAfterPackages),
+                amountSyp: roundMoney(remainingCreditAfterPackages),
                 synthetic: true,
                 source: 'synthetic',
               },

@@ -111,16 +111,18 @@ async function ensureDefaultLaserProcedureOptions() {
   }))
   await LaserProcedureOption.insertMany(rows, { ordered: false })
 }
-function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
-  const usd = Number(usdRaw)
-  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return round2(usd)
-  const syp = Number(sypRaw)
-  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
-    const rate = Number(exchangeRate)
-    if (!Number.isFinite(rate) || rate <= 0) return null
-    return round2(syp / rate)
-  }
-  return null
+function parsePositiveSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function parseNonNegativeSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  return Number.isFinite(n) && n >= 0 ? n : 0
+}
+
+function sumLaserExpenseLinesSyp(lines) {
+  return Math.round((lines || []).reduce((s, l) => s + (Number(l.amountSyp) || 0), 0))
 }
 
 function parseShotCount(value) {
@@ -143,45 +145,11 @@ function resolveReportMonth(rawMonth, fallbackBusinessDate) {
   return todayBusinessDate().slice(0, 7)
 }
 
-/** متوسط USD/SYP (ليرة لكل دولار) لأيام الشهر التي فيها exchangeRate */
-async function averageExchangeRateForMonth(month) {
-  const m = String(month || '').trim()
-  if (!/^\d{4}-\d{2}$/.test(m)) return null
-  const rows = await BusinessDay.find({
-    businessDate: new RegExp(`^${m}-`),
-    exchangeRate: { $gt: 0 },
-  })
-    .select('exchangeRate')
-    .lean()
-  const rates = rows.map((r) => Number(r.exchangeRate)).filter((x) => Number.isFinite(x) && x > 0)
-  if (!rates.length) return null
-  return round2(rates.reduce((a, b) => a + b, 0) / rates.length)
-}
-
-function sumLaserExpenseLinesUsd(lines, avgSypPerUsd) {
-  let sum = 0
-  for (const l of lines || []) {
-    const usd = round2(Math.max(0, Number(l.amountUsd) || 0))
-    const syp = Math.max(0, Number(l.amountSyp) || 0)
-    if (syp > 0) {
-      if (!avgSypPerUsd || !Number.isFinite(avgSypPerUsd) || avgSypPerUsd <= 0) return null
-      sum = round2(sum + usd + round2(syp / avgSypPerUsd))
-    } else {
-      sum = round2(sum + usd)
-    }
-  }
-  return round2(sum)
-}
-
-function sumLaserExpenseLinesUsdOnly(lines) {
-  return round2((lines || []).reduce((s, l) => s + (Number(l.amountUsd) || 0), 0))
-}
-
 async function getOrCreateLaserSettings() {
   let doc = await LaserSettings.findById('default').lean()
   if (!doc) {
-    await LaserSettings.create({ _id: 'default', pricePerPulseUsd: 0, pricePerPulseSyp: 0 })
-    doc = { _id: 'default', pricePerPulseUsd: 0, pricePerPulseSyp: 0 }
+    await LaserSettings.create({ _id: 'default', pricePerPulseSyp: 0 })
+    doc = { _id: 'default', pricePerPulseSyp: 0 }
   }
   return doc
 }
@@ -235,7 +203,6 @@ laserRouter.get('/pricing-settings', async (req, res) => {
     }
     const doc = await getOrCreateLaserSettings()
     res.json({
-      pricePerPulseUsd: round2(Number(doc.pricePerPulseUsd) || 0),
       pricePerPulseSyp: Math.max(0, Math.round(Number(doc.pricePerPulseSyp) || 0)),
     })
   } catch (e) {
@@ -246,11 +213,10 @@ laserRouter.get('/pricing-settings', async (req, res) => {
 
 laserRouter.patch('/pricing-settings', requireRoles('super_admin'), async (req, res) => {
   try {
-    const pricePerPulseUsd = round2(Math.max(0, Number(req.body?.pricePerPulseUsd) || 0))
     const pricePerPulseSyp = Math.max(0, Math.round(Number(req.body?.pricePerPulseSyp) || 0))
     await LaserSettings.findOneAndUpdate(
       { _id: 'default' },
-      { $set: { pricePerPulseUsd, pricePerPulseSyp } },
+      { $set: { pricePerPulseSyp } },
       { upsert: true, new: true },
     )
     await writeAudit({
@@ -258,9 +224,9 @@ laserRouter.patch('/pricing-settings', requireRoles('super_admin'), async (req, 
       action: 'تحديث سعر ضربة الليزر (محاسبة بعدد الضربات)',
       entityType: 'LaserSettings',
       entityId: 'default',
-      details: { pricePerPulseUsd, pricePerPulseSyp },
+      details: { pricePerPulseSyp },
     })
-    res.json({ pricePerPulseUsd, pricePerPulseSyp })
+    res.json({ pricePerPulseSyp })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -534,56 +500,35 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
   }
 })
 
-/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) */
+/** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) — بالليرة فقط */
 async function buildLaserPaymentBreakdown(businessDateFilter) {
   const itemFilter = { department: 'laser', status: 'paid', businessDate: businessDateFilter }
   const items = await BillingItem.find(itemFilter).select('_id businessDate').lean()
   if (!items.length) {
-    return { cash: { totalUsd: 0, totalSyp: 0 }, banks: [] }
+    return { cash: { totalSyp: 0 }, banks: [] }
   }
   const itemByPayment = new Map(items.map((i) => [String(i._id), i]))
   const payments = await BillingPayment.find({ billingItemId: { $in: items.map((i) => i._id) } }).lean()
 
-  const dates = [...new Set(items.map((i) => i.businessDate).filter(Boolean))]
-  const rateRows =
-    dates.length > 0
-      ? await BusinessDay.find({ businessDate: { $in: dates } })
-          .select('businessDate exchangeRate')
-          .lean()
-      : []
-  const rateByDate = new Map(rateRows.map((r) => [r.businessDate, Number(r.exchangeRate) || 0]))
-
-  let cashUsd = 0
   let cashSyp = 0
   const bankMap = new Map()
 
   for (const p of payments) {
-    const bi = itemByPayment.get(String(p.billingItemId))
-    if (!bi) continue
-    const rate = rateByDate.get(bi.businessDate) || 0
-    const usd = round2(Number(p.receivedAmountUsd) || 0)
-    let sypPart = 0
-    if (p.receivedAmountSypRecorded != null && Number.isFinite(Number(p.receivedAmountSypRecorded))) {
-      sypPart = Math.round(Number(p.receivedAmountSypRecorded))
-    } else if (rate > 0) {
-      sypPart = Math.round(usd * rate)
-    }
-
+    if (!itemByPayment.get(String(p.billingItemId))) continue
+    const sypPart = Math.round(Number(p.receivedAmountSyp) || 0)
     const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
     if (channel === 'cash') {
-      cashUsd = round2(cashUsd + usd)
       cashSyp += sypPart
     } else {
       const label = String(p.bankName || '').trim() || 'بنك'
-      const cur = bankMap.get(label) || { bankName: label, totalUsd: 0, totalSyp: 0 }
-      cur.totalUsd = round2(cur.totalUsd + usd)
+      const cur = bankMap.get(label) || { bankName: label, totalSyp: 0 }
       cur.totalSyp += sypPart
       bankMap.set(label, cur)
     }
   }
 
   const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
-  return { cash: { totalUsd: round2(cashUsd), totalSyp: Math.round(cashSyp) }, banks }
+  return { cash: { totalSyp: cashSyp }, banks }
 }
 
 laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) => {
@@ -598,7 +543,7 @@ laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) 
             businessDate: date,
             providerUserId: { $in: specialistIds },
           })
-            .select('_id providerUserId sessionFeeUsd')
+            .select('_id providerUserId sessionFeeSyp')
             .lean()
         : []
 
@@ -621,29 +566,29 @@ laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) 
       if (!doneClinicalIds.has(sid)) continue
       const uid = String(row.providerUserId || '')
       if (!uid) continue
-      const prev = totals.get(uid) || { totalAmountUsd: 0, sessionsCount: 0 }
-      prev.totalAmountUsd += Number(row.sessionFeeUsd) || 0
+      const prev = totals.get(uid) || { totalAmountSyp: 0, sessionsCount: 0 }
+      prev.totalAmountSyp += Number(row.sessionFeeSyp) || 0
       prev.sessionsCount += 1
       totals.set(uid, prev)
     }
 
     const rows = specialists.map((sp) => {
-      const current = totals.get(String(sp._id)) || { totalAmountUsd: 0, sessionsCount: 0 }
+      const current = totals.get(String(sp._id)) || { totalAmountSyp: 0, sessionsCount: 0 }
       return {
         userId: String(sp._id),
         name: String(sp.name || '').trim() || '—',
         active: sp.active !== false,
-        totalAmountUsd: round2(current.totalAmountUsd),
+        totalAmountSyp: Math.round(current.totalAmountSyp),
         sessionsCount: current.sessionsCount,
       }
     })
 
-    const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
+    const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
     const laserPaymentBreakdown = await buildLaserPaymentBreakdown(date)
     res.json({
       date,
       rows,
-      topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountUsd: top.totalAmountUsd } : null,
+      topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountSyp: top.totalAmountSyp } : null,
       laserPaymentBreakdown,
     })
   } catch (e) {
@@ -725,7 +670,7 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
             businessDate: new RegExp(`^${month}-`),
             providerUserId: { $in: specialistIds },
           })
-            .select('_id providerUserId sessionFeeUsd')
+            .select('_id providerUserId sessionFeeSyp')
             .lean()
         : []
 
@@ -748,48 +693,36 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
       if (!doneClinicalIds.has(sid)) continue
       const uid = String(row.providerUserId || '')
       if (!uid) continue
-      const prev = totals.get(uid) || { totalAmountUsd: 0, sessionsCount: 0 }
-      prev.totalAmountUsd += Number(row.sessionFeeUsd) || 0
+      const prev = totals.get(uid) || { totalAmountSyp: 0, sessionsCount: 0 }
+      prev.totalAmountSyp += Number(row.sessionFeeSyp) || 0
       prev.sessionsCount += 1
       totals.set(uid, prev)
     }
 
     const rows = specialists.map((sp) => {
-      const current = totals.get(String(sp._id)) || { totalAmountUsd: 0, sessionsCount: 0 }
+      const current = totals.get(String(sp._id)) || { totalAmountSyp: 0, sessionsCount: 0 }
       return {
         userId: String(sp._id),
         name: String(sp.name || '').trim() || '—',
         active: sp.active !== false,
-        totalAmountUsd: round2(current.totalAmountUsd),
+        totalAmountSyp: Math.round(current.totalAmountSyp),
         sessionsCount: current.sessionsCount,
       }
     })
 
-    const top = [...rows].sort((a, b) => b.totalAmountUsd - a.totalAmountUsd)[0] || null
-    const totalSessionRevenueUsd = round2(rows.reduce((s, r) => s + (Number(r.totalAmountUsd) || 0), 0))
+    const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
+    const totalSessionRevenueSyp = Math.round(rows.reduce((s, r) => s + (Number(r.totalAmountSyp) || 0), 0))
     const expDoc = await LaserMonthlyExpenses.findOne({ month }).select('lines').lean()
-    const monthAvgSypPerUsd = await averageExchangeRateForMonth(month)
-    let totalExpensesUsd = sumLaserExpenseLinesUsd(expDoc?.lines, monthAvgSypPerUsd)
-    let expenseConversionWarning = null
-    if (totalExpensesUsd == null) {
-      const hasSyp = (expDoc?.lines || []).some((l) => (Number(l.amountSyp) || 0) > 0)
-      if (hasSyp) {
-        expenseConversionWarning =
-          'لا يوجد في هذا الشهر أي يوم بسعر صرف محفوظ؛ لم يُحسب مبلغ الليرة في المصاريف (يُحسب بالدولار فقط).'
-      }
-      totalExpensesUsd = sumLaserExpenseLinesUsdOnly(expDoc?.lines)
-    }
-    const netProfitUsd = round2(totalSessionRevenueUsd - totalExpensesUsd)
+    const totalExpensesSyp = sumLaserExpenseLinesSyp(expDoc?.lines)
+    const netProfitSyp = totalSessionRevenueSyp - totalExpensesSyp
     const laserPaymentBreakdown = await buildLaserPaymentBreakdown(new RegExp(`^${month}-`))
     res.json({
       month,
       rows,
-      topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountUsd: top.totalAmountUsd } : null,
-      totalSessionRevenueUsd,
-      totalExpensesUsd,
-      netProfitUsd,
-      monthAvgSypPerUsd,
-      expenseConversionWarning,
+      topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountSyp: top.totalAmountSyp } : null,
+      totalSessionRevenueSyp,
+      totalExpensesSyp,
+      netProfitSyp,
       laserPaymentBreakdown,
     })
   } catch (e) {
@@ -802,24 +735,13 @@ laserRouter.get('/monthly-expenses', requireRoles('super_admin'), async (req, re
   try {
     const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
     const doc = await LaserMonthlyExpenses.findOne({ month }).lean()
-    const monthAvgSypPerUsd = await averageExchangeRateForMonth(month)
     const lines = (doc?.lines || []).map((l) => ({
       id: String(l._id),
       reason: String(l.reason || '').trim(),
-      amountUsd: round2(Number(l.amountUsd) || 0),
-      amountSyp: round2(Number(l.amountSyp) || 0),
+      amountSyp: Math.round(Number(l.amountSyp) || 0),
     }))
-    let totalExpensesUsd = sumLaserExpenseLinesUsd(lines, monthAvgSypPerUsd)
-    let expenseConversionWarning = null
-    if (totalExpensesUsd == null) {
-      const hasSyp = lines.some((l) => l.amountSyp > 0)
-      if (hasSyp) {
-        expenseConversionWarning =
-          'لا يوجد في هذا الشهر أي يوم بسعر صرف محفوظ؛ يظهر المجموع بالدولار فقط دون تحويل الليرة.'
-      }
-      totalExpensesUsd = sumLaserExpenseLinesUsdOnly(lines)
-    }
-    res.json({ month, lines, totalExpensesUsd, monthAvgSypPerUsd, expenseConversionWarning })
+    const totalExpensesSyp = sumLaserExpenseLinesSyp(lines)
+    res.json({ month, lines, totalExpensesSyp })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -836,18 +758,8 @@ laserRouter.put('/monthly-expenses', requireRoles('super_admin'), async (req, re
     }
     const lines = rawLines.map((row) => ({
       reason: String(row?.reason ?? '').trim().slice(0, 500),
-      amountUsd: round2(Math.max(0, Number(row?.amountUsd) || 0)),
-      amountSyp: round2(Math.max(0, Number(row?.amountSyp) || 0)),
+      amountSyp: Math.max(0, Math.round(Number(row?.amountSyp) || 0)),
     }))
-    const monthAvgSypPerUsd = await averageExchangeRateForMonth(month)
-    const hasSyp = lines.some((l) => l.amountSyp > 0)
-    if (hasSyp && (!monthAvgSypPerUsd || monthAvgSypPerUsd <= 0)) {
-      res.status(400).json({
-        error:
-          'لا يمكن حفظ مبالغ بالليرة: لا يوجد في هذا الشهر أي يوم عمل بسعر صرف محفوظ لحساب المتوسط. فعّل أياماً في الشهر أو أدخل المبلغ بالدولار فقط.',
-      })
-      return
-    }
     const doc = await LaserMonthlyExpenses.findOneAndUpdate(
       { month },
       { $set: { lines, updatedBy: req.user._id } },
@@ -856,18 +768,17 @@ laserRouter.put('/monthly-expenses', requireRoles('super_admin'), async (req, re
     const outLines = (doc?.lines || []).map((l) => ({
       id: String(l._id),
       reason: String(l.reason || '').trim(),
-      amountUsd: round2(Number(l.amountUsd) || 0),
-      amountSyp: round2(Number(l.amountSyp) || 0),
+      amountSyp: Math.round(Number(l.amountSyp) || 0),
     }))
-    const totalExpensesUsd = sumLaserExpenseLinesUsd(outLines, monthAvgSypPerUsd) ?? sumLaserExpenseLinesUsdOnly(outLines)
+    const totalExpensesSyp = sumLaserExpenseLinesSyp(outLines)
     await writeAudit({
       user: req.user,
       action: 'تحديث مصاريف ليزر شهرية',
       entityType: 'LaserMonthlyExpenses',
       entityId: month,
-      details: { linesCount: outLines.length, totalExpensesUsd },
+      details: { linesCount: outLines.length, totalExpensesSyp },
     })
-    res.json({ month, lines: outLines, totalExpensesUsd, monthAvgSypPerUsd, expenseConversionWarning: null })
+    res.json({ month, lines: outLines, totalExpensesSyp })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -968,37 +879,18 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
 
-    /** جلسة باكج: المبلغ المطلوب = مناطق خارج الباكج فقط (ليرة/دولار مع سعر اليوم) */
-    let packageAddOnGrossUsd = 0
+    /** جلسة باكج: المبلغ المطلوب = مناطق خارج الباكج فقط (ليرة) */
+    let packageAddOnGrossSyp = 0
     if (isPackageSession) {
-      const addOnSypRaw = Number(body.additionalCostSyp)
-      const addOnUsdRaw = Number(body.additionalCostUsd)
-      const hasAddOnSyp = Number.isFinite(addOnSypRaw) && addOnSypRaw > 0
-      const hasAddOnUsd = Number.isFinite(addOnUsdRaw) && addOnUsdRaw > 0
-      if (hasAddOnSyp || hasAddOnUsd) {
-        const resolved = resolveUsdAmount({
-          usdRaw: hasAddOnUsd ? addOnUsdRaw : undefined,
-          sypRaw: hasAddOnSyp ? addOnSypRaw : undefined,
-          exchangeRate: req.businessDay?.exchangeRate,
-        })
-        if (resolved == null || resolved <= 0) {
-          res.status(400).json({
-            error:
-              'مبلغ المناطق خارج الباكج غير صالح — تأكد من سعر صرف يوم العمل عند الدفع بالليرة، أو أدخل المبلغ بالدولار.',
-          })
-          return
-        }
-        packageAddOnGrossUsd = round2(resolved)
-      }
+      packageAddOnGrossSyp = parseNonNegativeSypInteger(body.additionalCostSyp)
     }
 
     const chargeByPulseCount = !isPackageSession && Boolean(body.chargeByPulseCount)
-    let costGross
+    let costGrossSyp = 0
     if (isPackageSession) {
-      costGross = packageAddOnGrossUsd
+      costGrossSyp = packageAddOnGrossSyp
     } else if (chargeByPulseCount) {
       const settings = await getOrCreateLaserSettings()
-      const ppuUsd = round2(Number(settings.pricePerPulseUsd) || 0)
       const ppuSyp = Math.max(0, Math.round(Number(settings.pricePerPulseSyp) || 0))
       const shots = parseShotCount(body.shotCount)
       if (!(shots > 0)) {
@@ -1007,42 +899,25 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         })
         return
       }
-      if (ppuUsd > 0) {
-        costGross = round2(ppuUsd * shots)
-      } else if (ppuSyp > 0) {
-        const grossSyp = ppuSyp * shots
-        const resolved = resolveUsdAmount({
-          sypRaw: grossSyp,
-          exchangeRate: req.businessDay?.exchangeRate,
-        })
-        if (resolved == null || !(resolved > 0)) {
-          res.status(400).json({
-            error:
-              'سعر الضربة بالليرة محدد — يجب تسجيل سعر صرف يوم العمل لتحويل المبلغ إلى الدولار، أو يحدد المدير سعر الضربة بالدولار.',
-          })
-          return
-        }
-        costGross = resolved
-      } else {
+      if (!(ppuSyp > 0)) {
         res.status(400).json({
           error:
-            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض (دولار أو ليرة).',
+            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض.',
         })
         return
       }
+      costGrossSyp = ppuSyp * shots
     } else {
-      costGross = resolveUsdAmount({
-        usdRaw: body.costUsd,
-        sypRaw: body.costSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-      })
+      costGrossSyp = parsePositiveSypInteger(body.costSyp)
     }
-    if (!isPackageSession && !(costGross > 0)) {
-      res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالدولار أو الليرة (قيمة أكبر من صفر)' })
+    if (!isPackageSession && !(costGrossSyp > 0)) {
+      res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالليرة (قيمة أكبر من صفر)' })
       return
     }
-    const amountDueUsd = isPackageSession ? round2(packageAddOnGrossUsd) : round2(costGross * (1 - discountPercent / 100))
-    if (!isPackageSession && amountDueUsd <= 0) {
+    const amountDueSyp = isPackageSession
+      ? Math.round(packageAddOnGrossSyp)
+      : Math.round(costGrossSyp * (1 - discountPercent / 100))
+    if (!isPackageSession && amountDueSyp <= 0) {
       res.status(400).json({ error: 'المبلغ بعد الحسم يجب أن يكون أكبر من صفر' })
       return
     }
@@ -1142,7 +1017,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         areaIds,
         manualAreaLabels,
         status: isPackageSession ? 'completed_pending_collection' : body.status || 'scheduled',
-        costUsd: costGross,
+        costSyp: costGrossSyp,
         discountPercent,
         isPackageSession,
         patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
@@ -1154,12 +1029,12 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         providerUserId: req.user._id,
         department: 'laser',
         procedureDescription,
-        sessionFeeUsd: amountDueUsd,
+        sessionFeeSyp: amountDueSyp,
         businessDate,
         notes: String(body.notes ?? '').trim().slice(0, 2000),
         laserSessionId: s._id,
         materials: [],
-        materialCostUsdTotal: 0,
+        materialCostSypTotal: 0,
         isPackageSession,
         patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
         patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
@@ -1171,8 +1046,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         providerUserId: req.user._id,
         department: 'laser',
         procedureLabel: procedureDescription.slice(0, 200) || 'ليزر',
-        amountDueUsd,
-        currency: 'USD',
+        amountDueSyp,
+        currency: 'SYP',
         businessDate,
         status: 'pending_payment',
         isPackagePrepaid: isPackageSession,
@@ -1219,7 +1094,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         action: 'إنشاء جلسة ليزر وبند فوترة معلّق',
         entityType: 'LaserSession',
         entityId: String(s._id),
-        details: { billingItemId: String(bi._id), amountDueUsd },
+        details: { billingItemId: String(bi._id), amountDueSyp },
       })
     } catch (auditErr) {
       console.error('writeAudit after laser session:', auditErr)
@@ -1238,7 +1113,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       billingItem: {
         id: String(bi._id),
         status: bi.status,
-        amountDueUsd: bi.amountDueUsd,
+        amountDueSyp: bi.amountDueSyp,
         isPackagePrepaid: bi.isPackagePrepaid === true,
       },
       packageInfo: isPackageSession

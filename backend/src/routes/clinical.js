@@ -25,16 +25,9 @@ const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 
 /** عرض جلسات المريض */
 const PATIENT_SESSION_VIEW_ROLES = [...CLINICAL_ROLES, 'reception']
 
-function resolveUsdAmount({ usdRaw, sypRaw, exchangeRate, allowZero = false }) {
-  const usd = Number(usdRaw)
-  if (Number.isFinite(usd) && (allowZero ? usd >= 0 : usd > 0)) return round2(usd)
-  const syp = Number(sypRaw)
-  if (Number.isFinite(syp) && (allowZero ? syp >= 0 : syp > 0)) {
-    const rate = Number(exchangeRate)
-    if (!Number.isFinite(rate) || rate <= 0) return null
-    return round2(syp / rate)
-  }
-  return null
+function parsePositiveSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function userRoleForSessionDepartment(dept) {
@@ -91,10 +84,10 @@ function sessionToPatientRow(r) {
     businessDate: r.businessDate,
     department: r.department,
     procedureDescription: r.procedureDescription || '',
-    sessionFeeUsd: r.sessionFeeUsd ?? 0,
-    materialCostUsdTotal: r.materialCostUsdTotal ?? 0,
-    materialChargeUsdTotal: r.materialChargeUsdTotal ?? 0,
-    amountDueUsd: r.billingItemId?.amountDueUsd ?? r.sessionFeeUsd ?? 0,
+    sessionFeeSyp: r.sessionFeeSyp ?? 0,
+    materialCostSypTotal: r.materialCostSypTotal ?? 0,
+    materialChargeSypTotal: r.materialChargeSypTotal ?? 0,
+    amountDueSyp: r.billingItemId?.amountDueSyp ?? r.sessionFeeSyp ?? 0,
     billingStatus: r.billingItemId?.status ?? 'pending_payment',
     isPackagePrepaid: r.billingItemId?.isPackagePrepaid === true,
     providerName: r.providerUserId?.name || '—',
@@ -134,10 +127,10 @@ async function consumeMaterials(rawLines) {
         sku: item.sku,
         name: item.name,
         quantity: qty,
-        unitCostUsd: unitCost,
-        lineCostUsd: round2(unitCost * qty),
-        chargedUnitPriceUsd: 0,
-        lineChargeUsd: 0,
+        unitCostSyp: unitCost,
+        lineCostSyp: Math.round(unitCost * qty),
+        chargedUnitPriceSyp: 0,
+        lineChargeSyp: 0,
       })
     }
     return snapshot
@@ -211,13 +204,9 @@ clinicalRouter.post(
         return
       }
 
-      const sessionFeeUsd = resolveUsdAmount({
-        usdRaw: body.sessionFeeUsd,
-        sypRaw: body.sessionFeeSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-      })
-      if (!(sessionFeeUsd > 0)) {
-        res.status(400).json({ error: 'أدخل مبلغ التحصيل بالدولار أو الليرة (قيمة أكبر من صفر)' })
+      const sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      if (sessionFeeSyp == null) {
+        res.status(400).json({ error: 'أدخل مبلغ التحصيل بالليرة (قيمة أكبر من صفر)' })
         return
       }
 
@@ -227,9 +216,9 @@ clinicalRouter.post(
       const businessDate = String(body.businessDate || '').trim() || req.businessDate || todayBusinessDate()
 
       const materialLines = []
-      const materialCostUsdTotal = 0
-      const materialChargeUsdTotal = 0
-      const amountDueUsd = round2(sessionFeeUsd + materialChargeUsdTotal)
+      const materialCostSypTotal = 0
+      const materialChargeSypTotal = 0
+      const amountDueSyp = sessionFeeSyp + materialChargeSypTotal
 
       let cs = null
       try {
@@ -238,12 +227,12 @@ clinicalRouter.post(
           providerUserId,
           department,
           procedureDescription,
-          sessionFeeUsd,
+          sessionFeeSyp,
           businessDate,
           notes,
           materials: materialLines,
-          materialCostUsdTotal,
-          materialChargeUsdTotal,
+          materialCostSypTotal,
+          materialChargeSypTotal,
           createdByReceptionUserId: req.user._id,
         })
 
@@ -253,8 +242,8 @@ clinicalRouter.post(
           providerUserId,
           department,
           procedureLabel: procedureDescription,
-          amountDueUsd,
-          currency: 'USD',
+          amountDueSyp,
+          currency: 'SYP',
           businessDate,
           status: 'pending_payment',
         })
@@ -274,7 +263,7 @@ clinicalRouter.post(
           entityId: cs._id,
           details: {
             billingItemId: String(bi._id),
-            amountDueUsd,
+            amountDueSyp,
             department,
             providerUserId: String(providerUserId),
           },
@@ -286,10 +275,10 @@ clinicalRouter.post(
             patientId: String(cs.patientId),
             department: cs.department,
             procedureDescription: cs.procedureDescription,
-            sessionFeeUsd: cs.sessionFeeUsd,
+            sessionFeeSyp: cs.sessionFeeSyp,
             businessDate: cs.businessDate,
-            materialCostUsdTotal: cs.materialCostUsdTotal,
-            materialChargeUsdTotal: cs.materialChargeUsdTotal,
+            materialCostSypTotal: cs.materialCostSypTotal,
+            materialChargeSypTotal: cs.materialChargeSypTotal,
             materials: cs.materials,
             providerUserId: String(providerUserId),
             createdByReceptionUserId: String(req.user._id),
@@ -297,7 +286,7 @@ clinicalRouter.post(
           billingItem: {
             id: String(bi._id),
             status: bi.status,
-            amountDueUsd: bi.amountDueUsd,
+            amountDueSyp: bi.amountDueSyp,
             procedureLabel: bi.procedureLabel,
           },
         })
@@ -348,13 +337,9 @@ clinicalRouter.post(
         return
       }
 
-      const sessionFeeUsd = resolveUsdAmount({
-        usdRaw: body.sessionFeeUsd,
-        sypRaw: body.sessionFeeSyp,
-        exchangeRate: req.businessDay?.exchangeRate,
-      })
-      if (!(sessionFeeUsd > 0)) {
-        res.status(400).json({ error: 'أدخل رسوم الجلسة بالدولار أو الليرة (قيمة أكبر من صفر)' })
+      const sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      if (sessionFeeSyp == null) {
+        res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (قيمة أكبر من صفر)' })
         return
       }
 
@@ -371,9 +356,9 @@ clinicalRouter.post(
         return
       }
 
-      const materialCostUsdTotal = round2(materialLines.reduce((s, m) => s + (m.lineCostUsd || 0), 0))
-      const materialChargeUsdTotal = round2(materialLines.reduce((s, m) => s + (m.lineChargeUsd || 0), 0))
-      const amountDueUsd = round2(sessionFeeUsd + materialChargeUsdTotal)
+      const materialCostSypTotal = Math.round(materialLines.reduce((s, m) => s + (m.lineCostSyp || 0), 0))
+      const materialChargeSypTotal = Math.round(materialLines.reduce((s, m) => s + (m.lineChargeSyp || 0), 0))
+      const amountDueSyp = sessionFeeSyp + materialChargeSypTotal
 
       let cs = null
       try {
@@ -382,12 +367,12 @@ clinicalRouter.post(
           providerUserId: req.user._id,
           department,
           procedureDescription,
-          sessionFeeUsd,
+          sessionFeeSyp,
           businessDate,
           notes,
           materials: materialLines,
-          materialCostUsdTotal,
-          materialChargeUsdTotal,
+          materialCostSypTotal,
+          materialChargeSypTotal,
         })
 
         const bi = await BillingItem.create({
@@ -396,8 +381,8 @@ clinicalRouter.post(
           providerUserId: req.user._id,
           department,
           procedureLabel: procedureDescription || 'إجراء',
-          amountDueUsd,
-          currency: 'USD',
+          amountDueSyp,
+          currency: 'SYP',
           businessDate,
           status: 'pending_payment',
         })
@@ -415,7 +400,7 @@ clinicalRouter.post(
           action: 'تسجيل جلسة سريرية وبند فوترة معلّق',
           entityType: 'ClinicalSession',
           entityId: cs._id,
-          details: { billingItemId: String(bi._id), amountDueUsd, materialChargeUsdTotal },
+          details: { billingItemId: String(bi._id), amountDueSyp, materialChargeSypTotal },
         })
 
         res.status(201).json({
@@ -424,16 +409,16 @@ clinicalRouter.post(
             patientId: String(cs.patientId),
             department: cs.department,
             procedureDescription: cs.procedureDescription,
-            sessionFeeUsd: cs.sessionFeeUsd,
+            sessionFeeSyp: cs.sessionFeeSyp,
             businessDate: cs.businessDate,
-            materialCostUsdTotal: cs.materialCostUsdTotal,
-            materialChargeUsdTotal: cs.materialChargeUsdTotal,
+            materialCostSypTotal: cs.materialCostSypTotal,
+            materialChargeSypTotal: cs.materialChargeSypTotal,
             materials: cs.materials,
           },
           billingItem: {
             id: String(bi._id),
             status: bi.status,
-            amountDueUsd: bi.amountDueUsd,
+            amountDueSyp: bi.amountDueSyp,
             procedureLabel: bi.procedureLabel,
           },
         })
@@ -475,7 +460,7 @@ clinicalRouter.get('/sessions/mine', requireRoles(...CLINICAL_ROLES), async (req
         patientName: r.patientId?.name ?? '',
         department: r.department,
         procedureDescription: r.procedureDescription,
-        sessionFeeUsd: r.sessionFeeUsd,
+        sessionFeeSyp: r.sessionFeeSyp,
         businessDate: r.businessDate,
         createdAt: r.createdAt,
         billingItemId: r.billingItemId ? String(r.billingItemId) : null,
@@ -502,7 +487,7 @@ clinicalRouter.get('/sessions/patient/:patientId', requireRoles(...PATIENT_SESSI
       .sort({ createdAt: -1 })
       .limit(120)
       .populate('providerUserId', 'name')
-      .populate('billingItemId', 'status amountDueUsd isPackagePrepaid')
+      .populate('billingItemId', 'status amountDueSyp isPackagePrepaid')
       .lean()
     res.json({
       sessions: rows.map((r) => sessionToPatientRow(r)),
@@ -523,7 +508,7 @@ clinicalRouter.get('/sessions/:sessionId', requireRoles(...SESSION_EDIT_ROLES), 
     }
     const r = await ClinicalSession.findById(sessionId)
       .populate('providerUserId', 'name')
-      .populate('billingItemId', 'status amountDueUsd isPackagePrepaid')
+      .populate('billingItemId', 'status amountDueSyp isPackagePrepaid')
       .lean()
     if (!r) {
       res.status(404).json({ error: 'الجلسة غير موجودة' })
@@ -572,7 +557,7 @@ clinicalRouter.patch(
         return
       }
 
-      const addCost = round2(newLines.reduce((s, m) => s + (m.lineCostUsd || 0), 0))
+      const addCost = Math.round(newLines.reduce((s, m) => s + (m.lineCostSyp || 0), 0))
 
       if (body.procedureDescription != null) {
         const next = String(body.procedureDescription).trim().slice(0, 500)
@@ -584,7 +569,7 @@ clinicalRouter.patch(
 
       if (newLines.length) {
         cs.materials = [...(cs.materials || []), ...newLines]
-        cs.materialCostUsdTotal = round2(Number(cs.materialCostUsdTotal || 0) + addCost)
+        cs.materialCostSypTotal = Math.round(Number(cs.materialCostSypTotal || 0) + addCost)
       }
 
       try {
@@ -606,13 +591,13 @@ clinicalRouter.patch(
           entityId: cs._id,
           details: {
             appendedMaterials: newLines.length,
-            addCostUsd: addCost,
+            addCostSyp: addCost,
           },
         })
 
         const populated = await ClinicalSession.findById(cs._id)
           .populate('providerUserId', 'name')
-          .populate('billingItemId', 'status amountDueUsd isPackagePrepaid')
+          .populate('billingItemId', 'status amountDueSyp isPackagePrepaid')
           .lean()
 
         res.json({ session: sessionToPatientRow(populated) })

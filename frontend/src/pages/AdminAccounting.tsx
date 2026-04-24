@@ -35,8 +35,7 @@ type FinDoc = {
   department: string
   sourceType: string
   calculationProfileCode?: string
-  exchangeRate?: number | null
-  lines?: { lineType: string; amountUsd: number; amountSyp?: number | null }[]
+  lines?: { lineType: string; amountSyp: number }[]
 }
 
 const legendRows: { sym: string; ar: string }[] = [
@@ -310,18 +309,17 @@ export function AdminAccounting() {
                 <th>القسم</th>
                 <th>المصدر</th>
                 <th>ملف الحساب</th>
-                <th>صافي الإيراد (دولار)</th>
-                <th>صافي الإيراد (ليرة)</th>
+                <th>صافي الإيراد (ل.س)</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6}>جاري التحميل…</td>
+                  <td colSpan={5}>جاري التحميل…</td>
                 </tr>
               ) : documents.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ color: 'var(--text-muted)' }}>
+                  <td colSpan={5} style={{ color: 'var(--text-muted)' }}>
                     لا توجد مستندات — نفّذ «مزامنة ترحيل» أو أكمِل جلسة ليزر.
                   </td>
                 </tr>
@@ -346,10 +344,11 @@ export function AdminAccounting() {
                         ) : null}
                       </td>
                       <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {net != null ? net.amountUsd : clinic?.amountUsd ?? '—'}
-                      </td>
-                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {net?.amountSyp != null ? net.amountSyp : '—'}
+                        {(() => {
+                          const v = net?.amountSyp ?? clinic?.amountSyp
+                          if (v == null || !Number.isFinite(Number(v))) return '—'
+                          return `${Number(v).toLocaleString('ar-SY')} ل.س`
+                        })()}
                       </td>
                     </tr>
                   )

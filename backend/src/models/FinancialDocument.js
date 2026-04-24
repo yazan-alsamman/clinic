@@ -7,8 +7,7 @@ const financialLineSchema = new mongoose.Schema(
       required: true,
       /** net_revenue, material_cost, doctor_share, clinic_net, discount_memo */
     },
-    amountUsd: { type: Number, required: true },
-    amountSyp: { type: Number, default: null },
+    amountSyp: { type: Number, required: true },
     glAccountCode: { type: String, default: '' },
     dimensions: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
@@ -34,7 +33,6 @@ const financialDocumentSchema = new mongoose.Schema(
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', default: null, index: true },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     department: { type: String, required: true, index: true },
-    exchangeRate: { type: Number, default: null },
     calculationProfileCode: { type: String, default: '' },
     parameterSnapshot: { type: mongoose.Schema.Types.Mixed, default: {} },
     /** مدخلات التسعير عند الترحيل (للتقارير دون إعادة قراءة المصدر) */
