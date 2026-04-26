@@ -48,6 +48,9 @@ export function BillingPage() {
   const [payChannel, setPayChannel] = useState<'cash' | 'bank'>('cash')
   const [payBankName, setPayBankName] = useState('')
   const [bankOptions, setBankOptions] = useState<{ id: string; name: string }[]>([])
+  /** عند التحصيل بالدولار: توثيق ما رُدّ للمريض (ل.س أو USD) */
+  const [payRefundCurrency, setPayRefundCurrency] = useState<'SYP' | 'USD'>('SYP')
+  const [payRefundAmount, setPayRefundAmount] = useState('')
 
   useEffect(() => {
     if (businessDate && !date) setDate(businessDate)
@@ -124,11 +127,34 @@ export function BillingPage() {
         setErr('أدخل مبلغاً صالحاً بالدولار.')
         return
       }
+      if (payRefundAmount.trim()) {
+        const ref =
+          payRefundCurrency === 'SYP'
+            ? Number(normalizeDecimalDigits(payRefundAmount))
+            : parseFloat(normalizeDecimalDigits(payRefundAmount))
+        if (!Number.isFinite(ref) || ref < 0) {
+          setErr('مبلغ الترجيع غير صالح — أدخل رقماً صحيحاً أو افرغ الحقل.')
+          return
+        }
+      }
     }
     setBusyId(id)
     try {
       const syp = Number(normalizeDecimalDigits(paySyp))
       const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      const refundTrim = payRefundAmount.trim()
+      const refundPayload =
+        payCurrency === 'USD' && refundTrim
+          ? {
+              refundCurrency: payRefundCurrency,
+              refundAmount:
+                payRefundCurrency === 'SYP'
+                  ? Number(normalizeDecimalDigits(payRefundAmount))
+                  : parseFloat(normalizeDecimalDigits(payRefundAmount)),
+            }
+          : payCurrency === 'USD'
+            ? { refundCurrency: payRefundCurrency }
+            : {}
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -138,6 +164,7 @@ export function BillingPage() {
           amountSyp:
             payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
           amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
+          ...refundPayload,
         }),
       })
       setPayOpen(false)
@@ -147,6 +174,8 @@ export function BillingPage() {
       setPayCurrency('SYP')
       setPayChannel('cash')
       setPayBankName('')
+      setPayRefundCurrency('SYP')
+      setPayRefundAmount('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل التحصيل')
@@ -182,11 +211,34 @@ export function BillingPage() {
         setErr('أدخل مبلغاً صالحاً بالدولار.')
         return
       }
+      if (payRefundAmount.trim()) {
+        const ref =
+          payRefundCurrency === 'SYP'
+            ? Number(normalizeDecimalDigits(payRefundAmount))
+            : parseFloat(normalizeDecimalDigits(payRefundAmount))
+        if (!Number.isFinite(ref) || ref < 0) {
+          setErr('مبلغ الترجيع غير صالح — أدخل رقماً صحيحاً أو افرغ الحقل.')
+          return
+        }
+      }
     }
     setBusyId(payItem.id)
     try {
       const syp = Number(normalizeDecimalDigits(paySyp))
       const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      const refundTrim = payRefundAmount.trim()
+      const refundPayload =
+        payCurrency === 'USD' && refundTrim
+          ? {
+              refundCurrency: payRefundCurrency,
+              refundAmount:
+                payRefundCurrency === 'SYP'
+                  ? Number(normalizeDecimalDigits(payRefundAmount))
+                  : parseFloat(normalizeDecimalDigits(payRefundAmount)),
+            }
+          : payCurrency === 'USD'
+            ? { refundCurrency: payRefundCurrency }
+            : {}
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -196,6 +248,7 @@ export function BillingPage() {
           amountSyp:
             payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
           amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
+          ...refundPayload,
         }),
       })
       await api(
@@ -212,6 +265,8 @@ export function BillingPage() {
       setPayCurrency('SYP')
       setPayChannel('cash')
       setPayBankName('')
+      setPayRefundCurrency('SYP')
+      setPayRefundAmount('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل إنقاص الجلسة والدفع')
@@ -356,6 +411,8 @@ export function BillingPage() {
                         setPayCurrency('SYP')
                         setPayChannel('cash')
                         setPayBankName('')
+                        setPayRefundCurrency('SYP')
+                        setPayRefundAmount('')
                         setPayOpen(true)
                       }}
                     >
@@ -384,6 +441,8 @@ export function BillingPage() {
                         setPayCurrency('SYP')
                         setPayChannel('cash')
                         setPayBankName('')
+                        setPayRefundCurrency('SYP')
+                        setPayRefundAmount('')
                         setPayOpen(true)
                       }}
                     >
@@ -411,7 +470,16 @@ export function BillingPage() {
         </ul>
       )}
       {payOpen && payItem ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setPayOpen(false)}>
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            setPayOpen(false)
+            setPayRefundCurrency('SYP')
+            setPayRefundAmount('')
+          }}
+        >
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
               {payItem.isPackagePrepaid && (Number(payItem.amountDueSyp) || 0) > 0
@@ -457,6 +525,8 @@ export function BillingPage() {
                     onChange={() => {
                       setPayCurrency('SYP')
                       setPaySyp(String(Math.round(Number(payItem.amountDueSyp || 0))))
+                      setPayRefundCurrency('SYP')
+                      setPayRefundAmount('')
                     }}
                   />
                   ليرة سورية
@@ -576,6 +646,54 @@ export function BillingPage() {
                       الضرب حتى يطابق المستحق بالليرة عند اختيار المبلغ المضبوط أعلاه.
                     </p>
                   ) : null}
+                  <div
+                    style={{
+                      marginTop: '0.65rem',
+                      paddingTop: '0.65rem',
+                      borderTop: '1px solid var(--border)',
+                    }}
+                  >
+                    <span className="form-label" style={{ display: 'block', marginBottom: '0.25rem' }}>
+                      ترجيع
+                    </span>
+                    <p style={{ margin: '0 0 0.4rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                      المبلغ الذي رُدّ للمريض بعد التحصيل بالدولار (إن وُجد) — يُسجّل للمراجعة فقط ولا يغيّر حساب
+                      المستحق أو الرصيد.
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="refund-currency"
+                          checked={payRefundCurrency === 'SYP'}
+                          onChange={() => setPayRefundCurrency('SYP')}
+                        />
+                        بالليرة السورية
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="refund-currency"
+                          checked={payRefundCurrency === 'USD'}
+                          onChange={() => setPayRefundCurrency('USD')}
+                        />
+                        بالدولار (USD)
+                      </label>
+                    </div>
+                    <label className="form-label" style={{ display: 'block', marginTop: '0.45rem' }}>
+                      مبلغ الترجيع {payRefundCurrency === 'SYP' ? '(ل.س)' : '(USD)'}
+                    </label>
+                    <input
+                      className="input"
+                      inputMode="decimal"
+                      dir={payRefundCurrency === 'USD' ? 'ltr' : undefined}
+                      step={payRefundCurrency === 'USD' ? 'any' : undefined}
+                      value={payRefundAmount}
+                      onChange={(e) => setPayRefundAmount(e.target.value)}
+                      placeholder="اتركه فارغاً إن لم يكن هناك ترجيع"
+                      style={{ marginTop: '0.25rem', maxWidth: 320 }}
+                    />
+                  </div>
                 </>
               )}
             </div>
@@ -616,7 +734,15 @@ export function BillingPage() {
               )
             })()}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.9rem' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setPayOpen(false)}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setPayOpen(false)
+                  setPayRefundCurrency('SYP')
+                  setPayRefundAmount('')
+                }}
+              >
                 إلغاء
               </button>
               <button

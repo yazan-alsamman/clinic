@@ -13,6 +13,9 @@ const billingPaymentSchema = new mongoose.Schema(
     payCurrency: { type: String, enum: ['SYP', 'USD'], default: 'SYP' },
     /** عند الدفع بالدولار: المبلغ المستلم بالدولار (للتقارير) */
     receivedAmountUsd: { type: Number, default: 0, min: 0 },
+    /** عند التحصيل بالدولار: ما رُدّ للمريض نقداً (توثيق — ل.س أو USD حسب الحقل غير الصفري) */
+    patientRefundSyp: { type: Number, default: 0, min: 0 },
+    patientRefundUsd: { type: Number, default: 0, min: 0 },
     /** كاش أو بنك — للتقارير المالية */
     paymentChannel: { type: String, enum: ['cash', 'bank'], default: 'cash' },
     /** اسم البنك عند paymentChannel === bank (نسخة وقت الدفع) */

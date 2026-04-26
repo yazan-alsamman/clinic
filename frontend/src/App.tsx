@@ -21,6 +21,7 @@ import { AdminLaserPage } from './pages/AdminLaserPage'
 import { AdminAccounting } from './pages/AdminAccounting'
 import { AdminFinancialBalances } from './pages/AdminFinancialBalances'
 import { BillingPage } from './pages/BillingPage'
+import { ReceptionDailyInventoryPage } from './pages/ReceptionDailyInventoryPage'
 import { AccountPassword } from './pages/AccountPassword'
 import { LaserCreateSessionPage } from './pages/LaserCreateSessionPage'
 import { PatientPortalGuard } from './components/PatientPortalGuard'
@@ -61,6 +62,7 @@ export default function App() {
               <Route path="/dermatology" element={<DermatologyToday />} />
               <Route path="/dental" element={<DentalPage />} />
               <Route path="/billing" element={<BillingPage />} />
+              <Route path="/reception/daily-inventory" element={<ReceptionDailyInventoryPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/reports/daily" element={<DailyReport />} />
               <Route path="/reports/insights" element={<InsightsPage />} />

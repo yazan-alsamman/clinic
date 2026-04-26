@@ -16,6 +16,7 @@ export type NavKey =
   | 'dermatology'
   | 'dental'
   | 'billing_queue'
+  | 'reception_daily_inventory'
   | 'inventory'
   | 'reports_daily'
   | 'reports_insights'
