@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
@@ -120,6 +120,7 @@ function renderServiceLabel(service: ServiceKey) {
 export function BookedAppointmentsPage() {
   const { user } = useAuth()
   const { businessDate: clinicBusinessDate } = useClinic()
+  const [searchParams] = useSearchParams()
   const allowed = canOpenPage(user?.role)
   const fullView = fullScheduleRoles(user?.role)
 
@@ -141,6 +142,11 @@ export function BookedAppointmentsPage() {
   const [provService, setProvService] = useState<ServiceKey>('other')
   const [provLaserUserId, setProvLaserUserId] = useState('')
   const [provName, setProvName] = useState('')
+
+  useEffect(() => {
+    const d = searchParams.get('date')
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setViewDate(d)
+  }, [searchParams])
 
   const load = useCallback(async () => {
     if (!allowed) {

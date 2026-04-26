@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { visibleNavForRole, roleLabel } from '../data/nav'
 import { DayBanner } from './DayBanner'
 import { CloseDayModal } from './CloseDayModal'
+import { NotificationBell } from './NotificationBell'
 
 export function AppShell() {
   const { user, logout } = useAuth()
@@ -131,6 +132,7 @@ export function AppShell() {
               <span style={{ fontWeight: 600 }}>{user?.name ?? '—'}</span>
               {role ? <span className="role-pill">{roleLabel(role)}</span> : null}
             </div>
+            <NotificationBell />
           </div>
           <button
             type="button"

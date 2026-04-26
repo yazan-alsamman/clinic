@@ -7,6 +7,7 @@ import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/au
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { todayBusinessDate, addCalendarDaysYmd, isValidYmd } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
+import { notifyAppointmentCancelled } from '../services/scheduleCancelNotify.js'
 import {
   normalizeHm,
   hmToMinutes,
@@ -603,11 +604,19 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
 
 scheduleRouter.delete('/cancel/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
-    const slot = await ScheduleSlot.findByIdAndDelete(req.params.id)
+    const slot = await ScheduleSlot.findById(req.params.id).lean()
     if (!slot) {
       res.status(404).json({ error: 'الموعد غير موجود' })
       return
     }
+    if (slot.patientId) {
+      try {
+        await notifyAppointmentCancelled(slot, req.user)
+      } catch (notifyErr) {
+        console.error('notifyAppointmentCancelled:', notifyErr)
+      }
+    }
+    await ScheduleSlot.deleteOne({ _id: slot._id })
     await writeAudit({
       user: req.user,
       action: 'إلغاء موعد',
@@ -642,6 +651,13 @@ scheduleRouter.post('/clear', loadBusinessDay, requireActiveDay, async (req, res
     if (!slot) {
       res.status(404).json({ error: 'الموعد غير موجود' })
       return
+    }
+    if (slot.patientId) {
+      try {
+        await notifyAppointmentCancelled(slot.toObject ? slot.toObject() : slot, req.user)
+      } catch (notifyErr) {
+        console.error('notifyAppointmentCancelled:', notifyErr)
+      }
     }
     await writeAudit({
       user: req.user,

@@ -17,6 +17,7 @@ import { reportsRouter } from './routes/reports.js'
 import { accountingRouter } from './routes/accounting.js'
 import { clinicalRouter } from './routes/clinical.js'
 import { billingRouter } from './routes/billing.js'
+import { notificationsRouter } from './routes/notifications.js'
 import { patientAuthRouter } from './routes/patientAuth.js'
 import { patientPortalRouter } from './routes/patientPortal.js'
 
@@ -60,6 +61,7 @@ app.use('/api/reports', reportsRouter)
 app.use('/api/accounting', accountingRouter)
 app.use('/api/clinical', clinicalRouter)
 app.use('/api/billing', billingRouter)
+app.use('/api/notifications', notificationsRouter)
 
 app.use((err, _req, res, _next) => {
   console.error(err)
