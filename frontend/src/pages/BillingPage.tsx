@@ -585,7 +585,7 @@ export function BillingPage() {
                   <>
                     {' '}
                     ثم ترجيع <strong>{usdCashOffer.impliedRefundSyp.toLocaleString('ar-SY')}</strong> ل.س فيُحسب الصافي
-                    مطابقاً للمستحق دون رصيد إضافي. استخدم «تعبئة المبلغ» لتعبئة الحقول تلقائياً.
+                    مطابقاً للمستحق دون رصيد إضافي — اضغط «تعبئة المبلغ» لتعبئة المستلم والترجيع معاً.
                   </>
                 ) : (
                   <> يطابق المستحق بالليرة. استخدم «تعبئة المبلغ» لتعبئة الحقل.</>
@@ -636,7 +636,7 @@ export function BillingPage() {
                         if (o) {
                           setPayUsd(o.usdFieldValue)
                           setPayRefundCurrency('SYP')
-                          setPayRefundAmount(o.impliedRefundSyp > 0 ? String(o.impliedRefundSyp) : '')
+                          setPayRefundAmount('')
                         } else {
                           setPayUsd('')
                           setPayRefundAmount('')
@@ -741,8 +741,9 @@ export function BillingPage() {
                   ) : null}
                   {payPreviewRate ? (
                     <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      المقابل بالليرة = المبلغ بالدولار × {payPreviewRate.toLocaleString('ar-SY')} (تقريب أقرب ليرة). عند
-                      التعبئة التلقائية يُختار أقرب دولار عملي للأعلى مع ترجيع بالليرة حتى لا يُسجَّل رصيد زائد.
+                      المقابل بالليرة = المبلغ بالدولار × {payPreviewRate.toLocaleString('ar-SY')} (تقريب أقرب ليرة). إن
+                      احتجت دولاراً مُقرّباً مع ترجيع بالليرة لمطابقة المستحق دون رصيد زائد، استخدم زر «تعبئة المبلغ»؛
+                      وإلا اترك الترجيع فارغاً (مثلاً قبض المبلغ بالدولار فقط عندما يكفي ذلك).
                     </p>
                   ) : null}
                   <div
