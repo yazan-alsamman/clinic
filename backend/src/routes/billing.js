@@ -548,19 +548,36 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
     const appliedAmountSyp = Math.min(netReceivedSyp, amountDueSyp)
     let settlementDeltaSyp = netReceivedSyp - amountDueSyp
-    /** صافي دولار نقدي عدد صحيح (مستلم − ترجيع USD) + بلا ترجيع ل.س + فرق ل.س ≤ سعر 1 USD: لا رصيد إضافي */
-    const netUsdCash = amountUsdRaw - patientRefundUsd
-    const wholeNetUsd =
-      Number.isFinite(netUsdCash) &&
-      netUsdCash > 0 &&
-      Math.abs(netUsdCash - Math.round(netUsdCash)) < 1e-5
+    /** فرق ≤ سعر 1 USD + صافي «أوراق» USD عدد صحيح (مستلم−ترجيع USD، أو صافي ل.س÷سعر عند ترجيع ل.س فقط): لا رصيد إضافي */
+    let absorbCashNetUsdQualifies = false
+    if (payCurrency === 'USD' && usdSypRateUsed > 0) {
+      if (patientRefundUsd > 0 && patientRefundSyp > 0) {
+        absorbCashNetUsdQualifies = false
+      } else if (patientRefundUsd > 0) {
+        const netUsdCash = amountUsdRaw - patientRefundUsd
+        absorbCashNetUsdQualifies =
+          Number.isFinite(netUsdCash) &&
+          netUsdCash > 0 &&
+          Math.abs(netUsdCash - Math.round(netUsdCash)) < 1e-5
+      } else if (patientRefundSyp > 0) {
+        const implied = netReceivedSyp / usdSypRateUsed
+        absorbCashNetUsdQualifies =
+          Number.isFinite(implied) &&
+          implied > 0 &&
+          Math.abs(implied - Math.round(implied)) < 1e-5
+      } else {
+        absorbCashNetUsdQualifies =
+          Number.isFinite(amountUsdRaw) &&
+          amountUsdRaw > 0 &&
+          Math.abs(amountUsdRaw - Math.round(amountUsdRaw)) < 1e-5
+      }
+    }
     if (
       payCurrency === 'USD' &&
-      patientRefundSyp <= 0 &&
       usdSypRateUsed > 0 &&
       settlementDeltaSyp > 0 &&
       settlementDeltaSyp <= usdSypRateUsed &&
-      wholeNetUsd
+      absorbCashNetUsdQualifies
     ) {
       settlementDeltaSyp = 0
     }

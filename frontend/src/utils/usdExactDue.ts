@@ -38,10 +38,11 @@ export type UsdRoundedCashOffer = {
  * ليتوافق مع التجميع المحاسبي وتفادي فرق التقريب بين round(a×r) − round(b×r) و round((a−b)×r).
  */
 /**
- * بعد حساب صافي الليرة من USD (ومع ترجيع USD اختياري، بلا ترجيع ل.س):
- * إذا كان صافي الدولار النقدي = مستلم − ترجيع USD **عدداً صحيحاً** وزاد الصافي بالليرة على المستحق
- * بمقدار ≤ سعر 1 USD بالليرة، نعتبره فرق تقريب تسعير/أوراق ولا يُسجَّل رصيد إضافي.
- * (يشمل قبض 8$ فقط، أو 10$ مع ترجيع 2$ عندما يعادل الصافي «جلسة 8$» مقابل مستحق ل.س غير مضبوط على مضاعف السعر.)
+ * بعد صافي الليرة من USD (ترجيع ل.س و/أو USD):
+ * إذا زاد الصافي على المستحق ب≤ سعر 1 USD وكان «صافي الدولار النقدي» عدداً صحيحاً نعتبره تسامح تسعير/أوراق ولا رصيد إضافي.
+ * — بلا ترجيع أو ترجيع USD فقط: صافي USD = مستلم − ترجيع USD صحيح.
+ * — ترجيع ل.س فقط: صافي الليرة ÷ السعر يعادل عدداً صحيحاً من USD (مثال 50$ و630000 ل.س ترجيع → صافي 8$).
+ * — ترجيع ل.س وUSD معاً: لا نستوعب (نادر؛ يُرجى التحقق يدوياً).
  */
 export function settlementDeltaAfterUsdCashNetAbsorb(opts: {
   payCurrency: 'SYP' | 'USD'
@@ -55,13 +56,30 @@ export function settlementDeltaAfterUsdCashNetAbsorb(opts: {
   const { payCurrency, netReceivedSyp, amountDueSyp, rate, amountUsd, patientRefundSyp, patientRefundUsd } = opts
   const rawDelta = netReceivedSyp - amountDueSyp
   if (payCurrency !== 'USD') return rawDelta
-  if (patientRefundSyp > 0) return rawDelta
+  if (!(rate > 0) || rawDelta <= 0 || rawDelta > rate) return rawDelta
+
   const u = Number(amountUsd)
   const ru = Number(patientRefundUsd) || 0
-  const netUsd = u - ru
-  if (!(rate > 0) || rawDelta <= 0 || rawDelta > rate) return rawDelta
-  if (!Number.isFinite(netUsd) || netUsd <= 0) return rawDelta
-  if (Math.abs(netUsd - Math.round(netUsd)) > 1e-5) return rawDelta
+  const rs = Math.round(Number(patientRefundSyp) || 0)
+
+  if (ru > 0 && rs > 0) return rawDelta
+
+  if (ru > 0) {
+    const netUsd = u - ru
+    if (!Number.isFinite(netUsd) || netUsd <= 0) return rawDelta
+    if (Math.abs(netUsd - Math.round(netUsd)) > 1e-5) return rawDelta
+    return 0
+  }
+
+  if (rs > 0) {
+    const impliedNetUsd = netReceivedSyp / rate
+    if (!Number.isFinite(impliedNetUsd) || impliedNetUsd <= 0) return rawDelta
+    if (Math.abs(impliedNetUsd - Math.round(impliedNetUsd)) > 1e-5) return rawDelta
+    return 0
+  }
+
+  if (!Number.isFinite(u) || u <= 0) return rawDelta
+  if (Math.abs(u - Math.round(u)) > 1e-5) return rawDelta
   return 0
 }
 
