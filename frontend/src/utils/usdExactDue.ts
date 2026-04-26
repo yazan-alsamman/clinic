@@ -32,6 +32,28 @@ export type UsdRoundedCashOffer = {
  * يقرّب مبلغ الدولار إلى **أعلى عدد صحيح** لا يقل عن المبلغ المضبوط رياضياً،
  * ويحسب ترجيعاً بالليرة بحيث: round(usd×rate) − ترجيع = المستحق (لا رصيد إضافي).
  */
+/**
+ * صافي ما يبقى للعيادة بالليرة بعد دفع USD وترجيع (ل.س و/أو USD).
+ * عند وجود ترجيع بالدولار يُحسب: round((مستلم − ترجيع USD) × السعر) − ترجيع ل.س
+ * ليتوافق مع التجميع المحاسبي وتفادي فرق التقريب بين round(a×r) − round(b×r) و round((a−b)×r).
+ */
+export function netReceivedSypAfterUsdCollection(opts: {
+  amountUsd: number
+  patientRefundSyp: number
+  patientRefundUsd: number
+  rate: number
+}): number {
+  const u = Number(opts.amountUsd)
+  const r = Number(opts.rate)
+  const rs = Math.round(Number(opts.patientRefundSyp) || 0)
+  const ru = Number(opts.patientRefundUsd) || 0
+  if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0
+  if (ru > 0) {
+    return Math.round((u - ru) * r) - rs
+  }
+  return Math.round(u * r) - rs
+}
+
 export function usdRoundedUpCashOffer(dueSyp: number, rate: number): UsdRoundedCashOffer | null {
   const due = Math.round(Number(dueSyp) || 0)
   const r = Number(rate)

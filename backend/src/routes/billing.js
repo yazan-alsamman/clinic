@@ -11,6 +11,19 @@ import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2, round6 } from '../utils/money.js'
+
+/** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
+function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
+  const u = Number(amountUsd)
+  const r = Number(rate)
+  const rs = Math.round(Number(patientRefundSyp) || 0)
+  const ru = Number(patientRefundUsd) || 0
+  if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0
+  if (ru > 0) {
+    return Math.round((u - ru) * r) - rs
+  }
+  return Math.round(u * r) - rs
+}
 export const billingRouter = Router()
 
 billingRouter.use(authMiddleware)
@@ -421,6 +434,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     let patientRefundUsd = 0
     /** سعر الصرف المستخدم لدفعة USD (لحساب صافي الليرة بعد ترجيع USD) */
     let usdSypRateUsed = 0
+    /** مبلغ USD المستلم (يُملأ عند payCurrency === USD فقط) */
+    let amountUsdRaw = 0
     if (payCurrency === 'USD') {
       const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
       const rate = Number(bd?.usdSypRate)
@@ -431,7 +446,7 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         })
         return
       }
-      const amountUsdRaw = Number(body.amountUsd)
+      amountUsdRaw = Number(body.amountUsd)
       if (!Number.isFinite(amountUsdRaw) || amountUsdRaw <= 0) {
         res.status(400).json({ error: 'مبلغ الدفع بالدولار غير صالح' })
         return
@@ -493,13 +508,15 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     /** صافٍ ما بقي لدى العيادة بعد الترجيع (للمقارنة مع المستحق والرصيد/الذمة) — حقول المستلم في السجل تبقى إجمالية */
-    let netReceivedSyp = receivedSyp
-    if (payCurrency === 'USD') {
-      if (patientRefundSyp > 0) netReceivedSyp -= patientRefundSyp
-      if (patientRefundUsd > 0 && usdSypRateUsed > 0) {
-        netReceivedSyp -= Math.round(patientRefundUsd * usdSypRateUsed)
-      }
-    }
+    const netReceivedSyp =
+      payCurrency === 'USD'
+        ? netReceivedSypAfterUsdCollection(
+            amountUsdRaw,
+            patientRefundSyp,
+            patientRefundUsd,
+            usdSypRateUsed,
+          )
+        : receivedSyp
     if (netReceivedSyp <= 0) {
       res.status(400).json({ error: 'صافي المبلغ بعد الترجيع غير صالح — يجب أن يبقى للعيادة مبلغ موجب يغطي التحصيل.' })
       return
