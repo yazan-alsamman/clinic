@@ -272,10 +272,17 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
       }
       byDept[deptKey].transactionCount += 1
 
+      /** صافي ما يبقى في الصندوق/البنك بعد الترجيع (USD: ناقص ترجيع دولار؛ ليرة: ناقص ترجيع ليرة) */
+      const usdNet = payCur === 'USD' ? round2(usdPart - refUsd) : usdPart
+      const sypNetForCashbook =
+        payCur === 'USD' ? -refSyp : sypPart
+
       if (channel === 'cash') {
         if (payCur === 'USD') {
-          cash.totalUsd = round2(cash.totalUsd + usdPart)
-          byDept[deptKey].cashUsd = round2(byDept[deptKey].cashUsd + usdPart)
+          cash.totalUsd = round2(cash.totalUsd + usdNet)
+          cash.totalSyp += sypNetForCashbook
+          byDept[deptKey].cashUsd = round2(byDept[deptKey].cashUsd + usdNet)
+          byDept[deptKey].cashSyp += sypNetForCashbook
         } else {
           cash.totalSyp += sypPart
           byDept[deptKey].cashSyp += sypPart
@@ -284,8 +291,10 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
         const label = String(p.bankName || '').trim() || 'بنك'
         const cur = bankMap.get(label) || { bankName: label, totalSyp: 0, totalUsd: 0 }
         if (payCur === 'USD') {
-          cur.totalUsd = round2(cur.totalUsd + usdPart)
-          byDept[deptKey].bankUsd = round2(byDept[deptKey].bankUsd + usdPart)
+          cur.totalUsd = round2(cur.totalUsd + usdNet)
+          cur.totalSyp += sypNetForCashbook
+          byDept[deptKey].bankUsd = round2(byDept[deptKey].bankUsd + usdNet)
+          byDept[deptKey].bankSyp += sypNetForCashbook
         } else {
           cur.totalSyp += sypPart
           byDept[deptKey].bankSyp += sypPart
@@ -410,6 +419,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     let receivedUsd = 0
     let patientRefundSyp = 0
     let patientRefundUsd = 0
+    /** سعر الصرف المستخدم لدفعة USD (لحساب صافي الليرة بعد ترجيع USD) */
+    let usdSypRateUsed = 0
     if (payCurrency === 'USD') {
       const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
       const rate = Number(bd?.usdSypRate)
@@ -426,6 +437,7 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         return
       }
       /** لا نستخدم round2 قبل الضرب — وإلا يضيعت مطابقة المستحق (مثال 110000÷15000) */
+      usdSypRateUsed = rate
       receivedSyp = Math.round(amountUsdRaw * rate)
       receivedUsd = round6(amountUsdRaw)
       if (receivedSyp <= 0) {
@@ -457,6 +469,20 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         res.status(400).json({ error: 'حدد عملة الترجيع (ليرة أو دولار) عند إدخال مبلغ الترجيع' })
         return
       }
+
+      if (patientRefundSyp > 0 && patientRefundSyp > receivedSyp) {
+        res.status(400).json({ error: 'مبلغ الترجيع بالليرة أكبر من المقابل المستلم بالليرة لهذه الدفعة' })
+        return
+      }
+      if (patientRefundUsd > 0 && patientRefundUsd > amountUsdRaw) {
+        res.status(400).json({ error: 'مبلغ الترجيع بالدولار أكبر من المبلغ المستلم بالدولار' })
+        return
+      }
+      const refundSypEquivUsd = patientRefundUsd > 0 ? Math.round(patientRefundUsd * rate) : 0
+      if (patientRefundSyp + refundSypEquivUsd > receivedSyp) {
+        res.status(400).json({ error: 'إجمالي الترجيع (ليرة ومقابل دولار) يتجاوز المبلغ المستلم بالليرة' })
+        return
+      }
     } else {
       const amountSypRaw = Number(body.amountSyp)
       receivedSyp = Number.isFinite(amountSypRaw) && amountSypRaw > 0 ? Math.round(amountSypRaw) : 0
@@ -466,9 +492,22 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       return
     }
 
+    /** صافٍ ما بقي لدى العيادة بعد الترجيع (للمقارنة مع المستحق والرصيد/الذمة) — حقول المستلم في السجل تبقى إجمالية */
+    let netReceivedSyp = receivedSyp
+    if (payCurrency === 'USD') {
+      if (patientRefundSyp > 0) netReceivedSyp -= patientRefundSyp
+      if (patientRefundUsd > 0 && usdSypRateUsed > 0) {
+        netReceivedSyp -= Math.round(patientRefundUsd * usdSypRateUsed)
+      }
+    }
+    if (netReceivedSyp <= 0) {
+      res.status(400).json({ error: 'صافي المبلغ بعد الترجيع غير صالح — يجب أن يبقى للعيادة مبلغ موجب يغطي التحصيل.' })
+      return
+    }
+
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
-    const appliedAmountSyp = Math.min(receivedSyp, amountDueSyp)
-    const settlementDeltaSyp = receivedSyp - amountDueSyp
+    const appliedAmountSyp = Math.min(netReceivedSyp, amountDueSyp)
+    const settlementDeltaSyp = netReceivedSyp - amountDueSyp
 
     const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
     if (existingPay) {

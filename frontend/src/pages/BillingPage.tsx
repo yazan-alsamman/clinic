@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
-import { usdAmountStringMatchingDueSyp } from '../utils/usdExactDue'
+import { usdRoundedUpCashOffer } from '../utils/usdExactDue'
 
 type Item = {
   id: string
@@ -137,6 +137,31 @@ export function BillingPage() {
           return
         }
       }
+      if (payPreviewRate && payPreviewRate > 0) {
+        const usdG = parseFloat(normalizeDecimalDigits(payUsd))
+        if (Number.isFinite(usdG) && usdG > 0) {
+          const grossSyp = Math.round(usdG * payPreviewRate)
+          let refSyp = 0
+          let refUsd = 0
+          if (payRefundAmount.trim()) {
+            if (payRefundCurrency === 'SYP') {
+              refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
+            } else {
+              refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
+            }
+          }
+          const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
+          if (refEquiv > grossSyp) {
+            setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
+            return
+          }
+          const netSyp = grossSyp - refEquiv
+          if (netSyp <= 0) {
+            setErr('صافي المبلغ بعد الترجيع يجب أن يكون أكبر من صفر.')
+            return
+          }
+        }
+      }
     }
     setBusyId(id)
     try {
@@ -219,6 +244,31 @@ export function BillingPage() {
         if (!Number.isFinite(ref) || ref < 0) {
           setErr('مبلغ الترجيع غير صالح — أدخل رقماً صحيحاً أو افرغ الحقل.')
           return
+        }
+      }
+      if (payPreviewRate && payPreviewRate > 0) {
+        const usdG = parseFloat(normalizeDecimalDigits(payUsd))
+        if (Number.isFinite(usdG) && usdG > 0) {
+          const grossSyp = Math.round(usdG * payPreviewRate)
+          let refSyp = 0
+          let refUsd = 0
+          if (payRefundAmount.trim()) {
+            if (payRefundCurrency === 'SYP') {
+              refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
+            } else {
+              refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
+            }
+          }
+          const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
+          if (refEquiv > grossSyp) {
+            setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
+            return
+          }
+          const netSyp = grossSyp - refEquiv
+          if (netSyp <= 0) {
+            setErr('صافي المبلغ بعد الترجيع يجب أن يكون أكبر من صفر.')
+            return
+          }
         }
       }
     }
@@ -318,10 +368,15 @@ export function BillingPage() {
       ? usdSypRate
       : null
   const dueSypRounded = payItem ? Math.round(Number(payItem.amountDueSyp || 0)) : 0
-  const dueUsdExactStr =
-    payPreviewRate && dueSypRounded > 0
-      ? usdAmountStringMatchingDueSyp(dueSypRounded, payPreviewRate)
-      : null
+  const usdCashOffer =
+    payPreviewRate && dueSypRounded > 0 ? usdRoundedUpCashOffer(dueSypRounded, payPreviewRate) : null
+
+  function applyUsdCashOfferFill() {
+    if (!payPreviewRate || !usdCashOffer) return
+    setPayUsd(usdCashOffer.usdFieldValue)
+    setPayRefundCurrency('SYP')
+    setPayRefundAmount(usdCashOffer.impliedRefundSyp > 0 ? String(usdCashOffer.impliedRefundSyp) : '')
+  }
 
   return (
     <>
@@ -492,11 +547,19 @@ export function BillingPage() {
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
               المستحق: {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
             </p>
-            {payPreviewRate != null && dueUsdExactStr ? (
+            {payPreviewRate != null && usdCashOffer ? (
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                وفق سعر اليوم ({payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD): مبلغ USD المضبوط لمطابقة
-                المستحق بالليرة: <strong dir="ltr">{dueUsdExactStr}</strong> USD (قد يتجاوز منزلتين عشريتين؛ استخدم
-                «تعبئة المبلغ» أو انسخ القيمة كما هي).
+                وفق سعر اليوم ({payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD): اقتراح عملي — استلام{' '}
+                <strong dir="ltr">{usdCashOffer.usdFieldValue}</strong> USD
+                {usdCashOffer.impliedRefundSyp > 0 ? (
+                  <>
+                    {' '}
+                    ثم ترجيع <strong>{usdCashOffer.impliedRefundSyp.toLocaleString('ar-SY')}</strong> ل.س فيُحسب الصافي
+                    مطابقاً للمستحق دون رصيد إضافي. استخدم «تعبئة المبلغ» لتعبئة الحقول تلقائياً.
+                  </>
+                ) : (
+                  <> يطابق المستحق بالليرة. استخدم «تعبئة المبلغ» لتعبئة الحقل.</>
+                )}
               </p>
             ) : payItem.businessDate && businessDate && payItem.businessDate !== businessDate ? (
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
@@ -539,9 +602,18 @@ export function BillingPage() {
                     onChange={() => {
                       setPayCurrency('USD')
                       if (payPreviewRate && dueSypRounded > 0) {
-                        setPayUsd(usdAmountStringMatchingDueSyp(dueSypRounded, payPreviewRate))
+                        const o = usdRoundedUpCashOffer(dueSypRounded, payPreviewRate)
+                        if (o) {
+                          setPayUsd(o.usdFieldValue)
+                          setPayRefundCurrency('SYP')
+                          setPayRefundAmount(o.impliedRefundSyp > 0 ? String(o.impliedRefundSyp) : '')
+                        } else {
+                          setPayUsd('')
+                          setPayRefundAmount('')
+                        }
                       } else {
                         setPayUsd('')
+                        setPayRefundAmount('')
                       }
                     }}
                   />
@@ -627,23 +699,20 @@ export function BillingPage() {
                     placeholder="0"
                     style={{ marginTop: '0.25rem', maxWidth: 320 }}
                   />
-                  {payPreviewRate && dueSypRounded > 0 ? (
+                  {payPreviewRate && dueSypRounded > 0 && usdCashOffer ? (
                     <button
                       type="button"
                       className="btn btn-secondary"
                       style={{ marginTop: '0.4rem', fontSize: '0.85rem' }}
-                      onClick={() =>
-                        setPayUsd(usdAmountStringMatchingDueSyp(dueSypRounded, payPreviewRate))
-                      }
+                      onClick={() => applyUsdCashOfferFill()}
                     >
-                      تعبئة المبلغ بالدولار المطابق للمستحق بالليرة
+                      تعبئة المبلغ (دولار مُقرّب + ترجيع ليرة عند الحاجة)
                     </button>
                   ) : null}
                   {payPreviewRate ? (
                     <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      يُحسب المقابل بالليرة بتقريب أقرب ليرة صحيحة: (المبلغ بالدولار ×{' '}
-                      {payPreviewRate.toLocaleString('ar-SY')}). لا يُقصّر مبلغ الدولار إلى منزلتين عشريتين قبل
-                      الضرب حتى يطابق المستحق بالليرة عند اختيار المبلغ المضبوط أعلاه.
+                      المقابل بالليرة = المبلغ بالدولار × {payPreviewRate.toLocaleString('ar-SY')} (تقريب أقرب ليرة). عند
+                      التعبئة التلقائية يُختار أقرب دولار عملي للأعلى مع ترجيع بالليرة حتى لا يُسجَّل رصيد زائد.
                     </p>
                   ) : null}
                   <div
@@ -657,8 +726,8 @@ export function BillingPage() {
                       ترجيع
                     </span>
                     <p style={{ margin: '0 0 0.4rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                      المبلغ الذي رُدّ للمريض بعد التحصيل بالدولار (إن وُجد) — يُسجّل للمراجعة فقط ولا يغيّر حساب
-                      المستحق أو الرصيد.
+                      المبلغ الذي رُدّ للمريض بعد التحصيل (إن وُجد). يُطرح من المستلم لحساب الصافي مقابل المستحق ولن
+                      يُسجَّل رصيد إضافي إذا كان الصافي يطابق المستحق.
                     </p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
                       <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
@@ -700,21 +769,42 @@ export function BillingPage() {
             {(() => {
               const due = Math.round(Number(payItem.amountDueSyp || 0))
               if (!(due > 0)) return null
-              let receivedSyp = 0
+              let grossSyp = 0
               if (payCurrency === 'SYP') {
                 const syp = Number(normalizeDecimalDigits(paySyp))
-                receivedSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
+                grossSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
               } else {
                 const usd = parseFloat(normalizeDecimalDigits(payUsd))
                 if (!payPreviewRate || !Number.isFinite(usd) || usd <= 0) return null
-                receivedSyp = Math.round(usd * payPreviewRate)
+                grossSyp = Math.round(usd * payPreviewRate)
               }
-              if (!(receivedSyp > 0)) return null
-              const delta = receivedSyp - due
+              if (!(grossSyp > 0)) return null
+
+              let netSyp = grossSyp
+              if (payCurrency === 'USD' && payPreviewRate && payRefundAmount.trim()) {
+                const rt = payPreviewRate
+                if (payRefundCurrency === 'SYP') {
+                  const r = Number(normalizeDecimalDigits(payRefundAmount))
+                  if (Number.isFinite(r) && r > 0) netSyp -= Math.round(r)
+                } else {
+                  const r = parseFloat(normalizeDecimalDigits(payRefundAmount))
+                  if (Number.isFinite(r) && r > 0) netSyp -= Math.round(r * rt)
+                }
+              }
+
+              if (payCurrency === 'USD' && netSyp <= 0) {
+                return (
+                  <p style={{ marginTop: '0.45rem', color: 'var(--danger)' }}>
+                    صافي المبلغ بعد الترجيع غير كافٍ — راجع المستلم بالدولار ومبلغ الترجيع.
+                  </p>
+                )
+              }
+
+              const delta = netSyp - due
               if (delta < 0) {
                 return (
                   <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
-                    المبلغ أقل من المستحق — سيتم تسجيل الباقي كذمة على المريض (
+                    الصافي بعد الترجيع أقل من المستحق — سيتم تسجيل الباقي كذمة على المريض (
                     {Math.abs(delta).toLocaleString('ar-SY')} ل.س).
                   </p>
                 )
@@ -722,14 +812,14 @@ export function BillingPage() {
               if (delta > 0) {
                 return (
                   <p style={{ marginTop: '0.45rem', color: 'var(--success)' }}>
-                    المبلغ أعلى من المستحق — سيتم تسجيل الزيادة كرصيد إضافي للمريض (
+                    الصافي بعد الترجيع أعلى من المستحق — سيتم تسجيل الزيادة كرصيد إضافي للمريض (
                     {delta.toLocaleString('ar-SY')} ل.س).
                   </p>
                 )
               }
               return (
                 <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)' }}>
-                  المبلغ مطابق للمستحق (محاسبياً بالليرة).
+                  الصافي بعد الترجيع مطابق للمستحق (محاسبياً بالليرة).
                 </p>
               )
             })()}

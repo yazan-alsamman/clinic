@@ -536,10 +536,15 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
     const payCur = String(p.payCurrency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
     const sypPart = Math.round(Number(p.receivedAmountSyp) || 0)
     const usdPart = round2(Number(p.receivedAmountUsd) || 0)
+    const refSyp = Math.round(Number(p.patientRefundSyp) || 0)
+    const refUsd = round2(Number(p.patientRefundUsd) || 0)
+    const usdNet = payCur === 'USD' ? round2(usdPart - refUsd) : usdPart
+    const sypAdjUsdPay = payCur === 'USD' ? -refSyp : 0
     const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
     if (channel === 'cash') {
       if (payCur === 'USD') {
-        cashUsd += usdPart
+        cashUsd += usdNet
+        cashSyp += sypAdjUsdPay
       } else {
         cashSyp += sypPart
       }
@@ -547,7 +552,8 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
       const label = String(p.bankName || '').trim() || 'بنك'
       const cur = bankMap.get(label) || { bankName: label, totalSyp: 0, totalUsd: 0 }
       if (payCur === 'USD') {
-        cur.totalUsd = round2(cur.totalUsd + usdPart)
+        cur.totalUsd = round2(cur.totalUsd + usdNet)
+        cur.totalSyp += sypAdjUsdPay
       } else {
         cur.totalSyp += sypPart
       }

@@ -20,3 +20,34 @@ export function usdAmountStringMatchingDueSyp(dueSyp: number, rate: number): str
   }
   return trimUsdDecimalString((due / r).toFixed(10))
 }
+
+/** نتيجة اقتراح دولار بسيط (غالباً عدد صحيح) + ترجيع ل.س ليبقى الصافي = المستحق */
+export type UsdRoundedCashOffer = {
+  usdRounded: number
+  usdFieldValue: string
+  impliedRefundSyp: number
+}
+
+/**
+ * يقرّب مبلغ الدولار إلى **أعلى عدد صحيح** لا يقل عن المبلغ المضبوط رياضياً،
+ * ويحسب ترجيعاً بالليرة بحيث: round(usd×rate) − ترجيع = المستحق (لا رصيد إضافي).
+ */
+export function usdRoundedUpCashOffer(dueSyp: number, rate: number): UsdRoundedCashOffer | null {
+  const due = Math.round(Number(dueSyp) || 0)
+  const r = Number(rate)
+  if (!(due > 0) || !(r > 0) || !Number.isFinite(r)) return null
+
+  const exactStr = usdAmountStringMatchingDueSyp(due, r)
+  const exactUsd = Number(exactStr)
+  if (!Number.isFinite(exactUsd) || exactUsd <= 0) return null
+
+  const usdRounded = Math.ceil(exactUsd - 1e-9)
+  const grossSyp = Math.round(usdRounded * r)
+  const impliedRefundSyp = Math.max(0, grossSyp - due)
+
+  return {
+    usdRounded,
+    usdFieldValue: String(usdRounded),
+    impliedRefundSyp,
+  }
+}
