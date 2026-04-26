@@ -156,8 +156,27 @@ patientsRouter.get('/', async (req, res) => {
       const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       query = { $or: [{ name: new RegExp(safe, 'i') }, { fileNumber: new RegExp(safe, 'i') }] }
     }
-    const list = await Patient.find(query).sort({ updatedAt: -1 }).limit(200)
-    res.json({ patients: list.map(patientToDto) })
+    const wantPagination = req.query.page != null || req.query.pageSize != null
+    if (!wantPagination) {
+      const list = await Patient.find(query).sort({ updatedAt: -1 }).limit(200)
+      res.json({ patients: list.map(patientToDto) })
+      return
+    }
+    const page = Math.max(1, parseInt(String(req.query.page), 10) || 1)
+    const pageSize = Math.min(50, Math.max(1, parseInt(String(req.query.pageSize), 10) || 10))
+    const skip = (page - 1) * pageSize
+    const [total, list] = await Promise.all([
+      Patient.countDocuments(query),
+      Patient.find(query).sort({ updatedAt: -1 }).skip(skip).limit(pageSize).lean(),
+    ])
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize)
+    res.json({
+      patients: list.map(patientToDto),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

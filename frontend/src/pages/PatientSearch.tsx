@@ -29,11 +29,45 @@ function canRegisterPatients(role: string | undefined) {
   return role === 'super_admin' || role === 'reception'
 }
 
+const PAGE_SIZE = 10
+
+/** أرقام صفحات مع فجوات عند الحاجة (مثال: 1 … 5 6 7 … 20) */
+function pageNumbersForDisplay(current: number, totalPages: number): (number | 'ellipsis')[] {
+  if (totalPages <= 0) return []
+  if (totalPages <= 9) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1)
+  }
+  const out: (number | 'ellipsis')[] = []
+  const edge = 1
+  const windowSize = 2
+  const push = (n: number | 'ellipsis') => {
+    if (out.length && out[out.length - 1] === n) return
+    out.push(n)
+  }
+  for (let p = 1; p <= totalPages; p++) {
+    if (
+      p <= edge ||
+      p > totalPages - edge ||
+      (p >= current - windowSize && p <= current + windowSize)
+    ) {
+      if (out.length && typeof out[out.length - 1] === 'number' && p - (out[out.length - 1] as number) > 1) {
+        push('ellipsis')
+      }
+      push(p)
+    }
+  }
+  return out
+}
+
 export function PatientSearch() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [q, setQ] = useState('')
+  const [debouncedQ, setDebouncedQ] = useState('')
+  const [page, setPage] = useState(1)
   const [list, setList] = useState<Patient[]>([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -45,31 +79,61 @@ export function PatientSearch() {
   const allowAdd = canRegisterPatients(user?.role)
 
   useEffect(() => {
-    let cancelled = false
-    const debounceMs = q.trim() ? 250 : 0
-    const t = setTimeout(() => {
-      ;(async () => {
-        try {
-          setLoading(true)
-          const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
-          const data = await api<{ patients: Patient[] }>(`/api/patients${qs}`)
-          const rows = Array.isArray(data.patients) ? data.patients : []
-          if (!cancelled) setList(rows)
-        } catch {
-          if (!cancelled) setList([])
-        } finally {
-          if (!cancelled) setLoading(false)
-        }
-      })()
-    }, debounceMs)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
+    if (!q.trim()) {
+      setDebouncedQ('')
+      return
     }
+    const t = window.setTimeout(() => setDebouncedQ(q.trim()), 250)
+    return () => window.clearTimeout(t)
   }, [q])
 
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedQ])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        setLoading(true)
+        const params = new URLSearchParams()
+        params.set('page', String(page))
+        params.set('pageSize', String(PAGE_SIZE))
+        if (debouncedQ) params.set('q', debouncedQ)
+        const data = await api<{
+          patients: Patient[]
+          total: number
+          totalPages: number
+        }>(`/api/patients?${params.toString()}`)
+        const rows = Array.isArray(data.patients) ? data.patients : []
+        const tot = Number(data.total || 0)
+        const tp = Number(data.totalPages || 0)
+        if (cancelled) return
+        if (tp >= 1 && page > tp) {
+          setPage(tp)
+          return
+        }
+        setList(rows)
+        setTotal(tot)
+        setTotalPages(tp)
+      } catch {
+        if (!cancelled) {
+          setList([])
+          setTotal(0)
+          setTotalPages(0)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedQ, page])
+
   const filtered = useMemo(() => list, [list])
-  const searchActive = q.trim().length > 0
+  const searchActive = debouncedQ.length > 0
+  const pageButtons = useMemo(() => pageNumbersForDisplay(page, totalPages), [page, totalPages])
 
   function toggleDept(d: Dept) {
     setForm((f) => ({
@@ -103,8 +167,7 @@ export function PatientSearch() {
             المرضى
           </h1>
           <p className="page-desc" style={{ margin: 0 }}>
-            بدون نص في البحث تُعرض قائمة بجميع المرضى (حتى ٢٠٠، الأحدث أولاً). اكتب اسماً لتضييق النتائج — يدعم
-            العربية واللاتينية.
+            قائمة بالصفحات (١٠ مرضى لكل صفحة). اكتب اسماً أو رقم إضبارة لتضييق النتائج — يدعم العربية واللاتينية.
           </p>
         </div>
         {allowAdd ? (
@@ -132,11 +195,18 @@ export function PatientSearch() {
         />
       </div>
       <div className="card" style={{ marginTop: '1rem' }}>
-        <h2 className="card-title">
-          النتائج
-          {!loading && filtered.length > 0 ? (
-            <span style={{ fontWeight: 400, fontSize: '0.85rem', color: 'var(--text-muted)', marginRight: '0.5rem' }}>
-              ({filtered.length})
+        <h2 className="card-title" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.5rem' }}>
+          <span>النتائج</span>
+          {!loading ? (
+            <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+              إجمالي المرضى:{' '}
+              <strong style={{ color: 'var(--text)' }}>{total.toLocaleString('ar-SY')}</strong>
+              {totalPages > 1 ? (
+                <>
+                  {' '}
+                  — الصفحة {page.toLocaleString('ar-SY')} من {totalPages.toLocaleString('ar-SY')}
+                </>
+              ) : null}
             </span>
           ) : null}
         </h2>
@@ -187,6 +257,59 @@ export function PatientSearch() {
                 </div>
               </Link>
             ))}
+            {totalPages > 1 ? (
+              <nav
+                aria-label="ترقيم صفحات المرضى"
+                style={{
+                  marginTop: '1rem',
+                  paddingTop: '1rem',
+                  borderTop: '1px solid var(--border)',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.35rem',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem' }}
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  السابق
+                </button>
+                {pageButtons.map((item, idx) =>
+                  item === 'ellipsis' ? (
+                    <span key={`e-${idx}`} style={{ padding: '0 0.2rem', color: 'var(--text-muted)' }}>
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      className={item === page ? 'btn btn-primary' : 'btn btn-ghost'}
+                      style={{ minWidth: 40, fontSize: '0.82rem' }}
+                      disabled={loading}
+                      onClick={() => setPage(item)}
+                      aria-current={item === page ? 'page' : undefined}
+                    >
+                      {item.toLocaleString('ar-SY')}
+                    </button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem' }}
+                  disabled={page >= totalPages || loading || totalPages === 0}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  التالي
+                </button>
+              </nav>
+            ) : null}
           </div>
         )}
       </div>
@@ -488,8 +611,9 @@ export function PatientSearch() {
                     })
                     setAddOpen(false)
                     setForm(emptyForm)
-                    setList((prev) => [data.patient, ...prev])
                     setQ('')
+                    setDebouncedQ('')
+                    setPage(1)
                     if (data.portalCredentials) {
                       setPortalCreds(data.portalCredentials)
                       setCreatedPatientId(data.patient.id)
