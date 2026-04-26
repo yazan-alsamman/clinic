@@ -18,7 +18,39 @@ type FinanceRow = {
   totalAmountSyp: number
   sessionsCount: number
 }
-type LaserTab = 'shots' | 'expenses' | 'financial'
+type LaserTab = 'shots' | 'expenses' | 'financial' | 'discounts'
+
+type LaserDiscountRow = {
+  paymentId: string
+  billingItemId: string
+  receivedAt: string | null
+  businessDate: string
+  patientName: string
+  procedureLabel: string
+  department: string
+  departmentLabel: string
+  listAmountDueSyp: number
+  discountPercent: number
+  effectiveAmountDueSyp: number
+  discountValueSyp: number
+  appliedAmountSyp: number
+  payCurrency: string
+  receivedAmountSyp: number
+  receivedAmountUsd: number
+  patientRefundSyp: number
+  patientRefundUsd: number
+  settlementDeltaSyp: number
+  receivedByName: string
+}
+
+type LaserDiscountBucket = {
+  key: string
+  transactionCount: number
+  sumDiscountSyp: number
+  sumEffectiveDueSyp: number
+  sumAppliedSyp: number
+  sumListDueSyp: number
+}
 type ReportPeriod = 'daily' | 'monthly'
 
 type LocalExpenseRow = { clientKey: string; reason: string; amountSypInput: string }
@@ -143,6 +175,11 @@ export function AdminLaserPage() {
   const [expenseLoading, setExpenseLoading] = useState(false)
   const [expenseErr, setExpenseErr] = useState('')
   const [expenseSaveBusy, setExpenseSaveBusy] = useState(false)
+  const [discountRows, setDiscountRows] = useState<LaserDiscountRow[]>([])
+  const [discountDaily, setDiscountDaily] = useState<LaserDiscountBucket[]>([])
+  const [discountMonthly, setDiscountMonthly] = useState<LaserDiscountBucket[]>([])
+  const [discountLoading, setDiscountLoading] = useState(false)
+  const [discountErr, setDiscountErr] = useState('')
 
   useEffect(() => {
     if (!date && businessDate) setDate(businessDate)
@@ -341,6 +378,56 @@ export function AdminLaserPage() {
     }
   }, [allowed, date, month, period])
 
+  const loadDiscounts = useCallback(async () => {
+    if (!allowed) return
+    setDiscountErr('')
+    setDiscountLoading(true)
+    try {
+      let fromStr = ''
+      let toStr = ''
+      if (period === 'daily') {
+        fromStr = date || businessDate || ''
+        toStr = fromStr
+      } else {
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+          setDiscountRows([])
+          setDiscountDaily([])
+          setDiscountMonthly([])
+          setDiscountLoading(false)
+          return
+        }
+        fromStr = `${month}-01`
+        const [y, m] = month.split('-').map(Number)
+        const last = new Date(y, m, 0).getDate()
+        toStr = `${month}-${String(last).padStart(2, '0')}`
+      }
+      if (!fromStr) {
+        setDiscountErr('حدّد تاريخ اليوم أو الشهر من الشريط أعلاه.')
+        setDiscountRows([])
+        setDiscountDaily([])
+        setDiscountMonthly([])
+        return
+      }
+      const data = await api<{
+        rows: LaserDiscountRow[]
+        dailyBuckets: LaserDiscountBucket[]
+        monthlyBuckets: LaserDiscountBucket[]
+      }>(
+        `/api/billing/discounts-report?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`,
+      )
+      setDiscountRows(data.rows || [])
+      setDiscountDaily(data.dailyBuckets || [])
+      setDiscountMonthly(data.monthlyBuckets || [])
+    } catch (e) {
+      setDiscountErr(e instanceof ApiError ? e.message : 'تعذر تحميل تقرير الخصومات')
+      setDiscountRows([])
+      setDiscountDaily([])
+      setDiscountMonthly([])
+    } finally {
+      setDiscountLoading(false)
+    }
+  }, [allowed, period, date, month, businessDate])
+
   const loadBankSettings = useCallback(async () => {
     if (!allowed) return
     setBankErr('')
@@ -462,16 +549,16 @@ export function AdminLaserPage() {
   }, [allowed, expenseMonth, expenseRows])
 
   useEffect(() => {
-    if (tab === 'shots') {
-      void loadShots()
-      return
-    }
-    if (tab === 'expenses') {
-      void loadExpenses()
-      return
-    }
-    void loadFinancial()
-  }, [tab, loadShots, loadFinancial, loadExpenses])
+    if (!allowed) return
+    if (tab === 'shots') void loadShots()
+    else if (tab === 'expenses') void loadExpenses()
+    else if (tab === 'financial') void loadFinancial()
+  }, [allowed, tab, loadShots, loadExpenses, loadFinancial])
+
+  useEffect(() => {
+    if (!allowed || tab !== 'discounts') return
+    void loadDiscounts()
+  }, [allowed, tab, period, date, month, loadDiscounts])
 
   if (!allowed) {
     return (
@@ -524,7 +611,13 @@ export function AdminLaserPage() {
           type="button"
           className="btn btn-secondary"
           disabled={
-            tab === 'shots' ? shotLoading : tab === 'expenses' ? expenseLoading : financeLoading
+            tab === 'shots'
+              ? shotLoading
+              : tab === 'expenses'
+                ? expenseLoading
+                : tab === 'discounts'
+                  ? discountLoading
+                  : financeLoading
           }
           onClick={() => {
             if (tab === 'shots') {
@@ -533,6 +626,10 @@ export function AdminLaserPage() {
             }
             if (tab === 'expenses') {
               void loadExpenses()
+              return
+            }
+            if (tab === 'discounts') {
+              void loadDiscounts()
               return
             }
             void loadFinancial()
@@ -546,9 +643,13 @@ export function AdminLaserPage() {
               ? expenseLoading
                 ? 'جاري التحديث…'
                 : 'تحديث'
-              : financeLoading
-                ? 'جاري التحديث…'
-                : 'تحديث'}
+              : tab === 'discounts'
+                ? discountLoading
+                  ? 'جاري التحديث…'
+                  : 'تحديث'
+                : financeLoading
+                  ? 'جاري التحديث…'
+                  : 'تحديث'}
         </button>
       </div>
 
@@ -603,6 +704,15 @@ export function AdminLaserPage() {
         >
           مالية
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'discounts'}
+          className={`tab${tab === 'discounts' ? ' active' : ''}`}
+          onClick={() => setTab('discounts')}
+        >
+          خصومات
+        </button>
       </div>
 
       {tab === 'shots' && shotErr ? <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{shotErr}</p> : null}
@@ -611,6 +721,9 @@ export function AdminLaserPage() {
       ) : null}
       {tab === 'financial' && financeErr ? (
         <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{financeErr}</p>
+      ) : null}
+      {tab === 'discounts' && discountErr ? (
+        <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{discountErr}</p>
       ) : null}
 
       {tab === 'shots' ? (
@@ -1296,6 +1409,107 @@ export function AdminLaserPage() {
                   </button>
                 </div>
               </>
+            )}
+          </div>
+        </>
+      ) : tab === 'discounts' ? (
+        <>
+          <div className="card" style={{ marginTop: '1rem' }}>
+            <h2 className="card-title" style={{ marginBottom: '0.45rem' }}>
+              ملخص الخصومات — {period === 'daily' ? `يوم ${date || '—'}` : `شهر ${month || '—'}`}
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginBottom: '0.65rem' }}>
+              كل البنود التي سُجّل عليها خصم عند التحصيل (جميع الأقسام). التجميع {period === 'daily' ? 'يومي' : 'شهري'}{' '}
+              حسب تاريخ يوم العمل للبند.
+            </p>
+            {discountLoading ? (
+              <p style={{ color: 'var(--text-muted)' }}>جاري التحميل…</p>
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{period === 'daily' ? 'تاريخ البند' : 'الشهر'}</th>
+                      <th>عدد العمليات</th>
+                      <th>مجموع الخصم (ل.س)</th>
+                      <th>مجموع المستحق بعد الخصم</th>
+                      <th>مجموع المطبّق</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(period === 'daily' ? discountDaily : discountMonthly).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ color: 'var(--text-muted)' }}>
+                          لا توجد خصومات في هذا النطاق.
+                        </td>
+                      </tr>
+                    ) : (
+                      (period === 'daily' ? discountDaily : discountMonthly).map((b) => (
+                        <tr key={b.key}>
+                          <td>{b.key}</td>
+                          <td>{b.transactionCount}</td>
+                          <td>{renderMoneySyp(b.sumDiscountSyp)}</td>
+                          <td>{renderMoneySyp(b.sumEffectiveDueSyp)}</td>
+                          <td>{renderMoneySyp(b.sumAppliedSyp)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="card" style={{ marginTop: '1rem' }}>
+            <h2 className="card-title" style={{ marginBottom: '0.45rem' }}>
+              تفاصيل الخصومات (عمليات التحصيل)
+            </h2>
+            {discountLoading ? (
+              <p style={{ color: 'var(--text-muted)' }}>جاري التحميل…</p>
+            ) : discountRows.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)' }}>لا توجد صفوف.</p>
+            ) : (
+              <div className="table-wrap" style={{ overflowX: 'auto' }}>
+                <table className="data-table" style={{ fontSize: '0.82rem', minWidth: 720 }}>
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>المريض</th>
+                      <th>الإجراء</th>
+                      <th>القسم</th>
+                      <th>قائمة ل.س</th>
+                      <th>%</th>
+                      <th>بعد الخصم</th>
+                      <th>مطبّق</th>
+                      <th>عملة</th>
+                      <th>ترجيع ل.س</th>
+                      <th>ترجيع USD</th>
+                      <th>فرق تسوية</th>
+                      <th>المستلم</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {discountRows.map((r) => (
+                      <tr key={r.paymentId}>
+                        <td>{r.businessDate || (r.receivedAt ? r.receivedAt.slice(0, 10) : '—')}</td>
+                        <td>{r.patientName}</td>
+                        <td style={{ maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {r.procedureLabel}
+                        </td>
+                        <td>{r.departmentLabel}</td>
+                        <td>{renderMoneySyp(r.listAmountDueSyp)}</td>
+                        <td dir="ltr">{Number(r.discountPercent).toLocaleString('en-US')}</td>
+                        <td>{renderMoneySyp(r.effectiveAmountDueSyp)}</td>
+                        <td>{renderMoneySyp(r.appliedAmountSyp)}</td>
+                        <td>{r.payCurrency}</td>
+                        <td>{renderMoneySyp(r.patientRefundSyp)}</td>
+                        <td dir="ltr">{formatUsdTableAmount(r.patientRefundUsd)}</td>
+                        <td>{renderMoneySyp(r.settlementDeltaSyp)}</td>
+                        <td>{r.receivedByName || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
@@ -34,6 +34,24 @@ const deptLabel: Record<string, string> = {
   dental: 'أسنان',
 }
 
+function stripPct(s: string) {
+  return s.replace(/%/g, '').trim()
+}
+
+function parseDiscountPercentInput(enabled: boolean, percentStr: string): number {
+  if (!enabled) return 0
+  const n = parseFloat(normalizeDecimalDigits(stripPct(percentStr)))
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.min(100, n)
+}
+
+function effectiveDueFromListAndPct(list: number, pct: number): number {
+  const L = Math.round(Number(list) || 0)
+  if (!(L > 0)) return 0
+  if (!(pct > 0)) return L
+  return Math.max(1, Math.round(L * (1 - pct / 100)))
+}
+
 export function BillingPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
@@ -57,6 +75,15 @@ export function BillingPage() {
   /** عند التحصيل بالدولار: توثيق ما رُدّ للمريض (ل.س أو USD) */
   const [payRefundCurrency, setPayRefundCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [payRefundAmount, setPayRefundAmount] = useState('')
+  const [payDiscountEnabled, setPayDiscountEnabled] = useState(false)
+  const [payDiscountPercent, setPayDiscountPercent] = useState('')
+
+  const effectiveDueSyp = useMemo(() => {
+    if (!payItem) return 0
+    const list = Math.round(Number(payItem.amountDueSyp || 0))
+    const pct = parseDiscountPercentInput(payDiscountEnabled, payDiscountPercent)
+    return effectiveDueFromListAndPct(list, pct)
+  }, [payItem, payDiscountEnabled, payDiscountPercent])
 
   useEffect(() => {
     if (businessDate && !date) setDate(businessDate)
@@ -116,6 +143,13 @@ export function BillingPage() {
     if (payItem && Math.round(Number(payItem.amountDueSyp) || 0) <= 0) {
       setErr('لا يوجد مبلغ مستحق على هذا البند — راجع التسعير في ملف المريض.')
       return
+    }
+    if (payDiscountEnabled) {
+      const p = parseDiscountPercentInput(true, payDiscountPercent)
+      if (!(p > 0) || p > 100) {
+        setErr('أدخل نسبة خصم صالحة بين 1 و 100%.')
+        return
+      }
     }
     if (payChannel === 'bank' && !payBankName.trim()) {
       setErr('اختر البنك ثم أدخل المبلغ المستلم.')
@@ -191,6 +225,7 @@ export function BillingPage() {
           : payCurrency === 'USD'
             ? { refundCurrency: payRefundCurrency }
             : {}
+      const discountPct = payDiscountEnabled ? parseDiscountPercentInput(true, payDiscountPercent) : 0
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -200,6 +235,7 @@ export function BillingPage() {
           amountSyp:
             payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
           amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
+          discountPercent: discountPct > 0 ? discountPct : 0,
           ...refundPayload,
         }),
       })
@@ -212,6 +248,8 @@ export function BillingPage() {
       setPayBankName('')
       setPayRefundCurrency('SYP')
       setPayRefundAmount('')
+      setPayDiscountEnabled(false)
+      setPayDiscountPercent('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل التحصيل')
@@ -231,6 +269,13 @@ export function BillingPage() {
       return
     }
     setErr('')
+    if (payDiscountEnabled) {
+      const p = parseDiscountPercentInput(true, payDiscountPercent)
+      if (!(p > 0) || p > 100) {
+        setErr('أدخل نسبة خصم صالحة بين 1 و 100%.')
+        return
+      }
+    }
     if (payChannel === 'bank' && !payBankName.trim()) {
       setErr('اختر البنك ثم أدخل المبلغ المستلم.')
       return
@@ -305,6 +350,7 @@ export function BillingPage() {
           : payCurrency === 'USD'
             ? { refundCurrency: payRefundCurrency }
             : {}
+      const discountPct = payDiscountEnabled ? parseDiscountPercentInput(true, payDiscountPercent) : 0
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -314,6 +360,7 @@ export function BillingPage() {
           amountSyp:
             payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
           amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
+          discountPercent: discountPct > 0 ? discountPct : 0,
           ...refundPayload,
         }),
       })
@@ -333,6 +380,8 @@ export function BillingPage() {
       setPayBankName('')
       setPayRefundCurrency('SYP')
       setPayRefundAmount('')
+      setPayDiscountEnabled(false)
+      setPayDiscountPercent('')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'فشل إنقاص الجلسة والدفع')
@@ -388,9 +437,8 @@ export function BillingPage() {
       return usdSypRate
     return null
   })()
-  const dueSypRounded = payItem ? Math.round(Number(payItem.amountDueSyp || 0)) : 0
   const usdCashOffer =
-    payPreviewRate && dueSypRounded > 0 ? usdRoundedUpCashOffer(dueSypRounded, payPreviewRate) : null
+    payPreviewRate && effectiveDueSyp > 0 ? usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate) : null
 
   function applyUsdCashOfferFill() {
     if (!payPreviewRate || !usdCashOffer) return
@@ -489,6 +537,8 @@ export function BillingPage() {
                         setPayBankName('')
                         setPayRefundCurrency('SYP')
                         setPayRefundAmount('')
+                        setPayDiscountEnabled(false)
+                        setPayDiscountPercent('')
                         setPayOpen(true)
                       }}
                     >
@@ -519,6 +569,8 @@ export function BillingPage() {
                         setPayBankName('')
                         setPayRefundCurrency('SYP')
                         setPayRefundAmount('')
+                        setPayDiscountEnabled(false)
+                        setPayDiscountPercent('')
                         setPayOpen(true)
                       }}
                     >
@@ -554,6 +606,8 @@ export function BillingPage() {
             setPayOpen(false)
             setPayRefundCurrency('SYP')
             setPayRefundAmount('')
+            setPayDiscountEnabled(false)
+            setPayDiscountPercent('')
           }}
         >
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
@@ -566,7 +620,7 @@ export function BillingPage() {
               {payItem.patientName} — {payItem.procedureLabel}
             </p>
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
-              المستحق: {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
+              المستحق (قائمة): {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
             </p>
             {payPreviewRate && Math.round(Number(payItem.amountDueSyp || 0)) > 0 ? (
               <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }} dir="ltr">
@@ -605,6 +659,91 @@ export function BillingPage() {
                 لا يمكن تأكيد الدفع: المستحق صفر. أغلق النافذة وراجع تسعير الجلسة في ملف المريض.
               </p>
             ) : null}
+            <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid var(--border)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={payDiscountEnabled}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setPayDiscountEnabled(on)
+                    if (!payItem) return
+                    const list = Math.round(Number(payItem.amountDueSyp || 0))
+                    let pct = parseDiscountPercentInput(on, payDiscountPercent)
+                    if (on && !payDiscountPercent.trim()) {
+                      setPayDiscountPercent('10')
+                      pct = 10
+                    }
+                    if (!on) {
+                      setPayDiscountPercent('')
+                      pct = 0
+                    }
+                    const eff = effectiveDueFromListAndPct(list, pct)
+                    if (payCurrency === 'SYP') setPaySyp(String(eff))
+                  }}
+                />
+                تطبيق خصم (نسبة مئوية على المستحق)
+              </label>
+              {payDiscountEnabled ? (
+                <>
+                  <p style={{ margin: '0.45rem 0 0', fontWeight: 700 }}>
+                    المستحق بعد الخصم: {effectiveDueSyp.toLocaleString('ar-SY')} ل.س
+                    {payPreviewRate && payPreviewRate > 0 ? (
+                      <span dir="ltr" style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginRight: '0.45rem' }}>
+                        {' '}
+                        (≈{' '}
+                        {(effectiveDueSyp / payPreviewRate).toLocaleString('en-US', { maximumFractionDigits: 4 })} USD)
+                      </span>
+                    ) : null}
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.45rem' }}>
+                    {([5, 10, 15, 20] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.82rem', padding: '0.25rem 0.5rem' }}
+                        onClick={() => {
+                          setPayDiscountPercent(String(p))
+                          if (payCurrency === 'SYP' && payItem) {
+                            const list = Math.round(Number(payItem.amountDueSyp || 0))
+                            setPaySyp(String(effectiveDueFromListAndPct(list, p)))
+                          }
+                        }}
+                      >
+                        {p}%
+                      </button>
+                    ))}
+                  </div>
+                  <label className="form-label" style={{ display: 'block', marginTop: '0.45rem' }}>
+                    نسبة الخصم %
+                  </label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    value={payDiscountPercent}
+                    onChange={(e) => {
+                      setPayDiscountPercent(e.target.value)
+                      const pct = parseDiscountPercentInput(true, e.target.value)
+                      if (payCurrency === 'SYP' && payItem) {
+                        const list = Math.round(Number(payItem.amountDueSyp || 0))
+                        setPaySyp(String(effectiveDueFromListAndPct(list, pct)))
+                      }
+                    }}
+                    placeholder="مثال: 10 أو 12.5"
+                    style={{ marginTop: '0.25rem', maxWidth: 220 }}
+                  />
+                  <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    قيمة الخصم من القائمة:{' '}
+                    <strong>
+                      {(Math.round(Number(payItem.amountDueSyp || 0)) - effectiveDueSyp).toLocaleString('ar-SY')} ل.س
+                    </strong>
+                    — يُحسب قبض التحصيل والترجيع مقابل <strong>المستحق بعد الخصم</strong>.
+                  </p>
+                </>
+              ) : null}
+            </div>
             <div style={{ marginTop: '0.55rem' }}>
               <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
                 عملة التحصيل
@@ -617,7 +756,7 @@ export function BillingPage() {
                     checked={payCurrency === 'SYP'}
                     onChange={() => {
                       setPayCurrency('SYP')
-                      setPaySyp(String(Math.round(Number(payItem.amountDueSyp || 0))))
+                      setPaySyp(String(effectiveDueFromListAndPct(Math.round(Number(payItem.amountDueSyp || 0)), parseDiscountPercentInput(payDiscountEnabled, payDiscountPercent))))
                       setPayRefundCurrency('SYP')
                       setPayRefundAmount('')
                     }}
@@ -631,8 +770,8 @@ export function BillingPage() {
                     checked={payCurrency === 'USD'}
                     onChange={() => {
                       setPayCurrency('USD')
-                      if (payPreviewRate && dueSypRounded > 0) {
-                        const o = usdRoundedUpCashOffer(dueSypRounded, payPreviewRate)
+                      if (payPreviewRate && effectiveDueSyp > 0) {
+                        const o = usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate)
                         if (o) {
                           setPayUsd(o.usdFieldValue)
                           setPayRefundCurrency('SYP')
@@ -729,7 +868,7 @@ export function BillingPage() {
                     placeholder="0"
                     style={{ marginTop: '0.25rem', maxWidth: 320 }}
                   />
-                  {payPreviewRate && dueSypRounded > 0 && usdCashOffer ? (
+                  {payPreviewRate && effectiveDueSyp > 0 && usdCashOffer ? (
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -798,7 +937,7 @@ export function BillingPage() {
               )}
             </div>
             {(() => {
-              const due = Math.round(Number(payItem.amountDueSyp || 0))
+              const due = effectiveDueSyp
               if (!(due > 0)) return null
               let grossSyp = 0
               let netSyp = 0
@@ -870,7 +1009,7 @@ export function BillingPage() {
               }
               return (
                 <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)' }}>
-                  الصافي بعد الترجيع مطابق للمستحق (محاسبياً بالليرة).
+                  الصافي بعد الترجيع مطابق للمستحق{payDiscountEnabled ? ' بعد الخصم' : ''} (محاسبياً بالليرة).
                 </p>
               )
             })()}
@@ -882,6 +1021,8 @@ export function BillingPage() {
                   setPayOpen(false)
                   setPayRefundCurrency('SYP')
                   setPayRefundAmount('')
+                  setPayDiscountEnabled(false)
+                  setPayDiscountPercent('')
                 }}
               >
                 إلغاء

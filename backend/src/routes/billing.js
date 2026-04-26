@@ -24,6 +24,32 @@ function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRe
   }
   return Math.round(u * r) - rs
 }
+
+/** يُرجع { discountPercent, listAmountDueSyp, effectiveAmountDueSyp } — يرمي إن كانت النسبة غير صالحة */
+function resolveBillingDiscount(listDueSyp, discountPercentBody) {
+  const list = Math.round(Number(listDueSyp) || 0)
+  if (!(list > 0)) {
+    return { discountPercent: 0, listAmountDueSyp: 0, effectiveAmountDueSyp: 0 }
+  }
+  const raw = Number(discountPercentBody)
+  if (discountPercentBody == null || discountPercentBody === '' || !Number.isFinite(raw) || raw <= 0) {
+    return { discountPercent: 0, listAmountDueSyp: list, effectiveAmountDueSyp: list }
+  }
+  if (raw > 100) {
+    const err = new Error('DISCOUNT_RANGE')
+    throw err
+  }
+  const eff = Math.round(list * (1 - raw / 100))
+  if (eff < 1) {
+    const err = new Error('DISCOUNT_TOO_DEEP')
+    throw err
+  }
+  if (eff >= list) {
+    return { discountPercent: 0, listAmountDueSyp: list, effectiveAmountDueSyp: list }
+  }
+  return { discountPercent: round6(raw), listAmountDueSyp: list, effectiveAmountDueSyp: eff }
+}
+
 export const billingRouter = Router()
 
 billingRouter.use(authMiddleware)
@@ -402,6 +428,113 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
   }
 })
 
+/** خصومات التحصيل — تفاصيل + تجميع يومي وشهري (مدير النظام) */
+billingRouter.get('/discounts-report', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const toStr = String(req.query.to || '').trim() || todayBusinessDate()
+    let fromStr = String(req.query.from || '').trim()
+    if (!fromStr) {
+      const t = new Date(`${toStr}T12:00:00`)
+      t.setUTCDate(t.getUTCDate() - 29)
+      fromStr = t.toISOString().slice(0, 10)
+    }
+    const fromStart = new Date(`${fromStr}T00:00:00.000Z`)
+    const toEnd = new Date(`${toStr}T23:59:59.999Z`)
+
+    const pays = await BillingPayment.find({
+      discountPercent: { $gt: 0 },
+      receivedAt: { $gte: fromStart, $lte: toEnd },
+    })
+      .sort({ receivedAt: -1 })
+      .limit(500)
+      .populate({
+        path: 'billingItemId',
+        select: 'procedureLabel businessDate department patientId amountDueSyp',
+        populate: { path: 'patientId', select: 'name' },
+      })
+      .populate('receivedBy', 'name')
+      .lean()
+
+    const rows = []
+    const dailyMap = new Map()
+    const monthlyMap = new Map()
+
+    for (const p of pays) {
+      const bi = p.billingItemId
+      if (!bi || typeof bi !== 'object') continue
+      const listV = Math.round(Number(p.listAmountDueSyp) || 0)
+      const eff = Math.round(Number(p.effectiveAmountDueSyp) || 0)
+      const discVal = Math.max(0, listV - eff)
+      const bd = String(bi.businessDate || (p.receivedAt ? new Date(p.receivedAt).toISOString().slice(0, 10) : ''))
+      const patientName =
+        bi.patientId && typeof bi.patientId === 'object' && bi.patientId.name != null
+          ? String(bi.patientId.name || '').trim()
+          : ''
+      const row = {
+        paymentId: String(p._id),
+        billingItemId: String(bi._id),
+        receivedAt: p.receivedAt ? new Date(p.receivedAt).toISOString() : null,
+        businessDate: bd,
+        patientName: patientName || '—',
+        procedureLabel: String(bi.procedureLabel || '—'),
+        department: String(bi.department || ''),
+        departmentLabel: DEPT_LABEL_AR[String(bi.department)] ?? String(bi.department || ''),
+        listAmountDueSyp: listV,
+        discountPercent: Number(p.discountPercent) || 0,
+        effectiveAmountDueSyp: eff,
+        discountValueSyp: discVal,
+        appliedAmountSyp: Math.round(Number(p.amountSyp) || 0),
+        payCurrency: p.payCurrency || 'SYP',
+        receivedAmountSyp: Math.round(Number(p.receivedAmountSyp) || 0),
+        receivedAmountUsd: round2(Number(p.receivedAmountUsd) || 0),
+        patientRefundSyp: Math.round(Number(p.patientRefundSyp) || 0),
+        patientRefundUsd: round2(Number(p.patientRefundUsd) || 0),
+        settlementDeltaSyp: Math.round(Number(p.settlementDeltaSyp) || 0),
+        receivedByName:
+          p.receivedBy && typeof p.receivedBy === 'object' && p.receivedBy.name != null
+            ? String(p.receivedBy.name || '').trim()
+            : '',
+      }
+      rows.push(row)
+
+      const bump = (map, key) => {
+        if (!key) return
+        const cur = map.get(key) || {
+          key,
+          transactionCount: 0,
+          sumDiscountSyp: 0,
+          sumEffectiveDueSyp: 0,
+          sumAppliedSyp: 0,
+          sumListDueSyp: 0,
+        }
+        cur.transactionCount += 1
+        cur.sumDiscountSyp += row.discountValueSyp
+        cur.sumEffectiveDueSyp += row.effectiveAmountDueSyp
+        cur.sumAppliedSyp += row.appliedAmountSyp
+        cur.sumListDueSyp += row.listAmountDueSyp
+        map.set(key, cur)
+      }
+      bump(dailyMap, bd)
+      const monthKey = bd.length >= 7 ? bd.slice(0, 7) : ''
+      bump(monthlyMap, monthKey)
+    }
+
+    const dailyBuckets = [...dailyMap.values()].sort((a, b) => String(b.key).localeCompare(String(a.key), 'ar'))
+    const monthlyBuckets = [...monthlyMap.values()].sort((a, b) => String(b.key).localeCompare(String(a.key), 'ar'))
+
+    res.json({
+      from: fromStr,
+      to: toStr,
+      rows,
+      dailyBuckets,
+      monthlyBuckets,
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 /** تأكيد استلام الدفع → ترحيل محاسبي */
 billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
@@ -420,8 +553,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       res.status(400).json({ error: 'البند ليس في انتظار الدفع' })
       return
     }
-    const amountDueSyp = Math.round(Number(bi.amountDueSyp) || 0)
-    if (amountDueSyp <= 0) {
+    const listDueSyp = Math.round(Number(bi.amountDueSyp) || 0)
+    if (listDueSyp <= 0) {
       res.status(400).json({
         error: bi.isPackagePrepaid
           ? 'هذه الجلسة ضمن باكج ولا يوجد مبلغ إضافي مستحق. استخدم «إنقاص جلسة» من صفحة التحصيل.'
@@ -431,6 +564,21 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const body = req.body ?? {}
+    let discountMeta
+    try {
+      discountMeta = resolveBillingDiscount(listDueSyp, body.discountPercent)
+    } catch (e) {
+      if (e && e.message === 'DISCOUNT_RANGE') {
+        res.status(400).json({ error: 'نسبة الخصم يجب أن تكون بين 0 و 100.' })
+        return
+      }
+      if (e && e.message === 'DISCOUNT_TOO_DEEP') {
+        res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
+        return
+      }
+      throw e
+    }
+    const dueForSettlement = discountMeta.effectiveAmountDueSyp
     const payCurrencyRaw = String(body.payCurrency || 'SYP').trim().toUpperCase()
     const payCurrency = payCurrencyRaw === 'USD' ? 'USD' : 'SYP'
 
@@ -546,8 +694,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     }
 
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
-    const appliedAmountSyp = Math.min(netReceivedSyp, amountDueSyp)
-    let settlementDeltaSyp = netReceivedSyp - amountDueSyp
+    const appliedAmountSyp = Math.min(netReceivedSyp, dueForSettlement)
+    let settlementDeltaSyp = netReceivedSyp - dueForSettlement
     /** فرق ≤ سعر 1 USD + صافي «أوراق» USD عدد صحيح (مستلم−ترجيع USD، أو صافي ل.س÷سعر عند ترجيع ل.س فقط): لا رصيد إضافي */
     let absorbCashNetUsdQualifies = false
     if (payCurrency === 'USD' && usdSypRateUsed > 0) {
@@ -601,6 +749,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       bankName: paymentChannel === 'bank' ? bankName : '',
       method,
       receivedBy: req.user._id,
+      discountPercent: discountMeta.discountPercent,
+      listAmountDueSyp: discountMeta.listAmountDueSyp,
+      effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
     })
 
     bi.status = 'paid'
@@ -665,6 +816,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
             settlementDeltaSyp,
             patientRefundSyp,
             patientRefundUsd,
+            discountPercent: discountMeta.discountPercent,
+            listAmountDueSyp: discountMeta.listAmountDueSyp,
+            effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
           },
         })
       } catch (auditErr) {
@@ -681,6 +835,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
           patientRefundSyp: payment.patientRefundSyp,
           patientRefundUsd: payment.patientRefundUsd,
           method: payment.method,
+          discountPercent: payment.discountPercent,
+          listAmountDueSyp: payment.listAmountDueSyp,
+          effectiveAmountDueSyp: payment.effectiveAmountDueSyp,
         },
         billingItem: { id: String(bi._id), status: bi.status },
         patientSettlement: {
@@ -710,6 +867,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
           accountingSkipped: posting.skipped,
           patientRefundSyp,
           patientRefundUsd,
+          discountPercent: discountMeta.discountPercent,
+          listAmountDueSyp: discountMeta.listAmountDueSyp,
+          effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
         },
       })
     } catch (auditErr) {
@@ -735,6 +895,9 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         method: payment.method,
         paymentChannel: payment.paymentChannel,
         bankName: payment.bankName || undefined,
+        discountPercent: payment.discountPercent,
+        listAmountDueSyp: payment.listAmountDueSyp,
+        effectiveAmountDueSyp: payment.effectiveAmountDueSyp,
       },
       billingItem: { id: String(bi._id), status: bi.status },
       patientSettlement: {

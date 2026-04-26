@@ -25,8 +25,16 @@ const billingPaymentSchema = new mongoose.Schema(
     receivedAt: { type: Date, default: () => new Date() },
     /** يُملأ بعد نجاح الترحيل المحاسبي */
     financialDocumentId: { type: mongoose.Schema.Types.ObjectId, ref: 'FinancialDocument', default: null },
+    /** خصم بالنسبة المئوية على المستحق وقت الدفع (0 = بدون خصم) */
+    discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+    /** المستحق قبل الخصم (لقطة) */
+    listAmountDueSyp: { type: Number, default: 0, min: 0 },
+    /** المستحق الفعلي بعد الخصم — يُقارن به الصافي المستلم */
+    effectiveAmountDueSyp: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 )
+
+billingPaymentSchema.index({ discountPercent: 1, receivedAt: -1 })
 
 export const BillingPayment = mongoose.model('BillingPayment', billingPaymentSchema)
