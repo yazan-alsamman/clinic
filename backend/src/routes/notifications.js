@@ -1,7 +1,9 @@
 import { Router } from 'express'
 import mongoose from 'mongoose'
 import { UserNotification } from '../models/UserNotification.js'
-import { authMiddleware } from '../middleware/auth.js'
+import { User } from '../models/User.js'
+import { authMiddleware, requireRoles } from '../middleware/auth.js'
+import { writeAudit } from '../utils/audit.js'
 
 export const notificationsRouter = Router()
 notificationsRouter.use(authMiddleware)
@@ -73,6 +75,76 @@ notificationsRouter.post('/read-all', requireStaff, async (req, res) => {
   try {
     await UserNotification.updateMany({ userId: req.user._id, read: false }, { $set: { read: true } })
     res.json({ ok: true, unreadCount: 0 })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+const MAX_ADMIN_BODY = 8000
+const MAX_ADMIN_TITLE = 200
+const MAX_RECIPIENTS = 200
+
+/** إنشاء إشعارات يدوية — مدير النظام فقط */
+notificationsRouter.post('/admin-send', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    let title = String(body.title ?? '').trim()
+    const text = String(body.body ?? body.message ?? '').trim()
+    const userIdsRaw = body.userIds ?? body.recipientIds
+    if (!text) {
+      res.status(400).json({ error: 'نص الإشعار مطلوب.' })
+      return
+    }
+    if (text.length > MAX_ADMIN_BODY) {
+      res.status(400).json({ error: `نص الإشعار طويل جداً (الحد ${MAX_ADMIN_BODY} حرفاً).` })
+      return
+    }
+    if (!title) title = 'إشعار من مدير النظام'
+    if (title.length > MAX_ADMIN_TITLE) {
+      res.status(400).json({ error: `العنوان طويل جداً (الحد ${MAX_ADMIN_TITLE} حرفاً).` })
+      return
+    }
+    if (!Array.isArray(userIdsRaw) || userIdsRaw.length === 0) {
+      res.status(400).json({ error: 'اختر مستخدماً واحداً على الأقل.' })
+      return
+    }
+    const unique = [...new Set(userIdsRaw.map((x) => String(x).trim()).filter((id) => mongoose.isValidObjectId(id)))]
+    if (unique.length === 0) {
+      res.status(400).json({ error: 'معرّفات المستخدمين غير صالحة.' })
+      return
+    }
+    if (unique.length > MAX_RECIPIENTS) {
+      res.status(400).json({ error: `لا يمكن تجاوز ${MAX_RECIPIENTS} مستلم في عملية واحدة.` })
+      return
+    }
+    const objectIds = unique.map((id) => new mongoose.Types.ObjectId(id))
+    const found = await User.find({ _id: { $in: objectIds } })
+      .select('_id')
+      .lean()
+    const validIds = found.map((u) => String(u._id))
+    if (validIds.length === 0) {
+      res.status(400).json({ error: 'لم يُعثر على أي مستخدم بالمعرّفات المحددة.' })
+      return
+    }
+    const fromName = String(req.user.name || '').trim() || 'مدير النظام'
+    const docs = validIds.map((userId) => ({
+      userId: new mongoose.Types.ObjectId(userId),
+      type: 'admin_message',
+      read: false,
+      title: title.slice(0, MAX_ADMIN_TITLE),
+      body: text.slice(0, MAX_ADMIN_BODY),
+      meta: { kind: 'admin_message', fromUserId: String(req.user._id), fromName },
+    }))
+    await UserNotification.insertMany(docs)
+    await writeAudit({
+      user: req.user,
+      action: 'إرسال إشعار لمستخدمين',
+      entityType: 'UserNotification',
+      entityId: '',
+      details: { recipientCount: docs.length, title: title.slice(0, MAX_ADMIN_TITLE) },
+    })
+    res.json({ ok: true, sent: docs.length })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

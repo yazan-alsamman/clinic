@@ -15,6 +15,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'reports_daily', path: '/reports/daily', label: 'تقرير الجرد اليومي' },
   { key: 'reports_insights', path: '/reports/insights', label: 'ذكاء الأعمال' },
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
+  { key: 'admin_send_notifications', path: '/admin/send-notifications', label: 'إرسال إشعارات' },
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
   { key: 'admin_laser', path: '/admin/laser', label: 'ليزر' },

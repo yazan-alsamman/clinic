@@ -21,6 +21,7 @@ export type NavKey =
   | 'reports_daily'
   | 'reports_insights'
   | 'admin_users'
+  | 'admin_send_notifications'
   | 'admin_audit'
   | 'admin_rooms'
   | 'admin_laser'

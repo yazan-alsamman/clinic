@@ -15,6 +15,7 @@ import { InventoryPage } from './pages/InventoryPage'
 import { DailyReport } from './pages/DailyReport'
 import { InsightsPage } from './pages/InsightsPage'
 import { AdminUsers } from './pages/AdminUsers'
+import { AdminSendNotificationsPage } from './pages/AdminSendNotificationsPage'
 import { AdminAudit } from './pages/AdminAudit'
 import { AdminRooms } from './pages/AdminRooms'
 import { AdminLaserPage } from './pages/AdminLaserPage'
@@ -67,6 +68,7 @@ export default function App() {
               <Route path="/reports/daily" element={<DailyReport />} />
               <Route path="/reports/insights" element={<InsightsPage />} />
               <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/admin/send-notifications" element={<AdminSendNotificationsPage />} />
               <Route path="/admin/audit" element={<AdminAudit />} />
               <Route path="/admin/rooms" element={<AdminRooms />} />
               <Route path="/admin/laser" element={<AdminLaserPage />} />

@@ -152,7 +152,10 @@ export function NotificationBell() {
           ) : (
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.5rem' }}>
               {items.map((n) => {
+                const isAppointmentCancel =
+                  n.type === 'appointment_cancelled' || n.meta?.kind === 'appointment_cancelled'
                 const dateQ =
+                  isAppointmentCancel &&
                   canPickHistoryDate &&
                   n.meta?.businessDate &&
                   /^\d{4}-\d{2}-\d{2}$/.test(n.meta.businessDate)
@@ -173,17 +176,19 @@ export function NotificationBell() {
                       {n.body}
                     </p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                      <Link
-                        to={`/appointments${dateQ}`}
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.75rem', padding: '0.2rem 0.45rem' }}
-                        onClick={() => {
-                          void markRead(n.id)
-                          setOpen(false)
-                        }}
-                      >
-                        المواعيد المحجوزة
-                      </Link>
+                      {isAppointmentCancel ? (
+                        <Link
+                          to={`/appointments${dateQ}`}
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.2rem 0.45rem' }}
+                          onClick={() => {
+                            void markRead(n.id)
+                            setOpen(false)
+                          }}
+                        >
+                          المواعيد المحجوزة
+                        </Link>
+                      ) : null}
                       {!n.read ? (
                         <button
                           type="button"
