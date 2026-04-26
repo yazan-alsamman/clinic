@@ -3,7 +3,11 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
-import { netReceivedSypAfterUsdCollection, usdRoundedUpCashOffer } from '../utils/usdExactDue'
+import {
+  netReceivedSypAfterUsdCollection,
+  settlementDeltaAfterUsdNoRefundAbsorb,
+  usdRoundedUpCashOffer,
+} from '../utils/usdExactDue'
 
 type Item = {
   id: string
@@ -15,6 +19,8 @@ type Item = {
   amountDueSyp: number
   status: string
   businessDate?: string
+  /** سعر USD لتاريخ البند من الخادم (يطابق complete-payment) */
+  usdSypBusinessDayRate?: number | null
   isPackagePrepaid?: boolean
   patientPackageId?: string
   patientPackageSessionId?: string
@@ -369,14 +375,19 @@ export function BillingPage() {
     )
   }
 
-  const payPreviewRate =
-    payItem?.businessDate &&
-    businessDate &&
-    payItem.businessDate === businessDate &&
-    usdSypRate != null &&
-    usdSypRate > 0
-      ? usdSypRate
-      : null
+  const payPreviewRate = (() => {
+    const fromItem = payItem?.usdSypBusinessDayRate != null ? Number(payItem.usdSypBusinessDayRate) : NaN
+    if (payItem && Number.isFinite(fromItem) && fromItem > 0) return fromItem
+    if (
+      payItem?.businessDate &&
+      businessDate &&
+      payItem.businessDate === businessDate &&
+      usdSypRate != null &&
+      usdSypRate > 0
+    )
+      return usdSypRate
+    return null
+  })()
   const dueSypRounded = payItem ? Math.round(Number(payItem.amountDueSyp || 0)) : 0
   const usdCashOffer =
     payPreviewRate && dueSypRounded > 0 ? usdRoundedUpCashOffer(dueSypRounded, payPreviewRate) : null
@@ -790,16 +801,18 @@ export function BillingPage() {
               if (!(due > 0)) return null
               let grossSyp = 0
               let netSyp = 0
+              let refSyp = 0
+              let refUsd = 0
+              let usdParsed = 0
               if (payCurrency === 'SYP') {
                 const syp = Number(normalizeDecimalDigits(paySyp))
                 grossSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
                 netSyp = grossSyp
               } else {
                 const usd = parseFloat(normalizeDecimalDigits(payUsd))
+                usdParsed = usd
                 if (!payPreviewRate || !Number.isFinite(usd) || usd <= 0) return null
                 grossSyp = Math.round(usd * payPreviewRate)
-                let refSyp = 0
-                let refUsd = 0
                 if (payRefundAmount.trim()) {
                   if (payRefundCurrency === 'SYP') {
                     const r = Number(normalizeDecimalDigits(payRefundAmount))
@@ -833,7 +846,18 @@ export function BillingPage() {
                 )
               }
 
-              const delta = netSyp - due
+              let delta = netSyp - due
+              if (payCurrency === 'USD' && payPreviewRate) {
+                delta = settlementDeltaAfterUsdNoRefundAbsorb({
+                  payCurrency: 'USD',
+                  netReceivedSyp: netSyp,
+                  amountDueSyp: due,
+                  rate: payPreviewRate,
+                  amountUsd: usdParsed,
+                  patientRefundSyp: refSyp,
+                  patientRefundUsd: refUsd,
+                })
+              }
               if (delta < 0) {
                 return (
                   <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>

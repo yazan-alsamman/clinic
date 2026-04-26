@@ -56,13 +56,16 @@ async function getOrCreatePaymentSettings() {
   return doc
 }
 
-function billingItemDto(b, patientName, providerName) {
+function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = null) {
   const patientIdRaw =
     b?.patientId && typeof b.patientId === 'object' && b.patientId._id ? b.patientId._id : b?.patientId
   const providerIdRaw =
     b?.providerUserId && typeof b.providerUserId === 'object' && b.providerUserId._id
       ? b.providerUserId._id
       : b?.providerUserId
+  const rateNum = Number(usdSypBusinessDayRate)
+  const usdRate =
+    usdSypBusinessDayRate != null && Number.isFinite(rateNum) && rateNum > 0 ? rateNum : null
   return {
     id: String(b._id),
     clinicalSessionId: String(b.clinicalSessionId),
@@ -75,6 +78,8 @@ function billingItemDto(b, patientName, providerName) {
     amountDueSyp: b.amountDueSyp,
     currency: b.currency || 'SYP',
     businessDate: b.businessDate,
+    /** سعر الدولار لتاريخ البند (يطابق ما يُستخدم عند complete-payment) */
+    usdSypBusinessDayRate: usdRate,
     status: b.status,
     isPackagePrepaid: b.isPackagePrepaid === true,
     patientPackageId: String(b.patientPackageId || ''),
@@ -87,19 +92,24 @@ function billingItemDto(b, patientName, providerName) {
 billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
     const date = String(req.query.date || '').trim() || todayBusinessDate()
-    const items = await BillingItem.find({
-      status: 'pending_payment',
-      businessDate: date,
-    })
-      .sort({ createdAt: 1 })
-      .populate('patientId', 'name')
-      .populate('providerUserId', 'name')
-      .lean()
+    const [items, bdDay] = await Promise.all([
+      BillingItem.find({
+        status: 'pending_payment',
+        businessDate: date,
+      })
+        .sort({ createdAt: 1 })
+        .populate('patientId', 'name')
+        .populate('providerUserId', 'name')
+        .lean(),
+      BusinessDay.findOne({ businessDate: date }).lean(),
+    ])
+    const br = Number(bdDay?.usdSypRate)
+    const usdSypBusinessDayRate = Number.isFinite(br) && br > 0 ? br : null
 
     res.json({
       date,
       items: items.map((b) =>
-        billingItemDto(b, b.patientId?.name, b.providerUserId?.name),
+        billingItemDto(b, b.patientId?.name, b.providerUserId?.name, usdSypBusinessDayRate),
       ),
     })
   } catch (e) {
@@ -137,9 +147,22 @@ billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) 
       .populate('patientId', 'name')
       .populate('providerUserId', 'name')
       .lean()
+    const dates = [...new Set(items.map((b) => String(b.businessDate || '')).filter(Boolean))]
+    const bdRows =
+      dates.length > 0
+        ? await BusinessDay.find({ businessDate: { $in: dates } })
+            .select({ businessDate: 1, usdSypRate: 1 })
+            .lean()
+        : []
+    const rateByDate = new Map(
+      bdRows.map((d) => {
+        const x = Number(d.usdSypRate)
+        return [d.businessDate, Number.isFinite(x) && x > 0 ? x : null]
+      }),
+    )
     res.json({
       items: items.map((b) =>
-        billingItemDto(b, b.patientId?.name, b.providerUserId?.name),
+        billingItemDto(b, b.patientId?.name, b.providerUserId?.name, rateByDate.get(b.businessDate) ?? null),
       ),
     })
   } catch (e) {
@@ -524,7 +547,20 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
 
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
     const appliedAmountSyp = Math.min(netReceivedSyp, amountDueSyp)
-    const settlementDeltaSyp = netReceivedSyp - amountDueSyp
+    let settlementDeltaSyp = netReceivedSyp - amountDueSyp
+    /** قبض USD صحيح دون ترجيع + فرق ≤ سعر 1 USD: لا رصيد إضافي (تسوية تقريب ليرة/دولار) */
+    if (
+      payCurrency === 'USD' &&
+      patientRefundSyp <= 0 &&
+      patientRefundUsd <= 0 &&
+      usdSypRateUsed > 0 &&
+      settlementDeltaSyp > 0 &&
+      settlementDeltaSyp <= usdSypRateUsed &&
+      Number.isFinite(amountUsdRaw) &&
+      Math.abs(amountUsdRaw - Math.round(amountUsdRaw)) < 1e-6
+    ) {
+      settlementDeltaSyp = 0
+    }
 
     const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
     if (existingPay) {
