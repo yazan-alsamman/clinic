@@ -75,6 +75,17 @@ type MeterReconciliationRow = {
   matched: boolean | null
 }
 
+/** مفتاح عميل فريد — بدون الاعتماد على `crypto.randomUUID` (قد يكون غير متوفر على HTTP أو متصفحات قديمة). */
+function newClientKey(): string {
+  try {
+    const c = globalThis.crypto
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  } catch {
+    /* ignore */
+  }
+  return `k_${Date.now()}_${Math.random().toString(36).slice(2, 12)}_${Math.random().toString(36).slice(2, 12)}`
+}
+
 /** أرقام لاتينية واضحة لعمود USD (تفادي عرض الصفر كنقطة أو بشكل غير مقروء مع ar-SY) */
 function formatUsdTableAmount(value: number) {
   const n = Math.round((Number(value) || 0) * 100) / 100
@@ -445,7 +456,7 @@ export function AdminLaserPage() {
       setBankRows(
         rows.length > 0
           ? rows
-          : [{ clientKey: crypto.randomUUID(), name: '', active: true, sortOrder: '0' }],
+          : [{ clientKey: newClientKey(), name: '', active: true, sortOrder: '0' }],
       )
     } catch (e) {
       setBankErr(e instanceof ApiError ? e.message : 'تعذر تحميل قائمة البنوك')
@@ -504,10 +515,10 @@ export function AdminLaserPage() {
               reason: l.reason,
               amountSypInput: (l.amountSyp ?? 0) === 0 ? '' : String(l.amountSyp),
             }))
-          : [{ clientKey: crypto.randomUUID(), reason: '', amountSypInput: '' }],
+          : [{ clientKey: newClientKey(), reason: '', amountSypInput: '' }],
       )
     } catch (e) {
-      setExpenseRows([{ clientKey: crypto.randomUUID(), reason: '', amountSypInput: '' }])
+      setExpenseRows([{ clientKey: newClientKey(), reason: '', amountSypInput: '' }])
       setExpenseErr(e instanceof ApiError ? e.message : 'تعذر تحميل المصاريف')
     } finally {
       setExpenseLoading(false)
@@ -539,7 +550,7 @@ export function AdminLaserPage() {
               reason: l.reason,
               amountSypInput: (l.amountSyp ?? 0) === 0 ? '' : String(l.amountSyp),
             }))
-          : [{ clientKey: crypto.randomUUID(), reason: '', amountSypInput: '' }],
+          : [{ clientKey: newClientKey(), reason: '', amountSypInput: '' }],
       )
     } catch (e) {
       setExpenseErr(e instanceof ApiError ? e.message : 'تعذر حفظ المصاريف')
@@ -848,7 +859,7 @@ export function AdminLaserPage() {
                                 if (prev.length <= 1) {
                                   return [
                                     {
-                                      clientKey: crypto.randomUUID(),
+                                      clientKey: newClientKey(),
                                       reason: '',
                                       amountSypInput: '',
                                     },
@@ -882,7 +893,7 @@ export function AdminLaserPage() {
                   onClick={() =>
                     setExpenseRows((prev) => [
                       ...prev,
-                      { clientKey: crypto.randomUUID(), reason: '', amountSypInput: '' },
+                      { clientKey: newClientKey(), reason: '', amountSypInput: '' },
                     ])
                   }
                 >
@@ -1393,7 +1404,7 @@ export function AdminLaserPage() {
                     onClick={() =>
                       setBankRows((prev) => [
                         ...prev,
-                        { clientKey: crypto.randomUUID(), name: '', active: true, sortOrder: String(prev.length) },
+                        { clientKey: newClientKey(), name: '', active: true, sortOrder: String(prev.length) },
                       ])
                     }
                   >
