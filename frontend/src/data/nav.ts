@@ -2,6 +2,7 @@ import type { NavKey, Role } from '../types'
 
 export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'dashboard', path: '/', label: 'لوحة التحكم' },
+  { key: 'admin_send_notifications', path: '/admin/send-notifications', label: 'إرسال إشعارات' },
   { key: 'patients', path: '/patients', label: 'المرضى' },
   { key: 'laser_create_session', path: '/laser/create-session', label: 'إنشاء جلسة' },
   { key: 'patients_intake_fast', path: '/patients/intake-fast', label: 'إدخال سريع للأضابير' },
@@ -15,7 +16,6 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'reports_daily', path: '/reports/daily', label: 'تقرير الجرد اليومي' },
   { key: 'reports_insights', path: '/reports/insights', label: 'ذكاء الأعمال' },
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
-  { key: 'admin_send_notifications', path: '/admin/send-notifications', label: 'إرسال إشعارات' },
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
   { key: 'admin_laser', path: '/admin/laser', label: 'ليزر' },
@@ -44,7 +44,13 @@ const roleNav: Record<Role, NavKey[]> = {
 }
 
 export function visibleNavForRole(role: Role) {
-  const keys = new Set(roleNav[role])
+  /** مباشرة من القائمة لتفادي أي اختلاف بين roleNav و navItems */
+  if (role === 'super_admin') {
+    return navItems.filter((n) => n.key !== 'laser_create_session')
+  }
+  const keysArr = roleNav[role]
+  if (!keysArr?.length) return []
+  const keys = new Set(keysArr)
   return navItems.filter((n) => keys.has(n.key))
 }
 

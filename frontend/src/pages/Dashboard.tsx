@@ -42,6 +42,11 @@ export function Dashboard() {
           )}
           {role === 'super_admin' && (
             <li>
+              <Link to="/admin/send-notifications">إرسال إشعارات للموظفين</Link>
+            </li>
+          )}
+          {role === 'super_admin' && (
+            <li>
               <Link to="/reports/daily">تقرير الجرد اليومي</Link>
             </li>
           )}
