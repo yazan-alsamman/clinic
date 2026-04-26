@@ -38,10 +38,12 @@ export type UsdRoundedCashOffer = {
  * ليتوافق مع التجميع المحاسبي وتفادي فرق التقريب بين round(a×r) − round(b×r) و round((a−b)×r).
  */
 /**
- * عند قبض عدد USD صحيح دون ترجيع: إذا زاد الصافي بالليرة على المستحق بأقل من «سعر 1 دولار» بالليرة
- * (فرق تقريب بين تسعير الجلسة بالليرة وما يعادله من أوراق نقدية USD)، لا يُسجَّل رصيد إضافي للمريض.
+ * بعد حساب صافي الليرة من USD (ومع ترجيع USD اختياري، بلا ترجيع ل.س):
+ * إذا كان صافي الدولار النقدي = مستلم − ترجيع USD **عدداً صحيحاً** وزاد الصافي بالليرة على المستحق
+ * بمقدار ≤ سعر 1 USD بالليرة، نعتبره فرق تقريب تسعير/أوراق ولا يُسجَّل رصيد إضافي.
+ * (يشمل قبض 8$ فقط، أو 10$ مع ترجيع 2$ عندما يعادل الصافي «جلسة 8$» مقابل مستحق ل.س غير مضبوط على مضاعف السعر.)
  */
-export function settlementDeltaAfterUsdNoRefundAbsorb(opts: {
+export function settlementDeltaAfterUsdCashNetAbsorb(opts: {
   payCurrency: 'SYP' | 'USD'
   netReceivedSyp: number
   amountDueSyp: number
@@ -53,10 +55,13 @@ export function settlementDeltaAfterUsdNoRefundAbsorb(opts: {
   const { payCurrency, netReceivedSyp, amountDueSyp, rate, amountUsd, patientRefundSyp, patientRefundUsd } = opts
   const rawDelta = netReceivedSyp - amountDueSyp
   if (payCurrency !== 'USD') return rawDelta
-  if (patientRefundSyp > 0 || patientRefundUsd > 0) return rawDelta
-  /** حتى لو زاد الصافي بمقدار يساوي سعر ورقة 1 USD بالليرة نعتبره ضمن تسامح التقريب */
+  if (patientRefundSyp > 0) return rawDelta
+  const u = Number(amountUsd)
+  const ru = Number(patientRefundUsd) || 0
+  const netUsd = u - ru
   if (!(rate > 0) || rawDelta <= 0 || rawDelta > rate) return rawDelta
-  if (!Number.isFinite(amountUsd) || Math.abs(amountUsd - Math.round(amountUsd)) > 1e-6) return rawDelta
+  if (!Number.isFinite(netUsd) || netUsd <= 0) return rawDelta
+  if (Math.abs(netUsd - Math.round(netUsd)) > 1e-5) return rawDelta
   return 0
 }
 

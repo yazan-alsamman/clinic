@@ -548,16 +548,19 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'
     const appliedAmountSyp = Math.min(netReceivedSyp, amountDueSyp)
     let settlementDeltaSyp = netReceivedSyp - amountDueSyp
-    /** قبض USD صحيح دون ترجيع + فرق ≤ سعر 1 USD: لا رصيد إضافي (تسوية تقريب ليرة/دولار) */
+    /** صافي دولار نقدي عدد صحيح (مستلم − ترجيع USD) + بلا ترجيع ل.س + فرق ل.س ≤ سعر 1 USD: لا رصيد إضافي */
+    const netUsdCash = amountUsdRaw - patientRefundUsd
+    const wholeNetUsd =
+      Number.isFinite(netUsdCash) &&
+      netUsdCash > 0 &&
+      Math.abs(netUsdCash - Math.round(netUsdCash)) < 1e-5
     if (
       payCurrency === 'USD' &&
       patientRefundSyp <= 0 &&
-      patientRefundUsd <= 0 &&
       usdSypRateUsed > 0 &&
       settlementDeltaSyp > 0 &&
       settlementDeltaSyp <= usdSypRateUsed &&
-      Number.isFinite(amountUsdRaw) &&
-      Math.abs(amountUsdRaw - Math.round(amountUsdRaw)) < 1e-6
+      wholeNetUsd
     ) {
       settlementDeltaSyp = 0
     }

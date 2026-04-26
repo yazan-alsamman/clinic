@@ -5,7 +5,7 @@ import { useClinic } from '../context/ClinicContext'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 import {
   netReceivedSypAfterUsdCollection,
-  settlementDeltaAfterUsdNoRefundAbsorb,
+  settlementDeltaAfterUsdCashNetAbsorb,
   usdRoundedUpCashOffer,
 } from '../utils/usdExactDue'
 
@@ -829,13 +829,6 @@ export function BillingPage() {
                   patientRefundUsd: refUsd,
                   rate: payPreviewRate,
                 })
-                if (payRefundCurrency === 'USD' && refUsd > 0) {
-                  const dueUsd = due / payPreviewRate
-                  const netUsd = usd - refUsd
-                  if (Number.isFinite(dueUsd) && Number.isFinite(netUsd) && Math.abs(netUsd - dueUsd) < 1e-7) {
-                    netSyp = due
-                  }
-                }
               }
               if (!(grossSyp > 0)) return null
 
@@ -849,7 +842,7 @@ export function BillingPage() {
 
               let delta = netSyp - due
               if (payCurrency === 'USD' && payPreviewRate) {
-                delta = settlementDeltaAfterUsdNoRefundAbsorb({
+                delta = settlementDeltaAfterUsdCashNetAbsorb({
                   payCurrency: 'USD',
                   netReceivedSyp: netSyp,
                   amountDueSyp: due,
