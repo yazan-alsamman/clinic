@@ -156,7 +156,9 @@ patientsRouter.get('/', async (req, res) => {
       const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       query = { $or: [{ name: new RegExp(safe, 'i') }, { fileNumber: new RegExp(safe, 'i') }] }
     }
-    const wantPagination = req.query.page != null || req.query.pageSize != null
+    /** مع استعلام بحث `q` يُطبَّق الترقيم دائماً (افتراضي ١٠ لكل صفحة) لتجنّب إرجاع مئات المطابقين دفعة واحدة */
+    const wantPagination =
+      req.query.page != null || req.query.pageSize != null || q.length > 0
     if (!wantPagination) {
       const list = await Patient.find(query).sort({ updatedAt: -1 }).limit(200)
       res.json({ patients: list.map(patientToDto) })

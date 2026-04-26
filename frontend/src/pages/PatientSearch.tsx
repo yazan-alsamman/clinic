@@ -102,12 +102,25 @@ export function PatientSearch() {
         if (debouncedQ) params.set('q', debouncedQ)
         const data = await api<{
           patients: Patient[]
-          total: number
-          totalPages: number
+          total?: number
+          totalPages?: number
         }>(`/api/patients?${params.toString()}`)
-        const rows = Array.isArray(data.patients) ? data.patients : []
-        const tot = Number(data.total || 0)
-        const tp = Number(data.totalPages || 0)
+        const raw = Array.isArray(data.patients) ? data.patients : []
+        const hasPagingMeta =
+          typeof data.total === 'number' && typeof data.totalPages === 'number'
+        let rows: Patient[]
+        let tot: number
+        let tp: number
+        if (hasPagingMeta) {
+          rows = raw
+          tot = Number(data.total)
+          tp = Number(data.totalPages)
+        } else {
+          tot = raw.length
+          tp = tot === 0 ? 0 : Math.ceil(tot / PAGE_SIZE)
+          const start = (page - 1) * PAGE_SIZE
+          rows = raw.slice(start, start + PAGE_SIZE)
+        }
         if (cancelled) return
         if (tp >= 1 && page > tp) {
           setPage(tp)
