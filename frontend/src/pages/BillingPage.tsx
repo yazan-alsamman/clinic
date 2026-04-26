@@ -85,6 +85,33 @@ export function BillingPage() {
     return effectiveDueFromListAndPct(list, pct)
   }, [payItem, payDiscountEnabled, payDiscountPercent])
 
+  const payPreviewRate = useMemo(() => {
+    const fromItem = payItem?.usdSypBusinessDayRate != null ? Number(payItem.usdSypBusinessDayRate) : NaN
+    if (payItem && Number.isFinite(fromItem) && fromItem > 0) return fromItem
+    if (
+      payItem?.businessDate &&
+      businessDate &&
+      payItem.businessDate === businessDate &&
+      usdSypRate != null &&
+      usdSypRate > 0
+    )
+      return usdSypRate
+    return null
+  }, [payItem, businessDate, usdSypRate])
+
+  const usdCashOffer = useMemo(() => {
+    if (!payPreviewRate || !(effectiveDueSyp > 0)) return null
+    return usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate)
+  }, [payPreviewRate, effectiveDueSyp])
+
+  /** عند الدفع بالدولار: إعادة اقتراح المستلم والترجيع عند تغيّر المستحق (خصم، بند، سعر). */
+  useEffect(() => {
+    if (!payOpen || payCurrency !== 'USD' || !usdCashOffer) return
+    setPayUsd(usdCashOffer.usdFieldValue)
+    setPayRefundCurrency('SYP')
+    setPayRefundAmount(usdCashOffer.impliedRefundSyp > 0 ? String(usdCashOffer.impliedRefundSyp) : '')
+  }, [payOpen, payCurrency, usdCashOffer])
+
   useEffect(() => {
     if (businessDate && !date) setDate(businessDate)
   }, [businessDate, date])
@@ -423,22 +450,6 @@ export function BillingPage() {
       </>
     )
   }
-
-  const payPreviewRate = (() => {
-    const fromItem = payItem?.usdSypBusinessDayRate != null ? Number(payItem.usdSypBusinessDayRate) : NaN
-    if (payItem && Number.isFinite(fromItem) && fromItem > 0) return fromItem
-    if (
-      payItem?.businessDate &&
-      businessDate &&
-      payItem.businessDate === businessDate &&
-      usdSypRate != null &&
-      usdSypRate > 0
-    )
-      return usdSypRate
-    return null
-  })()
-  const usdCashOffer =
-    payPreviewRate && effectiveDueSyp > 0 ? usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate) : null
 
   function applyUsdCashOfferFill() {
     if (!payPreviewRate || !usdCashOffer) return
