@@ -12,8 +12,8 @@
  * يمكن تجاوزه بـ: SEED_PATIENTS_XLSX=مسار_كامل_للملف
  *
  * الاستخدام:
- *   npm run seed:fresh   — حذف قاعدة البيانات بالكامل ثم: المدير + المرضى من Excel فقط
- *   npm run seed         — تحديث/إدراج المدير والمرضى من Excel دون مسح بقية الجداول
+ *   npm run seed:fresh   — يثبت التبعيات (npm install) ثم يمسح القاعدة ويبذر المدير + المرضى من Excel
+ *   npm run seed         — تحديث/إدراج المدير والمرضى من Excel دون مسح بقية الجداول (شغّل npm install في backend إن ظهر خطأ xlsx)
  *
  * تسجيل الدخول بعد البذر:
  *   elias@clinic.local / admin123

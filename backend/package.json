@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "seed": "node scripts/seed.js",
-    "seed:fresh": "node scripts/seed.js --fresh",
+    "seed:fresh": "npm install --no-audit --no-fund && node scripts/seed.js --fresh",
     "fix:clinical-laser-field": "node scripts/fixClinicalSessionLaserField.js"
   },
   "dependencies": {
