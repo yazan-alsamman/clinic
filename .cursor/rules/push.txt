@@ -1,0 +1,15 @@
+cd /var/www/clinic
+git pull origin main
+git branch
+
+cd /var/www/clinic/backend
+npm install
+pm2 restart clinic-api
+
+
+
+cd /var/www/clinic/frontend
+npm install
+npm run build
+
+

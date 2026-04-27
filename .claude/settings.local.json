@@ -15,7 +15,12 @@
       "Bash(mkdir -p ~/.ssh)",
       "Bash(ssh-keygen -t ed25519 -C \"clinic-deploy\" -f ~/.ssh/clinic_deploy -N \"\")",
       "Read(//c/Users/Lenovo/.ssh/**)",
-      "Bash(ssh *)"
+      "Bash(ssh *)",
+      "Bash(npm audit *)",
+      "Bash(ls -la dist/assets/)",
+      "Bash(dir dist/assets)",
+      "Bash(npx vite *)",
+      "Bash(npm run *)"
     ]
   }
 }
