@@ -910,14 +910,6 @@ export function PatientRecord() {
     return map
   }, [laserProcedureGroups])
 
-  const selectedLaserItems = useMemo(
-    () =>
-      selectedLaserItemIds
-        .map((id) => laserItemById.get(id))
-        .filter((x): x is LaserProcedureItem => Boolean(x)),
-    [selectedLaserItemIds, laserItemById],
-  )
-
   const selectedLaserAddonItems = useMemo(
     () =>
       selectedLaserAddonItemIds
