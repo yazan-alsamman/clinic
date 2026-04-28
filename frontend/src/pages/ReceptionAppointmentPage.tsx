@@ -68,7 +68,7 @@ type LaserProcedureGroup = {
 }
 
 const DAY_START_MIN = 9 * 60
-const DAY_END_MIN = 20 * 60
+const DAY_END_MIN = 21 * 60
 /** الفرق بين أوقات البداية المعروضة (ساعة)؛ يُضاف وقت غير على الساعة فقط عند نهاية حجز يخرج عن التوقيت الكامل */
 const HOURLY_DISPLAY_STEP_MIN = 60
 
@@ -606,7 +606,7 @@ export function ReceptionAppointmentPage() {
       return false
     }
     if (em > DAY_END_MIN) {
-      setFormErr('الموعد يتجاوز نهاية الدوام (8:00 مساءً)')
+      setFormErr('الموعد يتجاوز نهاية الدوام (9:00 مساءً)')
       return false
     }
     if (sm == null || em == null || em <= sm) {
@@ -912,7 +912,7 @@ export function ReceptionAppointmentPage() {
           </div>
         )}
         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.75rem 0 0' }}>
-          بداية الدوام 09:00 ونهايته 20:00. عرض الأوقات الفارغة بفاصل ساعة؛ أول وقت بداية بعد حجز قد يظهر على
+          بداية الدوام 09:00 ونهايته 21:00. عرض الأوقات الفارغة بفاصل ساعة؛ أول وقت بداية بعد حجز قد يظهر على
           الدقائق إذا انتهى الحجز بين ساعتين.
         </p>
       </div>
