@@ -4,6 +4,7 @@ import { authMiddleware, requireRoles } from '../middleware/auth.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { BusinessDay } from '../models/BusinessDay.js'
+import { CashMovement } from '../models/CashMovement.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
 import { PaymentSettings } from '../models/PaymentSettings.js'
@@ -68,6 +69,16 @@ const DEFAULT_BANK_SEED = [
   { name: 'العربي الإسلامي', active: true, sortOrder: 1 },
   { name: 'سورية و الخليج', active: true, sortOrder: 2 },
 ]
+
+function normalizeCashMovementKind(v) {
+  return String(v || '').trim().toLowerCase() === 'expense' ? 'expense' : 'receipt'
+}
+
+function parseMoneyInput(v, mode) {
+  const n = mode === 'usd' ? round2(Number(v) || 0) : Math.round(Number(v) || 0)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return n
+}
 
 async function getOrCreatePaymentSettings() {
   let doc = await PaymentSettings.findById('default').lean()
@@ -266,6 +277,74 @@ billingRouter.put('/payment-bank-options', requireRoles('super_admin'), async (r
   }
 })
 
+/** حركة الصندوق اليومية (مصاريف + مبالغ مستلمة) */
+billingRouter.get('/cash-movements', requireRoles(...BILLING_ROLES), async (req, res) => {
+  try {
+    const businessDate = String(req.query.date || '').trim() || todayBusinessDate()
+    const rows = await CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean()
+    res.json({
+      businessDate,
+      rows: rows.map((r) => ({
+        id: String(r._id),
+        businessDate: String(r.businessDate || ''),
+        kind: normalizeCashMovementKind(r.kind),
+        reason: String(r.reason || ''),
+        amountSyp: Math.round(Number(r.amountSyp) || 0),
+        amountUsd: round2(Number(r.amountUsd) || 0),
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      })),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+billingRouter.post('/cash-movements', requireRoles(...BILLING_ROLES), async (req, res) => {
+  try {
+    const businessDate = String(req.body?.businessDate || '').trim() || todayBusinessDate()
+    const kind = normalizeCashMovementKind(req.body?.kind)
+    const reason = String(req.body?.reason || '').trim()
+    const amountSyp = parseMoneyInput(req.body?.amountSyp, 'syp')
+    const amountUsd = parseMoneyInput(req.body?.amountUsd, 'usd')
+    if (!reason) {
+      res.status(400).json({ error: 'أدخل سبب العملية' })
+      return
+    }
+    if (!(amountSyp > 0 || amountUsd > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغاً بالليرة أو بالدولار على الأقل' })
+      return
+    }
+    const created = await CashMovement.create({
+      businessDate,
+      kind,
+      reason,
+      amountSyp,
+      amountUsd,
+      createdBy: req.user.id || null,
+    })
+    await writeAudit({
+      user: req.user,
+      action: kind === 'expense' ? 'إضافة مصروف لحركة الصندوق' : 'إضافة مبلغ مستلم لحركة الصندوق',
+      entityType: 'CashMovement',
+      entityId: created._id,
+      details: { businessDate, reason, amountSyp, amountUsd, kind },
+    })
+    res.status(201).json({
+      id: String(created._id),
+      businessDate,
+      kind,
+      reason,
+      amountSyp,
+      amountUsd,
+      createdAt: created.createdAt ? new Date(created.createdAt).toISOString() : null,
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 /**
  * جرد مالي يومي للاستقبال: يوم التقويم الحالي فقط (لا يُقبل تاريخ من الواجهة).
  * تجميع كل التحصيلات المؤكدة لهذا التاريخ — كاش/بنك، ل.س و USD.
@@ -289,6 +368,8 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
       .populate('patientId', 'name')
       .populate('providerUserId', 'name')
       .lean()
+
+    const movementRows = await CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean()
 
     const payIds = [...new Set(items.map((i) => i.paymentId).filter(Boolean))]
     const payments = payIds.length
@@ -400,8 +481,34 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
     }
 
     const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
-    const totalsSyp = cash.totalSyp + banks.reduce((s, b) => s + (Math.round(Number(b.totalSyp)) || 0), 0)
-    const totalsUsd = round2(cash.totalUsd + banks.reduce((s, b) => s + (Number(b.totalUsd) || 0), 0))
+    const expense = { totalSyp: 0, totalUsd: 0 }
+    const receipt = { totalSyp: 0, totalUsd: 0 }
+    const normalizedMovements = movementRows.map((m) => {
+      const kind = normalizeCashMovementKind(m.kind)
+      const amountSyp = Math.round(Number(m.amountSyp) || 0)
+      const amountUsd = round2(Number(m.amountUsd) || 0)
+      if (kind === 'expense') {
+        expense.totalSyp += amountSyp
+        expense.totalUsd = round2(expense.totalUsd + amountUsd)
+      } else {
+        receipt.totalSyp += amountSyp
+        receipt.totalUsd = round2(receipt.totalUsd + amountUsd)
+      }
+      return {
+        id: String(m._id),
+        businessDate: String(m.businessDate || ''),
+        kind,
+        reason: String(m.reason || ''),
+        amountSyp,
+        amountUsd,
+        createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+      }
+    })
+
+    const adjustedCashSyp = cash.totalSyp - expense.totalSyp + receipt.totalSyp
+    const adjustedCashUsd = round2(cash.totalUsd - expense.totalUsd + receipt.totalUsd)
+    const totalsSyp = adjustedCashSyp + banks.reduce((s, b) => s + (Math.round(Number(b.totalSyp)) || 0), 0)
+    const totalsUsd = round2(adjustedCashUsd + banks.reduce((s, b) => s + (Number(b.totalUsd) || 0), 0))
 
     const pendingCount = await BillingItem.countDocuments({ businessDate, status: 'pending_payment' })
 
@@ -412,12 +519,18 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
       dayActive,
       usdSypRate,
       summary: {
-        cash: { totalSyp: cash.totalSyp, totalUsd: round2(cash.totalUsd) },
+        cashBase: { totalSyp: cash.totalSyp, totalUsd: round2(cash.totalUsd) },
+        cash: { totalSyp: adjustedCashSyp, totalUsd: adjustedCashUsd },
         banks,
         totals: { totalSyp: totalsSyp, totalUsd: totalsUsd },
         refundsRecorded: { totalSyp: refundsRecordedSyp, totalUsd: round2(refundsRecordedUsd) },
         transactionCount: transactions.length,
         pendingCollectionCount: pendingCount,
+      },
+      cashMovements: {
+        expense: { totalSyp: expense.totalSyp, totalUsd: round2(expense.totalUsd) },
+        receipt: { totalSyp: receipt.totalSyp, totalUsd: round2(receipt.totalUsd) },
+        rows: normalizedMovements,
       },
       byDepartment: Object.values(byDept).sort((a, b) => a.label.localeCompare(b.label, 'ar')),
       transactions,

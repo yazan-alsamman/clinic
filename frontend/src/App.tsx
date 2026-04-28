@@ -34,6 +34,7 @@ const AdminLaserPage            = lazyPage(() => import('./pages/AdminLaserPage'
 const AdminAccounting           = lazyPage(() => import('./pages/AdminAccounting'), 'AdminAccounting')
 const AdminFinancialBalances    = lazyPage(() => import('./pages/AdminFinancialBalances'), 'AdminFinancialBalances')
 const BillingPage               = lazyPage(() => import('./pages/BillingPage'), 'BillingPage')
+const ReceptionCashMovementPage = lazyPage(() => import('./pages/ReceptionCashMovementPage'), 'ReceptionCashMovementPage')
 const ReceptionDailyInventoryPage = lazyPage(() => import('./pages/ReceptionDailyInventoryPage'), 'ReceptionDailyInventoryPage')
 const AccountPassword           = lazyPage(() => import('./pages/AccountPassword'), 'AccountPassword')
 const LaserCreateSessionPage    = lazyPage(() => import('./pages/LaserCreateSessionPage'), 'LaserCreateSessionPage')
@@ -90,6 +91,7 @@ export default function App() {
                 <Route path="/dermatology" element={<DermatologyToday />} />
                 <Route path="/dental" element={<DentalPage />} />
                 <Route path="/billing" element={<BillingPage />} />
+                <Route path="/reception/cash-movement" element={<ReceptionCashMovementPage />} />
                 <Route path="/reception/daily-inventory" element={<ReceptionDailyInventoryPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/reports/daily" element={<DailyReport />} />

@@ -43,12 +43,25 @@ type InventoryPayload = {
   dayActive: boolean
   usdSypRate: number | null
   summary: {
+    cashBase?: { totalSyp: number; totalUsd: number }
     cash: { totalSyp: number; totalUsd: number }
     banks: BankRow[]
     totals: { totalSyp: number; totalUsd: number }
     refundsRecorded: { totalSyp: number; totalUsd: number }
     transactionCount: number
     pendingCollectionCount: number
+  }
+  cashMovements?: {
+    expense: { totalSyp: number; totalUsd: number }
+    receipt: { totalSyp: number; totalUsd: number }
+    rows: Array<{
+      id: string
+      kind: 'expense' | 'receipt'
+      reason: string
+      amountSyp: number
+      amountUsd: number
+      createdAt: string | null
+    }>
   }
   byDepartment: DeptRow[]
   transactions: TxRow[]
@@ -275,7 +288,9 @@ export function ReceptionDailyInventoryPage() {
                 <p style={{ margin: '0.45rem 0 0', fontSize: '1.35rem', fontWeight: 800, color: 'var(--text)' }}>
                   {formatSyp(d.summary.cash.totalSyp)}
                 </p>
-                <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>مستلم نقداً بالليرة</p>
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  بعد إضافة المصاريف والمقبوضات النقدية
+                </p>
               </div>
               <div
                 className="card"
@@ -288,7 +303,9 @@ export function ReceptionDailyInventoryPage() {
                 <p style={{ margin: '0.45rem 0 0', fontSize: '1.35rem', fontWeight: 800, direction: 'ltr', textAlign: 'right' }}>
                   {formatUsd(d.summary.cash.totalUsd)}
                 </p>
-                <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>مستلم نقداً بالدولار</p>
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  بعد إضافة المصاريف والمقبوضات النقدية
+                </p>
               </div>
               <div
                 className="card"
@@ -318,6 +335,77 @@ export function ReceptionDailyInventoryPage() {
               </div>
             </div>
           </section>
+
+          {d.cashMovements ? (
+            <section style={{ marginBottom: '1.15rem' }}>
+              <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.65rem', color: 'var(--text)' }}>
+                جدول حركة الصندوق (مصاريف + مبالغ مستلمة)
+              </h2>
+              <div className="card" style={{ marginBottom: '0.65rem' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.8rem' }}>
+                  <p style={{ margin: 0 }}>
+                    <strong>كاش أساسي ل.س:</strong> {formatSyp(d.summary.cashBase?.totalSyp ?? d.summary.cash.totalSyp)}
+                  </p>
+                  <p style={{ margin: 0 }} dir="ltr">
+                    <strong>Cash Base USD:</strong> {formatUsd(d.summary.cashBase?.totalUsd ?? d.summary.cash.totalUsd)}
+                  </p>
+                  <p style={{ margin: 0, color: 'var(--danger)' }}>
+                    <strong>مصاريف:</strong> {formatSyp(d.cashMovements.expense.totalSyp)}
+                  </p>
+                  <p style={{ margin: 0, color: 'var(--danger)' }} dir="ltr">
+                    <strong>Expenses USD:</strong> {formatUsd(d.cashMovements.expense.totalUsd)}
+                  </p>
+                  <p style={{ margin: 0, color: 'var(--success)' }}>
+                    <strong>مقبوضات:</strong> {formatSyp(d.cashMovements.receipt.totalSyp)}
+                  </p>
+                  <p style={{ margin: 0, color: 'var(--success)' }} dir="ltr">
+                    <strong>Receipts USD:</strong> {formatUsd(d.cashMovements.receipt.totalUsd)}
+                  </p>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>النوع</th>
+                      <th>السبب</th>
+                      <th>المبلغ ل.س</th>
+                      <th>المبلغ USD</th>
+                      <th>الوقت</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.cashMovements.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ color: 'var(--text-muted)' }}>
+                          لا توجد حركة صندوق مسجلة لهذا اليوم.
+                        </td>
+                      </tr>
+                    ) : (
+                      d.cashMovements.rows.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.kind === 'expense' ? 'مصروف' : 'مقبوض'}</td>
+                          <td>{row.reason}</td>
+                          <td>{row.amountSyp > 0 ? formatSyp(row.amountSyp) : '—'}</td>
+                          <td dir="ltr">{row.amountUsd > 0 ? formatUsd(row.amountUsd) : '—'}</td>
+                          <td>
+                            {row.createdAt
+                              ? new Date(row.createdAt).toLocaleString('ar-SY', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                })
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
 
           <section style={{ marginBottom: '1.15rem' }}>
             <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.65rem', color: 'var(--text)' }}>البنوك — تفصيل الحوالات</h2>
