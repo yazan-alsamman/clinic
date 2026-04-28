@@ -926,6 +926,9 @@ export function PatientRecord() {
     [selectedLaserAddonItemIds, laserItemById],
   )
 
+  const pricingGender: '' | 'male' | 'female' =
+    patient?.gender === 'male' || patient?.gender === 'female' ? patient.gender : ''
+
   const laserAddonTotalSyp = useMemo(
     () =>
       selectedLaserAddonItems.reduce(
@@ -1377,18 +1380,6 @@ export function PatientRecord() {
       return { ...prev, [n]: order[(i + 1) % order.length] }
     })
   }, [])
-
-  const pricingGender: '' | 'male' | 'female' =
-    patient?.gender === 'male' || patient?.gender === 'female' ? patient.gender : ''
-
-  const selectedLaserBaseTotalSyp = useMemo(
-    () =>
-      selectedLaserItems.reduce(
-        (sum, item) => sum + resolveLaserItemPriceByPatientGender(item, pricingGender),
-        0,
-      ),
-    [selectedLaserItems, pricingGender],
-  )
 
   const patientPackages: PatientPackage[] = useMemo(() => {
     if (!patient) return []
