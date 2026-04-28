@@ -96,6 +96,8 @@ type LaserProcedureItem = {
   groupTitle: string
   kind: 'area' | 'offer'
   priceSyp: number
+  priceMaleSyp: number
+  priceFemaleSyp: number
   active: boolean
   sortOrder: number
 }
@@ -104,6 +106,42 @@ type LaserProcedureGroup = {
   id: string
   title: string
   items: LaserProcedureItem[]
+}
+
+type LaserSessionLineInput = {
+  rowId: string
+  procedureOptionId: string
+  areaLabel: string
+  pw: string
+  pulse: string
+  shotCount: string
+  chargeByPulseCount: boolean
+  isAddon: boolean
+}
+
+function resolveLaserItemPriceByPatientGender(
+  item: Pick<LaserProcedureItem, 'priceSyp' | 'priceMaleSyp' | 'priceFemaleSyp'>,
+  patientGender: '' | 'male' | 'female',
+) {
+  const male = Number(item.priceMaleSyp ?? item.priceSyp) || 0
+  const female = Number(item.priceFemaleSyp ?? item.priceSyp) || 0
+  if (patientGender === 'male') return male
+  if (patientGender === 'female') return female
+  return female || male
+}
+
+function createLaserLineRow(partial?: Partial<LaserSessionLineInput>): LaserSessionLineInput {
+  return {
+    rowId: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    procedureOptionId: '',
+    areaLabel: '',
+    pw: '',
+    pulse: '',
+    shotCount: '',
+    chargeByPulseCount: false,
+    isAddon: false,
+    ...partial,
+  }
 }
 
 type DermatologySessionRow = {
@@ -547,10 +585,7 @@ export function PatientRecord() {
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
-  const [pw, setPw] = useState('')
-  const [pulse, setPulse] = useState('')
-  const [shotCount, setShotCount] = useState('')
-  const [chargeLaserByPulse, setChargeLaserByPulse] = useState(false)
+  const [laserLineItems, setLaserLineItems] = useState<LaserSessionLineInput[]>([])
   const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
   const [laserNotes, setLaserNotes] = useState('')
   const [nextTreatmentHint, setNextTreatmentHint] = useState('—')
@@ -892,8 +927,12 @@ export function PatientRecord() {
   )
 
   const laserAddonTotalSyp = useMemo(
-    () => selectedLaserAddonItems.reduce((sum, item) => sum + (Number(item.priceSyp) || 0), 0),
-    [selectedLaserAddonItems],
+    () =>
+      selectedLaserAddonItems.reduce(
+        (sum, item) => sum + resolveLaserItemPriceByPatientGender(item, pricingGender),
+        0,
+      ),
+    [selectedLaserAddonItems, pricingGender],
   )
 
   const combinedLaserSaveIds = useMemo(
@@ -908,6 +947,26 @@ export function PatientRecord() {
         .filter((x): x is LaserProcedureItem => Boolean(x)),
     [combinedLaserSaveIds, laserItemById],
   )
+
+  useEffect(() => {
+    setLaserLineItems((prev) => {
+      const mappedPrev = new Map(
+        prev
+          .filter((row) => row.procedureOptionId)
+          .map((row) => [row.procedureOptionId, row] as const),
+      )
+      const customRows = prev.filter((row) => !row.procedureOptionId)
+      const nextMappedRows = combinedLaserSaveItems.map((item) =>
+        createLaserLineRow({
+          ...(mappedPrev.get(item.id) || {}),
+          procedureOptionId: item.id,
+          areaLabel: item.name,
+          isAddon: selectedLaserAddonItemIds.includes(item.id),
+        }),
+      )
+      return [...nextMappedRows, ...customRows]
+    })
+  }, [combinedLaserSaveItems, selectedLaserAddonItemIds])
 
   const toggleLaserMainArea = useCallback((itemId: string) => {
     setSelectedLaserItemIds((prev) => (prev.includes(itemId) ? prev.filter((x) => x !== itemId) : [...prev, itemId]))
@@ -1319,9 +1378,16 @@ export function PatientRecord() {
     })
   }, [])
 
-  const selectedLaserTotalSyp = useMemo(
-    () => selectedLaserItems.reduce((sum, item) => sum + (Number(item.priceSyp) || 0), 0),
-    [selectedLaserItems],
+  const pricingGender: '' | 'male' | 'female' =
+    patient?.gender === 'male' || patient?.gender === 'female' ? patient.gender : ''
+
+  const selectedLaserBaseTotalSyp = useMemo(
+    () =>
+      selectedLaserItems.reduce(
+        (sum, item) => sum + resolveLaserItemPriceByPatientGender(item, pricingGender),
+        0,
+      ),
+    [selectedLaserItems, pricingGender],
   )
 
   const patientPackages: PatientPackage[] = useMemo(() => {
@@ -1359,18 +1425,24 @@ export function PatientRecord() {
     )
   }, [patientPackages])
 
-  const laserPulsePricingSyp = useMemo(() => {
-    if (!chargeLaserByPulse || activeLaserPackage) return null
-    const shots = parseLaserShotsForPricing(shotCount)
-    if (!(shots > 0)) return null
-    const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
-    if (!(ppuSyp > 0)) return null
-    return Math.round(ppuSyp * shots)
-  }, [chargeLaserByPulse, activeLaserPackage, shotCount, laserPricePerPulseSyp])
+  const laserLineItemsWithPricing = useMemo(
+    () =>
+      laserLineItems.map((row) => {
+        const linked = row.procedureOptionId ? laserItemById.get(row.procedureOptionId) : undefined
+        const areaPrice = linked ? resolveLaserItemPriceByPatientGender(linked, pricingGender) : 0
+        const shots = parseLaserShotsForPricing(row.shotCount)
+        const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
+        const pulseCost = row.chargeByPulseCount && shots > 0 && ppuSyp > 0 ? ppuSyp * shots : 0
+        const lineCostSyp = row.chargeByPulseCount ? pulseCost : areaPrice
+        return { ...row, lineCostSyp, shots }
+      }),
+    [laserLineItems, laserItemById, pricingGender, laserPricePerPulseSyp],
+  )
 
-  useEffect(() => {
-    if (activeLaserPackage) setChargeLaserByPulse(false)
-  }, [activeLaserPackage])
+  const selectedLaserTotalSyp = useMemo(
+    () => laserLineItemsWithPricing.reduce((sum, row) => sum + (Number(row.lineCostSyp) || 0), 0),
+    [laserLineItemsWithPricing],
+  )
 
   useEffect(() => {
     if (!activeLaserPackage) setSelectedLaserAddonItemIds([])
@@ -2911,49 +2983,87 @@ export function PatientRecord() {
                     <thead>
                       <tr>
                         <th>نوع الليزر</th>
+                        <th>المناطق</th>
                         <th>P.W</th>
                         <th>Pulse</th>
                         <th>الضربات</th>
-                        <th>المناطق</th>
-                        <th>ملاحظات</th>
+                        <th>محاسبة على الضربات</th>
+                        <th>سعر السطر</th>
+                        <th>حذف</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr>
+                      {laserLineItemsWithPricing.map((row, idx) => (
+                        <tr key={row.rowId}>
                         <td>
-                          <select
-                            className="select"
-                            value={laserType}
-                            onChange={(e) => setLaserType(e.target.value as (typeof laserTypes)[number])}
-                            style={{ maxWidth: 220 }}
-                          >
-                            {laserTypes.map((lt) => (
-                              <option key={lt} value={lt}>
-                                {lt}
-                              </option>
-                            ))}
-                          </select>
+                          {idx === 0 ? (
+                            <select
+                              className="select"
+                              value={laserType}
+                              onChange={(e) => setLaserType(e.target.value as (typeof laserTypes)[number])}
+                              style={{ maxWidth: 220 }}
+                            >
+                              {laserTypes.map((lt) => (
+                                <option key={lt} value={lt}>
+                                  {lt}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>{laserType}</span>
+                          )}
+                        </td>
+                        <td>
+                          {row.procedureOptionId ? (
+                            <span style={{ fontWeight: 600 }}>{row.areaLabel || '—'}</span>
+                          ) : (
+                            <input
+                              className="input"
+                              type="text"
+                              placeholder="اسم منطقة مخصص"
+                              value={row.areaLabel}
+                              onChange={(e) =>
+                                setLaserLineItems((prev) =>
+                                  prev.map((x) => (x.rowId === row.rowId ? { ...x, areaLabel: e.target.value } : x)),
+                                )
+                              }
+                              style={{ minWidth: 180 }}
+                            />
+                          )}
+                          {row.isAddon ? (
+                            <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', color: 'var(--amber)' }}>
+                              خارج الباكج
+                            </div>
+                          ) : null}
                         </td>
                         <td>
                           <input
                             className="input"
-                            type="number"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={pw}
-                            onChange={(e) => setPw(e.target.value)}
-                            style={{ maxWidth: 220 }}
+                            type="text"
+                            inputMode="text"
+                            placeholder="مثال: 11/7"
+                            value={row.pw}
+                            onChange={(e) =>
+                              setLaserLineItems((prev) =>
+                                prev.map((x) => (x.rowId === row.rowId ? { ...x, pw: e.target.value } : x)),
+                              )
+                            }
+                            style={{ maxWidth: 130 }}
                           />
                         </td>
                         <td>
                           <input
                             className="input"
-                            type="number"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={pulse}
-                            onChange={(e) => setPulse(e.target.value)}
-                            style={{ maxWidth: 220 }}
+                            type="text"
+                            inputMode="text"
+                            placeholder="مثال: 13/8"
+                            value={row.pulse}
+                            onChange={(e) =>
+                              setLaserLineItems((prev) =>
+                                prev.map((x) => (x.rowId === row.rowId ? { ...x, pulse: e.target.value } : x)),
+                              )
+                            }
+                            style={{ maxWidth: 130 }}
                           />
                         </td>
                         <td>
@@ -2962,36 +3072,80 @@ export function PatientRecord() {
                             type="number"
                             inputMode="numeric"
                             placeholder="0"
-                            value={shotCount}
-                            onChange={(e) => setShotCount(e.target.value)}
-                            style={{ maxWidth: 220 }}
+                            value={row.shotCount}
+                            onChange={(e) =>
+                              setLaserLineItems((prev) =>
+                                prev.map((x) => (x.rowId === row.rowId ? { ...x, shotCount: e.target.value } : x)),
+                              )
+                            }
+                            style={{ maxWidth: 120 }}
                           />
+                        </td>
+                        <td>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={row.chargeByPulseCount}
+                              onChange={(e) =>
+                                setLaserLineItems((prev) =>
+                                  prev.map((x) =>
+                                    x.rowId === row.rowId ? { ...x, chargeByPulseCount: e.target.checked } : x,
+                                  ),
+                                )
+                              }
+                            />
+                            نعم
+                          </label>
+                        </td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {(Number(row.lineCostSyp) || 0).toLocaleString('ar-SY')} ل.س
                         </td>
                         <td>
                           <button
                             type="button"
-                            className="btn btn-secondary"
-                            onClick={() => setLaserAreaModalOpen(true)}
+                            className="btn btn-ghost"
+                            onClick={() => {
+                              setLaserLineItems((prev) => prev.filter((x) => x.rowId !== row.rowId))
+                              if (row.procedureOptionId) {
+                                setSelectedLaserItemIds((prev) => prev.filter((id) => id !== row.procedureOptionId))
+                                setSelectedLaserAddonItemIds((prev) =>
+                                  prev.filter((id) => id !== row.procedureOptionId),
+                                )
+                              }
+                            }}
                           >
-                            اختيار المناطق / العروض
+                            حذف
                           </button>
-                          <div style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-                            {combinedLaserSaveItems.length > 0
-                              ? combinedLaserSaveItems.map((x) => x.name).join(' + ')
-                              : 'لم يتم اختيار مناطق بعد'}
-                          </div>
-                        </td>
-                        <td>
-                          <textarea
-                            className="textarea"
-                            placeholder="..."
-                            value={laserNotes}
-                            onChange={(e) => setLaserNotes(e.target.value)}
-                          />
                         </td>
                       </tr>
+                      ))}
                     </tbody>
                   </table>
+                </div>
+                <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setLaserAreaModalOpen(true)}>
+                    اختيار المناطق / العروض
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setLaserLineItems((prev) => [...prev, createLaserLineRow({ isAddon: Boolean(activeLaserPackage) })])}
+                  >
+                    + إضافة سطر
+                  </button>
+                </div>
+                <div style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+                  {combinedLaserSaveItems.length > 0
+                    ? `مناطق مختارة: ${combinedLaserSaveItems.map((x) => x.name).join(' + ')}`
+                    : 'لم يتم اختيار مناطق بعد'}
+                </div>
+                <div style={{ marginTop: '0.75rem' }}>
+                  <textarea
+                    className="textarea"
+                    placeholder="ملاحظات عامة للجلسة..."
+                    value={laserNotes}
+                    onChange={(e) => setLaserNotes(e.target.value)}
+                  />
                 </div>
                 <div
                   style={{
@@ -3002,37 +3156,11 @@ export function PatientRecord() {
                     background: 'var(--surface-solid)',
                   }}
                 >
-                  <label
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.45rem',
-                      cursor: activeLaserPackage ? 'not-allowed' : 'pointer',
-                      fontSize: '0.9rem',
-                      fontWeight: 600,
-                      opacity: activeLaserPackage ? 0.72 : 1,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      disabled={Boolean(activeLaserPackage)}
-                      checked={chargeLaserByPulse}
-                      onChange={(e) => setChargeLaserByPulse(e.target.checked)}
-                    />
-                    محاسبة على عدد الضربات
-                  </label>
-                  {activeLaserPackage ? (
-                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      غير متاح لهذه الجلسة لأنها ضمن باكج ليزر مدفوع مسبقاً. يُفعّل هذا الخيار تلقائياً عند تسجيل جلسة لمريض <strong>بدون</strong> باكج ليزر نشط يحتوي جلسة غير مربوطة.
-                    </p>
-                  ) : chargeLaserByPulse ? (
-                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      سعر الجلسة = سعر الضربة × عدد الضربات (بالليرة). يُضبط سعر الضربة من صفحة الغرف وأسعار المناطق — الحالي:{' '}
-                      {laserPricePerPulseSyp > 0
-                        ? `${laserPricePerPulseSyp.toLocaleString('ar-SY')} ل.س`
-                        : '—'}.
-                    </p>
-                  ) : null}
+                  <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                    لكل سطر يمكنك تفعيل <strong>محاسبة على الضربات</strong>. عند التفعيل يصبح سعر السطر = عدد الضربات ×
+                    سعر الضربة المسجّل في النظام ({' '}
+                    <strong>{laserPricePerPulseSyp.toLocaleString('ar-SY')} ل.س</strong> ).
+                  </p>
                 </div>
                 {activeLaserPackage ? (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
@@ -3047,20 +3175,6 @@ export function PatientRecord() {
                         <span style={{ color: 'var(--text-muted)' }}>لا توجد إضافات خارج الباكج</span>
                       )}
                     </p>
-                  </div>
-                ) : chargeLaserByPulse ? (
-                  <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
-                    <strong>سعر الجلسة (محاسبة الضربات):</strong>{' '}
-                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {laserPulsePricingSyp != null
-                        ? `${laserPulsePricingSyp.toLocaleString('ar-SY')} ل.س`
-                        : '—'}
-                    </span>
-                    {laserPulsePricingSyp == null && parseLaserShotsForPricing(shotCount) > 0 ? (
-                      <span style={{ marginInlineStart: '0.6rem', color: 'var(--warning)' }}>
-                        (أدخل عدد ضربات أكبر من صفر وحدّد سعر الضربة بالليرة)
-                      </span>
-                    ) : null}
                   </div>
                 ) : (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
@@ -3096,12 +3210,20 @@ export function PatientRecord() {
                   setLaserSessionErr('انتظر تحميل المناطق أولاً.')
                   return
                 }
-                if (combinedLaserSaveItems.length === 0) {
-                  setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل.')
+                if (laserLineItemsWithPricing.length === 0) {
+                  setLaserSessionErr('أضف سطر منطقة/عرض واحد على الأقل.')
+                  return
+                }
+                const emptyNamedRow = laserLineItemsWithPricing.find(
+                  (row) => !(row.areaLabel || '').trim(),
+                )
+                if (emptyNamedRow) {
+                  setLaserSessionErr('يوجد سطر بدون اسم منطقة/عرض. أكمل الاسم أو احذف السطر.')
                   return
                 }
                 if (!activeLaserPackage) {
-                  if (chargeLaserByPulse) {
+                  const pulseRows = laserLineItemsWithPricing.filter((row) => row.chargeByPulseCount)
+                  if (pulseRows.length > 0) {
                     const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
                     if (!(ppuSyp > 0)) {
                       setLaserSessionErr(
@@ -3109,15 +3231,17 @@ export function PatientRecord() {
                       )
                       return
                     }
-                    if (!(parseLaserShotsForPricing(shotCount) > 0)) {
-                      setLaserSessionErr('عند «محاسبة على عدد الضربات» أدخل عدد ضربات أكبر من صفر.')
+                    const invalidPulseRow = pulseRows.find((row) => !(parseLaserShotsForPricing(row.shotCount) > 0))
+                    if (invalidPulseRow) {
+                      setLaserSessionErr(
+                        `عند «محاسبة على الضربات» أدخل عدد ضربات أكبر من صفر للسطر: ${invalidPulseRow.areaLabel}.`,
+                      )
                       return
                     }
-                  } else {
-                    if (!(selectedLaserTotalSyp > 0)) {
-                      setLaserSessionErr('اختر منطقة أو عرض واحد على الأقل بسعر صالح.')
-                      return
-                    }
+                  }
+                  if (!(selectedLaserTotalSyp > 0)) {
+                    setLaserSessionErr('اختر مناطق/عروض بسعر صالح أو فعّل محاسبة الضربات مع عدد ضربات صحيح.')
+                    return
                   }
                 }
                 setSavingLaser(true)
@@ -3131,17 +3255,28 @@ export function PatientRecord() {
                       scheduleSlotId: bookedLaserSlotId || undefined,
                       room,
                       laserType,
-                      pw,
-                      pulse,
-                      shotCount,
+                      pw: laserLineItemsWithPricing.map((x) => x.pw).filter(Boolean).join(' | '),
+                      pulse: laserLineItemsWithPricing.map((x) => x.pulse).filter(Boolean).join(' | '),
+                      shotCount: laserLineItemsWithPricing.map((x) => x.shotCount).filter(Boolean).join(' | '),
                       notes: laserNotes,
                       areaIds: [],
+                      procedureOptionIds: selectedLaserItemIds,
+                      addonProcedureOptionIds: activeLaserPackage ? selectedLaserAddonItemIds : undefined,
+                      laserLineItems: laserLineItemsWithPricing.map((row) => ({
+                        procedureOptionId: row.procedureOptionId || undefined,
+                        areaLabel: row.areaLabel,
+                        pw: row.pw,
+                        pulse: row.pulse,
+                        shotCount: row.shotCount,
+                        chargeByPulseCount: row.chargeByPulseCount,
+                        isAddon: row.isAddon,
+                      })),
                       manualAreaLabels: combinedLaserSaveItems.map((x) => x.name),
                       addonManualLabels: activeLaserPackage ? selectedLaserAddonItems.map((x) => x.name) : undefined,
                       additionalCostSyp: activeLaserPackage ? laserAddonTotalSyp : undefined,
                       status: activeLaserPackage ? 'completed_pending_collection' : 'in_progress',
-                      costSyp: activeLaserPackage || chargeLaserByPulse ? undefined : selectedLaserTotalSyp,
-                      chargeByPulseCount: !activeLaserPackage && chargeLaserByPulse,
+                      costSyp: selectedLaserTotalSyp,
+                      chargeByPulseCount: !activeLaserPackage && laserLineItemsWithPricing.some((x) => x.chargeByPulseCount),
                       discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
@@ -3158,10 +3293,7 @@ export function PatientRecord() {
                   setLaserNotes('')
                   setSelectedLaserItemIds([])
                   setSelectedLaserAddonItemIds([])
-                  setChargeLaserByPulse(false)
-                  setPw('')
-                  setPulse('')
-                  setShotCount('')
+                  setLaserLineItems([])
                   const data = await api<{ sessions: { treatmentNumber: number }[] }>(
                     `/api/laser/sessions?patientId=${encodeURIComponent(id)}`,
                   )
@@ -3223,7 +3355,12 @@ export function PatientRecord() {
                                   >
                                     {item.name}
                                     {activeLaserPackage ? null : (
-                                      <span style={{ opacity: 0.85 }}> — {item.priceSyp.toLocaleString('en-US')} ل.س</span>
+                                      <span style={{ opacity: 0.85 }}>
+                                        {' '}
+                                        —{' '}
+                                        {resolveLaserItemPriceByPatientGender(item, pricingGender).toLocaleString('en-US')}{' '}
+                                        ل.س
+                                      </span>
                                     )}
                                   </button>
                                 )
@@ -3259,7 +3396,9 @@ export function PatientRecord() {
                                         }}
                                         onClick={() => toggleLaserAddonArea(item.id)}
                                       >
-                                        {item.name} — {item.priceSyp.toLocaleString('en-US')} ل.س
+                                        {item.name} —{' '}
+                                        {resolveLaserItemPriceByPatientGender(item, pricingGender).toLocaleString('en-US')}{' '}
+                                        ل.س
                                       </button>
                                     )
                                   })}

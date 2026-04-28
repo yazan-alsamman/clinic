@@ -10,7 +10,11 @@ const laserProcedureOptionSchema = new mongoose.Schema(
     groupId: { type: String, required: true, enum: GROUP_IDS },
     groupTitle: { type: String, required: true, trim: true, maxlength: 120 },
     kind: { type: String, required: true, enum: KIND_IDS, default: 'area' },
-    priceSyp: { type: Number, required: true, min: 0 },
+    /** Deprecated: kept for backward compatibility with older rows/clients */
+    priceSyp: { type: Number, required: true, min: 0, default: 0 },
+    /** السعر بحسب جنس المريض */
+    priceMaleSyp: { type: Number, required: true, min: 0, default: 0 },
+    priceFemaleSyp: { type: Number, required: true, min: 0, default: 0 },
     active: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
   },

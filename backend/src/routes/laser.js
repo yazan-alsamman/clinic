@@ -83,6 +83,8 @@ function slugifyArabic(v) {
 }
 
 function optionToDto(row) {
+  const male = Math.max(0, Math.round(Number(row.priceMaleSyp ?? row.priceSyp) || 0))
+  const female = Math.max(0, Math.round(Number(row.priceFemaleSyp ?? row.priceSyp) || 0))
   return {
     id: String(row._id),
     code: row.code,
@@ -90,7 +92,9 @@ function optionToDto(row) {
     groupId: row.groupId,
     groupTitle: row.groupTitle,
     kind: row.kind,
-    priceSyp: Number(row.priceSyp) || 0,
+    priceSyp: Number(row.priceSyp) || female,
+    priceMaleSyp: male,
+    priceFemaleSyp: female,
     active: Boolean(row.active),
     sortOrder: Number(row.sortOrder) || 0,
   }
@@ -98,7 +102,22 @@ function optionToDto(row) {
 
 async function ensureDefaultLaserProcedureOptions() {
   const count = await LaserProcedureOption.estimatedDocumentCount()
-  if (count > 0) return
+  if (count > 0) {
+    await LaserProcedureOption.updateMany(
+      {
+        $or: [{ priceMaleSyp: { $exists: false } }, { priceFemaleSyp: { $exists: false } }],
+      },
+      [
+        {
+          $set: {
+            priceMaleSyp: { $ifNull: ['$priceMaleSyp', { $ifNull: ['$priceSyp', 0] }] },
+            priceFemaleSyp: { $ifNull: ['$priceFemaleSyp', { $ifNull: ['$priceSyp', 0] }] },
+          },
+        },
+      ],
+    )
+    return
+  }
   const rows = defaultProcedureOptions.map(([groupId, kind, name, priceSyp], idx) => ({
     code: `${groupId}-${slugifyArabic(name)}-${idx + 1}`,
     name,
@@ -106,10 +125,53 @@ async function ensureDefaultLaserProcedureOptions() {
     groupTitle: LASER_PROCEDURE_GROUPS[groupId],
     kind,
     priceSyp,
+    priceMaleSyp: priceSyp,
+    priceFemaleSyp: priceSyp,
     active: true,
     sortOrder: idx + 1,
   }))
   await LaserProcedureOption.insertMany(rows, { ordered: false })
+}
+function normalizePatientGender(raw) {
+  const v = String(raw || '').trim()
+  return v === 'male' || v === 'female' ? v : ''
+}
+
+function resolveProcedurePriceForGender(option, patientGender) {
+  const male = Math.max(0, Math.round(Number(option?.priceMaleSyp ?? option?.priceSyp) || 0))
+  const female = Math.max(0, Math.round(Number(option?.priceFemaleSyp ?? option?.priceSyp) || 0))
+  if (patientGender === 'male') return male
+  if (patientGender === 'female') return female
+  return female || male
+}
+
+function parseUniqueStringIds(raw, max = 200) {
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, max)
+}
+
+function parseLaserSessionLineItems(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((row) => ({
+      procedureOptionId: String(row?.procedureOptionId || '').trim(),
+      areaLabel: String(row?.areaLabel || '')
+        .trim()
+        .slice(0, 120),
+      pw: String(row?.pw || '')
+        .trim()
+        .slice(0, 80),
+      pulse: String(row?.pulse || '')
+        .trim()
+        .slice(0, 80),
+      shotCount: String(row?.shotCount || '')
+        .trim()
+        .slice(0, 80),
+      chargeByPulseCount: row?.chargeByPulseCount === true,
+      isAddon: row?.isAddon === true,
+    }))
+    .filter((row) => row.procedureOptionId || row.areaLabel)
+    .slice(0, 120)
 }
 function parsePositiveSypInteger(raw) {
   const n = Math.round(Number(raw))
@@ -276,7 +338,9 @@ laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, 
       .slice(0, 120)
     const groupId = String(body.groupId || '').trim()
     const kind = String(body.kind || 'area').trim() === 'offer' ? 'offer' : 'area'
-    const priceSyp = Number(body.priceSyp)
+    const legacyPriceSyp = Number(body.priceSyp)
+    const priceMaleSyp = Number(body.priceMaleSyp ?? legacyPriceSyp)
+    const priceFemaleSyp = Number(body.priceFemaleSyp ?? legacyPriceSyp)
     const sortOrder = Number(body.sortOrder)
     if (!name) {
       res.status(400).json({ error: 'اسم المنطقة/العرض مطلوب' })
@@ -286,8 +350,13 @@ laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, 
       res.status(400).json({ error: 'القسم غير صالح' })
       return
     }
-    if (!Number.isFinite(priceSyp) || priceSyp < 0) {
-      res.status(400).json({ error: 'السعر بالليرة غير صالح' })
+    if (
+      !Number.isFinite(priceMaleSyp) ||
+      priceMaleSyp < 0 ||
+      !Number.isFinite(priceFemaleSyp) ||
+      priceFemaleSyp < 0
+    ) {
+      res.status(400).json({ error: 'سعر الذكور/الإناث بالليرة غير صالح' })
       return
     }
     const option = await LaserProcedureOption.create({
@@ -296,7 +365,9 @@ laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, 
       groupId,
       groupTitle: LASER_PROCEDURE_GROUPS[groupId],
       kind,
-      priceSyp,
+      priceSyp: Math.round(priceFemaleSyp),
+      priceMaleSyp: Math.round(priceMaleSyp),
+      priceFemaleSyp: Math.round(priceFemaleSyp),
       active: body.active !== false,
       sortOrder: Number.isFinite(sortOrder) ? sortOrder : 999,
     })
@@ -333,13 +404,16 @@ laserRouter.patch('/procedure-options/:id', requireRoles('super_admin'), async (
       option.groupTitle = LASER_PROCEDURE_GROUPS[groupId]
     }
     if (body.kind != null) option.kind = String(body.kind).trim() === 'offer' ? 'offer' : 'area'
-    if (body.priceSyp != null) {
-      const priceSyp = Number(body.priceSyp)
-      if (!Number.isFinite(priceSyp) || priceSyp < 0) {
-        res.status(400).json({ error: 'السعر بالليرة غير صالح' })
+    if (body.priceSyp != null || body.priceMaleSyp != null || body.priceFemaleSyp != null) {
+      const nextMale = Number(body.priceMaleSyp ?? body.priceSyp ?? option.priceMaleSyp ?? option.priceSyp)
+      const nextFemale = Number(body.priceFemaleSyp ?? body.priceSyp ?? option.priceFemaleSyp ?? option.priceSyp)
+      if (!Number.isFinite(nextMale) || nextMale < 0 || !Number.isFinite(nextFemale) || nextFemale < 0) {
+        res.status(400).json({ error: 'سعر الذكور/الإناث بالليرة غير صالح' })
         return
       }
-      option.priceSyp = priceSyp
+      option.priceMaleSyp = Math.round(nextMale)
+      option.priceFemaleSyp = Math.round(nextFemale)
+      option.priceSyp = Math.round(nextFemale)
     }
     if (body.sortOrder != null) {
       const so = Number(body.sortOrder)
@@ -889,20 +963,100 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const packageMatch = findActiveLaserPackage(patient)
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
+    const patientGender = normalizePatientGender(patient.gender)
+
+    const procedureOptionIds = parseUniqueStringIds(body.procedureOptionIds)
+    const addonProcedureOptionIds = parseUniqueStringIds(body.addonProcedureOptionIds).filter(
+      (id) => !procedureOptionIds.includes(id),
+    )
+    const allProcedureOptionIds = [...new Set([...procedureOptionIds, ...addonProcedureOptionIds])]
+    const procedureOptionsById = new Map()
+    if (allProcedureOptionIds.length > 0) {
+      const optionRows = await LaserProcedureOption.find({
+        _id: { $in: allProcedureOptionIds },
+        active: true,
+      }).lean()
+      for (const row of optionRows) procedureOptionsById.set(String(row._id), row)
+      const missing = allProcedureOptionIds.filter((id) => !procedureOptionsById.has(id))
+      if (missing.length > 0) {
+        res.status(400).json({ error: 'بعض المناطق/العروض المحددة غير موجودة أو موقفة' })
+        return
+      }
+    }
+    const selectedMainOptions = procedureOptionIds
+      .map((id) => procedureOptionsById.get(id))
+      .filter(Boolean)
+    const selectedAddonOptions = addonProcedureOptionIds
+      .map((id) => procedureOptionsById.get(id))
+      .filter(Boolean)
+    const rawLineItems = parseLaserSessionLineItems(body.laserLineItems)
+    const settings = await getOrCreateLaserSettings()
+    const ppuSyp = Math.max(0, Math.round(Number(settings.pricePerPulseSyp) || 0))
+    const normalizedLineItems = rawLineItems.map((row) => {
+      const option =
+        row.procedureOptionId && procedureOptionsById.has(row.procedureOptionId)
+          ? procedureOptionsById.get(row.procedureOptionId)
+          : null
+      const resolvedAreaLabel = row.areaLabel || String(option?.name || '').trim().slice(0, 120)
+      const areaPriceSyp = option ? resolveProcedurePriceForGender(option, patientGender) : 0
+      const shots = parseShotCount(row.shotCount)
+      let lineCostSyp = areaPriceSyp
+      if (row.chargeByPulseCount) {
+        if (!(ppuSyp > 0)) {
+          lineCostSyp = 0
+        } else if (shots > 0) {
+          lineCostSyp = ppuSyp * shots
+        } else {
+          lineCostSyp = 0
+        }
+      }
+      return {
+        ...row,
+        areaLabel: resolvedAreaLabel,
+        lineCostSyp: Math.max(0, Math.round(lineCostSyp)),
+      }
+    })
 
     /** جلسة باكج: المبلغ المطلوب = مناطق خارج الباكج فقط (ليرة) */
     let packageAddOnGrossSyp = 0
     if (isPackageSession) {
-      packageAddOnGrossSyp = parseNonNegativeSypInteger(body.additionalCostSyp)
+      if (normalizedLineItems.length > 0) {
+        packageAddOnGrossSyp = normalizedLineItems
+          .filter((row) => row.isAddon)
+          .reduce((sum, row) => sum + (Number(row.lineCostSyp) || 0), 0)
+      } else {
+        packageAddOnGrossSyp =
+          selectedAddonOptions.length > 0
+            ? selectedAddonOptions.reduce(
+                (sum, row) => sum + resolveProcedurePriceForGender(row, patientGender),
+                0,
+              )
+            : parseNonNegativeSypInteger(body.additionalCostSyp)
+      }
     }
 
     const chargeByPulseCount = !isPackageSession && Boolean(body.chargeByPulseCount)
     let costGrossSyp = 0
     if (isPackageSession) {
       costGrossSyp = packageAddOnGrossSyp
+    } else if (normalizedLineItems.length > 0) {
+      const pulseRows = normalizedLineItems.filter((row) => row.chargeByPulseCount)
+      if (pulseRows.length > 0 && !(ppuSyp > 0)) {
+        res.status(400).json({
+          error:
+            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض.',
+        })
+        return
+      }
+      const invalidPulseRow = pulseRows.find((row) => !(parseShotCount(row.shotCount) > 0))
+      if (invalidPulseRow) {
+        res.status(400).json({
+          error: `أدخل عدد ضربات أكبر من صفر للسطر: ${invalidPulseRow.areaLabel || 'بدون اسم'}.`,
+        })
+        return
+      }
+      costGrossSyp = normalizedLineItems.reduce((sum, row) => sum + (Number(row.lineCostSyp) || 0), 0)
     } else if (chargeByPulseCount) {
-      const settings = await getOrCreateLaserSettings()
-      const ppuSyp = Math.max(0, Math.round(Number(settings.pricePerPulseSyp) || 0))
       const shots = parseShotCount(body.shotCount)
       if (!(shots > 0)) {
         res.status(400).json({
@@ -919,7 +1073,13 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       }
       costGrossSyp = ppuSyp * shots
     } else {
-      costGrossSyp = parsePositiveSypInteger(body.costSyp)
+      costGrossSyp =
+        selectedMainOptions.length > 0
+          ? selectedMainOptions.reduce(
+              (sum, row) => sum + resolveProcedurePriceForGender(row, patientGender),
+              0,
+            )
+          : parsePositiveSypInteger(body.costSyp)
     }
     if (!isPackageSession && !(costGrossSyp > 0)) {
       res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالليرة (قيمة أكبر من صفر)' })
@@ -935,22 +1095,36 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
 
     const areaIds = Array.isArray(body.areaIds) ? body.areaIds.map(String) : []
     const manualRaw = Array.isArray(body.manualAreaLabels) ? body.manualAreaLabels : []
-    const manualAreaLabels = [
-      ...new Set(
-        manualRaw
-          .map((x) => String(x ?? '').trim().slice(0, 120))
-          .filter(Boolean),
-      ),
-    ].slice(0, 20)
+    const manualAreaLabels =
+      selectedMainOptions.length > 0
+        ? selectedMainOptions.map((row) => String(row?.name || '').trim()).filter(Boolean).slice(0, 20)
+        : [
+            ...new Set(
+              manualRaw
+                .map((x) => String(x ?? '').trim().slice(0, 120))
+                .filter(Boolean),
+            ),
+          ].slice(0, 20)
 
     const addonRaw = Array.isArray(body.addonManualLabels) ? body.addonManualLabels : []
-    const addonManualLabels = [
-      ...new Set(
-        addonRaw
-          .map((x) => String(x ?? '').trim().slice(0, 120))
-          .filter(Boolean),
-      ),
-    ].slice(0, 20)
+    const addonManualLabels =
+      selectedAddonOptions.length > 0
+        ? selectedAddonOptions.map((row) => String(row?.name || '').trim()).filter(Boolean).slice(0, 20)
+        : [
+            ...new Set(
+              addonRaw
+                .map((x) => String(x ?? '').trim().slice(0, 120))
+                .filter(Boolean),
+            ),
+          ].slice(0, 20)
+    const linesPw = normalizedLineItems.map((row) => row.pw).filter(Boolean)
+    const linesPulse = normalizedLineItems.map((row) => row.pulse).filter(Boolean)
+    const linesShots = normalizedLineItems.map((row) => row.shotCount).filter(Boolean)
+    const mergedPw = linesPw.length > 0 ? linesPw.join(' | ').slice(0, 500) : String(body.pw ?? '')
+    const mergedPulse =
+      linesPulse.length > 0 ? linesPulse.join(' | ').slice(0, 500) : String(body.pulse ?? '')
+    const mergedShotCount =
+      linesShots.length > 0 ? linesShots.join(' | ').slice(0, 500) : String(body.shotCount ?? '')
 
     const laserType = body.laserType || 'Mix'
     const businessDate = String(body.businessDate || '').trim() || req.businessDate || todayBusinessDate()
@@ -1020,13 +1194,17 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         operatorUserId: req.user._id,
         room: String(body.room ?? '1'),
         laserType,
-        pw: body.pw ?? '',
-        pulse: body.pulse ?? '',
-        shotCount: body.shotCount ?? '',
-        chargeByPulseCount: Boolean(chargeByPulseCount),
+        pw: mergedPw,
+        pulse: mergedPulse,
+        shotCount: mergedShotCount,
+        chargeByPulseCount:
+          normalizedLineItems.length > 0
+            ? normalizedLineItems.some((row) => row.chargeByPulseCount)
+            : Boolean(chargeByPulseCount),
         notes: body.notes ?? '',
         areaIds,
         manualAreaLabels,
+        lineItems: normalizedLineItems,
         status: isPackageSession ? 'completed_pending_collection' : body.status || 'scheduled',
         costSyp: costGrossSyp,
         discountPercent,

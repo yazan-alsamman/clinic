@@ -18,6 +18,19 @@ const laserSessionSchema = new mongoose.Schema(
     areaIds: [{ type: String }],
     /** مناطق مذكورة يدوياً (نص حر) */
     manualAreaLabels: [{ type: String, trim: true }],
+    /** تفاصيل كل سطر منطقة/عرض مدخل من أخصائي الليزر */
+    lineItems: [
+      {
+        procedureOptionId: { type: String, default: '' },
+        areaLabel: { type: String, default: '' },
+        pw: { type: String, default: '' },
+        pulse: { type: String, default: '' },
+        shotCount: { type: String, default: '' },
+        chargeByPulseCount: { type: Boolean, default: false },
+        isAddon: { type: Boolean, default: false },
+        lineCostSyp: { type: Number, default: 0 },
+      },
+    ],
     costSyp: { type: Number, default: 0 },
     discountPercent: { type: Number, default: 0 },
     sessionTypeLabel: { type: String, default: '' },

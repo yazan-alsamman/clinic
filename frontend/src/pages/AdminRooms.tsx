@@ -20,6 +20,8 @@ type LaserProcedureItem = {
   groupTitle: string
   kind: 'area' | 'offer'
   priceSyp: number
+  priceMaleSyp: number
+  priceFemaleSyp: number
   active: boolean
   sortOrder: number
 }
@@ -49,13 +51,15 @@ export function AdminRooms() {
   const [newName, setNewName] = useState('')
   const [newGroup, setNewGroup] = useState('face')
   const [newKind, setNewKind] = useState<'area' | 'offer'>('area')
-  const [newPrice, setNewPrice] = useState('55000')
+  const [newPriceMale, setNewPriceMale] = useState('55000')
+  const [newPriceFemale, setNewPriceFemale] = useState('55000')
   const [newSortOrder, setNewSortOrder] = useState('999')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editGroup, setEditGroup] = useState('face')
   const [editKind, setEditKind] = useState<'area' | 'offer'>('area')
-  const [editPrice, setEditPrice] = useState('')
+  const [editPriceMale, setEditPriceMale] = useState('')
+  const [editPriceFemale, setEditPriceFemale] = useState('')
   const [editSortOrder, setEditSortOrder] = useState('999')
   const [pulsePriceSyp, setPulsePriceSyp] = useState('0')
   const [pulsePriceSaving, setPulsePriceSaving] = useState(false)
@@ -317,7 +321,18 @@ export function AdminRooms() {
             <option value="area">منطقة</option>
             <option value="offer">عرض</option>
           </select>
-          <input className="input" placeholder="السعر ل.س" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} />
+          <input
+            className="input"
+            placeholder="سعر الذكور ل.س"
+            value={newPriceMale}
+            onChange={(e) => setNewPriceMale(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="سعر الإناث ل.س"
+            value={newPriceFemale}
+            onChange={(e) => setNewPriceFemale(e.target.value)}
+          />
           <input className="input" placeholder="الترتيب" value={newSortOrder} onChange={(e) => setNewSortOrder(e.target.value)} />
           <button
             type="button"
@@ -329,12 +344,14 @@ export function AdminRooms() {
                   name: newName,
                   groupId: newGroup,
                   kind: newKind,
-                  priceSyp: Number(newPrice) || 0,
+                  priceMaleSyp: Number(newPriceMale) || 0,
+                  priceFemaleSyp: Number(newPriceFemale) || 0,
                   sortOrder: Number(newSortOrder) || 999,
                 }),
               })
               setNewName('')
-              setNewPrice('55000')
+              setNewPriceMale('55000')
+              setNewPriceFemale('55000')
               setNewSortOrder('999')
               await loadProcedureOptions()
             }}
@@ -355,7 +372,8 @@ export function AdminRooms() {
                     <tr>
                       <th>الاسم</th>
                       <th>النوع</th>
-                      <th>السعر ل.س</th>
+                      <th>سعر الذكور</th>
+                      <th>سعر الإناث</th>
                       <th>الحالة</th>
                       <th>إجراء</th>
                     </tr>
@@ -365,7 +383,8 @@ export function AdminRooms() {
                       <tr key={item.id}>
                         <td>{item.name}</td>
                         <td>{item.kind === 'offer' ? 'عرض' : 'منطقة'}</td>
-                        <td>{Number(item.priceSyp || 0).toLocaleString('en-US')}</td>
+                        <td>{Number(item.priceMaleSyp ?? item.priceSyp ?? 0).toLocaleString('en-US')}</td>
+                        <td>{Number(item.priceFemaleSyp ?? item.priceSyp ?? 0).toLocaleString('en-US')}</td>
                         <td>{item.active ? 'مفعل' : 'موقوف'}</td>
                         <td style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                           <button
@@ -376,7 +395,8 @@ export function AdminRooms() {
                               setEditName(item.name)
                               setEditGroup(item.groupId)
                               setEditKind(item.kind)
-                              setEditPrice(String(item.priceSyp))
+                              setEditPriceMale(String(item.priceMaleSyp ?? item.priceSyp ?? 0))
+                              setEditPriceFemale(String(item.priceFemaleSyp ?? item.priceSyp ?? 0))
                               setEditSortOrder(String(item.sortOrder || 999))
                             }}
                           >
@@ -433,7 +453,18 @@ export function AdminRooms() {
                 <option value="area">منطقة</option>
                 <option value="offer">عرض</option>
               </select>
-              <input className="input" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+              <input
+                className="input"
+                placeholder="سعر الذكور"
+                value={editPriceMale}
+                onChange={(e) => setEditPriceMale(e.target.value)}
+              />
+              <input
+                className="input"
+                placeholder="سعر الإناث"
+                value={editPriceFemale}
+                onChange={(e) => setEditPriceFemale(e.target.value)}
+              />
               <input className="input" value={editSortOrder} onChange={(e) => setEditSortOrder(e.target.value)} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.9rem' }}>
@@ -450,7 +481,8 @@ export function AdminRooms() {
                       name: editName,
                       groupId: editGroup,
                       kind: editKind,
-                      priceSyp: Number(editPrice) || 0,
+                      priceMaleSyp: Number(editPriceMale) || 0,
+                      priceFemaleSyp: Number(editPriceFemale) || 0,
                       sortOrder: Number(editSortOrder) || 999,
                     }),
                   })
