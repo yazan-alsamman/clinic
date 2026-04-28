@@ -55,6 +55,8 @@ type LaserProcedureItem = {
   groupTitle: string
   kind: 'area' | 'offer'
   priceSyp: number
+  priceMaleSyp?: number
+  priceFemaleSyp?: number
   active: boolean
   sortOrder: number
 }
@@ -74,6 +76,23 @@ function toHm(min: number) {
   const h = Math.floor(min / 60)
   const m = min % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/** عرض الوقت بصيغة 12 ساعة بدون AM/PM (مثال: 13:00 => 1:00) */
+function toDisplay12h(hm: string) {
+  const norm = normalizeTime(hm)
+  if (!norm) return hm
+  const [hh, mm] = norm.split(':').map(Number)
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return hm
+  const h12 = ((hh + 11) % 12) + 1
+  return `${h12}:${String(mm).padStart(2, '0')}`
+}
+
+function rangeToDisplay12h(rangeText: string) {
+  if (!rangeText || !rangeText.includes('—')) return rangeText
+  const parts = rangeText.split('—').map((x) => x.trim())
+  if (parts.length !== 2) return rangeText
+  return `${toDisplay12h(parts[0])} — ${toDisplay12h(parts[1])}`
 }
 
 /** دمج فترات [بداية،نهاية) المتداخلة أو المتلامسة حتى لا تُحسب كل شريحة فرعية كنقطة نهاية منفصلة */
@@ -136,6 +155,14 @@ function patientDebtCreditSyp(p: Patient) {
 
 function fmtSypAmount(n: number) {
   return `${(Number(n) || 0).toLocaleString('ar-SY')} ل.س`
+}
+
+function resolveLaserItemPriceByGender(item: LaserProcedureItem, gender: '' | 'male' | 'female') {
+  const male = Math.max(0, Math.round(Number(item.priceMaleSyp ?? item.priceSyp) || 0))
+  const female = Math.max(0, Math.round(Number(item.priceFemaleSyp ?? item.priceSyp) || 0))
+  if (gender === 'male') return male
+  if (gender === 'female') return female
+  return female || male
 }
 
 /** تنبيه ذمة/رصيد — يُعرض أعلى نافذة الحجز ليبقى ظاهراً عند التمرير */
@@ -205,6 +232,7 @@ export function ReceptionAppointmentPage() {
   const [patientSearchLoading, setPatientSearchLoading] = useState(false)
   const [picked, setPicked] = useState<Patient | null>(null)
   const [declinedNewPatientForName, setDeclinedNewPatientForName] = useState<string | null>(null)
+  const [newPatientGenderIntent, setNewPatientGenderIntent] = useState<'' | 'male' | 'female'>('')
   const [creatingPatient, setCreatingPatient] = useState(false)
 
   const [saving, setSaving] = useState(false)
@@ -478,9 +506,16 @@ export function ReceptionAppointmentPage() {
     [selectedLaserItemIds, laserItemById],
   )
 
+  const selectedGenderForLaserPricing: '' | 'male' | 'female' =
+    picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderIntent
+
   const selectedLaserTotalSyp = useMemo(
-    () => selectedLaserItems.reduce((sum, item) => sum + (Number(item.priceSyp) || 0), 0),
-    [selectedLaserItems],
+    () =>
+      selectedLaserItems.reduce(
+        (sum, item) => sum + resolveLaserItemPriceByGender(item, selectedGenderForLaserPricing),
+        0,
+      ),
+    [selectedLaserItems, selectedGenderForLaserPricing],
   )
 
   /** مزامنة الوقت مع المدة والجدول الفعلي — لا تعتمد على قائمة العرض فقط (تجنّب رفض 5/15 دقيقة ومسودة الحجز) */
@@ -518,15 +553,16 @@ export function ReceptionAppointmentPage() {
     setSelectedLaserItemIds((prev) => prev.filter((id) => laserItemById.has(id)))
   }, [laserItemById])
 
-  async function createNewPatientAndSelect() {
+  async function createNewPatientAndSelect(gender: 'male' | 'female') {
     const name = patientQ.trim()
     if (name.length < 2) return
     setFormErr('')
+    setNewPatientGenderIntent(gender)
     setCreatingPatient(true)
     try {
       const data = await api<{ patient: Patient }>('/api/patients', {
         method: 'POST',
-        body: JSON.stringify({ name, fileNumber: tempFileNumber() }),
+        body: JSON.stringify({ name, fileNumber: tempFileNumber(), gender }),
       })
       setPicked(data.patient)
       setPatientHits([])
@@ -763,7 +799,7 @@ export function ReceptionAppointmentPage() {
                       <tbody>
                         {rows.map((r) => (
                           <tr key={`${channel}-${r.time}-${r.status}`}>
-                            <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{r.time}</td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{toDisplay12h(r.time)}</td>
                             <td>
                               {r.status === 'busy' ? (
                                 <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
@@ -776,7 +812,7 @@ export function ReceptionAppointmentPage() {
                               )}
                             </td>
                             <td>{r.status === 'busy' ? r.patientName : '—'}</td>
-                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.range}</td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>{rangeToDisplay12h(r.range)}</td>
                             <td>
                               {r.status === 'free' ? (
                                 <button
@@ -828,7 +864,7 @@ export function ReceptionAppointmentPage() {
               <tbody>
                 {selectedChannelRows.map((r) => (
                   <tr key={`${selectedChannel}-${r.time}-${r.status}`}>
-                    <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{r.time}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{toDisplay12h(r.time)}</td>
                     <td>
                       {r.status === 'busy' ? (
                         <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
@@ -841,7 +877,7 @@ export function ReceptionAppointmentPage() {
                       )}
                     </td>
                     <td>{r.status === 'busy' ? r.patientName : '—'}</td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.range}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{rangeToDisplay12h(r.range)}</td>
                     <td>
                       {r.status === 'free' ? (
                         <button
@@ -900,7 +936,7 @@ export function ReceptionAppointmentPage() {
               {selectedService === 'laser' ? ` (${LASER_ROOM_TITLES[selectedChannel] || selectedChannel})` : ''}
             </h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.25rem', fontSize: '0.88rem' }}>
-              الموعد المختار: <strong>{appointmentTime}</strong> — المدة: <strong>{bookingDurationMinutes} دقيقة</strong> — التاريخ:{' '}
+              الموعد المختار: <strong>{toDisplay12h(appointmentTime)}</strong> — المدة: <strong>{bookingDurationMinutes} دقيقة</strong> — التاريخ:{' '}
               <strong>{businessDate}</strong>
             </p>
             {picked ? <BookingFinancialStickyAlert picked={picked} /> : null}
@@ -934,6 +970,7 @@ export function ReceptionAppointmentPage() {
                 onChange={(e) => {
                   setPatientQ(e.target.value)
                   if (picked) setPicked(null)
+                  if (declinedNewPatientForName) setNewPatientGenderIntent('')
                 }}
               />
               {picked ? (
@@ -959,6 +996,9 @@ export function ReceptionAppointmentPage() {
                           setPicked(p)
                           setPatientQ(p.name)
                           setPatientHits([])
+                          setNewPatientGenderIntent(
+                            p.gender === 'male' || p.gender === 'female' ? p.gender : '',
+                          )
                         }}
                       >
                         {p.name}
@@ -987,19 +1027,35 @@ export function ReceptionAppointmentPage() {
                       type="button"
                       className="btn btn-primary"
                       disabled={creatingPatient || assignBlocked}
-                      onClick={() => void createNewPatientAndSelect()}
+                      onClick={() => void createNewPatientAndSelect('male')}
                     >
-                      {creatingPatient ? 'جاري الإنشاء…' : 'نعم'}
+                      {creatingPatient ? 'جاري الإنشاء…' : 'نعم، المريض ذكر'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={creatingPatient || assignBlocked}
+                      onClick={() => void createNewPatientAndSelect('female')}
+                    >
+                      {creatingPatient ? 'جاري الإنشاء…' : 'نعم، المريضة أنثى'}
                     </button>
                     <button
                       type="button"
                       className="btn btn-secondary"
                       disabled={creatingPatient}
-                      onClick={() => setDeclinedNewPatientForName(patientQ.trim())}
+                      onClick={() => {
+                        setDeclinedNewPatientForName(patientQ.trim())
+                        setNewPatientGenderIntent('')
+                      }}
                     >
                       لا
                     </button>
                   </div>
+                  {newPatientGenderIntent ? (
+                    <p style={{ margin: '0.6rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                      تم اختيار الجنس مؤقتاً للتسعير: <strong>{newPatientGenderIntent === 'male' ? 'ذكر' : 'أنثى'}</strong>
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1042,7 +1098,12 @@ export function ReceptionAppointmentPage() {
                                       )
                                     }
                                   >
-                                    {item.name} — {item.priceSyp.toLocaleString('en-US')} ل.س
+                                    {item.name} —{' '}
+                                    {resolveLaserItemPriceByGender(
+                                      item,
+                                      selectedGenderForLaserPricing,
+                                    ).toLocaleString('en-US')}{' '}
+                                    ل.س
                                   </button>
                                 )
                               })}
@@ -1054,6 +1115,9 @@ export function ReceptionAppointmentPage() {
                         تم اختيار <strong>{selectedLaserItems.length}</strong> منطقة/عرض
                         {selectedLaserItems.length > 0
                           ? ` — المجموع التقريبي: ${selectedLaserTotalSyp.toLocaleString('en-US')} ل.س`
+                          : ''}
+                        {selectedGenderForLaserPricing
+                          ? ` — بحسب ${selectedGenderForLaserPricing === 'male' ? 'سعر الذكور' : 'سعر الإناث'}`
                           : ''}
                       </p>
                     </>
