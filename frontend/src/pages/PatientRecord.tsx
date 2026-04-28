@@ -950,7 +950,6 @@ export function PatientRecord() {
           .filter((row) => row.procedureOptionId)
           .map((row) => [row.procedureOptionId, row] as const),
       )
-      const customRows = prev.filter((row) => !row.procedureOptionId)
       const nextMappedRows = combinedLaserSaveItems.map((item) =>
         createLaserLineRow({
           ...(mappedPrev.get(item.id) || {}),
@@ -959,7 +958,7 @@ export function PatientRecord() {
           isAddon: selectedLaserAddonItemIds.includes(item.id),
         }),
       )
-      return [...nextMappedRows, ...customRows]
+      return nextMappedRows
     })
   }, [combinedLaserSaveItems, selectedLaserAddonItemIds])
 
@@ -2976,43 +2975,24 @@ export function PatientRecord() {
                       </tr>
                     </thead>
                     <tbody>
-                      {laserLineItemsWithPricing.map((row, idx) => (
+                      {laserLineItemsWithPricing.map((row) => (
                         <tr key={row.rowId}>
                         <td>
-                          {idx === 0 ? (
-                            <select
-                              className="select"
-                              value={laserType}
-                              onChange={(e) => setLaserType(e.target.value as (typeof laserTypes)[number])}
-                              style={{ maxWidth: 220 }}
-                            >
-                              {laserTypes.map((lt) => (
-                                <option key={lt} value={lt}>
-                                  {lt}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)' }}>{laserType}</span>
-                          )}
+                          <select
+                            className="select"
+                            value={laserType}
+                            onChange={(e) => setLaserType(e.target.value as (typeof laserTypes)[number])}
+                            style={{ maxWidth: 220 }}
+                          >
+                            {laserTypes.map((lt) => (
+                              <option key={lt} value={lt}>
+                                {lt}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                         <td>
-                          {row.procedureOptionId ? (
-                            <span style={{ fontWeight: 600 }}>{row.areaLabel || '—'}</span>
-                          ) : (
-                            <input
-                              className="input"
-                              type="text"
-                              placeholder="اسم منطقة مخصص"
-                              value={row.areaLabel}
-                              onChange={(e) =>
-                                setLaserLineItems((prev) =>
-                                  prev.map((x) => (x.rowId === row.rowId ? { ...x, areaLabel: e.target.value } : x)),
-                                )
-                              }
-                              style={{ minWidth: 180 }}
-                            />
-                          )}
+                          <span style={{ fontWeight: 600 }}>{row.areaLabel || '—'}</span>
                           {row.isAddon ? (
                             <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', color: 'var(--amber)' }}>
                               خارج الباكج
@@ -3112,7 +3092,7 @@ export function PatientRecord() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => setLaserLineItems((prev) => [...prev, createLaserLineRow({ isAddon: Boolean(activeLaserPackage) })])}
+                    onClick={() => setLaserAreaModalOpen(true)}
                   >
                     + إضافة سطر
                   </button>
