@@ -91,18 +91,15 @@ export function ReceptionCashMovementPage() {
   const saveDraft = useCallback(
     async (kind: MovementKind, rowId: string) => {
       const setDrafts = kind === 'expense' ? setExpenseDrafts : setReceiptDrafts
-      let payload: { reason: string; amountSyp: number; amountUsd: number } | null = null
-      setDrafts((prev) =>
-        prev.map((r) => {
-          if (r.rowId !== rowId) return r
-          const reason = r.reason.trim()
-          const amountSyp = Math.round(Number(r.amountSyp) || 0)
-          const amountUsd = Math.round((Number(r.amountUsd) || 0) * 100) / 100
-          payload = { reason, amountSyp, amountUsd }
-          return { ...r, saving: true }
-        }),
-      )
-      if (!payload) return
+      const sourceDrafts = kind === 'expense' ? expenseDrafts : receiptDrafts
+      const row = sourceDrafts.find((r) => r.rowId === rowId)
+      if (!row) return
+      const payload = {
+        reason: row.reason.trim(),
+        amountSyp: Math.round(Number(row.amountSyp) || 0),
+        amountUsd: Math.round((Number(row.amountUsd) || 0) * 100) / 100,
+      }
+      setDrafts((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, saving: true } : r)))
       if (!payload.reason) {
         setErr('يرجى إدخال السبب قبل الحفظ')
         setDrafts((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, saving: false } : r)))
@@ -134,7 +131,7 @@ export function ReceptionCashMovementPage() {
         setDrafts((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, saving: false } : r)))
       }
     },
-    [load],
+    [expenseDrafts, load, receiptDrafts],
   )
 
   const totals = useMemo(() => {
