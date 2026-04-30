@@ -20,7 +20,7 @@ export const scheduleRouter = Router()
 
 scheduleRouter.use(authMiddleware)
 
-const providerRoles = ['laser', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'dental_branch']
+const providerRoles = ['laser', 'dermatology', 'dermatology_assistant_manager', 'dental_branch']
 const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'other']
 const DERMATOLOGY_PROVIDER_ROLES = ['dermatology', 'dermatology_manager', 'dermatology_assistant_manager']
 const DEFAULT_DERMATOLOGY_BOARDS = [
@@ -181,6 +181,7 @@ scheduleRouter.get(
   async (req, res) => {
     try {
       const role = req.user.role
+      const isDermatologyManager = role === 'dermatology_manager'
       const isProvider = providerRoles.includes(role)
 
       let from
@@ -213,6 +214,9 @@ scheduleRouter.get(
       const filter = {
         patientId: { $ne: null },
         businessDate: { $gte: from, $lte: to },
+      }
+      if (isDermatologyManager) {
+        filter.serviceType = 'dermatology'
       }
       let scopedToProvider = false
       if (isProvider) {
@@ -252,7 +256,7 @@ scheduleRouter.get(
   },
 )
 
-scheduleRouter.use(requireRoles('super_admin', 'reception'))
+scheduleRouter.use(requireRoles('super_admin', 'reception', 'dermatology_manager'))
 
 scheduleRouter.get('/dermatology-boards', async (_req, res) => {
   try {
@@ -445,10 +449,14 @@ function slotToDto(s) {
 scheduleRouter.get('/', async (req, res) => {
   try {
     const businessDate = String(req.query.date || '').trim() || todayBusinessDate()
-    const slots = await ScheduleSlot.find({
+    const query = {
       businessDate,
       patientId: { $ne: null },
-    })
+    }
+    if (req.user.role === 'dermatology_manager') {
+      query.serviceType = 'dermatology'
+    }
+    const slots = await ScheduleSlot.find(query)
       .sort({ time: 1, providerName: 1 })
       .lean()
     res.json({ businessDate, slots: slots.map(slotToDto) })
@@ -466,6 +474,10 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
     const endTime = normalizeHm(body.endTime)
     const providerName = String(body.providerName || '').trim()
     const serviceType = normalizeServiceType(body.serviceType)
+    if (req.user.role === 'dermatology_manager' && serviceType !== 'dermatology') {
+      res.status(403).json({ error: 'رئيس قسم الجلدية يمكنه حجز مواعيد الجلدية فقط' })
+      return
+    }
     const procedureType = String(body.procedureType || '')
       .trim()
       .slice(0, 200)
@@ -591,6 +603,10 @@ scheduleRouter.get('/arrived', async (req, res) => {
 
 scheduleRouter.post('/arrive/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
+    if (req.user.role === 'dermatology_manager') {
+      res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء' })
+      return
+    }
     const slot = await ScheduleSlot.findById(req.params.id)
     if (!slot || !slot.patientId) {
       res.status(404).json({ error: 'الموعد غير موجود' })
@@ -616,6 +632,10 @@ scheduleRouter.post('/arrive/:id', loadBusinessDay, requireActiveDay, async (req
 
 scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
+    if (req.user.role === 'dermatology_manager') {
+      res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء' })
+      return
+    }
     const slot = await ScheduleSlot.findById(req.params.id)
     if (!slot || !slot.patientId) {
       res.status(404).json({ error: 'الموعد غير موجود' })
@@ -682,6 +702,10 @@ scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async
 
 scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
+    if (req.user.role === 'dermatology_manager') {
+      res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء' })
+      return
+    }
     const slot = await ScheduleSlot.findById(req.params.id)
     if (!slot || !slot.patientId) {
       res.status(404).json({ error: 'الموعد غير موجود' })
@@ -734,6 +758,10 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
 
 scheduleRouter.delete('/cancel/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
+    if (req.user.role === 'dermatology_manager') {
+      res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء' })
+      return
+    }
     const slot = await ScheduleSlot.findById(req.params.id).lean()
     if (!slot) {
       res.status(404).json({ error: 'الموعد غير موجود' })
@@ -763,6 +791,10 @@ scheduleRouter.delete('/cancel/:id', loadBusinessDay, requireActiveDay, async (r
 
 scheduleRouter.post('/clear', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
+    if (req.user.role === 'dermatology_manager') {
+      res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء' })
+      return
+    }
     const body = req.body ?? {}
     const businessDate = String(body.businessDate || '').trim() || todayBusinessDate()
     const time = normalizeHm(body.time)

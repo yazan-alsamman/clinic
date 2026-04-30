@@ -53,6 +53,7 @@ const roleNav: Record<Role, NavKey[]> = {
     'dashboard',
     'patients',
     'appointments_booked',
+    'reception_appointment',
     'dermatology_create_session',
     'dermatology',
     'inventory',

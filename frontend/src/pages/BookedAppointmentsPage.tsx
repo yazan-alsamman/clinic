@@ -57,7 +57,7 @@ const canOpenPage = (role: string | undefined) =>
   role === 'dental_branch'
 
 function fullScheduleRoles(role: string | undefined) {
-  return role === 'super_admin' || role === 'reception'
+  return role === 'super_admin' || role === 'reception' || role === 'dermatology_manager'
 }
 
 function parseRoomNumber(slot: SlotRow) {

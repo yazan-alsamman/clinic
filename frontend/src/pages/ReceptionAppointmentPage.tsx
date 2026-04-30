@@ -231,7 +231,8 @@ function BookingFinancialStickyAlert({ picked }: { picked: Patient }) {
 export function ReceptionAppointmentPage() {
   const { user } = useAuth()
   const { dayActive } = useClinic()
-  const canUse = user?.role === 'super_admin' || user?.role === 'reception'
+  const isDermatologyManager = user?.role === 'dermatology_manager'
+  const canUse = user?.role === 'super_admin' || user?.role === 'reception' || isDermatologyManager
   const assignBlocked = user?.role === 'reception' && !dayActive
 
   const [businessDate, setBusinessDate] = useState(todayYmd)
@@ -239,7 +240,9 @@ export function ReceptionAppointmentPage() {
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [slotsErr, setSlotsErr] = useState('')
 
-  const [selectedService, setSelectedService] = useState<ServiceValue>('laser')
+  const [selectedService, setSelectedService] = useState<ServiceValue>(
+    isDermatologyManager ? 'dermatology' : 'laser',
+  )
   const [selectedChannel, setSelectedChannel] = useState<string>(SERVICE_CHANNELS.laser[0])
   const [dermatologyBoards, setDermatologyBoards] = useState<DermatologyBoard[]>([])
   const [appointmentTime, setAppointmentTime] = useState('09:00')
@@ -344,6 +347,17 @@ export function ReceptionAppointmentPage() {
     }),
     [dermatologyBoards],
   )
+
+  const availableServiceOptions = useMemo(
+    () => (isDermatologyManager ? SERVICE_OPTIONS.filter((x) => x.value === 'dermatology') : SERVICE_OPTIONS),
+    [isDermatologyManager],
+  )
+
+  useEffect(() => {
+    if (isDermatologyManager && selectedService !== 'dermatology') {
+      setSelectedService('dermatology')
+    }
+  }, [isDermatologyManager, selectedService])
 
   useEffect(() => {
     const channels = channelsByService[selectedService]
@@ -809,9 +823,10 @@ export function ReceptionAppointmentPage() {
               id="appt-prov"
               className="select"
               value={selectedService}
+              disabled={isDermatologyManager}
               onChange={(e) => setSelectedService(e.target.value as ServiceValue)}
             >
-              {SERVICE_OPTIONS.map((svc) => (
+              {availableServiceOptions.map((svc) => (
                 <option key={svc.value} value={svc.value}>
                   {svc.label}
                 </option>
