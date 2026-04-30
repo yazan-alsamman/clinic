@@ -33,6 +33,17 @@ const LASER_ROOM_TITLES: Record<string, string> = {
   'Laser Room 2': 'Room 2',
 }
 
+const DERMATOLOGY_PROCEDURE_OPTIONS = [
+  'فيلر',
+  'بوتوكس',
+  'استشارة',
+  'ابرة نضارة',
+  'تقشير',
+  'ديرما',
+  'حقن شعر',
+  'إزالة زوائد',
+] as const
+
 type SlotRow = {
   id: string
   businessDate: string
@@ -582,6 +593,11 @@ export function ReceptionAppointmentPage() {
     })
     if (next && normalizeTime(next) !== norm) setAppointmentTime(next)
   }, [selectedChannel, appointmentTime, bookingDurationMinutes, slots, availableStartTimesForChannel])
+
+  const nonLaserProcedureOptions = useMemo(() => {
+    if (selectedService === 'dermatology') return DERMATOLOGY_PROCEDURE_OPTIONS
+    return APPOINTMENT_PROCEDURE_OPTIONS
+  }, [selectedService])
 
   useEffect(() => {
     setSelectedLaserItemIds((prev) => prev.filter((id) => laserItemById.has(id)))
@@ -1170,7 +1186,7 @@ export function ReceptionAppointmentPage() {
                   onChange={(e) => setProcedureType(e.target.value)}
                 >
                   <option value="">— اختر نوع الإجراء —</option>
-                  {APPOINTMENT_PROCEDURE_OPTIONS.map((x) => (
+                  {nonLaserProcedureOptions.map((x) => (
                     <option key={x} value={x}>
                       {x}
                     </option>

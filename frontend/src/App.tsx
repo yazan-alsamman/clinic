@@ -38,6 +38,10 @@ const ReceptionCashMovementPage = lazyPage(() => import('./pages/ReceptionCashMo
 const ReceptionDailyInventoryPage = lazyPage(() => import('./pages/ReceptionDailyInventoryPage'), 'ReceptionDailyInventoryPage')
 const AccountPassword           = lazyPage(() => import('./pages/AccountPassword'), 'AccountPassword')
 const LaserCreateSessionPage    = lazyPage(() => import('./pages/LaserCreateSessionPage'), 'LaserCreateSessionPage')
+const DermatologyCreateSessionPage = lazyPage(
+  () => import('./pages/DermatologyCreateSessionPage'),
+  'DermatologyCreateSessionPage',
+)
 
 const PatientPortalDashboard    = lazyPage(() => import('./pages/patient-portal/PatientPortalDashboard'), 'PatientPortalDashboard')
 const PatientPortalProfile      = lazyPage(() => import('./pages/patient-portal/PatientPortalProfile'), 'PatientPortalProfile')
@@ -87,6 +91,7 @@ export default function App() {
                 <Route path="/patients/:id" element={<PatientRecord />} />
                 <Route path="/appointments" element={<BookedAppointmentsPage />} />
                 <Route path="/laser/create-session" element={<LaserCreateSessionPage />} />
+                <Route path="/dermatology/create-session" element={<DermatologyCreateSessionPage />} />
                 <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
                 <Route path="/dermatology" element={<DermatologyToday />} />
                 <Route path="/dental" element={<DentalPage />} />
