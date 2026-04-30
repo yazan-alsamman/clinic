@@ -18,7 +18,15 @@ clinicalRouter.use(authMiddleware, loadBusinessDay)
 /** أقسام الجلسة السريرية + الفوترة */
 const SESSION_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'solarium']
 const PATIENT_DEPARTMENT_ENUM = SESSION_DEPARTMENTS
-const CLINICAL_ROLES = ['super_admin', 'laser', 'dermatology', 'dental_branch', 'solarium']
+const CLINICAL_ROLES = [
+  'super_admin',
+  'laser',
+  'dermatology',
+  'dermatology_manager',
+  'dermatology_assistant_manager',
+  'dental_branch',
+  'solarium',
+]
 const RECEPTION_CREATE_ROLES = ['super_admin', 'reception']
 /** تعديل جلسة (وصف / مواد): استقبال أو المقدّم أو المدير */
 const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
@@ -56,7 +64,13 @@ function departmentFromRequest(req) {
     return null
   }
   if (role === 'laser') return 'laser'
-  if (role === 'dermatology') return 'dermatology'
+  if (
+    role === 'dermatology' ||
+    role === 'dermatology_manager' ||
+    role === 'dermatology_assistant_manager'
+  ) {
+    return 'dermatology'
+  }
   if (role === 'dental_branch') return 'dental'
   if (role === 'solarium') return 'solarium'
   return null

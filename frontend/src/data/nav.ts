@@ -41,6 +41,8 @@ const roleNav: Record<Role, NavKey[]> = {
   ],
   laser: ['dashboard', 'appointments_booked', 'laser_create_session', 'account_password'],
   dermatology: ['dashboard', 'patients', 'appointments_booked', 'dermatology', 'account_password'],
+  dermatology_manager: ['dashboard', 'patients', 'appointments_booked', 'dermatology', 'inventory', 'account_password'],
+  dermatology_assistant_manager: ['dashboard', 'patients', 'appointments_booked', 'dermatology', 'inventory', 'account_password'],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
   solarium: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
 }
@@ -62,6 +64,8 @@ export function roleLabel(role: Role): string {
     reception: 'استقبال',
     laser: 'ليزر',
     dermatology: 'جلدية',
+    dermatology_manager: 'مدير قسم الجلدية',
+    dermatology_assistant_manager: 'مساعد رئيس قسم الجلدية',
     dental_branch: 'أسنان — فرع',
     solarium: 'سولاريوم',
   }
@@ -76,7 +80,9 @@ export function canAccessTab(
   /** الاستقبال: نظرة عامة + الحساب فقط — بدون تبويبات ليزر/جلدية/أسنان */
   if (role === 'reception') return false
   if (role === 'laser') return tab === 'laser'
-  if (role === 'dermatology') return tab === 'dermatology'
+  if (role === 'dermatology' || role === 'dermatology_manager' || role === 'dermatology_assistant_manager') {
+    return tab === 'dermatology'
+  }
   if (role === 'dental_branch') return tab === 'dental'
   if (role === 'solarium') return tab === 'solarium'
   return false

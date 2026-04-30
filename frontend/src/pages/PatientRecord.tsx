@@ -2026,7 +2026,10 @@ export function PatientRecord() {
                 <div>
                   <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     المواعيد المحجوزة
-                    {role === 'dermatology' || role === 'dental_branch' ? (
+                    {role === 'dermatology' ||
+                    role === 'dermatology_manager' ||
+                    role === 'dermatology_assistant_manager' ||
+                    role === 'dental_branch' ? (
                       <span style={{ fontWeight: 400, fontSize: '0.8rem', marginRight: '0.35rem' }}>
                         (المسجّلة باسمك كمقدّم)
                       </span>
@@ -2140,7 +2143,9 @@ export function PatientRecord() {
                 <div>
                   <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     معاينات وإجراءات الجلدية
-                    {role === 'dermatology' ? (
+                    {role === 'dermatology' ||
+                    role === 'dermatology_manager' ||
+                    role === 'dermatology_assistant_manager' ? (
                       <span style={{ fontWeight: 400, fontSize: '0.8rem', marginRight: '0.35rem' }}>
                         (المسجّلة باسمك كمقدّم)
                       </span>

@@ -11,7 +11,11 @@ import { postDermatologyVisit } from '../services/postingService.js'
 
 export const dermatologyRouter = Router()
 
-dermatologyRouter.use(authMiddleware, loadBusinessDay, requireRoles('super_admin', 'dermatology'))
+dermatologyRouter.use(
+  authMiddleware,
+  loadBusinessDay,
+  requireRoles('super_admin', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager'),
+)
 
 function parseNonNegativeSypInteger(raw) {
   const n = Math.round(Number(raw))
@@ -29,7 +33,10 @@ dermatologyRouter.get('/today', async (req, res) => {
   try {
     const businessDate = todayBusinessDate()
     const { start, end } = startEndOfLocalDay()
-    const isDermatologyOnly = req.user?.role === 'dermatology'
+    const isDermatologyOnly =
+      req.user?.role === 'dermatology' ||
+      req.user?.role === 'dermatology_manager' ||
+      req.user?.role === 'dermatology_assistant_manager'
 
     const todayPatients = await Patient.find({
       departments: 'dermatology',

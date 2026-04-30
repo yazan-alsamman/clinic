@@ -7,7 +7,7 @@ const inventoryItemSchema = new mongoose.Schema(
     active: { type: Boolean, default: true, index: true },
     department: {
       type: String,
-      enum: ['laser', 'dermatology', 'dental', 'skin', 'solarium'],
+      enum: ['laser', 'dermatology', 'dermatology_private', 'dental', 'skin', 'solarium'],
       default: 'dermatology',
       index: true,
     },

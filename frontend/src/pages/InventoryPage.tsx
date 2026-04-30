@@ -6,7 +6,7 @@ type Item = {
   sku: string
   name: string
   active: boolean
-  department: 'laser' | 'dermatology' | 'dental' | 'skin' | 'solarium'
+  department: 'laser' | 'dermatology' | 'dermatology_private' | 'dental' | 'skin' | 'solarium'
   unit: string
   quantity: number
   safetyStockLevel: number
@@ -20,12 +20,13 @@ const emptyCreate = {
   quantity: '0',
   safetyStockLevel: '5',
   unitCost: '0',
-  department: 'dermatology' as Item['department'],
+  department: 'dermatology_private' as Item['department'],
 }
 
 const DEPARTMENT_OPTIONS: Array<{ value: Item['department']; label: string }> = [
   { value: 'laser', label: 'ليزر' },
   { value: 'dermatology', label: 'جلدية' },
+  { value: 'dermatology_private', label: 'مستودع جلدية' },
   { value: 'dental', label: 'أسنان' },
   { value: 'skin', label: 'بشرة' },
   { value: 'solarium', label: 'سولاريوم' },
@@ -33,9 +34,11 @@ const DEPARTMENT_OPTIONS: Array<{ value: Item['department']; label: string }> = 
 
 export function InventoryPage() {
   const { user } = useAuth()
-  const canRead = user?.role === 'super_admin' || user?.role === 'reception'
-  const canCreate = user?.role === 'super_admin'
-  const canEdit = user?.role === 'super_admin'
+  const isDermWarehouseManager =
+    user?.role === 'dermatology_manager' || user?.role === 'dermatology_assistant_manager'
+  const canRead = user?.role === 'super_admin' || isDermWarehouseManager
+  const canCreate = user?.role === 'super_admin' || isDermWarehouseManager
+  const canEdit = user?.role === 'super_admin' || isDermWarehouseManager
 
   const [rows, setRows] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,7 +53,7 @@ export function InventoryPage() {
     safetyStockLevel: '',
     unitCost: '',
     active: true,
-    department: 'dermatology' as Item['department'],
+    department: 'dermatology_private' as Item['department'],
   })
   const [formErr, setFormErr] = useState('')
   const [saving, setSaving] = useState(false)
@@ -100,6 +103,9 @@ export function InventoryPage() {
   }
 
   const isAdmin = user?.role === 'super_admin'
+  const departmentOptions = isAdmin
+    ? DEPARTMENT_OPTIONS
+    : DEPARTMENT_OPTIONS.filter((d) => d.value === 'dermatology_private')
 
   return (
     <>
@@ -120,7 +126,7 @@ export function InventoryPage() {
           <p className="page-desc" style={{ margin: 0 }}>
             {isAdmin
               ? 'خصومات تلقائية مع الإجراءات — تنبيهات الحد الأدنى'
-              : 'عرض المواد والكميات — التعديل للمدير فقط'}
+              : 'مستودع جلدية الخاص بالقسم — عرض وتعديل حسب الصلاحية'}
           </p>
         </div>
         {canCreate ? (
@@ -266,7 +272,7 @@ export function InventoryPage() {
                     setCreateForm((f) => ({ ...f, department: e.target.value as Item['department'] }))
                   }
                 >
-                  {DEPARTMENT_OPTIONS.map((d) => (
+                  {departmentOptions.map((d) => (
                     <option key={d.value} value={d.value}>
                       {d.label}
                     </option>
@@ -336,7 +342,7 @@ export function InventoryPage() {
                       body: JSON.stringify({
                         name: createForm.name.trim(),
                         unit: createForm.unit.trim(),
-                        department: createForm.department,
+                        department: isAdmin ? createForm.department : 'dermatology_private',
                         quantity: Number(createForm.quantity) || 0,
                         safetyStockLevel: Number(createForm.safetyStockLevel) || 0,
                         unitCost: Number(createForm.unitCost) || undefined,
@@ -413,7 +419,7 @@ export function InventoryPage() {
                         setEditForm((f) => ({ ...f, department: e.target.value as Item['department'] }))
                       }
                     >
-                      {DEPARTMENT_OPTIONS.map((d) => (
+                      {departmentOptions.map((d) => (
                         <option key={d.value} value={d.value}>
                           {d.label}
                         </option>
@@ -513,6 +519,8 @@ export function InventoryPage() {
                       body.department = editForm.department
                       body.unitCost = Number(editForm.unitCost) || undefined
                       body.active = editForm.active
+                    } else {
+                      body.department = 'dermatology_private'
                     }
                     await api(`/api/inventory/items/${editItem.id}`, {
                       method: 'PATCH',

@@ -28,7 +28,11 @@ const gradientBtn: CSSProperties = {
 
 export function DermatologyToday() {
   const { user } = useAuth()
-  const canView = user?.role === 'super_admin' || user?.role === 'dermatology'
+  const canView =
+    user?.role === 'super_admin' ||
+    user?.role === 'dermatology' ||
+    user?.role === 'dermatology_manager' ||
+    user?.role === 'dermatology_assistant_manager'
 
   const [data, setData] = useState<TodayPayload | null>(null)
   const [loading, setLoading] = useState(true)

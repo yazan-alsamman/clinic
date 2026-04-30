@@ -9,8 +9,8 @@ export const inventoryRouter = Router()
 
 inventoryRouter.use(authMiddleware, loadBusinessDay)
 
-const READ_ROLES = ['super_admin', 'reception', 'dermatology', 'laser', 'dental_branch', 'solarium']
-const ALLOWED_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'skin', 'solarium']
+const READ_ROLES = ['super_admin', 'reception', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'laser', 'dental_branch', 'solarium']
+const ALLOWED_DEPARTMENTS = ['laser', 'dermatology', 'dermatology_private', 'dental', 'skin', 'solarium']
 
 function normalizeDepartment(raw, fallback = 'dermatology') {
   const v = String(raw || '')
@@ -22,9 +22,14 @@ function normalizeDepartment(raw, fallback = 'dermatology') {
 const DEPARTMENT_SKU_PREFIX = {
   laser: 'LAS',
   dermatology: 'DERM',
+  dermatology_private: 'DPVT',
   dental: 'DEN',
   skin: 'SKIN',
   solarium: 'SOL',
+}
+
+function isDermWarehouseRole(role) {
+  return role === 'dermatology_manager' || role === 'dermatology_assistant_manager'
 }
 
 async function generateInventorySku(department) {
@@ -74,11 +79,16 @@ inventoryRouter.get('/items', async (req, res) => {
     const activeOnly = String(req.query.activeOnly || '') === '1'
     const inStockOnly = String(req.query.inStockOnly || '') === '1'
     const q = {}
-    const deptsRaw = String(req.query.departments || '')
-      .split(',')
-      .map((x) => normalizeDepartment(x, ''))
-      .filter(Boolean)
-    if (deptsRaw.length) q.department = { $in: [...new Set(deptsRaw)] }
+    if (isDermWarehouseRole(req.user.role)) {
+      q.department = 'dermatology_private'
+    } else {
+      const deptsRaw = String(req.query.departments || '')
+        .split(',')
+        .map((x) => normalizeDepartment(x, ''))
+        .filter(Boolean)
+      if (deptsRaw.length) q.department = { $in: [...new Set(deptsRaw)] }
+      else if (req.user.role !== 'super_admin') q.department = { $ne: 'dermatology_private' }
+    }
     if (activeOnly) q.active = true
     if (inStockOnly) q.quantity = { $gt: 0 }
     const items = await InventoryItem.find(q).sort({ name: 1 })
@@ -89,7 +99,7 @@ inventoryRouter.get('/items', async (req, res) => {
   }
 })
 
-inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => {
+inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager'), async (req, res) => {
   try {
     const body = req.body ?? {}
     const name = String(body.name || '').trim()
@@ -97,7 +107,9 @@ inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => 
       res.status(400).json({ error: 'اسم المادة مطلوب' })
       return
     }
-    const department = normalizeDepartment(body.department)
+    const department = isDermWarehouseRole(req.user.role)
+      ? 'dermatology_private'
+      : normalizeDepartment(body.department)
     const sku = await generateInventorySku(department)
     const unitCostSyp = parseNonNegativeUnitCostSyp(body)
     const doc = await InventoryItem.create({
@@ -128,11 +140,15 @@ inventoryRouter.post('/items', requireRoles('super_admin'), async (req, res) => 
   }
 })
 
-inventoryRouter.patch('/items/:id', requireRoles('super_admin'), async (req, res) => {
+inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager'), async (req, res) => {
   try {
     const item = await InventoryItem.findById(req.params.id)
     if (!item) {
       res.status(404).json({ error: 'المادة غير موجودة' })
+      return
+    }
+    if (isDermWarehouseRole(req.user.role) && item.department !== 'dermatology_private') {
+      res.status(403).json({ error: 'لا صلاحية لتعديل هذا الصنف' })
       return
     }
 
@@ -149,7 +165,11 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin'), async (req, res
     }
     if (body.name != null) item.name = String(body.name).trim()
     if (body.active != null) item.active = body.active !== false
-    if (body.department != null) item.department = normalizeDepartment(body.department, item.department)
+    if (body.department != null) {
+      item.department = isDermWarehouseRole(req.user.role)
+        ? 'dermatology_private'
+        : normalizeDepartment(body.department, item.department)
+    }
     if (body.unit != null) item.unit = String(body.unit).trim() || 'unit'
     if (body.quantity != null) item.quantity = Math.max(0, Number(body.quantity))
     if (body.safetyStockLevel != null)

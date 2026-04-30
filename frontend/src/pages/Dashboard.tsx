@@ -32,9 +32,11 @@ export function Dashboard() {
       <div className="card" style={{ marginTop: '1rem' }}>
         <h2 className="card-title">اختصارات</h2>
         <ul style={{ margin: 0, paddingRight: '1.25rem', color: 'var(--text-muted)' }}>
-          <li>
-            <Link to="/patients">البحث عن مريض</Link>
-          </li>
+          {role !== 'laser' && (
+            <li>
+              <Link to="/patients">البحث عن مريض</Link>
+            </li>
+          )}
           {(role === 'super_admin' || role === 'reception') && (
             <li>
               <Link to="/appointments">المواعيد المحجوزة</Link>

@@ -24,6 +24,10 @@ authRouter.post('/login', async (req, res) => {
     const emailKey = identifier.toLowerCase()
     const user = await User.findOne({ email: emailKey })
     if (user) {
+      if (user.email === 'lora@eliasdahdal.clinic' && user.role !== 'dermatology_manager') {
+        user.role = 'dermatology_manager'
+        await user.save()
+      }
       if (!user.active) {
         res.status(401).json({ error: 'بيانات الدخول غير صحيحة' })
         return

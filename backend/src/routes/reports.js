@@ -47,11 +47,17 @@ function toYmdLocal(d) {
   return `${y}-${m}-${day}`
 }
 
-const CLINICAL_ROLES = new Set(['laser', 'dermatology', 'dental_branch'])
+const CLINICAL_ROLES = new Set([
+  'laser',
+  'dermatology',
+  'dermatology_manager',
+  'dermatology_assistant_manager',
+  'dental_branch',
+])
 
 function roleToDeptColumn(role) {
   if (role === 'laser') return 'ليزر'
-  if (role === 'dermatology') return 'جلدية'
+  if (role === 'dermatology' || role === 'dermatology_manager' || role === 'dermatology_assistant_manager') return 'جلدية'
   if (role === 'dental_branch') return 'أسنان'
   return '—'
 }

@@ -3,6 +3,8 @@ export type Role =
   | 'reception'
   | 'laser'
   | 'dermatology'
+  | 'dermatology_manager'
+  | 'dermatology_assistant_manager'
   | 'dental_branch'
   | 'solarium'
 

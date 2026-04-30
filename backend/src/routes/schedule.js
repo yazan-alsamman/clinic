@@ -19,7 +19,7 @@ export const scheduleRouter = Router()
 
 scheduleRouter.use(authMiddleware)
 
-const providerRoles = ['laser', 'dermatology', 'dental_branch']
+const providerRoles = ['laser', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'dental_branch']
 const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'other']
 
 function normalizeServiceType(v) {
@@ -137,7 +137,15 @@ async function assertNoOverlapForProvider({ businessDate, providerName, startTim
 scheduleRouter.get(
   '/booked',
   loadBusinessDay,
-  requireRoles('super_admin', 'reception', 'laser', 'dermatology', 'dental_branch'),
+  requireRoles(
+    'super_admin',
+    'reception',
+    'laser',
+    'dermatology',
+    'dermatology_manager',
+    'dermatology_assistant_manager',
+    'dental_branch',
+  ),
   async (req, res) => {
     try {
       const role = req.user.role

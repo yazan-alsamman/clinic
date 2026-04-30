@@ -9,6 +9,8 @@ const ROLES: Role[] = [
   'reception',
   'laser',
   'dermatology',
+  'dermatology_manager',
+  'dermatology_assistant_manager',
   'dental_branch',
   'solarium',
 ]
@@ -65,7 +67,12 @@ export function AdminUsers() {
   }, [])
 
   const clinicalRole = (r: Role) =>
-    r === 'laser' || r === 'dermatology' || r === 'dental_branch' || r === 'solarium'
+    r === 'laser' ||
+    r === 'dermatology' ||
+    r === 'dermatology_manager' ||
+    r === 'dermatology_assistant_manager' ||
+    r === 'dental_branch' ||
+    r === 'solarium'
 
   function openEdit(u: Row) {
     setFormErr('')

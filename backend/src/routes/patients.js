@@ -14,7 +14,16 @@ import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
 
-const CLINICAL_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
+const CLINICAL_ROLES = [
+  'super_admin',
+  'reception',
+  'laser',
+  'dermatology',
+  'dermatology_manager',
+  'dermatology_assistant_manager',
+  'dental_branch',
+  'solarium',
+]
 
 const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']
 
@@ -25,6 +34,10 @@ function parseFinancialBalanceDept(raw) {
 
 function canReadPatients(role) {
   return CLINICAL_ROLES.includes(role)
+}
+
+function canListPatients(role) {
+  return role !== 'laser' && canReadPatients(role)
 }
 
 function normalizePaperLaserEntries(raw) {
@@ -146,7 +159,7 @@ patientsRouter.use(authMiddleware, loadBusinessDay)
 
 patientsRouter.get('/', async (req, res) => {
   try {
-    if (!canReadPatients(req.user.role)) {
+    if (!canListPatients(req.user.role)) {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
@@ -247,8 +260,17 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
     const fullAccess = role === 'super_admin' || role === 'reception'
 
     const needLaser = fullAccess || role === 'laser'
-    const needDerm = fullAccess || role === 'dermatology'
-    const needAppts = fullAccess || role === 'dermatology' || role === 'dental_branch'
+    const needDerm =
+      fullAccess ||
+      role === 'dermatology' ||
+      role === 'dermatology_manager' ||
+      role === 'dermatology_assistant_manager'
+    const needAppts =
+      fullAccess ||
+      role === 'dermatology' ||
+      role === 'dermatology_manager' ||
+      role === 'dermatology_assistant_manager' ||
+      role === 'dental_branch'
     const needDentalPlan = fullAccess || role === 'dental_branch'
 
     const bundle = await getClinicalBundleForPatientId(pid)
@@ -266,7 +288,10 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
 
     let appointments = bundle.appointments
     if (!needAppts) appointments = []
-    else if ((role === 'dermatology' || role === 'dental_branch') && myName) {
+    else if (
+      (role === 'dermatology' || role === 'dental_branch') &&
+      myName
+    ) {
       appointments = appointments.filter((o) => String(o.providerName || '').trim() === myName)
     }
 

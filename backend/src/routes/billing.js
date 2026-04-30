@@ -280,10 +280,11 @@ billingRouter.put('/payment-bank-options', requireRoles('super_admin'), async (r
 /** حركة الصندوق اليومية (مصاريف + مبالغ مستلمة) */
 billingRouter.get('/cash-movements', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
-    const businessDate = String(req.query.date || '').trim() || todayBusinessDate()
+    const businessDate = todayBusinessDate()
     const rows = await CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean()
     res.json({
       businessDate,
+      dateLockedToToday: true,
       rows: rows.map((r) => ({
         id: String(r._id),
         businessDate: String(r.businessDate || ''),
@@ -302,7 +303,7 @@ billingRouter.get('/cash-movements', requireRoles(...BILLING_ROLES), async (req,
 
 billingRouter.post('/cash-movements', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
-    const businessDate = String(req.body?.businessDate || '').trim() || todayBusinessDate()
+    const businessDate = todayBusinessDate()
     const kind = normalizeCashMovementKind(req.body?.kind)
     const reason = String(req.body?.reason || '').trim()
     const amountSyp = parseMoneyInput(req.body?.amountSyp, 'syp')
