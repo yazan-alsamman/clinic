@@ -17,7 +17,6 @@ export type NavKey =
   | 'patients_intake_fast'
   | 'appointments_booked'
   | 'reception_appointment'
-  | 'dermatology'
   | 'dental'
   | 'billing_queue'
   | 'reception_cash_movement'

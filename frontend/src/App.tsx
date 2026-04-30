@@ -21,7 +21,6 @@ const PatientFastIntakePage     = lazyPage(() => import('./pages/PatientFastInta
 const PatientRecord             = lazyPage(() => import('./pages/PatientRecord'), 'PatientRecord')
 const BookedAppointmentsPage    = lazyPage(() => import('./pages/BookedAppointmentsPage'), 'BookedAppointmentsPage')
 const ReceptionAppointmentPage  = lazyPage(() => import('./pages/ReceptionAppointmentPage'), 'ReceptionAppointmentPage')
-const DermatologyToday          = lazyPage(() => import('./pages/DermatologyToday'), 'DermatologyToday')
 const DentalPage                = lazyPage(() => import('./pages/DentalPage'), 'DentalPage')
 const InventoryPage             = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage')
 const DailyReport               = lazyPage(() => import('./pages/DailyReport'), 'DailyReport')
@@ -95,7 +94,6 @@ export default function App() {
                 <Route path="/dermatology/create-session" element={<DermatologyCreateSessionPage />} />
                 <Route path="/dermatology/finance" element={<DermatologyFinancePage />} />
                 <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
-                <Route path="/dermatology" element={<DermatologyToday />} />
                 <Route path="/dental" element={<DentalPage />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/reception/cash-movement" element={<ReceptionCashMovementPage />} />
