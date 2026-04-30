@@ -42,7 +42,11 @@ export function DermatologyCreateSessionPage() {
     setErr('')
     setLoading(true)
     try {
-      const data = await api<{ slots: SlotRow[] }>('/api/schedule/booked')
+      const q =
+        user?.role === 'dermatology_assistant_manager'
+          ? '/api/schedule/booked?headOnly=1'
+          : '/api/schedule/booked'
+      const data = await api<{ slots: SlotRow[] }>(q)
       setSlots(data.slots || [])
     } catch (e) {
       setSlots([])
@@ -50,7 +54,7 @@ export function DermatologyCreateSessionPage() {
     } finally {
       setLoading(false)
     }
-  }, [canUse])
+  }, [canUse, user?.role])
 
   useEffect(() => {
     void load()
@@ -83,8 +87,10 @@ export function DermatologyCreateSessionPage() {
     <>
       <h1 className="page-title">إنشاء جلسة</h1>
       <p className="page-desc">
-        تظهر هنا فقط مواعيد الجلدية التي تم تسجيل وصول المريض لها ومربوطة باسمك. اضغط على أي مريض لفتح ملفه على
-        تبويب الجلدية مباشرة.
+        {user?.role === 'dermatology_assistant_manager'
+          ? 'تظهر هنا فقط مواعيد الجلدية الواصلة والمحجوزة على رئيس قسم الجلدية.'
+          : 'تظهر هنا فقط مواعيد الجلدية التي تم تسجيل وصول المريض لها ومربوطة باسمك.'}{' '}
+        اضغط على أي مريض لفتح ملفه على تبويب الجلدية مباشرة.
       </p>
       <div className="toolbar" style={{ marginBottom: '1rem' }}>
         <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void load()}>
@@ -101,7 +107,11 @@ export function DermatologyCreateSessionPage() {
         ) : loading ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري التحميل…</p>
         ) : rows.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا يوجد مرضى واصلين لهذا الطبيب حالياً.</p>
+          <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+            {user?.role === 'dermatology_assistant_manager'
+              ? 'لا يوجد مرضى واصلين ومحجوزين على رئيس القسم حالياً.'
+              : 'لا يوجد مرضى واصلين لهذا الطبيب حالياً.'}
+          </p>
         ) : (
           <div className="table-wrap">
             <table className="data-table">

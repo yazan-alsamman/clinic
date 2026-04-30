@@ -20,7 +20,7 @@ export const scheduleRouter = Router()
 
 scheduleRouter.use(authMiddleware)
 
-const providerRoles = ['laser', 'dermatology', 'dermatology_assistant_manager', 'dental_branch']
+const providerRoles = ['laser', 'dermatology', 'dental_branch']
 const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'other']
 const DERMATOLOGY_PROVIDER_ROLES = ['dermatology', 'dermatology_manager', 'dermatology_assistant_manager']
 const DEFAULT_DERMATOLOGY_BOARDS = [
@@ -182,6 +182,8 @@ scheduleRouter.get(
     try {
       const role = req.user.role
       const isDermatologyManager = role === 'dermatology_manager'
+      const isDermatologyAssistantManager = role === 'dermatology_assistant_manager'
+      const isDermatologyLeadership = isDermatologyManager || isDermatologyAssistantManager
       const isProvider = providerRoles.includes(role)
 
       let from
@@ -215,7 +217,7 @@ scheduleRouter.get(
         patientId: { $ne: null },
         businessDate: { $gte: from, $lte: to },
       }
-      if (isDermatologyManager) {
+      if (isDermatologyLeadership) {
         filter.serviceType = 'dermatology'
       }
       let scopedToProvider = false
@@ -238,6 +240,27 @@ scheduleRouter.get(
           filter.providerName = name
         }
         scopedToProvider = true
+      }
+      const assistantHeadOnly =
+        isDermatologyAssistantManager && String(req.query.headOnly || '').trim() === '1'
+      if (assistantHeadOnly) {
+        const managers = await User.find({
+          role: 'dermatology_manager',
+          active: true,
+        })
+          .select('_id')
+          .lean()
+        const ids = managers.map((u) => u._id)
+        if (ids.length === 0) {
+          res.json({
+            from,
+            to,
+            scopedToProvider,
+            slots: [],
+          })
+          return
+        }
+        filter.assignedSpecialistUserId = { $in: ids }
       }
 
       const slots = await ScheduleSlot.find(filter)
