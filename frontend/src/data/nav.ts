@@ -69,7 +69,7 @@ export function roleLabel(role: Role): string {
     dental_branch: 'أسنان — فرع',
     solarium: 'سولاريوم',
   }
-  return map[role]
+  return map[role] ?? 'مستخدم'
 }
 
 export function canAccessTab(

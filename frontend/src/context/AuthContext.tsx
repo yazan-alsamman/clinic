@@ -18,6 +18,40 @@ export interface AuthUser {
   active: boolean
 }
 
+function normalizeRole(raw: unknown): Role {
+  const role = String(raw || '').trim().toLowerCase()
+  if (role === 'super_admin') return 'super_admin'
+  if (role === 'reception') return 'reception'
+  if (role === 'laser') return 'laser'
+  if (role === 'dermatology') return 'dermatology'
+  if (role === 'dental_branch') return 'dental_branch'
+  if (role === 'solarium') return 'solarium'
+  if (
+    role === 'dermatology_manager' ||
+    role === 'dermatology head' ||
+    role === 'dermatology_head' ||
+    role === 'dermatology-manager'
+  ) {
+    return 'dermatology_manager'
+  }
+  if (
+    role === 'dermatology_assistant_manager' ||
+    role === 'dermatology assistant manager' ||
+    role === 'dermatology_assistant_head' ||
+    role === 'dermatology-assistant-manager'
+  ) {
+    return 'dermatology_assistant_manager'
+  }
+  return 'reception'
+}
+
+function normalizeAuthUser(raw: AuthUser): AuthUser {
+  return {
+    ...raw,
+    role: normalizeRole(raw?.role),
+  }
+}
+
 export type LoginResult =
   | { accountType: 'staff' }
   | { accountType: 'patient'; mustChangePassword: boolean }
@@ -50,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api<{ user: AuthUser; sessionMinutesLeft: number | null }>(
         '/api/auth/me',
       )
-      setUser(data.user)
+      setUser(normalizeAuthUser(data.user))
       setSessionMinutesLeft(data.sessionMinutesLeft ?? null)
     } catch {
       setToken(null)
@@ -90,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const me = await api<{ user: AuthUser; sessionMinutesLeft: number | null }>(
       '/api/auth/me',
     )
-    setUser(me.user)
+    setUser(normalizeAuthUser(me.user))
     setSessionMinutesLeft(me.sessionMinutesLeft ?? null)
     return { accountType: 'staff' as const }
   }, [])
