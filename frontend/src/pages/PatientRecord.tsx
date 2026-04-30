@@ -76,7 +76,7 @@ type DermatologyMaterialOption = {
   id: string
   sku: string
   name: string
-  department: 'laser' | 'dermatology' | 'dental' | 'skin' | 'solarium'
+  department: 'laser' | 'dermatology' | 'dermatology_private' | 'dental' | 'skin' | 'solarium'
   unit: string
   quantity: number
   unitCost: number
@@ -613,8 +613,6 @@ export function PatientRecord() {
   )
   const [approvingPlan, setApprovingPlan] = useState(false)
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
-  const [dermNotes, setDermNotes] = useState('')
-  const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
   const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
   const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
   const [dermSaving, setDermSaving] = useState(false)
@@ -1240,9 +1238,9 @@ export function PatientRecord() {
     setDermErr('')
     ;(async () => {
       try {
-        const itemsRes = await api<{ items: DermatologyMaterialOption[] }>(
-          '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology,skin,solarium',
-        )
+          const itemsRes = await api<{ items: DermatologyMaterialOption[] }>(
+            '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology_private',
+          )
         if (cancelled) return
         setDermMaterialsCatalog(itemsRes.items)
       } catch {
@@ -1452,34 +1450,20 @@ export function PatientRecord() {
       .filter(Boolean)
       .join(' — ') || '—'
 
-  const dermMaterialChargeTotal = useMemo(
-    () => 0,
-    [dermSelectedMaterials],
-  )
-  const dermGrossTotal = useMemo(() => {
-    const sypRaw = Math.max(0, parseFloat(dermSessionFeeSyp) || 0)
-    return Math.round(sypRaw + dermMaterialChargeTotal)
-  }, [dermMaterialChargeTotal, dermSessionFeeSyp])
-
-  function toggleDermMaterial(materialId: string, checked: boolean) {
-    setDermSelectedMaterials((prev) => {
-      const exists = prev.some((x) => x.inventoryItemId === materialId)
-      if (checked && !exists) {
-        return [...prev, { inventoryItemId: materialId, quantity: '1' }]
-      }
-      if (!checked && exists) return prev.filter((x) => x.inventoryItemId !== materialId)
-      return prev
-    })
+  function addDermMaterialRow() {
+    setDermSelectedMaterials((prev) => [...prev, { inventoryItemId: '', quantity: '1' }])
   }
 
-  function updateDermMaterialLine(
-    materialId: string,
-    field: 'quantity',
+  function removeDermMaterialRow(idx: number) {
+    setDermSelectedMaterials((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function updateDermMaterialRow(
+    idx: number,
+    field: 'inventoryItemId' | 'quantity',
     value: string,
   ) {
-    setDermSelectedMaterials((prev) =>
-      prev.map((line) => (line.inventoryItemId === materialId ? { ...line, [field]: value } : line)),
-    )
+    setDermSelectedMaterials((prev) => prev.map((line, i) => (i === idx ? { ...line, [field]: value } : line)))
   }
 
   if (loadErr || (!patient && !loadErr)) {
@@ -3468,7 +3452,7 @@ export function PatientRecord() {
           <div className="card">
             <h2 className="card-title">جلسة جلدية مع مواد مستودع</h2>
             <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              اختر المواد (متعدد) وأدخل الكمية لكل مادة. التحصيل يعتمد فقط على سعر الجلسة، ثم يُخصم المخزون فوراً.
+              أدخل وصف الإجراء، ثم اختر المواد من مستودع الجلدية وأدخل الكمية حسب الوحدة المحددة للمادة.
             </p>
             <div>
               <label className="form-label">وصف الإجراء / الجلسة</label>
@@ -3479,76 +3463,88 @@ export function PatientRecord() {
                 placeholder="مثال: حقن تجميلي للوجه"
               />
             </div>
-            <div style={{ marginTop: '0.75rem' }}>
-              <label className="form-label">رسوم الجلسة الأساسية (ل.س)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={dermSessionFeeSyp}
-                onChange={(e) => setDermSessionFeeSyp(e.target.value)}
-                placeholder="0"
-                style={{ marginTop: '0.25rem' }}
-              />
-            </div>
-            <div style={{ marginTop: '0.85rem' }}>
-              <label className="form-label">ملاحظات طبية</label>
-              <textarea
-                className="textarea"
-                rows={3}
-                value={dermNotes}
-                onChange={(e) => setDermNotes(e.target.value)}
-                placeholder="ملاحظات مرتبطة بالإجراء..."
-              />
-            </div>
             <h3 className="card-title" style={{ marginTop: '1rem', fontSize: '0.95rem' }}>
-              مواد الجلدية (المستودع المركزي)
+              مواد مستودع الجلدية
             </h3>
             {dermMaterialsCatalog.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.88rem' }}>
-                لا توجد مواد فعّالة/متاحة بالمخزون حالياً.
+                لا توجد مواد فعّالة/متاحة حالياً في مستودع الجلدية.
               </p>
             ) : (
-              <div style={{ display: 'grid', gap: '0.6rem' }}>
-                {dermMaterialsCatalog.map((item) => {
-                  const selected = dermSelectedMaterials.find((x) => x.inventoryItemId === item.id)
-                  return (
-                    <div
-                      key={item.id}
-                      style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem' }}
-                    >
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(selected)}
-                          onChange={(e) => toggleDermMaterial(item.id, e.target.checked)}
-                        />
-                        <strong>{item.name}</strong>
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                          ({item.quantity} {item.unit} متاح)
-                        </span>
-                      </label>
-                      {selected ? (
-                        <div style={{ marginTop: '0.5rem' }}>
-                          <label className="form-label">الكمية المستخدمة</label>
-                          <input
-                            className="input"
-                            inputMode="decimal"
-                            value={selected.quantity}
-                            onChange={(e) =>
-                              updateDermMaterialLine(item.id, 'quantity', e.target.value)
-                            }
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
+              <div style={{ display: 'grid', gap: '0.65rem' }}>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>اسم المادة</th>
+                        <th>الكمية</th>
+                        <th>إجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dermSelectedMaterials.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} style={{ color: 'var(--text-muted)' }}>
+                            لا توجد مواد مضافة بعد.
+                          </td>
+                        </tr>
+                      ) : (
+                        dermSelectedMaterials.map((line, idx) => {
+                          const selectedItem = dermMaterialsCatalog.find((x) => x.id === line.inventoryItemId)
+                          return (
+                            <tr key={`derm-mat-${idx}`}>
+                              <td>
+                                <select
+                                  className="input"
+                                  value={line.inventoryItemId}
+                                  onChange={(e) => updateDermMaterialRow(idx, 'inventoryItemId', e.target.value)}
+                                >
+                                  <option value="">— اختر المادة —</option>
+                                  {dermMaterialsCatalog.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.name} ({item.quantity} {item.unit})
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                  <input
+                                    className="input"
+                                    inputMode="decimal"
+                                    value={line.quantity}
+                                    onChange={(e) => updateDermMaterialRow(idx, 'quantity', e.target.value)}
+                                    placeholder="0"
+                                  />
+                                  <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>
+                                    {selectedItem?.unit || 'وحدة'}
+                                  </span>
+                                </div>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: '0.8rem' }}
+                                  onClick={() => removeDermMaterialRow(idx)}
+                                >
+                                  حذف
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <button type="button" className="btn btn-secondary" onClick={addDermMaterialRow}>
+                    إضافة مادة
+                  </button>
+                </div>
               </div>
             )}
-            <div style={{ marginTop: '0.85rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              رسوم الجلسة: <strong>{dermGrossTotal.toLocaleString('ar-SY')} ل.س</strong> — الإجمالي للتحصيل:{' '}
-              <strong>{dermGrossTotal.toLocaleString('ar-SY')} ل.س</strong>
-            </div>
             {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
             {dermOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{dermOk}</p> : null}
             <button
@@ -3560,17 +3556,21 @@ export function PatientRecord() {
                 if (!id) return
                 setDermErr('')
                 setDermOk('')
-                const feeSyp = Math.max(0, Math.round(parseFloat(dermSessionFeeSyp) || 0))
-                if (!(feeSyp > 0)) {
-                  setDermErr('أدخل رسوم الجلسة الأساسية بالليرة (قيمة أكبر من صفر).')
-                  return
-                }
                 const payloadMaterials = dermSelectedMaterials
                   .map((line) => ({
                     inventoryItemId: line.inventoryItemId,
                     quantity: Math.max(0, parseFloat(line.quantity) || 0),
                   }))
+                  .filter((x) => Boolean(x.inventoryItemId))
                   .filter((x) => x.quantity > 0)
+                if (!dermProcedureDescription.trim()) {
+                  setDermErr('أدخل وصف الإجراء أولاً.')
+                  return
+                }
+                if (payloadMaterials.length === 0) {
+                  setDermErr('أضف مادة واحدة على الأقل مع الكمية.')
+                  return
+                }
                 setDermSaving(true)
                 try {
                   const created = await api<{
@@ -3580,9 +3580,9 @@ export function PatientRecord() {
                     body: JSON.stringify({
                       department: 'dermatology',
                       patientId: id,
-                      sessionFeeSyp: feeSyp,
+                      sessionFeeSyp: 0,
                       procedureDescription: dermProcedureDescription.trim(),
-                      notes: dermNotes.trim(),
+                      notes: '',
                       materials: payloadMaterials,
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
@@ -3592,12 +3592,10 @@ export function PatientRecord() {
                   )
                   setDermSessions(sessionsData.sessions.filter((s) => s.department === 'dermatology'))
                   const itemsData = await api<{ items: DermatologyMaterialOption[] }>(
-                    '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology,skin,solarium',
+                    '/api/inventory/items?activeOnly=1&inStockOnly=1&departments=dermatology_private',
                   )
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')
-                  setDermSessionFeeSyp('')
-                  setDermNotes('')
                   setDermSelectedMaterials([])
                   setDermOk(
                     `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`,
