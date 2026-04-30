@@ -13,6 +13,7 @@ export type NavKey =
   | 'patients'
   | 'laser_create_session'
   | 'dermatology_create_session'
+  | 'dermatology_finance'
   | 'patients_intake_fast'
   | 'appointments_booked'
   | 'reception_appointment'

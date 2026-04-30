@@ -24,6 +24,12 @@ type SlotRow = {
   patientName: string
 }
 type LaserProviderOption = { roomNumber: number; userId: string; name: string }
+type DermatologyBoard = {
+  id: string
+  index: number
+  title: string
+  assigned: { id: string; name: string } | null
+}
 
 type ServiceKey = 'laser' | 'dental' | 'dermatology' | 'solarium' | 'other'
 
@@ -137,6 +143,7 @@ export function BookedAppointmentsPage() {
   const [actionMode, setActionMode] = useState<'menu' | 'reschedule' | 'provider'>('menu')
   const [providers, setProviders] = useState<string[]>([])
   const [laserProviders, setLaserProviders] = useState<LaserProviderOption[]>([])
+  const [dermatologyBoards, setDermatologyBoards] = useState<DermatologyBoard[]>([])
   const [resDate, setResDate] = useState(todayYmd)
   const [resTime, setResTime] = useState('09:00')
   const [resDuration, setResDuration] = useState(60)
@@ -208,6 +215,17 @@ export function BookedAppointmentsPage() {
     }
   }, [fullView])
 
+  const loadDermatologyBoards = useCallback(async () => {
+    if (!fullView) return
+    try {
+      const data = await api<{ boards: DermatologyBoard[] }>('/api/schedule/dermatology-boards')
+      const rows = Array.isArray(data.boards) ? data.boards : []
+      setDermatologyBoards(rows.filter((b) => String(b?.title || '').trim()).sort((a, b) => a.index - b.index))
+    } catch {
+      setDermatologyBoards([])
+    }
+  }, [fullView])
+
   useEffect(() => {
     void load()
   }, [load])
@@ -223,6 +241,10 @@ export function BookedAppointmentsPage() {
   useEffect(() => {
     void loadLaserProviders('09:00')
   }, [loadLaserProviders])
+
+  useEffect(() => {
+    void loadDermatologyBoards()
+  }, [loadDermatologyBoards])
 
   const grouped = useMemo(() => {
     const filtered = fullView
@@ -271,6 +293,25 @@ export function BookedAppointmentsPage() {
       }),
     [arrivedSlots],
   )
+
+  const dermatologyBoardsRows = useMemo(() => {
+    const rows = grouped.byService.dermatology
+    if (rows.length === 0) return []
+    if (dermatologyBoards.length === 0) {
+      return [{ id: 'default-derm', title: renderServiceLabel('dermatology'), rows }]
+    }
+    const mapped = dermatologyBoards.map((b) => ({
+      id: b.id,
+      title: b.title,
+      rows: rows.filter((s) => String(s.providerName || '').trim() === String(b.title || '').trim()),
+    }))
+    const listed = new Set(dermatologyBoards.map((b) => String(b.title || '').trim()))
+    const unlisted = rows.filter((s) => !listed.has(String(s.providerName || '').trim()))
+    if (unlisted.length > 0) {
+      mapped.push({ id: 'unlisted-derm', title: 'جداول غير مصنفة', rows: unlisted })
+    }
+    return mapped
+  }, [grouped.byService.dermatology, dermatologyBoards])
 
   async function openActionMenu(slot: SlotRow) {
     if (!fullView) return
@@ -610,31 +651,46 @@ export function BookedAppointmentsPage() {
             {grouped.byService.dermatology.length > 0 ? (
               <div>
                 <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('dermatology')}</h3>
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>من — إلى</th>
-                        <th>اسم المريض</th>
-                        <th>القسم</th>
-                        <th>المقدم</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grouped.byService.dermatology.map((s) => (
-                        <tr
-                          key={s.id}
-                          onClick={() => openActionMenu(s)}
-                          style={fullView ? { cursor: 'pointer' } : undefined}
-                        >
-                          <td>{renderTimeWithArrival(s)}</td>
-                          <td>{s.patientName || '—'}</td>
-                          <td>{renderServiceLabel('dermatology')}</td>
-                          <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ display: 'grid', gap: '0.8rem', gridTemplateColumns: 'repeat(auto-fit,minmax(360px,1fr))' }}>
+                  {dermatologyBoardsRows.map((board) => (
+                    <div key={board.id}>
+                      <h4 style={{ margin: '0 0 0.35rem', color: 'var(--text-muted)' }}>{board.title}</h4>
+                      <div className="table-wrap">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>من — إلى</th>
+                              <th>اسم المريض</th>
+                              <th>القسم</th>
+                              <th>المقدم</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {board.rows.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} style={{ color: 'var(--text-muted)' }}>
+                                  لا توجد مواعيد محجوزة
+                                </td>
+                              </tr>
+                            ) : (
+                              board.rows.map((s) => (
+                                <tr
+                                  key={s.id}
+                                  onClick={() => openActionMenu(s)}
+                                  style={fullView ? { cursor: 'pointer' } : undefined}
+                                >
+                                  <td>{renderTimeWithArrival(s)}</td>
+                                  <td>{s.patientName || '—'}</td>
+                                  <td>{renderServiceLabel('dermatology')}</td>
+                                  <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : null}

@@ -42,6 +42,7 @@ const DermatologyCreateSessionPage = lazyPage(
   () => import('./pages/DermatologyCreateSessionPage'),
   'DermatologyCreateSessionPage',
 )
+const DermatologyFinancePage = lazyPage(() => import('./pages/DermatologyFinancePage'), 'DermatologyFinancePage')
 
 const PatientPortalDashboard    = lazyPage(() => import('./pages/patient-portal/PatientPortalDashboard'), 'PatientPortalDashboard')
 const PatientPortalProfile      = lazyPage(() => import('./pages/patient-portal/PatientPortalProfile'), 'PatientPortalProfile')
@@ -92,6 +93,7 @@ export default function App() {
                 <Route path="/appointments" element={<BookedAppointmentsPage />} />
                 <Route path="/laser/create-session" element={<LaserCreateSessionPage />} />
                 <Route path="/dermatology/create-session" element={<DermatologyCreateSessionPage />} />
+                <Route path="/dermatology/finance" element={<DermatologyFinancePage />} />
                 <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
                 <Route path="/dermatology" element={<DermatologyToday />} />
                 <Route path="/dental" element={<DentalPage />} />
