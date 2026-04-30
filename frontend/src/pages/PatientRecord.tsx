@@ -260,7 +260,14 @@ type ClinicalDentalSummary = {
 } | null
 
 function showOverviewAppointments(r: Role | undefined) {
-  return r === 'super_admin' || r === 'reception' || r === 'dermatology' || r === 'dental_branch'
+  return (
+    r === 'super_admin' ||
+    r === 'reception' ||
+    r === 'dermatology' ||
+    r === 'dermatology_manager' ||
+    r === 'dermatology_assistant_manager' ||
+    r === 'dental_branch'
+  )
 }
 
 function showOverviewLaser(r: Role | undefined) {
@@ -268,7 +275,13 @@ function showOverviewLaser(r: Role | undefined) {
 }
 
 function showOverviewDerm(r: Role | undefined) {
-  return r === 'super_admin' || r === 'reception' || r === 'dermatology'
+  return (
+    r === 'super_admin' ||
+    r === 'reception' ||
+    r === 'dermatology' ||
+    r === 'dermatology_manager' ||
+    r === 'dermatology_assistant_manager'
+  )
 }
 
 function showOverviewDentalSummary(r: Role | undefined) {
@@ -279,6 +292,8 @@ function clinicalHistoryIntro(r: Role | undefined): string {
   if (r === 'laser') return 'جلسات الليزر المسجّلة لهذا المريض.'
   if (r === 'dermatology')
     return 'مواعيدك وإجراءاتك الجلدية المسجّلة لهذا المريض (حسب اسمك كمقدّم في النظام).'
+  if (r === 'dermatology_manager' || r === 'dermatology_assistant_manager')
+    return 'عرض المواعيد وإجراءات الجلدية لهذا المريض ضمن صلاحيات إدارة القسم.'
   if (r === 'dental_branch')
     return 'مواعيدك المحجوزة وملخص خطة الأسنان لهذا المريض (حسب اسمك كمقدّم).'
   return 'مواعيد محجوزة، جلسات ليزر، إجراءات جلدية، وخطة أسنان إن وُجدت.'
