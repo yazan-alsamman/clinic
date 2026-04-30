@@ -31,13 +31,14 @@ type DermatologyBoard = {
   assigned: { id: string; name: string } | null
 }
 
-type ServiceKey = 'laser' | 'dental' | 'dermatology' | 'solarium' | 'other'
+type ServiceKey = 'laser' | 'dental' | 'dermatology' | 'solarium' | 'skin' | 'other'
 
 const SERVICE_LABELS: Record<ServiceKey, string> = {
   laser: 'الليزر',
   dental: 'الأسنان',
   dermatology: 'الجلدية',
   solarium: 'السولاريوم',
+  skin: 'البشرة',
   other: 'أخرى',
 }
 const SERVICE_ICONS: Record<ServiceKey, string> = {
@@ -45,6 +46,7 @@ const SERVICE_ICONS: Record<ServiceKey, string> = {
   dental: '🦷',
   dermatology: '🧴',
   solarium: '☀',
+  skin: '✨',
   other: '•',
 }
 
@@ -60,7 +62,8 @@ const canOpenPage = (role: string | undefined) =>
   role === 'dermatology' ||
   role === 'dermatology_manager' ||
   role === 'dermatology_assistant_manager' ||
-  role === 'dental_branch'
+  role === 'dental_branch' ||
+  role === 'skin_specialist'
 
 function fullScheduleRoles(role: string | undefined) {
   return role === 'super_admin' || role === 'reception' || role === 'dermatology_manager'
@@ -81,6 +84,7 @@ function normalizeService(slot: SlotRow): ServiceKey {
   if (raw === 'laser') return 'laser'
   if (raw === 'dental') return 'dental'
   if (raw === 'dermatology') return 'dermatology'
+  if (raw === 'skin') return 'skin'
   if (raw === 'solarium') return 'solarium'
 
   const inferred = inferProcedureCategory(slot.procedureType ?? '', slot.providerName)
@@ -268,6 +272,7 @@ export function BookedAppointmentsPage() {
       dental: [],
       dermatology: [],
       solarium: [],
+      skin: [],
       other: [],
     }
     for (const s of sorted) byService[normalizeService(s)].push(s)
@@ -718,6 +723,38 @@ export function BookedAppointmentsPage() {
                           <td>{renderTimeWithArrival(s)}</td>
                           <td>{s.patientName || '—'}</td>
                           <td>{renderServiceLabel('solarium')}</td>
+                          <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {grouped.byService.skin.length > 0 ? (
+              <div>
+                <h3 style={{ margin: '0 0 0.45rem' }}>{renderServiceLabel('skin')}</h3>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>من — إلى</th>
+                        <th>اسم المريض</th>
+                        <th>القسم</th>
+                        <th>المقدم</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grouped.byService.skin.map((s) => (
+                        <tr
+                          key={s.id}
+                          onClick={() => openActionMenu(s)}
+                          style={fullView ? { cursor: 'pointer' } : undefined}
+                        >
+                          <td>{renderTimeWithArrival(s)}</td>
+                          <td>{s.patientName || '—'}</td>
+                          <td>{renderServiceLabel('skin')}</td>
                           <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
                         </tr>
                       ))}

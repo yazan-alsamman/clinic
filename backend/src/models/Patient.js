@@ -59,7 +59,7 @@ const patientSchema = new mongoose.Schema(
     isotretinoinHistory: { type: String, enum: ['', 'yes', 'no'], default: '' },
     departments: {
       type: [String],
-      enum: ['laser', 'dermatology', 'dental', 'solarium'],
+      enum: ['laser', 'dermatology', 'dental', 'solarium', 'skin'],
       default: [],
     },
     lastVisit: { type: Date, default: null },

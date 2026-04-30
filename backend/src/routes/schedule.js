@@ -20,8 +20,8 @@ export const scheduleRouter = Router()
 
 scheduleRouter.use(authMiddleware)
 
-const providerRoles = ['laser', 'dermatology', 'dental_branch']
-const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'other']
+const providerRoles = ['laser', 'dermatology', 'dental_branch', 'skin_specialist']
+const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'skin', 'other']
 const DERMATOLOGY_PROVIDER_ROLES = ['dermatology', 'dermatology_manager', 'dermatology_assistant_manager']
 const DEFAULT_DERMATOLOGY_BOARDS = [
   { index: 1, title: 'د.لورا' },
@@ -35,7 +35,8 @@ function normalizeServiceType(v) {
     .toLowerCase()
   if (s === 'laser' || s === 'ليزر') return 'laser'
   if (s === 'dental' || s === 'أسنان' || s === 'اسنان') return 'dental'
-  if (s === 'dermatology' || s === 'جلدية' || s === 'بشرة') return 'dermatology'
+  if (s === 'dermatology' || s === 'جلدية') return 'dermatology'
+  if (s === 'skin' || s === 'قسم البشرة') return 'skin'
   if (s === 'solarium' || s === 'سولاريوم') return 'solarium'
   return 'other'
 }
@@ -123,6 +124,14 @@ async function resolveProviderAssignment({ serviceType, providerName, roomNumber
     effectiveProviderName = String(board.title || '').trim()
     assignedSpecialistUserId = board.assignedUserId._id
     assignedSpecialistName = String(board.assignedUserId.name || '').trim()
+  } else if (serviceType === 'skin') {
+    const specialist = await User.findOne({ role: 'skin_specialist', active: true }).select('_id name').lean()
+    if (!specialist?._id || !specialist?.name) {
+      return { error: 'لا يوجد أخصائية بشرة نشطة في النظام' }
+    }
+    effectiveProviderName = 'أخصائي بشرة'
+    assignedSpecialistUserId = specialist._id
+    assignedSpecialistName = String(specialist.name || '').trim()
   }
   return { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName }
 }
@@ -177,6 +186,7 @@ scheduleRouter.get(
     'dermatology_manager',
     'dermatology_assistant_manager',
     'dental_branch',
+    'skin_specialist',
   ),
   async (req, res) => {
     try {
@@ -381,6 +391,7 @@ scheduleRouter.get('/providers', async (_req, res) => {
           'dermatology_assistant_manager',
           'dental_branch',
           'solarium',
+          'skin_specialist',
         ],
       },
       active: true,
@@ -478,6 +489,8 @@ scheduleRouter.get('/', async (req, res) => {
     }
     if (req.user.role === 'dermatology_manager') {
       query.serviceType = 'dermatology'
+    } else if (req.user.role === 'skin_specialist') {
+      query.serviceType = 'skin'
     }
     const slots = await ScheduleSlot.find(query)
       .sort({ time: 1, providerName: 1 })

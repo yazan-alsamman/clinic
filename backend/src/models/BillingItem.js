@@ -11,7 +11,7 @@ const billingItemSchema = new mongoose.Schema(
     },
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true, index: true },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    department: { type: String, enum: ['laser', 'dermatology', 'dental', 'solarium'], required: true },
+    department: { type: String, enum: ['laser', 'dermatology', 'dental', 'solarium', 'skin'], required: true },
     procedureLabel: { type: String, default: '' },
     amountDueSyp: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'SYP' },

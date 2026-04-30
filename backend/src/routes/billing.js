@@ -62,6 +62,7 @@ const DEPT_LABEL_AR = {
   dermatology: 'جلدية',
   dental: 'أسنان',
   solarium: 'سولاريوم',
+  skin: 'بشرة',
 }
 
 const DEFAULT_BANK_SEED = [

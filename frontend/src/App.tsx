@@ -37,11 +37,13 @@ const ReceptionCashMovementPage = lazyPage(() => import('./pages/ReceptionCashMo
 const ReceptionDailyInventoryPage = lazyPage(() => import('./pages/ReceptionDailyInventoryPage'), 'ReceptionDailyInventoryPage')
 const AccountPassword           = lazyPage(() => import('./pages/AccountPassword'), 'AccountPassword')
 const LaserCreateSessionPage    = lazyPage(() => import('./pages/LaserCreateSessionPage'), 'LaserCreateSessionPage')
+const SkinCreateSessionPage = lazyPage(() => import('./pages/SkinCreateSessionPage'), 'SkinCreateSessionPage')
 const DermatologyCreateSessionPage = lazyPage(
   () => import('./pages/DermatologyCreateSessionPage'),
   'DermatologyCreateSessionPage',
 )
 const DermatologyFinancePage = lazyPage(() => import('./pages/DermatologyFinancePage'), 'DermatologyFinancePage')
+const AdminSkinProceduresPage = lazyPage(() => import('./pages/AdminSkinProceduresPage'), 'AdminSkinProceduresPage')
 
 const PatientPortalDashboard    = lazyPage(() => import('./pages/patient-portal/PatientPortalDashboard'), 'PatientPortalDashboard')
 const PatientPortalProfile      = lazyPage(() => import('./pages/patient-portal/PatientPortalProfile'), 'PatientPortalProfile')
@@ -91,6 +93,7 @@ export default function App() {
                 <Route path="/patients/:id" element={<PatientRecord />} />
                 <Route path="/appointments" element={<BookedAppointmentsPage />} />
                 <Route path="/laser/create-session" element={<LaserCreateSessionPage />} />
+                <Route path="/skin/create-session" element={<SkinCreateSessionPage />} />
                 <Route path="/dermatology/create-session" element={<DermatologyCreateSessionPage />} />
                 <Route path="/dermatology/finance" element={<DermatologyFinancePage />} />
                 <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
@@ -102,6 +105,7 @@ export default function App() {
                 <Route path="/reports/daily" element={<DailyReport />} />
                 <Route path="/reports/insights" element={<InsightsPage />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />
                 <Route path="/admin/send-notifications" element={<AdminSendNotificationsPage />} />
                 <Route path="/admin/audit" element={<AdminAudit />} />
                 <Route path="/admin/rooms" element={<AdminRooms />} />

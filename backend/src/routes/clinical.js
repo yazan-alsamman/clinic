@@ -16,7 +16,7 @@ export const clinicalRouter = Router()
 clinicalRouter.use(authMiddleware, loadBusinessDay)
 
 /** أقسام الجلسة السريرية + الفوترة */
-const SESSION_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'solarium']
+const SESSION_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'solarium', 'skin']
 const PATIENT_DEPARTMENT_ENUM = SESSION_DEPARTMENTS
 const CLINICAL_ROLES = [
   'super_admin',
@@ -26,10 +26,11 @@ const CLINICAL_ROLES = [
   'dermatology_assistant_manager',
   'dental_branch',
   'solarium',
+  'skin_specialist',
 ]
 const RECEPTION_CREATE_ROLES = ['super_admin', 'reception']
 /** تعديل جلسة (وصف / مواد): استقبال أو المقدّم أو المدير */
-const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
+const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium', 'skin_specialist']
 /** عرض جلسات المريض */
 const PATIENT_SESSION_VIEW_ROLES = [...CLINICAL_ROLES, 'reception']
 
@@ -44,6 +45,7 @@ function userRoleForSessionDepartment(dept) {
     dermatology: 'dermatology',
     dental: 'dental_branch',
     solarium: 'solarium',
+    skin: 'skin_specialist',
   }
   return m[dept] || null
 }
@@ -73,6 +75,7 @@ function departmentFromRequest(req) {
   }
   if (role === 'dental_branch') return 'dental'
   if (role === 'solarium') return 'solarium'
+  if (role === 'skin_specialist') return 'skin'
   return null
 }
 
@@ -88,6 +91,7 @@ function defaultProcedurePlaceholder(department) {
     dermatology: 'جلدية — بانتظار التفاصيل',
     dental: 'أسنان — بانتظار التفاصيل',
     solarium: 'سولاريوم — بانتظار التفاصيل',
+    skin: 'بشرة — بانتظار التفاصيل',
   }
   return m[department] || 'جلسة — بانتظار التفاصيل'
 }

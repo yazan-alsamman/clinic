@@ -7,13 +7,16 @@ export type Role =
   | 'dermatology_assistant_manager'
   | 'dental_branch'
   | 'solarium'
+  | 'skin_specialist'
 
 export type NavKey =
   | 'dashboard'
   | 'patients'
   | 'laser_create_session'
   | 'dermatology_create_session'
+  | 'skin_create_session'
   | 'dermatology_finance'
+  | 'admin_skin_procedures'
   | 'patients_intake_fast'
   | 'appointments_booked'
   | 'reception_appointment'
@@ -49,7 +52,7 @@ export interface Patient {
   previousTreatments?: '' | 'yes' | 'no'
   recentDermTreatments?: '' | 'yes' | 'no'
   isotretinoinHistory?: '' | 'yes' | 'no'
-  departments: ('laser' | 'dermatology' | 'dental' | 'solarium')[]
+  departments: ('laser' | 'dermatology' | 'dental' | 'solarium' | 'skin')[]
   lastVisit: string
   phone?: string
   /** ذكر / أنثى — فارغ إن لم يُحدَّد */

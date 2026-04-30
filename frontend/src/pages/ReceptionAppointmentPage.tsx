@@ -16,6 +16,7 @@ const SERVICE_OPTIONS = [
   { value: 'laser', label: 'ليزر' },
   { value: 'dental', label: 'أسنان' },
   { value: 'dermatology', label: 'جلدية' },
+  { value: 'skin', label: 'بشرة' },
   { value: 'solarium', label: 'سولاريوم' },
 ] as const
 
@@ -25,6 +26,7 @@ const SERVICE_CHANNELS: Record<ServiceValue, string[]> = {
   laser: ['Laser Room 1', 'Laser Room 2'],
   dental: ['أسنان'],
   dermatology: ['د.لورا', 'د.سامر', 'د.محمد'],
+  skin: ['أخصائي بشرة'],
   solarium: ['سولاريوم'],
 }
 
@@ -43,6 +45,7 @@ const DERMATOLOGY_PROCEDURE_OPTIONS = [
   'حقن شعر',
   'إزالة زوائد',
 ] as const
+const DEFAULT_SKIN_PROCEDURE_OPTIONS = ['عادي', 'VIP', 'دلال', 'organic', 'كاربوكسي'] as const
 
 type SlotRow = {
   id: string
@@ -64,6 +67,7 @@ type DermatologyBoard = {
   title: string
   assigned: { id: string; name: string } | null
 }
+type SkinProcedureOption = { id: string; name: string; priceSyp: number; active: boolean; sortOrder: number }
 
 type LaserProcedureItem = {
   id: string
@@ -245,6 +249,7 @@ export function ReceptionAppointmentPage() {
   )
   const [selectedChannel, setSelectedChannel] = useState<string>(SERVICE_CHANNELS.laser[0])
   const [dermatologyBoards, setDermatologyBoards] = useState<DermatologyBoard[]>([])
+  const [skinProcedureOptions, setSkinProcedureOptions] = useState<SkinProcedureOption[]>([])
   const [appointmentTime, setAppointmentTime] = useState('09:00')
   const [bookingDurationMinutes, setBookingDurationMinutes] = useState(60)
   const [procedureType, setProcedureType] = useState('')
@@ -318,6 +323,15 @@ export function ReceptionAppointmentPage() {
       setLaserProcedureLoading(false)
     }
   }, [canUse])
+  const loadSkinProcedureOptions = useCallback(async () => {
+    if (!canUse) return
+    try {
+      const data = await api<{ options: SkinProcedureOption[] }>('/api/skin/procedure-options')
+      setSkinProcedureOptions((data.options || []).filter((x) => String(x?.name || '').trim()))
+    } catch {
+      setSkinProcedureOptions([])
+    }
+  }, [canUse])
 
   useEffect(() => {
     void loadSlots()
@@ -330,6 +344,9 @@ export function ReceptionAppointmentPage() {
   useEffect(() => {
     void loadLaserProcedureOptions()
   }, [loadLaserProcedureOptions])
+  useEffect(() => {
+    void loadSkinProcedureOptions()
+  }, [loadSkinProcedureOptions])
 
   useEffect(() => {
     if (dayActive) {
@@ -610,8 +627,16 @@ export function ReceptionAppointmentPage() {
 
   const nonLaserProcedureOptions = useMemo(() => {
     if (selectedService === 'dermatology') return DERMATOLOGY_PROCEDURE_OPTIONS
+    if (selectedService === 'skin') {
+      const dynamic = skinProcedureOptions.map((x) => x.name)
+      return dynamic.length > 0 ? dynamic : DEFAULT_SKIN_PROCEDURE_OPTIONS
+    }
     return APPOINTMENT_PROCEDURE_OPTIONS
-  }, [selectedService])
+  }, [selectedService, skinProcedureOptions])
+  const skinOptionPriceByName = useMemo(
+    () => new Map(skinProcedureOptions.map((x) => [String(x.name || '').trim(), Number(x.priceSyp) || 0])),
+    [skinProcedureOptions],
+  )
 
   useEffect(() => {
     setSelectedLaserItemIds((prev) => prev.filter((id) => laserItemById.has(id)))
@@ -1203,7 +1228,9 @@ export function ReceptionAppointmentPage() {
                   <option value="">— اختر نوع الإجراء —</option>
                   {nonLaserProcedureOptions.map((x) => (
                     <option key={x} value={x}>
-                      {x}
+                      {selectedService === 'skin' && skinOptionPriceByName.has(x)
+                        ? `${x} — ${Number(skinOptionPriceByName.get(x) || 0).toLocaleString('ar-SY')} ل.س`
+                        : x}
                     </option>
                   ))}
                 </select>

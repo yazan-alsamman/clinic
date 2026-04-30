@@ -9,7 +9,7 @@ export const inventoryRouter = Router()
 
 inventoryRouter.use(authMiddleware, loadBusinessDay)
 
-const READ_ROLES = ['super_admin', 'reception', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'laser', 'dental_branch', 'solarium']
+const READ_ROLES = ['super_admin', 'reception', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'laser', 'dental_branch', 'solarium', 'skin_specialist']
 const ALLOWED_DEPARTMENTS = ['laser', 'dermatology', 'dermatology_private', 'dental', 'skin', 'solarium']
 
 function normalizeDepartment(raw, fallback = 'dermatology') {
@@ -30,6 +30,9 @@ const DEPARTMENT_SKU_PREFIX = {
 
 function isDermWarehouseRole(role) {
   return role === 'dermatology_manager' || role === 'dermatology_assistant_manager'
+}
+function isSkinWarehouseRole(role) {
+  return role === 'skin_specialist'
 }
 
 async function generateInventorySku(department) {
@@ -81,6 +84,8 @@ inventoryRouter.get('/items', async (req, res) => {
     const q = {}
     if (isDermWarehouseRole(req.user.role)) {
       q.department = 'dermatology_private'
+    } else if (isSkinWarehouseRole(req.user.role)) {
+      q.department = 'skin'
     } else {
       const deptsRaw = String(req.query.departments || '')
         .split(',')
@@ -99,7 +104,7 @@ inventoryRouter.get('/items', async (req, res) => {
   }
 })
 
-inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager'), async (req, res) => {
+inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager', 'skin_specialist'), async (req, res) => {
   try {
     const body = req.body ?? {}
     const name = String(body.name || '').trim()
@@ -109,7 +114,9 @@ inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager'
     }
     const department = isDermWarehouseRole(req.user.role)
       ? 'dermatology_private'
-      : normalizeDepartment(body.department)
+      : isSkinWarehouseRole(req.user.role)
+        ? 'skin'
+        : normalizeDepartment(body.department)
     const sku = await generateInventorySku(department)
     const unitCostSyp = parseNonNegativeUnitCostSyp(body)
     const doc = await InventoryItem.create({
@@ -140,7 +147,7 @@ inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager'
   }
 })
 
-inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager'), async (req, res) => {
+inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager', 'skin_specialist'), async (req, res) => {
   try {
     const item = await InventoryItem.findById(req.params.id)
     if (!item) {
@@ -148,6 +155,10 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
       return
     }
     if (isDermWarehouseRole(req.user.role) && item.department !== 'dermatology_private') {
+      res.status(403).json({ error: 'لا صلاحية لتعديل هذا الصنف' })
+      return
+    }
+    if (isSkinWarehouseRole(req.user.role) && item.department !== 'skin') {
       res.status(403).json({ error: 'لا صلاحية لتعديل هذا الصنف' })
       return
     }
@@ -168,7 +179,9 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
     if (body.department != null) {
       item.department = isDermWarehouseRole(req.user.role)
         ? 'dermatology_private'
-        : normalizeDepartment(body.department, item.department)
+        : isSkinWarehouseRole(req.user.role)
+          ? 'skin'
+          : normalizeDepartment(body.department, item.department)
     }
     if (body.unit != null) item.unit = String(body.unit).trim() || 'unit'
     if (body.quantity != null) item.quantity = Math.max(0, Number(body.quantity))

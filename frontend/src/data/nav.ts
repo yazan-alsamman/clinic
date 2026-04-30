@@ -6,6 +6,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'patients', path: '/patients', label: 'المرضى' },
   { key: 'laser_create_session', path: '/laser/create-session', label: 'إنشاء جلسة' },
   { key: 'dermatology_create_session', path: '/dermatology/create-session', label: 'إنشاء جلسة' },
+  { key: 'skin_create_session', path: '/skin/create-session', label: 'إنشاء جلسة' },
   { key: 'dermatology_finance', path: '/dermatology/finance', label: 'مالية' },
   { key: 'patients_intake_fast', path: '/patients/intake-fast', label: 'إدخال سريع للأضابير' },
   { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
@@ -18,6 +19,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'reports_daily', path: '/reports/daily', label: 'تقرير الجرد اليومي' },
   { key: 'reports_insights', path: '/reports/insights', label: 'ذكاء الأعمال' },
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
+  { key: 'admin_skin_procedures', path: '/admin/skin-procedures', label: 'إجراءات البشرة' },
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
   { key: 'admin_laser', path: '/admin/laser', label: 'ليزر' },
@@ -68,6 +70,7 @@ const roleNav: Record<Role, NavKey[]> = {
   ],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
   solarium: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
+  skin_specialist: ['dashboard', 'appointments_booked', 'skin_create_session', 'inventory', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {
@@ -91,6 +94,7 @@ export function roleLabel(role: Role): string {
     dermatology_assistant_manager: 'مساعد رئيس قسم الجلدية',
     dental_branch: 'أسنان — فرع',
     solarium: 'سولاريوم',
+    skin_specialist: 'أخصائي بشرة',
   }
   return map[role] ?? 'مستخدم'
 }
@@ -108,5 +112,6 @@ export function canAccessTab(
   }
   if (role === 'dental_branch') return tab === 'dental'
   if (role === 'solarium') return tab === 'solarium'
+  if (role === 'skin_specialist') return tab === 'solarium'
   return false
 }

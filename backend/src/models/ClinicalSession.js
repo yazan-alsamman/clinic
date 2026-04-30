@@ -19,7 +19,7 @@ const clinicalSessionSchema = new mongoose.Schema(
   {
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true, index: true },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    department: { type: String, enum: ['laser', 'dermatology', 'dental', 'solarium'], required: true, index: true },
+    department: { type: String, enum: ['laser', 'dermatology', 'dental', 'solarium', 'skin'], required: true, index: true },
     procedureDescription: { type: String, default: '', trim: true },
     sessionFeeSyp: { type: Number, required: true, min: 0 },
     businessDate: { type: String, required: true, index: true },

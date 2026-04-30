@@ -10,7 +10,7 @@ const scheduleSlotSchema = new mongoose.Schema(
     providerName: { type: String, required: true, trim: true },
     serviceType: {
       type: String,
-      enum: ['laser', 'dental', 'dermatology', 'solarium', 'other'],
+      enum: ['laser', 'dental', 'dermatology', 'solarium', 'skin', 'other'],
       default: 'other',
       index: true,
     },

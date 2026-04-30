@@ -8,7 +8,7 @@ import { writeAudit } from '../utils/audit.js'
 export const notificationsRouter = Router()
 notificationsRouter.use(authMiddleware)
 
-const STAFF_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
+const STAFF_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium', 'skin_specialist']
 
 function requireStaff(req, res, next) {
   if (!STAFF_ROLES.includes(req.user.role)) {
