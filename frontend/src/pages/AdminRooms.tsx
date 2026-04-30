@@ -26,6 +26,12 @@ type LaserProcedureItem = {
   sortOrder: number
 }
 type LaserProcedureGroup = { id: string; title: string; items: LaserProcedureItem[] }
+type DermatologyBoard = {
+  id: string
+  index: number
+  title: string
+  assigned: { id: string; name: string } | null
+}
 
 const GROUP_OPTIONS = [
   { value: 'face', label: 'الوجه' },
@@ -45,6 +51,11 @@ export function AdminRooms() {
   const [pickEveningShiftStart, setPickEveningShiftStart] = useState('15:00')
   const [pickEveningShiftEnd, setPickEveningShiftEnd] = useState('21:00')
   const [loading, setLoading] = useState(true)
+  const [dermBoards, setDermBoards] = useState<DermatologyBoard[]>([])
+  const [dermUsers, setDermUsers] = useState<LaserUser[]>([])
+  const [dermEditOpen, setDermEditOpen] = useState<number | null>(null)
+  const [dermTitle, setDermTitle] = useState('')
+  const [dermUserId, setDermUserId] = useState('')
   const [groups, setGroups] = useState<LaserProcedureGroup[]>([])
   const [procLoading, setProcLoading] = useState(false)
   const [procErr, setProcErr] = useState('')
@@ -87,14 +98,26 @@ export function AdminRooms() {
 
   async function load() {
     try {
-      const [rData, uData] = await Promise.all([
+      const [rData, uData, dData] = await Promise.all([
         api<{ rooms: RoomRow[] }>('/api/rooms'),
         api<{ users: LaserUser[] }>('/api/users'),
+        api<{ boards: DermatologyBoard[] }>('/api/schedule/dermatology-boards'),
       ])
       setRooms(rData.rooms)
       setLaserUsers(uData.users.filter((u) => u.role === 'laser' && u.active !== false))
+      setDermUsers(
+        uData.users.filter(
+          (u) =>
+            (u.role === 'dermatology' ||
+              u.role === 'dermatology_manager' ||
+              u.role === 'dermatology_assistant_manager') &&
+            u.active !== false,
+        ),
+      )
+      setDermBoards((dData.boards || []).sort((a, b) => a.index - b.index))
     } catch {
       setRooms([])
+      setDermBoards([])
     } finally {
       setLoading(false)
     }
@@ -237,6 +260,33 @@ export function AdminRooms() {
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: '1rem' }}>
+        <h2 className="card-title">جداول سكرتاريا الجلدية</h2>
+        <p className="page-desc">٣ جداول ثابتة (09:00–21:00) — يمكنك تعديل الاسم وربط كل جدول بطبيب الجلدية.</p>
+        <div className="grid-2">
+          {dermBoards.map((board) => (
+            <div key={board.id} className="card" style={{ margin: 0 }}>
+              <h3 style={{ marginTop: 0 }}>{board.title || `جدول ${board.index}`}</h3>
+              <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                الطبيب المرتبط: {board.assigned?.name || '— غير مرتبط —'}
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ marginTop: '0.75rem' }}
+                onClick={() => {
+                  setDermEditOpen(board.index)
+                  setDermTitle(board.title || '')
+                  setDermUserId(board.assigned?.id || '')
+                }}
+              >
+                تعديل الجدول
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="card" style={{ marginTop: '1rem' }}>
         <h2 className="card-title">إدارة مناطق وعروض الليزر</h2>
@@ -488,6 +538,68 @@ export function AdminRooms() {
                   })
                   setEditingId(null)
                   await loadProcedureOptions()
+                }}
+              >
+                حفظ
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {dermEditOpen != null ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h3>تعديل جدول الجلدية رقم {dermEditOpen}</h3>
+            <div style={{ display: 'grid', gap: '0.6rem' }}>
+              <div>
+                <label className="form-label" htmlFor="derm-board-title">
+                  اسم الجدول
+                </label>
+                <input
+                  id="derm-board-title"
+                  className="input"
+                  value={dermTitle}
+                  onChange={(e) => setDermTitle(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="derm-board-user">
+                  الطبيب المرتبط
+                </label>
+                <select
+                  id="derm-board-user"
+                  className="select"
+                  value={dermUserId}
+                  onChange={(e) => setDermUserId(e.target.value)}
+                >
+                  <option value="">— بدون ربط —</option>
+                  {dermUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.9rem' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setDermEditOpen(null)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={async () => {
+                  if (!dermTitle.trim()) return
+                  await api(`/api/schedule/dermatology-boards/${dermEditOpen}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                      title: dermTitle.trim(),
+                      assignedUserId: dermUserId || null,
+                    }),
+                  })
+                  setDermEditOpen(null)
+                  await load()
                 }}
               >
                 حفظ

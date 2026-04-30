@@ -24,7 +24,7 @@ type ServiceValue = (typeof SERVICE_OPTIONS)[number]['value']
 const SERVICE_CHANNELS: Record<ServiceValue, string[]> = {
   laser: ['Laser Room 1', 'Laser Room 2'],
   dental: ['أسنان'],
-  dermatology: ['جلدية'],
+  dermatology: ['د.لورا', 'د.سامر', 'د.محمد'],
   solarium: ['سولاريوم'],
 }
 
@@ -45,6 +45,13 @@ type SlotRow = {
   patientName: string
   roomNumber?: number | null
   assignedSpecialistName?: string
+}
+
+type DermatologyBoard = {
+  id: string
+  index: number
+  title: string
+  assigned: { id: string; name: string } | null
 }
 
 type LaserProcedureItem = {
@@ -223,6 +230,7 @@ export function ReceptionAppointmentPage() {
 
   const [selectedService, setSelectedService] = useState<ServiceValue>('laser')
   const [selectedChannel, setSelectedChannel] = useState<string>(SERVICE_CHANNELS.laser[0])
+  const [dermatologyBoards, setDermatologyBoards] = useState<DermatologyBoard[]>([])
   const [appointmentTime, setAppointmentTime] = useState('09:00')
   const [bookingDurationMinutes, setBookingDurationMinutes] = useState(60)
   const [procedureType, setProcedureType] = useState('')
@@ -271,6 +279,17 @@ export function ReceptionAppointmentPage() {
     }
   }, [canUse, businessDate])
 
+  const loadDermatologyBoards = useCallback(async () => {
+    if (!canUse) return
+    try {
+      const data = await api<{ boards: DermatologyBoard[] }>('/api/schedule/dermatology-boards')
+      const rows = Array.isArray(data.boards) ? data.boards : []
+      setDermatologyBoards(rows.filter((b) => String(b?.title || '').trim()))
+    } catch {
+      setDermatologyBoards([])
+    }
+  }, [canUse])
+
   const loadLaserProcedureOptions = useCallback(async () => {
     if (!canUse) return
     setLaserProcedureLoading(true)
@@ -291,6 +310,10 @@ export function ReceptionAppointmentPage() {
   }, [loadSlots])
 
   useEffect(() => {
+    void loadDermatologyBoards()
+  }, [loadDermatologyBoards])
+
+  useEffect(() => {
     void loadLaserProcedureOptions()
   }, [loadLaserProcedureOptions])
 
@@ -300,12 +323,23 @@ export function ReceptionAppointmentPage() {
     }
   }, [dayActive])
 
+  const channelsByService = useMemo(
+    () => ({
+      ...SERVICE_CHANNELS,
+      dermatology:
+        dermatologyBoards.length > 0
+          ? dermatologyBoards.map((b) => b.title)
+          : SERVICE_CHANNELS.dermatology,
+    }),
+    [dermatologyBoards],
+  )
+
   useEffect(() => {
-    const channels = SERVICE_CHANNELS[selectedService]
+    const channels = channelsByService[selectedService]
     if (channels.length > 0 && !channels.includes(selectedChannel)) {
       setSelectedChannel(channels[0])
     }
-  }, [selectedService, selectedChannel])
+  }, [selectedService, selectedChannel, channelsByService])
 
   useEffect(() => {
     const q = patientQ.trim()
@@ -771,7 +805,7 @@ export function ReceptionAppointmentPage() {
         </div>
         {slotsLoading ? (
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل الجدول…</p>
-        ) : selectedService === 'laser' ? (
+        ) : selectedService === 'laser' || selectedService === 'dermatology' ? (
           <div
             style={{
               display: 'grid',
@@ -780,11 +814,16 @@ export function ReceptionAppointmentPage() {
               alignItems: 'start',
             }}
           >
-            {SERVICE_CHANNELS.laser.map((channel) => {
+            {channelsByService[selectedService].map((channel) => {
               const rows = appointmentRowsForChannel(channel)
               return (
                 <div key={channel}>
-                  <h3 style={{ margin: '0 0 0.5rem' }}>جدول {LASER_ROOM_TITLES[channel] || channel}</h3>
+                  <h3 style={{ margin: '0 0 0.5rem' }}>
+                    جدول{' '}
+                    {selectedService === 'laser'
+                      ? LASER_ROOM_TITLES[channel] || channel
+                      : channel}
+                  </h3>
                   <div className="table-wrap">
                     <table className="data-table">
                       <thead>

@@ -3,6 +3,7 @@ import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
 import { Room } from '../models/Room.js'
+import { DermatologyBoard } from '../models/DermatologyBoard.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { todayBusinessDate, addCalendarDaysYmd, isValidYmd } from '../utils/date.js'
@@ -21,6 +22,12 @@ scheduleRouter.use(authMiddleware)
 
 const providerRoles = ['laser', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'dental_branch']
 const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'other']
+const DERMATOLOGY_PROVIDER_ROLES = ['dermatology', 'dermatology_manager', 'dermatology_assistant_manager']
+const DEFAULT_DERMATOLOGY_BOARDS = [
+  { index: 1, title: 'د.لورا' },
+  { index: 2, title: 'د.سامر' },
+  { index: 3, title: 'د.محمد' },
+]
 
 function normalizeServiceType(v) {
   const s = String(v || '')
@@ -104,8 +111,33 @@ async function resolveProviderAssignment({ serviceType, providerName, roomNumber
     effectiveProviderName = `Laser Room ${roomNumber}`
     assignedSpecialistUserId = assignedForShift._id
     assignedSpecialistName = assignedForShift.name || ''
+  } else if (serviceType === 'dermatology') {
+    const boards = await ensureDermatologyBoards()
+    const board = boards.find((b) => String(b.title || '').trim() === effectiveProviderName)
+    if (!board) {
+      return { error: 'جدول الجلدية المختار غير صالح' }
+    }
+    if (!board.assignedUserId?._id || !board.assignedUserId?.name) {
+      return { error: 'لا يوجد طبيب جلدية مرتبط بهذا الجدول. عدّل الربط من لوحة المدير.' }
+    }
+    effectiveProviderName = String(board.title || '').trim()
+    assignedSpecialistUserId = board.assignedUserId._id
+    assignedSpecialistName = String(board.assignedUserId.name || '').trim()
   }
   return { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName }
+}
+
+async function ensureDermatologyBoards() {
+  for (const row of DEFAULT_DERMATOLOGY_BOARDS) {
+    await DermatologyBoard.updateOne(
+      { index: row.index },
+      { $setOnInsert: { title: row.title, assignedUserId: null } },
+      { upsert: true },
+    )
+  }
+  return DermatologyBoard.find({ index: { $in: [1, 2, 3] } })
+    .sort({ index: 1 })
+    .populate('assignedUserId', 'name role active')
 }
 
 async function assertNoOverlapForProvider({ businessDate, providerName, startTime, endTime, ignoreId = null }) {
@@ -196,6 +228,8 @@ scheduleRouter.get(
         }
         if (req.user.role === 'laser') {
           filter.$or = [{ assignedSpecialistUserId: req.user._id }, { providerName: name }]
+        } else if (DERMATOLOGY_PROVIDER_ROLES.includes(req.user.role)) {
+          filter.$or = [{ assignedSpecialistUserId: req.user._id }, { providerName: name }]
         } else {
           filter.providerName = name
         }
@@ -220,6 +254,85 @@ scheduleRouter.get(
 
 scheduleRouter.use(requireRoles('super_admin', 'reception'))
 
+scheduleRouter.get('/dermatology-boards', async (_req, res) => {
+  try {
+    const boards = await ensureDermatologyBoards()
+    res.json({
+      boards: boards.map((b) => ({
+        id: String(b._id),
+        index: Number(b.index) || 0,
+        title: String(b.title || '').trim(),
+        assigned: b.assignedUserId?._id
+          ? {
+              id: String(b.assignedUserId._id),
+              name: String(b.assignedUserId.name || '').trim(),
+            }
+          : null,
+      })),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+scheduleRouter.patch('/dermatology-boards/:index', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const idx = Number.parseInt(String(req.params.index || ''), 10)
+    if (![1, 2, 3].includes(idx)) {
+      res.status(400).json({ error: 'رقم جدول الجلدية غير صالح' })
+      return
+    }
+    const nextTitle = String(req.body?.title || '').trim().slice(0, 120)
+    if (!nextTitle) {
+      res.status(400).json({ error: 'اسم الجدول مطلوب' })
+      return
+    }
+    const assignedUserIdRaw = req.body?.assignedUserId
+    let assignedUserId = null
+    if (assignedUserIdRaw) {
+      const user = await User.findById(assignedUserIdRaw).lean()
+      if (!user || user.active === false || !DERMATOLOGY_PROVIDER_ROLES.includes(String(user.role || ''))) {
+        res.status(400).json({ error: 'الطبيب المرتبط يجب أن يكون من فريق الجلدية النشط' })
+        return
+      }
+      assignedUserId = user._id
+    }
+    const board = await DermatologyBoard.findOneAndUpdate(
+      { index: idx },
+      { $set: { title: nextTitle, assignedUserId: assignedUserId || null } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    ).populate('assignedUserId', 'name')
+    await writeAudit({
+      user: req.user,
+      action: 'تعديل جدول عيادة الجلدية',
+      entityType: 'DermatologyBoard',
+      entityId: String(board?._id || idx),
+      details: {
+        index: idx,
+        title: nextTitle,
+        assignedUserId: assignedUserId ? String(assignedUserId) : null,
+      },
+    })
+    res.json({
+      board: {
+        id: String(board._id),
+        index: Number(board.index) || idx,
+        title: String(board.title || '').trim(),
+        assigned: board.assignedUserId?._id
+          ? {
+              id: String(board.assignedUserId._id),
+              name: String(board.assignedUserId.name || '').trim(),
+            }
+          : null,
+      },
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 function defaultEndFromStart(timeStr) {
   const s = hmToMinutes(timeStr)
   if (s == null) return ''
@@ -233,7 +346,16 @@ function defaultEndFromStart(timeStr) {
 scheduleRouter.get('/providers', async (_req, res) => {
   try {
     const clinical = await User.find({
-      role: { $in: ['laser', 'dermatology', 'dental_branch', 'solarium'] },
+      role: {
+        $in: [
+          'laser',
+          'dermatology',
+          'dermatology_manager',
+          'dermatology_assistant_manager',
+          'dental_branch',
+          'solarium',
+        ],
+      },
       active: true,
     })
       .select('name')
