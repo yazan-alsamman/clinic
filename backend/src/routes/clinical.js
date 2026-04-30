@@ -38,11 +38,6 @@ function parsePositiveSypInteger(raw) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-function parseNonNegativeSypInteger(raw) {
-  const n = Math.round(Number(raw))
-  return Number.isFinite(n) && n >= 0 ? n : null
-}
-
 function userRoleForSessionDepartment(dept) {
   const m = {
     laser: 'laser',
@@ -356,12 +351,9 @@ clinicalRouter.post(
         return
       }
 
-      const sessionFeeSyp =
-        department === 'dermatology'
-          ? parseNonNegativeSypInteger(body.sessionFeeSyp)
-          : parsePositiveSypInteger(body.sessionFeeSyp)
+      const sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
       if (sessionFeeSyp == null) {
-        res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (قيمة صحيحة)' })
+        res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (قيمة أكبر من صفر)' })
         return
       }
 
@@ -379,12 +371,11 @@ clinicalRouter.post(
       }
 
       const materialCostSypTotal = Math.round(materialLines.reduce((s, m) => s + (m.lineCostSyp || 0), 0))
-      const materialChargeSypTotal = Math.round(materialLines.reduce((s, m) => s + (m.lineChargeSyp || 0), 0))
+      const materialChargeSypTotal =
+        department === 'dermatology'
+          ? 0
+          : Math.round(materialLines.reduce((s, m) => s + (m.lineChargeSyp || 0), 0))
       const amountDueSyp = sessionFeeSyp + materialChargeSypTotal
-      if (!(amountDueSyp > 0)) {
-        res.status(400).json({ error: 'أدخل رسوم جلسة أو مواد ينتج عنها مبلغ تحصيل أكبر من صفر' })
-        return
-      }
 
       let cs = null
       try {
