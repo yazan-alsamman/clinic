@@ -28,8 +28,15 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'account_password', path: '/account/password', label: 'كلمة المرور' },
 ]
 
+/** روابط «إنشاء جلسة» للأقسام — لا تُعرض في شريط مدير النظام (تكرار الاسم + غير ضروري للدور) */
+const SUPER_ADMIN_HIDDEN_SESSION_KEYS = new Set<NavKey>([
+  'laser_create_session',
+  'dermatology_create_session',
+  'skin_create_session',
+])
+
 const roleNav: Record<Role, NavKey[]> = {
-  super_admin: navItems.filter((n) => n.key !== 'laser_create_session').map((n) => n.key),
+  super_admin: navItems.filter((n) => !SUPER_ADMIN_HIDDEN_SESSION_KEYS.has(n.key)).map((n) => n.key),
   reception: [
     'dashboard',
     'patients',
@@ -76,7 +83,7 @@ const roleNav: Record<Role, NavKey[]> = {
 export function visibleNavForRole(role: Role) {
   /** مباشرة من القائمة لتفادي أي اختلاف بين roleNav و navItems */
   if (role === 'super_admin') {
-    return navItems.filter((n) => n.key !== 'laser_create_session')
+    return navItems.filter((n) => !SUPER_ADMIN_HIDDEN_SESSION_KEYS.has(n.key))
   }
   const keysArr = roleNav[role]
   if (!keysArr?.length) return []
