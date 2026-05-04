@@ -91,8 +91,8 @@ type LaserProcedureGroup = {
 
 const DAY_START_MIN = 9 * 60
 const DAY_END_MIN = 21 * 60
-/** الفرق بين أوقات البداية المعروضة (ساعة)؛ يُضاف وقت غير على الساعة فقط عند نهاية حجز يخرج عن التوقيت الكامل */
-const HOURLY_DISPLAY_STEP_MIN = 60
+/** الفرق بين أوقات البداية المعروضة في الجدول (دقائق)؛ يُضاف وقت بداية إضافي عند نهاية حجز لا يقع على حدّ الشبكة */
+const BOOKING_DISPLAY_GRID_STEP_MIN = 15
 
 function toHm(min: number) {
   const h = Math.floor(min / 60)
@@ -476,7 +476,7 @@ export function ReceptionAppointmentPage() {
         seen.add(toHm(m))
       }
 
-      for (let m = DAY_START_MIN; m + dur <= DAY_END_MIN; m += HOURLY_DISPLAY_STEP_MIN) {
+      for (let m = DAY_START_MIN; m + dur <= DAY_END_MIN; m += BOOKING_DISPLAY_GRID_STEP_MIN) {
         addIfOk(m)
       }
 
@@ -488,7 +488,7 @@ export function ReceptionAppointmentPage() {
       for (const block of mergedBusy) {
         const e = block.end
         if (e <= DAY_START_MIN || e >= DAY_END_MIN) continue
-        if (e % HOURLY_DISPLAY_STEP_MIN === 0) continue
+        if (e % BOOKING_DISPLAY_GRID_STEP_MIN === 0) continue
         addIfOk(e)
       }
 
@@ -525,7 +525,7 @@ export function ReceptionAppointmentPage() {
       const times = new Set<string>(availableStartTimes)
       for (const tm of bookedMap.keys()) times.add(tm)
       if (times.size === 0) {
-        for (let m = DAY_START_MIN; m + bookingDurationMinutes <= DAY_END_MIN; m += HOURLY_DISPLAY_STEP_MIN) {
+        for (let m = DAY_START_MIN; m + bookingDurationMinutes <= DAY_END_MIN; m += BOOKING_DISPLAY_GRID_STEP_MIN) {
           times.add(toHm(m))
         }
       }
@@ -797,8 +797,8 @@ export function ReceptionAppointmentPage() {
         <Link to="/appointments" style={{ color: 'var(--cyan)' }}>
           المواعيد المحجوزة
         </Link>{' '}
-        ليوم الموعد. الأوقات الفارغة على شبكة ساعية (09:00، 10:00، …)، ويُضاف وقت بداية إضافي فقط بعد نهاية حجز
-        لا تقع على الساعة (مثل 11:30 بعد موعد 90 دقيقة من 10:00)؛ بقية الساعات تبقى كما هي.
+        ليوم الموعد. الأوقات الفارغة على شبكة كلّ ربع ساعة (09:00، 09:15، 09:30، …)، ويُضاف وقت بداية إضافي عند نهاية حجز
+        لا يقع على حدّ الشبكة (مثلاً بعد موعد ينتهي 10:20)؛ بقية الأوقات تُحسب كما في المنطق السابق.
       </p>
 
       {assignBlocked ? (
