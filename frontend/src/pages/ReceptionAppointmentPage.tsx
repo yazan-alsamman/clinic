@@ -133,6 +133,35 @@ function mergeHalfOpenIntervals(intervals: { start: number; end: number }[]): { 
   return out
 }
 
+/**
+ * أوقات بداية على شبكة `gridStep` تقع داخل فراغات اليوم بين فترات مشغول مدمجة [dayStart, dayEnd).
+ * يُستخدم لعرض الجدول: فراغ 15 دقيقة يظهر كصف "متاح" حتى لو كانت مدة الحجز الافتراضية (مثلاً 60) لا تتسع فيه.
+ */
+function gridAlignedStartsInFreeGaps(
+  mergedBusy: { start: number; end: number }[],
+  dayStart: number,
+  dayEnd: number,
+  gridStep: number,
+): string[] {
+  const seen = new Set<string>()
+  let cursor = dayStart
+  for (const b of mergedBusy) {
+    const gapEnd = Math.min(b.start, dayEnd)
+    if (gapEnd > cursor) {
+      for (let m = dayStart; m + gridStep <= dayEnd; m += gridStep) {
+        if (m >= cursor && m + gridStep <= gapEnd) seen.add(toHm(m))
+      }
+    }
+    cursor = Math.max(cursor, b.end)
+  }
+  if (cursor < dayEnd) {
+    for (let m = dayStart; m + gridStep <= dayEnd; m += gridStep) {
+      if (m >= cursor && m + gridStep <= dayEnd) seen.add(toHm(m))
+    }
+  }
+  return [...seen]
+}
+
 /** تداخل [startMin,endMin) مع مواعيد محفوظة فعلياً — نفس منطق التأكيد على الخادم (بدون مسودة النافذة) */
 function intervalOverlapsBookedSlots(
   slots: SlotRow[],
@@ -516,14 +545,17 @@ export function ReceptionAppointmentPage() {
         }
       }
       const bookedWithDraft = draftSlot ? [...bookedSlots, draftSlot] : bookedSlots
-      const availableStartTimes = availableStartTimesForChannel(channel)
+      const busyIntervals = bookedWithDraft
+        .map((s) => slotIntervalFromRow(s.time, s.endTime))
+        .filter((x): x is { start: number; end: number } => x != null)
+      const mergedBusy = mergeHalfOpenIntervals(busyIntervals)
+      const freeRowStarts = gridAlignedStartsInFreeGaps(mergedBusy, DAY_START_MIN, DAY_END_MIN, BOOKING_DISPLAY_GRID_STEP_MIN)
       const bookedMap = new Map<string, SlotRow>()
       for (const s of bookedWithDraft) {
         const ti = normalizeTime(s.time)
         if (ti) bookedMap.set(ti, s)
       }
-      const times = new Set<string>(availableStartTimes)
-      for (const tm of bookedMap.keys()) times.add(tm)
+      const times = new Set<string>([...bookedMap.keys(), ...freeRowStarts])
       if (times.size === 0) {
         for (let m = DAY_START_MIN; m + bookingDurationMinutes <= DAY_END_MIN; m += BOOKING_DISPLAY_GRID_STEP_MIN) {
           times.add(toHm(m))
@@ -554,7 +586,6 @@ export function ReceptionAppointmentPage() {
     },
     [
       appointmentTime,
-      availableStartTimesForChannel,
       bookingDurationMinutes,
       bookingOpen,
       businessDate,
