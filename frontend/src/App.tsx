@@ -17,7 +17,6 @@ const lazyPage = <T extends Record<string, React.ComponentType>>(
 
 const Dashboard                 = lazyPage(() => import('./pages/Dashboard'), 'Dashboard')
 const PatientSearch             = lazyPage(() => import('./pages/PatientSearch'), 'PatientSearch')
-const PatientFastIntakePage     = lazyPage(() => import('./pages/PatientFastIntakePage'), 'PatientFastIntakePage')
 const PatientRecord             = lazyPage(() => import('./pages/PatientRecord'), 'PatientRecord')
 const BookedAppointmentsPage    = lazyPage(() => import('./pages/BookedAppointmentsPage'), 'BookedAppointmentsPage')
 const ReceptionAppointmentPage  = lazyPage(() => import('./pages/ReceptionAppointmentPage'), 'ReceptionAppointmentPage')
@@ -89,7 +88,7 @@ export default function App() {
               <Route element={<AppShell />}>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/patients" element={<PatientSearch />} />
-                <Route path="/patients/intake-fast" element={<PatientFastIntakePage />} />
+                <Route path="/patients/intake-fast" element={<Navigate to="/patients" replace />} />
                 <Route path="/patients/:id" element={<PatientRecord />} />
                 <Route path="/appointments" element={<BookedAppointmentsPage />} />
                 <Route path="/laser/create-session" element={<LaserCreateSessionPage />} />

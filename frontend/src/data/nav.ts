@@ -8,7 +8,6 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'dermatology_create_session', path: '/dermatology/create-session', label: 'إنشاء جلسة' },
   { key: 'skin_create_session', path: '/skin/create-session', label: 'إنشاء جلسة' },
   { key: 'dermatology_finance', path: '/dermatology/finance', label: 'مالية' },
-  { key: 'patients_intake_fast', path: '/patients/intake-fast', label: 'إدخال سريع للأضابير' },
   { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
   { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
   { key: 'dental', path: '/dental', label: 'الأسنان' },
@@ -40,7 +39,6 @@ const roleNav: Record<Role, NavKey[]> = {
   reception: [
     'dashboard',
     'patients',
-    'patients_intake_fast',
     'appointments_booked',
     'reception_appointment',
     'billing_queue',
