@@ -185,7 +185,7 @@ export function Login() {
             }}
           >
             للتجربة: موظف — البريد <span dir="ltr">elias@clinic.local</span> وكلمة المرور{' '}
-            <span dir="ltr">admin123</span>. مريض (بعد seed) — اسم المستخدم مثل اسم السجل (مثلاً نورا فهد) وكلمة
+            <span dir="ltr">elias123</span>. مريض (بعد seed) — اسم المستخدم مثل اسم السجل (مثلاً نورا فهد) وكلمة
             المرور <span dir="ltr">client1234</span>.
           </p>
         ) : null}
