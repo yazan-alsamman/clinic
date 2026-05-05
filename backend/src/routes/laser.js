@@ -206,6 +206,44 @@ function parseShotCount(value) {
   return Math.round(num)
 }
 
+/**
+ * مجموع ضربات الأخصائي في الجلسة فقط (بدون قراءات عدّاد الجهاز الكليّة).
+ * - يُفضّل جمع أسطر lineItems لأنها تمثل إدخال الأخصائي لكل منطقة.
+ * - إن لم توجد أسطر: يُجمع كل جزء من shotCount بعد الفصل بـ | (بدل دمج كل الأرقام في رقم واحد).
+ * - أي جزء أكبر من الحد يُستبعد (غالباً قراءة عدّاد أو خطأ إدخال).
+ */
+const MAX_REASONABLE_SHOTS_PER_LINE = 500_000
+
+function specialistSessionShotsTotal(row) {
+  const items = Array.isArray(row?.lineItems) ? row.lineItems : []
+
+  const clampSegment = (parsed) => {
+    const v = Math.round(Number(parsed) || 0)
+    if (!Number.isFinite(v) || v <= 0) return 0
+    if (v > MAX_REASONABLE_SHOTS_PER_LINE) return 0
+    return v
+  }
+
+  if (items.length > 0) {
+    let sum = 0
+    for (const li of items) {
+      sum += clampSegment(parseShotCount(li?.shotCount))
+    }
+    return sum
+  }
+
+  const raw = String(row?.shotCount ?? '').trim()
+  if (!raw) return 0
+  const parts = raw.includes('|')
+    ? raw.split('|').map((s) => s.trim()).filter(Boolean)
+    : [raw]
+  let sum = 0
+  for (const part of parts) {
+    sum += clampSegment(parseShotCount(part))
+  }
+  return sum
+}
+
 function resolveReportMonth(rawMonth, fallbackBusinessDate) {
   const m = String(rawMonth || '').trim()
   if (/^\d{4}-\d{2}$/.test(m)) return m
@@ -539,14 +577,14 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
             clinicalSessionId: { $in: sessionIds },
             status: { $in: doneStatuses },
           })
-            .select('operatorUserId shotCount room')
+            .select('operatorUserId shotCount room lineItems')
             .lean()
         : []
 
     const totals = new Map()
     const roomTotals = { room1Shots: 0, room2Shots: 0 }
     for (const row of laserRows) {
-      const shotCount = parseShotCount(row.shotCount)
+      const shotCount = specialistSessionShotsTotal(row)
       const room = String(row.room || '').trim()
       if (room === '1') roomTotals.room1Shots += shotCount
       if (room === '2') roomTotals.room2Shots += shotCount
@@ -774,14 +812,14 @@ laserRouter.get('/shots-monthly', requireRoles('super_admin'), async (req, res) 
             clinicalSessionId: { $in: sessionIds },
             status: { $in: doneStatuses },
           })
-            .select('operatorUserId shotCount room')
+            .select('operatorUserId shotCount room lineItems')
             .lean()
         : []
 
     const totals = new Map()
     const roomTotals = { room1Shots: 0, room2Shots: 0 }
     for (const row of laserRows) {
-      const shotCount = parseShotCount(row.shotCount)
+      const shotCount = specialistSessionShotsTotal(row)
       const room = String(row.room || '').trim()
       if (room === '1') roomTotals.room1Shots += shotCount
       if (room === '2') roomTotals.room2Shots += shotCount
