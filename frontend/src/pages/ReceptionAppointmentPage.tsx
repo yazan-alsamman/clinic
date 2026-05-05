@@ -636,23 +636,33 @@ export function ReceptionAppointmentPage() {
     const em = sm + dur
     if (em > DAY_END_MIN || em <= sm) {
       const picks = availableStartTimesForChannel(selectedChannel)
-      const next = picks.find((hm) => {
+      const validPicks = picks.filter((hm) => {
         const t = hmToMinutes(hm)
         if (t == null) return false
         if (t + dur > DAY_END_MIN) return false
         return !intervalOverlapsBookedSlots(slots, ch, t, t + dur)
       })
+      const next =
+        validPicks.find((hm) => {
+          const t = hmToMinutes(hm)
+          return t != null && sm != null && t >= sm
+        }) || validPicks[0]
       if (next) setAppointmentTime(next)
       return
     }
     if (!intervalOverlapsBookedSlots(slots, ch, sm, em)) return
     const picks = availableStartTimesForChannel(selectedChannel)
-    const next = picks.find((hm) => {
+    const validPicks = picks.filter((hm) => {
       const t = hmToMinutes(hm)
       if (t == null) return false
       if (t + dur > DAY_END_MIN) return false
       return !intervalOverlapsBookedSlots(slots, ch, t, t + dur)
     })
+    const next =
+      validPicks.find((hm) => {
+        const t = hmToMinutes(hm)
+        return t != null && sm != null && t >= sm
+      }) || validPicks[0]
     if (next && normalizeTime(next) !== norm) setAppointmentTime(next)
   }, [selectedChannel, appointmentTime, bookingDurationMinutes, slots, availableStartTimesForChannel])
 

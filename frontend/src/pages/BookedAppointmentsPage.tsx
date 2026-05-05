@@ -106,12 +106,22 @@ function addMinutesHm(hm: string, minutes: number) {
   return `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}`
 }
 
+function toDisplay12h(hm: string) {
+  const m = String(hm || '').match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return hm
+  const h = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return hm
+  const h12 = ((h + 11) % 12) + 1
+  return `${h12}:${String(mm).padStart(2, '0')}`
+}
+
 function renderTimeWithArrival(slot: SlotRow) {
   return (
     <>
       <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-        {slot.time}
-        {slot.endTime ? ` — ${slot.endTime}` : ''}
+        {toDisplay12h(slot.time)}
+        {slot.endTime ? ` — ${toDisplay12h(slot.endTime)}` : ''}
       </span>
       {slot.arrivedAt ? (
         <span
@@ -513,13 +523,13 @@ export function BookedAppointmentsPage() {
                   {arrivedSorted.map((s) => (
                     <tr key={`arrived-${s.id}`}>
                       <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {s.time}
-                        {s.endTime ? ` — ${s.endTime}` : ''}
+                        {toDisplay12h(s.time)}
+                        {s.endTime ? ` — ${toDisplay12h(s.endTime)}` : ''}
                       </td>
                       <td>{s.patientName || '—'}</td>
                       <td>{renderServiceLabel(normalizeService(s))}</td>
                       <td>{s.assignedSpecialistName?.trim() || s.providerName}</td>
-                      <td>{s.arrivedAt ? new Date(s.arrivedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                      <td>{s.arrivedAt ? new Date(s.arrivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -804,8 +814,8 @@ export function BookedAppointmentsPage() {
           <div className="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>إدارة الموعد</h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.35rem' }}>
-              {actionSlot.patientName} — {actionSlot.time}
-              {actionSlot.endTime ? ` إلى ${actionSlot.endTime}` : ''}
+              {actionSlot.patientName} — {toDisplay12h(actionSlot.time)}
+              {actionSlot.endTime ? ` إلى ${toDisplay12h(actionSlot.endTime)}` : ''}
             </p>
 
             {actionMode === 'menu' ? (
