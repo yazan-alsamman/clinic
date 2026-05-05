@@ -1448,16 +1448,42 @@ export function PatientRecord() {
   }, [patientPackages])
 
   const laserLineItemsWithPricing = useMemo(
-    () =>
-      laserLineItems.map((row) => {
+    () => {
+      const distributedAreaPriceByIndex = new Map<number, number>()
+      const nonPulseGrouped = new Map<string, number[]>()
+
+      laserLineItems.forEach((row, idx) => {
+        if (!row.procedureOptionId || row.chargeByPulseCount) return
+        const k = `${row.procedureOptionId}|${row.isAddon ? 1 : 0}`
+        if (!nonPulseGrouped.has(k)) nonPulseGrouped.set(k, [])
+        nonPulseGrouped.get(k)?.push(idx)
+      })
+
+      for (const [k, indexes] of nonPulseGrouped.entries()) {
+        if (!indexes.length) continue
+        const sample = laserLineItems[indexes[0]]
+        if (!sample?.procedureOptionId) continue
+        const linked = laserItemById.get(sample.procedureOptionId)
+        const fullAreaPrice = linked ? resolveLaserItemPriceByPatientGender(linked, pricingGender) : 0
+        const count = indexes.length
+        const base = Math.floor(fullAreaPrice / count)
+        const remainder = fullAreaPrice - base * count
+        indexes.forEach((idx, pos) => {
+          distributedAreaPriceByIndex.set(idx, base + (pos < remainder ? 1 : 0))
+        })
+      }
+
+      return laserLineItems.map((row, idx) => {
         const linked = row.procedureOptionId ? laserItemById.get(row.procedureOptionId) : undefined
         const areaPrice = linked ? resolveLaserItemPriceByPatientGender(linked, pricingGender) : 0
         const shots = parseLaserShotsForPricing(row.shotCount)
         const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
         const pulseCost = row.chargeByPulseCount && shots > 0 && ppuSyp > 0 ? ppuSyp * shots : 0
-        const lineCostSyp = row.chargeByPulseCount ? pulseCost : areaPrice
+        const distributedAreaPrice = distributedAreaPriceByIndex.get(idx)
+        const lineCostSyp = row.chargeByPulseCount ? pulseCost : distributedAreaPrice ?? areaPrice
         return { ...row, lineCostSyp, shots }
-      }),
+      })
+    },
     [laserLineItems, laserItemById, pricingGender, laserPricePerPulseSyp],
   )
 
