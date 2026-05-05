@@ -477,55 +477,6 @@ export function ReceptionAppointmentPage() {
     [slots],
   )
 
-  const availableStartTimesForChannel = useCallback(
-    (channel: string) => {
-      const apiIntervals = channelBookedSlots(channel)
-        .map((s) => slotIntervalFromRow(s.time, s.endTime))
-        .filter((x): x is { start: number; end: number } => x != null)
-      const dur = bookingDurationMinutes
-
-      const startFitsDayAndNoOverlap = (t: number): boolean => {
-        if (t + dur > DAY_END_MIN) return false
-        const candEnd = t + dur
-        if (apiIntervals.some((iv) => intervalsOverlapHalfOpen(t, candEnd, iv.start, iv.end))) return false
-        if (
-          draftBookingInterval &&
-          channel === selectedChannel &&
-          !(t === draftBookingInterval.start && candEnd === draftBookingInterval.end) &&
-          intervalsOverlapHalfOpen(t, candEnd, draftBookingInterval.start, draftBookingInterval.end)
-        ) {
-          return false
-        }
-        return true
-      }
-
-      const seen = new Set<string>()
-      const addIfOk = (m: number) => {
-        if (!startFitsDayAndNoOverlap(m)) return
-        seen.add(toHm(m))
-      }
-
-      for (let m = DAY_START_MIN; m + dur <= DAY_END_MIN; m += BOOKING_DISPLAY_GRID_STEP_MIN) {
-        addIfOk(m)
-      }
-
-      const forMerge = [...apiIntervals]
-      if (draftBookingInterval && channel === selectedChannel) {
-        forMerge.push({ start: draftBookingInterval.start, end: draftBookingInterval.end })
-      }
-      const mergedBusy = mergeHalfOpenIntervals(forMerge)
-      for (const block of mergedBusy) {
-        const e = block.end
-        if (e <= DAY_START_MIN || e >= DAY_END_MIN) continue
-        if (e % BOOKING_DISPLAY_GRID_STEP_MIN === 0) continue
-        addIfOk(e)
-      }
-
-      return [...seen].sort((a, b) => (hmToMinutes(a) || 0) - (hmToMinutes(b) || 0))
-    },
-    [channelBookedSlots, bookingDurationMinutes, draftBookingInterval, selectedChannel],
-  )
-
   const appointmentRowsForChannel = useCallback(
     (channel: string) => {
       const bookedSlots = channelBookedSlots(channel)
