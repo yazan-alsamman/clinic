@@ -39,6 +39,13 @@ function parsePositiveSypInteger(raw) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+function parseDiscountPercent(raw) {
+  if (raw == null || raw === '') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null
+  return Math.round(n * 100) / 100
+}
+
 function userRoleForSessionDepartment(dept) {
   const m = {
     laser: 'laser',
@@ -97,6 +104,11 @@ function defaultProcedurePlaceholder(department) {
 }
 
 function sessionToPatientRow(r) {
+  const listAmountDueSyp = Math.round(Number(r.billingItemId?.listAmountDueSyp || r.billingItemId?.amountDueSyp || r.sessionFeeSyp || 0))
+  const discountPercent = Number(r.billingItemId?.discountPercent) || 0
+  const effectiveAmountDueSyp = Math.round(
+    Number(r.billingItemId?.effectiveAmountDueSyp || r.billingItemId?.amountDueSyp || r.sessionFeeSyp || 0),
+  )
   return {
     id: String(r._id),
     businessDate: r.businessDate,
@@ -105,7 +117,10 @@ function sessionToPatientRow(r) {
     sessionFeeSyp: r.sessionFeeSyp ?? 0,
     materialCostSypTotal: r.materialCostSypTotal ?? 0,
     materialChargeSypTotal: r.materialChargeSypTotal ?? 0,
-    amountDueSyp: r.billingItemId?.amountDueSyp ?? r.sessionFeeSyp ?? 0,
+    amountDueSyp: effectiveAmountDueSyp,
+    listAmountDueSyp,
+    discountPercent,
+    effectiveAmountDueSyp,
     billingStatus: r.billingItemId?.status ?? 'pending_payment',
     isPackagePrepaid: r.billingItemId?.isPackagePrepaid === true,
     providerName: r.providerUserId?.name || '—',
@@ -260,6 +275,9 @@ clinicalRouter.post(
           providerUserId,
           department,
           procedureLabel: procedureDescription,
+          listAmountDueSyp: amountDueSyp,
+          discountPercent: 0,
+          effectiveAmountDueSyp: amountDueSyp,
           amountDueSyp,
           currency: 'SYP',
           businessDate,
@@ -379,7 +397,19 @@ clinicalRouter.post(
         department === 'dermatology'
           ? 0
           : Math.round(materialLines.reduce((s, m) => s + (m.lineChargeSyp || 0), 0))
-      const amountDueSyp = sessionFeeSyp + materialChargeSypTotal
+      const listAmountDueSyp = sessionFeeSyp + materialChargeSypTotal
+      const discountPercent = department === 'dermatology' ? parseDiscountPercent(body.discountPercent) : 0
+      if (discountPercent == null) {
+        await restoreMaterialsFromSnapshot(materialLines)
+        res.status(400).json({ error: 'نسبة الخصم يجب أن تكون بين 0 و 100.' })
+        return
+      }
+      const amountDueSyp = Math.round(listAmountDueSyp * (1 - discountPercent / 100))
+      if (amountDueSyp < 1) {
+        await restoreMaterialsFromSnapshot(materialLines)
+        res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
+        return
+      }
 
       let cs = null
       try {
@@ -402,6 +432,9 @@ clinicalRouter.post(
           providerUserId: req.user._id,
           department,
           procedureLabel: procedureDescription || 'إجراء',
+          listAmountDueSyp,
+          discountPercent,
+          effectiveAmountDueSyp: amountDueSyp,
           amountDueSyp,
           currency: 'SYP',
           businessDate,
@@ -508,7 +541,7 @@ clinicalRouter.get('/sessions/patient/:patientId', requireRoles(...PATIENT_SESSI
       .sort({ createdAt: -1 })
       .limit(120)
       .populate('providerUserId', 'name')
-      .populate('billingItemId', 'status amountDueSyp isPackagePrepaid')
+      .populate('billingItemId', 'status amountDueSyp listAmountDueSyp discountPercent effectiveAmountDueSyp isPackagePrepaid')
       .lean()
     res.json({
       sessions: rows.map((r) => sessionToPatientRow(r)),
@@ -529,7 +562,7 @@ clinicalRouter.get('/sessions/:sessionId', requireRoles(...SESSION_EDIT_ROLES), 
     }
     const r = await ClinicalSession.findById(sessionId)
       .populate('providerUserId', 'name')
-      .populate('billingItemId', 'status amountDueSyp isPackagePrepaid')
+      .populate('billingItemId', 'status amountDueSyp listAmountDueSyp discountPercent effectiveAmountDueSyp isPackagePrepaid')
       .lean()
     if (!r) {
       res.status(404).json({ error: 'الجلسة غير موجودة' })
@@ -618,7 +651,7 @@ clinicalRouter.patch(
 
         const populated = await ClinicalSession.findById(cs._id)
           .populate('providerUserId', 'name')
-          .populate('billingItemId', 'status amountDueSyp isPackagePrepaid')
+          .populate('billingItemId', 'status amountDueSyp listAmountDueSyp discountPercent effectiveAmountDueSyp isPackagePrepaid')
           .lean()
 
         res.json({ session: sessionToPatientRow(populated) })

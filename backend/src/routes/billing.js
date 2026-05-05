@@ -113,6 +113,9 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
     providerUserId: String(providerIdRaw || ''),
     department: b.department,
     procedureLabel: b.procedureLabel || '—',
+    listAmountDueSyp: Math.round(Number(b.listAmountDueSyp || b.amountDueSyp || 0)),
+    discountPercent: Number(b.discountPercent) || 0,
+    effectiveAmountDueSyp: Math.round(Number(b.effectiveAmountDueSyp || b.amountDueSyp || 0)),
     amountDueSyp: b.amountDueSyp,
     currency: b.currency || 'SYP',
     businessDate: b.businessDate,
@@ -668,8 +671,11 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       res.status(400).json({ error: 'البند ليس في انتظار الدفع' })
       return
     }
-    const listDueSyp = Math.round(Number(bi.amountDueSyp) || 0)
-    if (listDueSyp <= 0) {
+    const savedListDueSyp = Math.round(Number(bi.listAmountDueSyp || bi.amountDueSyp) || 0)
+    const savedDiscountPercent = Number(bi.discountPercent) || 0
+    const savedEffectiveDueSyp = Math.round(Number(bi.effectiveAmountDueSyp || bi.amountDueSyp) || 0)
+    const dueBaseSyp = savedDiscountPercent > 0 ? savedEffectiveDueSyp : savedListDueSyp
+    if (dueBaseSyp <= 0) {
       res.status(400).json({
         error: bi.isPackagePrepaid
           ? 'هذه الجلسة ضمن باكج ولا يوجد مبلغ إضافي مستحق. استخدم «إنقاص جلسة» من صفحة التحصيل.'
@@ -680,18 +686,26 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
 
     const body = req.body ?? {}
     let discountMeta
-    try {
-      discountMeta = resolveBillingDiscount(listDueSyp, body.discountPercent)
-    } catch (e) {
-      if (e && e.message === 'DISCOUNT_RANGE') {
-        res.status(400).json({ error: 'نسبة الخصم يجب أن تكون بين 0 و 100.' })
-        return
+    if (savedDiscountPercent > 0) {
+      discountMeta = {
+        discountPercent: savedDiscountPercent,
+        listAmountDueSyp: savedListDueSyp,
+        effectiveAmountDueSyp: savedEffectiveDueSyp,
       }
-      if (e && e.message === 'DISCOUNT_TOO_DEEP') {
-        res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
-        return
+    } else {
+      try {
+        discountMeta = resolveBillingDiscount(savedListDueSyp, body.discountPercent)
+      } catch (e) {
+        if (e && e.message === 'DISCOUNT_RANGE') {
+          res.status(400).json({ error: 'نسبة الخصم يجب أن تكون بين 0 و 100.' })
+          return
+        }
+        if (e && e.message === 'DISCOUNT_TOO_DEEP') {
+          res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
+          return
+        }
+        throw e
       }
-      throw e
     }
     const dueForSettlement = discountMeta.effectiveAmountDueSyp
     const payCurrencyRaw = String(body.payCurrency || 'SYP').trim().toUpperCase()

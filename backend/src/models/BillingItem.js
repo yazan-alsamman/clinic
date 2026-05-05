@@ -13,6 +13,12 @@ const billingItemSchema = new mongoose.Schema(
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     department: { type: String, enum: ['laser', 'dermatology', 'dental', 'solarium', 'skin'], required: true },
     procedureLabel: { type: String, default: '' },
+    /** السعر قبل الخصم (إن وجد) */
+    listAmountDueSyp: { type: Number, min: 0, default: 0 },
+    /** نسبة الخصم المطبقة على البند نفسه قبل التحصيل */
+    discountPercent: { type: Number, min: 0, max: 100, default: 0 },
+    /** السعر بعد الخصم — هو المعتمد للتحصيل */
+    effectiveAmountDueSyp: { type: Number, min: 0, default: 0 },
     amountDueSyp: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'SYP' },
     businessDate: { type: String, required: true, index: true },

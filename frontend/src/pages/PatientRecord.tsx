@@ -166,6 +166,9 @@ type DermatologySessionRow = {
   materialCostSypTotal: number
   materialChargeSypTotal: number
   amountDueSyp: number
+  listAmountDueSyp?: number
+  discountPercent?: number
+  effectiveAmountDueSyp?: number
   billingStatus: string
   providerName: string
   providerUserId?: string
@@ -627,6 +630,7 @@ export function PatientRecord() {
   const [approvingPlan, setApprovingPlan] = useState(false)
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
   const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
+  const [dermDiscountPercent, setDermDiscountPercent] = useState('')
   const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
   const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
   const [dermSaving, setDermSaving] = useState(false)
@@ -3627,6 +3631,16 @@ export function PatientRecord() {
                 placeholder="مثال: 250000"
               />
             </div>
+            <div style={{ marginTop: '0.75rem' }}>
+              <label className="form-label">نسبة الخصم % (اختياري)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={dermDiscountPercent}
+                onChange={(e) => setDermDiscountPercent(e.target.value)}
+                placeholder="مثال: 10"
+              />
+            </div>
             {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
             {dermOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{dermOk}</p> : null}
             <button
@@ -3654,6 +3668,7 @@ export function PatientRecord() {
                   setDermErr('أدخل سعر الجلسة بالليرة (قيمة أكبر من صفر).')
                   return
                 }
+                const discountPercent = Math.max(0, Math.min(100, Number.parseFloat(dermDiscountPercent) || 0))
                 if (payloadMaterials.length === 0) {
                   setDermErr('أضف مادة واحدة على الأقل مع الكمية.')
                   return
@@ -3668,6 +3683,7 @@ export function PatientRecord() {
                       department: 'dermatology',
                       patientId: id,
                       sessionFeeSyp: feeSyp,
+                      discountPercent,
                       procedureDescription: dermProcedureDescription.trim(),
                       notes: '',
                       materials: payloadMaterials,
@@ -3684,6 +3700,7 @@ export function PatientRecord() {
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')
                   setDermSessionFeeSyp('')
+                  setDermDiscountPercent('')
                   setDermSelectedMaterials([])
                   setDermOk(
                     `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`,

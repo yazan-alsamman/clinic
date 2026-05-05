@@ -17,6 +17,9 @@ type Item = {
   department: string
   procedureLabel: string
   amountDueSyp: number
+  listAmountDueSyp?: number
+  discountPercent?: number
+  effectiveAmountDueSyp?: number
   status: string
   businessDate?: string
   /** سعر USD لتاريخ البند من الخادم (يطابق complete-payment) */
@@ -52,6 +55,16 @@ function effectiveDueFromListAndPct(list: number, pct: number): number {
   return Math.max(1, Math.round(L * (1 - pct / 100)))
 }
 
+function itemListDueSyp(item: Item | null): number {
+  if (!item) return 0
+  return Math.round(Number(item.listAmountDueSyp ?? item.amountDueSyp) || 0)
+}
+
+function itemEffectiveDueSyp(item: Item | null): number {
+  if (!item) return 0
+  return Math.round(Number(item.effectiveAmountDueSyp ?? item.amountDueSyp) || 0)
+}
+
 export function BillingPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
@@ -80,7 +93,9 @@ export function BillingPage() {
 
   const effectiveDueSyp = useMemo(() => {
     if (!payItem) return 0
-    const list = Math.round(Number(payItem.amountDueSyp || 0))
+    const list = itemListDueSyp(payItem)
+    const presetPct = Number(payItem.discountPercent) || 0
+    if (presetPct > 0) return itemEffectiveDueSyp(payItem)
     const pct = parseDiscountPercentInput(payDiscountEnabled, payDiscountPercent)
     return effectiveDueFromListAndPct(list, pct)
   }, [payItem, payDiscountEnabled, payDiscountPercent])
@@ -167,7 +182,7 @@ export function BillingPage() {
 
   async function completePay(id: string) {
     setErr('')
-    if (payItem && Math.round(Number(payItem.amountDueSyp) || 0) <= 0) {
+    if (payItem && itemEffectiveDueSyp(payItem) <= 0) {
       setErr('لا يوجد مبلغ مستحق على هذا البند — راجع التسعير في ملف المريض.')
       return
     }
@@ -252,7 +267,12 @@ export function BillingPage() {
           : payCurrency === 'USD'
             ? { refundCurrency: payRefundCurrency }
             : {}
-      const discountPct = payDiscountEnabled ? parseDiscountPercentInput(true, payDiscountPercent) : 0
+      const discountPct =
+        payItem && (Number(payItem.discountPercent) || 0) > 0
+          ? 0
+          : payDiscountEnabled
+            ? parseDiscountPercentInput(true, payDiscountPercent)
+            : 0
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -377,7 +397,12 @@ export function BillingPage() {
           : payCurrency === 'USD'
             ? { refundCurrency: payRefundCurrency }
             : {}
-      const discountPct = payDiscountEnabled ? parseDiscountPercentInput(true, payDiscountPercent) : 0
+      const discountPct =
+        payItem && (Number(payItem.discountPercent) || 0) > 0
+          ? 0
+          : payDiscountEnabled
+            ? parseDiscountPercentInput(true, payDiscountPercent)
+            : 0
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -529,19 +554,26 @@ export function BillingPage() {
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     {b.procedureLabel} — المقدّم: {b.providerName || '—'}
                   </p>
-                  <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>
-                    {Number(b.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
-                  </p>
+                  {(Number(b.discountPercent) || 0) > 0 ? (
+                    <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>
+                      السعر الأصلي: {itemListDueSyp(b).toLocaleString('ar-SY')} ل.س — بعد الخصم (
+                      {Number(b.discountPercent).toLocaleString('ar-SY')}%): {itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س
+                    </p>
+                  ) : (
+                    <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>
+                      {itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س
+                    </p>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) > 0 ? (
+                  {b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
                     <button
                       type="button"
                       className="btn btn-primary"
                       disabled={busyId === b.id}
                       onClick={() => {
                         setPayItem(b)
-                        setPaySyp(String(Number(b.amountDueSyp || 0)))
+                        setPaySyp(String(itemEffectiveDueSyp(b)))
                         setPayUsd('')
                         setPayCurrency('SYP')
                         setPayChannel('cash')
@@ -556,7 +588,7 @@ export function BillingPage() {
                       {busyId === b.id ? 'جاري المعالجة…' : 'إنقاص جلسة و دفع'}
                     </button>
                   ) : null}
-                  {b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) <= 0 ? (
+                  {b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -566,14 +598,14 @@ export function BillingPage() {
                       {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
                     </button>
                   ) : null}
-                  {!b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) > 0 ? (
+                  {!b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
                     <button
                       type="button"
                       className="btn btn-primary"
                       disabled={busyId === b.id}
                       onClick={() => {
                         setPayItem(b)
-                        setPaySyp(String(Number(b.amountDueSyp || 0)))
+                        setPaySyp(String(itemEffectiveDueSyp(b)))
                         setPayUsd('')
                         setPayCurrency('SYP')
                         setPayChannel('cash')
@@ -587,13 +619,13 @@ export function BillingPage() {
                     >
                       {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                     </button>
-                  ) : !b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) <= 0 ? (
+                  ) : !b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
                     <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
                       مستحق ٠ — راجع الملف
                     </span>
                   ) : null}
                 </div>
-                {b.isPackagePrepaid && (Number(b.amountDueSyp) || 0) > 0 ? (
+                {b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
                   <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                     جلسة باكج مع مناطق إضافية خارج الباكج — استخدم «إنقاص جلسة و دفع» لتسجيل الدفعة ثم خصم جلسة من
                     الباكج.
@@ -623,7 +655,7 @@ export function BillingPage() {
         >
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
-              {payItem.isPackagePrepaid && (Number(payItem.amountDueSyp) || 0) > 0
+              {payItem.isPackagePrepaid && itemEffectiveDueSyp(payItem) > 0
                 ? 'إنقاص جلسة باكج ودفع الإضافات'
                 : 'تأكيد استلام الدفع'}
             </h3>
@@ -631,12 +663,14 @@ export function BillingPage() {
               {payItem.patientName} — {payItem.procedureLabel}
             </p>
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
-              المستحق (قائمة): {Number(payItem.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س
+              {(Number(payItem.discountPercent) || 0) > 0
+                ? `السعر الأصلي: ${itemListDueSyp(payItem).toLocaleString('ar-SY')} ل.س — بعد الخصم (${Number(payItem.discountPercent).toLocaleString('ar-SY')}%): ${itemEffectiveDueSyp(payItem).toLocaleString('ar-SY')} ل.س`
+                : `المستحق: ${itemEffectiveDueSyp(payItem).toLocaleString('ar-SY')} ل.س`}
             </p>
-            {payPreviewRate && Math.round(Number(payItem.amountDueSyp || 0)) > 0 ? (
+            {payPreviewRate && itemEffectiveDueSyp(payItem) > 0 ? (
               <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }} dir="ltr">
                 يعادل المستحق المحفوظ للبند:{' '}
-                {(Math.round(Number(payItem.amountDueSyp || 0)) / payPreviewRate).toLocaleString('en-US', {
+                {(itemEffectiveDueSyp(payItem) / payPreviewRate).toLocaleString('en-US', {
                   maximumFractionDigits: 6,
                 })}{' '}
                 USD عند سعر {payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD
@@ -665,21 +699,31 @@ export function BillingPage() {
                 لا يتوفر سعر صرف في الواجهة لهذا البند — سيتحقق الخادم من السعر المحفوظ لتاريخ البند.
               </p>
             ) : null}
-            {Math.round(Number(payItem.amountDueSyp) || 0) <= 0 ? (
+            {itemEffectiveDueSyp(payItem) <= 0 ? (
               <p style={{ color: 'var(--danger)', marginTop: '0.35rem', fontSize: '0.88rem' }}>
                 لا يمكن تأكيد الدفع: المستحق صفر. أغلق النافذة وراجع تسعير الجلسة في ملف المريض.
               </p>
             ) : null}
             <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid var(--border)' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer', fontWeight: 600 }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  opacity: (Number(payItem.discountPercent) || 0) > 0 ? 0.6 : 1,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={payDiscountEnabled}
+                  disabled={(Number(payItem.discountPercent) || 0) > 0}
                   onChange={(e) => {
                     const on = e.target.checked
                     setPayDiscountEnabled(on)
                     if (!payItem) return
-                    const list = Math.round(Number(payItem.amountDueSyp || 0))
+                    const list = itemListDueSyp(payItem)
                     let pct = parseDiscountPercentInput(on, payDiscountPercent)
                     if (on && !payDiscountPercent.trim()) {
                       setPayDiscountPercent('10')
@@ -695,6 +739,11 @@ export function BillingPage() {
                 />
                 تطبيق خصم (نسبة مئوية على المستحق)
               </label>
+              {(Number(payItem.discountPercent) || 0) > 0 ? (
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  هذا البند عليه خصم مُدخل مسبقاً من قسم الجلدية، وسيتم التحصيل تلقائياً على السعر بعد الخصم.
+                </p>
+              ) : null}
               {payDiscountEnabled ? (
                 <>
                   <p style={{ margin: '0.45rem 0 0', fontWeight: 700 }}>
@@ -717,7 +766,7 @@ export function BillingPage() {
                         onClick={() => {
                           setPayDiscountPercent(String(p))
                           if (payCurrency === 'SYP' && payItem) {
-                            const list = Math.round(Number(payItem.amountDueSyp || 0))
+                            const list = itemListDueSyp(payItem)
                             setPaySyp(String(effectiveDueFromListAndPct(list, p)))
                           }
                         }}
@@ -738,7 +787,7 @@ export function BillingPage() {
                       setPayDiscountPercent(e.target.value)
                       const pct = parseDiscountPercentInput(true, e.target.value)
                       if (payCurrency === 'SYP' && payItem) {
-                        const list = Math.round(Number(payItem.amountDueSyp || 0))
+                        const list = itemListDueSyp(payItem)
                         setPaySyp(String(effectiveDueFromListAndPct(list, pct)))
                       }
                     }}
@@ -748,7 +797,7 @@ export function BillingPage() {
                   <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
                     قيمة الخصم من القائمة:{' '}
                     <strong>
-                      {(Math.round(Number(payItem.amountDueSyp || 0)) - effectiveDueSyp).toLocaleString('ar-SY')} ل.س
+                      {(itemListDueSyp(payItem) - effectiveDueSyp).toLocaleString('ar-SY')} ل.س
                     </strong>
                     — يُحسب قبض التحصيل والترجيع مقابل <strong>المستحق بعد الخصم</strong>.
                   </p>
@@ -767,7 +816,14 @@ export function BillingPage() {
                     checked={payCurrency === 'SYP'}
                     onChange={() => {
                       setPayCurrency('SYP')
-                      setPaySyp(String(effectiveDueFromListAndPct(Math.round(Number(payItem.amountDueSyp || 0)), parseDiscountPercentInput(payDiscountEnabled, payDiscountPercent))))
+                      setPaySyp(
+                        String(
+                          effectiveDueFromListAndPct(
+                            itemListDueSyp(payItem),
+                            parseDiscountPercentInput(payDiscountEnabled, payDiscountPercent),
+                          ),
+                        ),
+                      )
                       setPayRefundCurrency('SYP')
                       setPayRefundAmount('')
                     }}
@@ -1041,16 +1097,16 @@ export function BillingPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={busyId === payItem.id || Math.round(Number(payItem.amountDueSyp) || 0) <= 0}
+                disabled={busyId === payItem.id || itemEffectiveDueSyp(payItem) <= 0}
                 onClick={() =>
-                  void (payItem.isPackagePrepaid && (Number(payItem.amountDueSyp) || 0) > 0
+                  void (payItem.isPackagePrepaid && itemEffectiveDueSyp(payItem) > 0
                     ? completePackageAddonPayAndConsume()
                     : completePay(payItem.id))
                 }
               >
                 {busyId === payItem.id
                   ? 'جاري الحفظ…'
-                  : payItem.isPackagePrepaid && (Number(payItem.amountDueSyp) || 0) > 0
+                  : payItem.isPackagePrepaid && itemEffectiveDueSyp(payItem) > 0
                     ? 'تأكيد الدفع وإنقاص الجلسة'
                     : 'تأكيد استلام الدفع'}
               </button>

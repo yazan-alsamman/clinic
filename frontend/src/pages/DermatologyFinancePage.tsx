@@ -28,6 +28,14 @@ type FinanceSummary = {
     doctorShareSyp: number
     clinicNetSyp: number
   }
+  samerShare?: {
+    providerName: string
+    totalSessionRevenueSyp: number
+    materialCostSyp: number
+    materialCostSharePercent: number
+    materialCostShareSyp: number
+    payableShareSyp: number
+  }
   rows: FinanceRow[]
   notes: string[]
 }
@@ -128,7 +136,7 @@ export function DermatologyFinancePage() {
         style={{
           marginTop: '1rem',
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
           gap: '0.75rem',
         }}
       >
@@ -150,6 +158,17 @@ export function DermatologyFinancePage() {
             {renderSyp(data?.totals.clinicNetSyp || 0)}
           </p>
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#4f46e5' }}>الرقم النهائي المعتمد للعيادة.</p>
+        </div>
+        <div className="card" style={{ borderColor: '#0ea5e9', background: 'linear-gradient(160deg, #ecfeff 0%, #cffafe 100%)' }}>
+          <h3 style={{ margin: 0, color: '#0c4a6e' }}>نسبة الدكتور سامر</h3>
+          <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#0c4a6e' }}>
+            {renderSyp(data?.samerShare?.payableShareSyp || 0)}
+          </p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#0369a1' }}>
+            المعادلة: مجموع جلساته ({renderSyp(data?.samerShare?.totalSessionRevenueSyp || 0)}) −{' '}
+            {Number(data?.samerShare?.materialCostSharePercent || 50).toLocaleString('ar-SY')}% من كلفة المواد (
+            {renderSyp(data?.samerShare?.materialCostShareSyp || 0)}).
+          </p>
         </div>
       </div>
 
