@@ -107,12 +107,16 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
     const samerMaterialCostSyp = Math.round(
       samerRows.reduce((sum, row) => sum + (Number(row.materialCostSyp) || 0), 0),
     )
-    const samerMaterialCostSharePercent = 50
-    const samerMaterialCostShareSyp = Math.round(
-      samerMaterialCostSyp * (samerMaterialCostSharePercent / 100),
+    const samerSharePercent = 50
+    const samerNetAfterMaterialSyp = Math.round(
+      samerTotalSessionRevenueSyp - samerMaterialCostSyp,
     )
     const samerPayableSyp = Math.round(
-      samerTotalSessionRevenueSyp - samerMaterialCostShareSyp,
+      samerNetAfterMaterialSyp * (samerSharePercent / 100),
+    )
+    const samerClinicAddedFromMaterialSyp = Math.round(samerNetAfterMaterialSyp - samerPayableSyp)
+    const adjustedClinicNetSyp = Math.round(
+      totals.clinicNetSyp + samerClinicAddedFromMaterialSyp,
     )
 
     res.json({
@@ -125,16 +129,19 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
         providerName: 'د.سامر',
         totalSessionRevenueSyp: samerTotalSessionRevenueSyp,
         materialCostSyp: samerMaterialCostSyp,
-        materialCostSharePercent: samerMaterialCostSharePercent,
-        materialCostShareSyp: samerMaterialCostShareSyp,
+        netAfterMaterialSyp: samerNetAfterMaterialSyp,
+        sharePercent: samerSharePercent,
+        clinicAddedFromMaterialSyp: samerClinicAddedFromMaterialSyp,
         payableShareSyp: samerPayableSyp,
+        adjustedClinicNetSyp,
       },
       rows: detailRows,
       notes: [
         'الإيراد = خط net_revenue من المستندات المرحلة لقسم الجلدية.',
         'المصاريف المعروضة = كلفة المواد + حصة الطبيب من نفس المستندات.',
         'صافي الربح = خط clinic_net.',
-        'حصة د.سامر = مجموع جلساته − (50% من كلفة المواد ضمن جلساته).',
+        'قاعدة د.سامر: (مجموع جلساته − تكلفة المواد في جلساته) × 50% = مستحق الدكتور.',
+        'الـ 50% المتبقية من نفس الناتج تُضاف إلى صافي أرباح القسم.',
       ],
     })
   } catch (e) {

@@ -32,9 +32,11 @@ type FinanceSummary = {
     providerName: string
     totalSessionRevenueSyp: number
     materialCostSyp: number
-    materialCostSharePercent: number
-    materialCostShareSyp: number
+    netAfterMaterialSyp: number
+    sharePercent: number
+    clinicAddedFromMaterialSyp: number
     payableShareSyp: number
+    adjustedClinicNetSyp: number
   }
   rows: FinanceRow[]
   notes: string[]
@@ -155,9 +157,12 @@ export function DermatologyFinancePage() {
         <div className="card" style={{ borderColor: '#818cf8', background: 'linear-gradient(160deg, #eef2ff 0%, #e0e7ff 100%)' }}>
           <h3 style={{ margin: 0, color: '#3730a3' }}>صافي الربح</h3>
           <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#312e81' }}>
-            {renderSyp(data?.totals.clinicNetSyp || 0)}
+            {renderSyp(data?.samerShare?.adjustedClinicNetSyp ?? data?.totals.clinicNetSyp ?? 0)}
           </p>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#4f46e5' }}>الرقم النهائي المعتمد للعيادة.</p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#4f46e5' }}>
+            يشمل إضافة 50% المتبقية من (جلسات د.سامر بعد خصم المواد) بقيمة (
+            {renderSyp(data?.samerShare?.clinicAddedFromMaterialSyp || 0)}).
+          </p>
         </div>
         <div className="card" style={{ borderColor: '#0ea5e9', background: 'linear-gradient(160deg, #ecfeff 0%, #cffafe 100%)' }}>
           <h3 style={{ margin: 0, color: '#0c4a6e' }}>نسبة الدكتور سامر</h3>
@@ -165,9 +170,9 @@ export function DermatologyFinancePage() {
             {renderSyp(data?.samerShare?.payableShareSyp || 0)}
           </p>
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#0369a1' }}>
-            المعادلة: مجموع جلساته ({renderSyp(data?.samerShare?.totalSessionRevenueSyp || 0)}) −{' '}
-            {Number(data?.samerShare?.materialCostSharePercent || 50).toLocaleString('ar-SY')}% من كلفة المواد (
-            {renderSyp(data?.samerShare?.materialCostShareSyp || 0)}).
+            المعادلة: (مجموع جلساته {renderSyp(data?.samerShare?.totalSessionRevenueSyp || 0)} − تكلفة المواد{' '}
+            {renderSyp(data?.samerShare?.materialCostSyp || 0)}) = {renderSyp(data?.samerShare?.netAfterMaterialSyp || 0)} ثم ×{' '}
+            {Number(data?.samerShare?.sharePercent || 50).toLocaleString('ar-SY')}% = {renderSyp(data?.samerShare?.payableShareSyp || 0)}.
           </p>
         </div>
       </div>
