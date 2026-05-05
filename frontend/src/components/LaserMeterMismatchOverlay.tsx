@@ -1,0 +1,72 @@
+import { useEffect } from 'react'
+
+export type MeterReconciliationDto = {
+  complete?: boolean
+  matched?: boolean | null
+}
+
+/** تحقق يومي: أي غرفة اكتمل حسابها ولم يتحقق التطابق مع العداد */
+export function laserMeterRoomsMismatch(
+  meterReconciliation:
+    | {
+        room1?: MeterReconciliationDto
+        room2?: MeterReconciliationDto
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!meterReconciliation) return false
+  const r1 = meterReconciliation.room1
+  const r2 = meterReconciliation.room2
+  return Boolean(
+    (r1?.complete && r1.matched === false) || (r2?.complete && r2.matched === false),
+  )
+}
+
+export function LaserMeterMismatchOverlay({
+  open,
+  businessDateLabel,
+  onDismiss,
+}: {
+  open: boolean
+  businessDateLabel: string
+  onDismiss: () => void
+}) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onDismiss()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onDismiss])
+
+  if (!open) return null
+
+  return (
+    <div
+      className="laser-meter-mismatch-overlay"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="laser-meter-mismatch-title"
+      aria-describedby="laser-meter-mismatch-desc"
+    >
+      <div className="laser-meter-mismatch-overlay__backdrop" aria-hidden />
+      <div className="laser-meter-mismatch-overlay__panel">
+        <div className="laser-meter-mismatch-overlay__icon" aria-hidden>
+          ⚠
+        </div>
+        <h2 id="laser-meter-mismatch-title" className="laser-meter-mismatch-overlay__title">
+          تنبيه عاجل: لا يوجد تطابق لعداد الضربات
+        </h2>
+        <p id="laser-meter-mismatch-desc" className="laser-meter-mismatch-overlay__text">
+          تم إغلاق وأرشفة اليوم <strong dir="ltr">{businessDateLabel || '—'}</strong> مع وجود عدم تطابق في مطابقة
+          عدّاد الضربات مع الجهاز في إحدى الغرف أو أكثر. راجع صفحة الليزر — تقارير يومية — قسم مطابقة العداد مباشرةً.
+        </p>
+        <button type="button" className="btn btn-danger laser-meter-mismatch-overlay__cta" onClick={onDismiss}>
+          متابعة وعرض التفاصيل
+        </button>
+      </div>
+    </div>
+  )
+}

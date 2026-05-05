@@ -39,7 +39,7 @@ interface ClinicContextValue {
     room1MeterEnd: number
     room2MeterEnd: number
     confirm: string
-  }) => Promise<void>
+  }) => Promise<{ businessDate: string; dayActive: boolean; dayClosed: boolean }>
 }
 
 const ClinicContext = createContext<ClinicContextValue | null>(null)
@@ -93,11 +93,15 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       room2MeterEnd: number
       confirm: string
     }) => {
-      await api('/api/system/close-day', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      })
+      const data = await api<{ businessDate: string; dayActive: boolean; dayClosed: boolean }>(
+        '/api/system/close-day',
+        {
+          method: 'POST',
+          body: JSON.stringify(input),
+        },
+      )
       await refreshSystem()
+      return data
     },
     [refreshSystem],
   )

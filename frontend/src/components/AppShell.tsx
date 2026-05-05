@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import logoEliasClinic from '../assets/logo-elias-clinic.png'
@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { visibleNavForRole, roleLabel } from '../data/nav'
 import { DayBanner } from './DayBanner'
 import { CloseDayModal } from './CloseDayModal'
+import { LaserMeterMismatchOverlay, laserMeterRoomsMismatch } from './LaserMeterMismatchOverlay'
 import { NotificationBell } from './NotificationBell'
 
 export function AppShell() {
@@ -15,6 +16,8 @@ export function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const [closeOpen, setCloseOpen] = useState(false)
+  const [laserMeterMismatchOpen, setLaserMeterMismatchOpen] = useState(false)
+  const [laserMismatchDateLabel, setLaserMismatchDateLabel] = useState('')
   const [navOpen, setNavOpen] = useState(false)
   const [pendingBillingCount, setPendingBillingCount] = useState(0)
   const role = user?.role
@@ -65,6 +68,41 @@ export function AppShell() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [navOpen])
+
+  const onBusinessDayArchived = useCallback(
+    async (info: { businessDate: string }) => {
+      if (role !== 'super_admin') return
+      const bd = String(info.businessDate || '').trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) return
+      try {
+        const data = await api<{
+          meterReconciliation?: {
+            room1?: { complete?: boolean; matched?: boolean | null }
+            room2?: { complete?: boolean; matched?: boolean | null }
+          }
+        }>(`/api/laser/shots-daily?date=${encodeURIComponent(bd)}`)
+        if (!laserMeterRoomsMismatch(data.meterReconciliation)) return
+        setLaserMismatchDateLabel(bd)
+        setLaserMeterMismatchOpen(true)
+        navigate(
+          `/admin/laser?tab=shots&period=daily&date=${encodeURIComponent(bd)}&highlight=meters`,
+          { replace: true },
+        )
+      } catch {
+        /* تجاهل — لا نمنع الإغلاق */
+      }
+    },
+    [navigate, role],
+  )
+
+  useEffect(() => {
+    if (!laserMeterMismatchOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [laserMeterMismatchOpen])
 
   return (
     <div className={`app-layout${navOpen ? ' app-layout--nav-open' : ''}`}>
@@ -153,7 +191,17 @@ export function AppShell() {
         </main>
       </div>
 
-      <CloseDayModal open={closeOpen} onClose={() => setCloseOpen(false)} />
+      <CloseDayModal
+        open={closeOpen}
+        onClose={() => setCloseOpen(false)}
+        onArchived={onBusinessDayArchived}
+      />
+
+      <LaserMeterMismatchOverlay
+        open={laserMeterMismatchOpen}
+        businessDateLabel={laserMismatchDateLabel}
+        onDismiss={() => setLaserMeterMismatchOpen(false)}
+      />
     </div>
   )
 }

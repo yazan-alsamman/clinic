@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
@@ -157,6 +158,7 @@ function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterR
 export function AdminLaserPage() {
   const { user } = useAuth()
   const { businessDate } = useClinic()
+  const [searchParams] = useSearchParams()
   const allowed = user?.role === 'super_admin'
   const [tab, setTab] = useState<LaserTab>('shots')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
@@ -193,11 +195,38 @@ export function AdminLaserPage() {
   const [discountErr, setDiscountErr] = useState('')
 
   useEffect(() => {
-    if (!date && businessDate) setDate(businessDate)
-  }, [businessDate, date])
+    if (date || !businessDate) return
+    const fromUrl = searchParams.get('date')
+    if (fromUrl && /^\d{4}-\d{2}-\d{2}$/.test(fromUrl)) return
+    setDate(businessDate)
+  }, [businessDate, date, searchParams])
   useEffect(() => {
     if (!month && businessDate) setMonth(String(businessDate).slice(0, 7))
   }, [businessDate, month])
+
+  useEffect(() => {
+    if (!allowed) return
+    const t = searchParams.get('tab')
+    const p = searchParams.get('period')
+    const d = searchParams.get('date')
+    if (t === 'shots') setTab('shots')
+    if (p === 'daily') setPeriod('daily')
+    if (p === 'monthly') setPeriod('monthly')
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d)
+  }, [allowed, searchParams])
+
+  useEffect(() => {
+    if (!allowed || tab !== 'shots' || period !== 'daily') return
+    if (searchParams.get('highlight') !== 'meters') return
+    if (shotLoading) return
+    const id = window.setTimeout(() => {
+      const el = document.getElementById('laser-meter-reconciliation')
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el?.classList.add('laser-meter-reconciliation--flash')
+      window.setTimeout(() => el?.classList.remove('laser-meter-reconciliation--flash'), 4500)
+    }, 140)
+    return () => window.clearTimeout(id)
+  }, [allowed, tab, period, shotLoading, searchParams])
 
   const expenseMonth = useMemo(() => {
     if (period === 'monthly' && month && /^\d{4}-\d{2}$/.test(month)) return month
@@ -747,7 +776,11 @@ export function AdminLaserPage() {
             الثانية: <strong style={{ color: 'var(--text)' }}>{roomTotals.room2Shots}</strong>
           </div>
           {period === 'daily' && meterReconciliation ? (
-            <div style={{ marginBottom: '0.95rem' }}>
+            <div
+              id="laser-meter-reconciliation"
+              className="laser-meter-reconciliation-anchor"
+              style={{ marginBottom: '0.95rem' }}
+            >
               <p style={{ margin: '0 0 0.45rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                 مطابقة العداد: (قراءة بداية اليوم + ضربات الجلسات المسجّلة) − قراءة نهاية اليوم — يجب أن يساوي{' '}
                 <strong>0</strong> عند التطابق مع الجهاز.

@@ -1499,6 +1499,179 @@ button:focus:not(:focus-visible) {
   background: rgba(14, 165, 233, 0.45);
 }
 
+/* ——— تنبيه عدم تطابق عداد الليزر بعد إغلاق اليوم ——— */
+.laser-meter-mismatch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  pointer-events: auto;
+}
+
+.laser-meter-mismatch-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .laser-meter-mismatch-overlay__backdrop {
+    animation: laserMeterMismatchBackdropFade 420ms var(--ease-out-expo) both;
+  }
+
+  .laser-meter-mismatch-overlay__panel {
+    animation:
+      laserMeterMismatchPanelIn 520ms var(--ease-out-expo) both,
+      laserMeterMismatchShake 720ms 180ms ease-in-out 1;
+  }
+
+  .laser-meter-mismatch-overlay__icon {
+    animation: laserMeterMismatchIconPulse 1.1s ease-in-out infinite;
+  }
+}
+
+.laser-meter-mismatch-overlay__panel {
+  position: relative;
+  max-width: 34rem;
+  width: 100%;
+  border-radius: var(--radius);
+  padding: 1.75rem 1.5rem 1.5rem;
+  background: linear-gradient(165deg, #fff5f5 0%, #ffffff 46%, #fef2f2 100%);
+  border: 3px solid var(--danger);
+  box-shadow:
+    0 0 0 1px rgba(220, 38, 38, 0.25),
+    0 28px 80px rgba(220, 38, 38, 0.35),
+    0 12px 40px rgba(15, 23, 42, 0.2);
+  text-align: center;
+}
+
+.laser-meter-mismatch-overlay__icon {
+  font-size: 3.75rem;
+  line-height: 1;
+  margin-bottom: 0.35rem;
+  filter: drop-shadow(0 6px 18px rgba(220, 38, 38, 0.45));
+}
+
+.laser-meter-mismatch-overlay__title {
+  margin: 0 0 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--danger);
+  letter-spacing: -0.02em;
+}
+
+.laser-meter-mismatch-overlay__text {
+  margin: 0 0 1.25rem;
+  font-size: 1rem;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+.laser-meter-mismatch-overlay__cta {
+  font-size: 1rem;
+  font-weight: 800;
+  padding: 0.65rem 1.35rem;
+  min-width: 12rem;
+}
+
+@keyframes laserMeterMismatchBackdropFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes laserMeterMismatchPanelIn {
+  from {
+    opacity: 0;
+    transform: scale(0.88) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes laserMeterMismatchShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-10px);
+  }
+  30% {
+    transform: translateX(10px);
+  }
+  45% {
+    transform: translateX(-7px);
+  }
+  60% {
+    transform: translateX(7px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+
+@keyframes laserMeterMismatchIconPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+.laser-meter-reconciliation-anchor {
+  scroll-margin-top: 5.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .laser-meter-reconciliation--flash {
+    animation: laserMeterReconciliationFlash 4.2s ease-out 1;
+  }
+}
+
+@keyframes laserMeterReconciliationFlash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55);
+    outline: 0 solid transparent;
+  }
+  15% {
+    box-shadow: 0 0 0 8px rgba(220, 38, 38, 0.35);
+    outline: 2px solid rgba(220, 38, 38, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    outline: 0 solid transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .laser-meter-mismatch-overlay__panel {
+    animation: none;
+  }
+
+  .laser-meter-mismatch-overlay__icon {
+    animation: none;
+  }
+
+  .laser-meter-reconciliation--flash {
+    animation: none;
+    outline: 2px solid var(--danger);
+    outline-offset: 4px;
+  }
+}
+
 /* طباعة تقرير الجرد اليومي — إظهار المحتوى فقط */
 @media print {
   body * {

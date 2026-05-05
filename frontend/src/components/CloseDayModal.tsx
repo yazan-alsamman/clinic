@@ -6,9 +6,12 @@ import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 export function CloseDayModal({
   open,
   onClose,
+  onArchived,
 }: {
   open: boolean
   onClose: () => void
+  /** يُستدعى بعد إغلاق اليوم بنجاح (قبل إغلاق نافذة الإدخال) */
+  onArchived?: (info: { businessDate: string }) => void | Promise<void>
 }) {
   const { endDay } = useClinic()
   const [room1Input, setRoom1Input] = useState('')
@@ -111,11 +114,12 @@ export function CloseDayModal({
               setBusy(true)
               setErr('')
               try {
-                await endDay({
+                const archived = await endDay({
                   room1MeterEnd: r1,
                   room2MeterEnd: r2,
                   confirm: confirmText.trim(),
                 })
+                await Promise.resolve(onArchived?.({ businessDate: archived.businessDate }))
                 onClose()
               } catch (e) {
                 setErr(e instanceof ApiError ? e.message : 'تعذر إغلاق اليوم.')
