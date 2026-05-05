@@ -3669,10 +3669,6 @@ export function PatientRecord() {
                   return
                 }
                 const discountPercent = Math.max(0, Math.min(100, Number.parseFloat(dermDiscountPercent) || 0))
-                if (payloadMaterials.length === 0) {
-                  setDermErr('أضف مادة واحدة على الأقل مع الكمية.')
-                  return
-                }
                 setDermSaving(true)
                 try {
                   const created = await api<{
@@ -3703,7 +3699,9 @@ export function PatientRecord() {
                   setDermDiscountPercent('')
                   setDermSelectedMaterials([])
                   setDermOk(
-                    `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`,
+                    payloadMaterials.length > 0
+                      ? `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`
+                      : `تم حفظ الجلسة وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`,
                   )
                 } catch (e) {
                   setDermErr(e instanceof ApiError ? e.message : 'تعذر حفظ جلسة الجلدية')
@@ -3712,7 +3710,7 @@ export function PatientRecord() {
                 }
               }}
             >
-              {dermSaving ? 'جاري الحفظ…' : 'تأكيد الجلسة وخصم المواد وإنشاء الفاتورة'}
+              {dermSaving ? 'جاري الحفظ…' : 'تأكيد الجلسة وإنشاء الفاتورة'}
             </button>
             <h3 className="card-title" style={{ marginTop: '1.25rem', fontSize: '0.95rem' }}>
               آخر جلسات الجلدية لهذا المريض
