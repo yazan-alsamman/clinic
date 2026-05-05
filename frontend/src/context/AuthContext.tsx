@@ -62,7 +62,7 @@ interface AuthContextValue {
   loading: boolean
   sessionMinutesLeft: number | null
   login: (identifier: string, password: string) => Promise<LoginResult>
-  logout: () => void
+  logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
 
@@ -130,12 +130,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { accountType: 'staff' as const }
   }, [])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      if (user?.role === 'laser') {
+        await api('/api/laser/morning-shift-logout-notify', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+      }
+    } catch {
+      /* يُكمل تسجيل الخروج محلياً */
+    }
     setToken(null)
     setPatientToken(null)
     setUser(null)
     setSessionMinutesLeft(null)
-  }, [])
+  }, [user?.role])
 
   const value = useMemo(
     () => ({

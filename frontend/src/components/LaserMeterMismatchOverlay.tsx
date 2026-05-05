@@ -1,11 +1,26 @@
 import { useEffect } from 'react'
 
-export type MeterReconciliationDto = {
+export type MeterSegmentDto = {
   complete?: boolean
   matched?: boolean | null
 }
 
-/** تحقق يومي: أي غرفة اكتمل حسابها ولم يتحقق التطابق مع العداد */
+export type MeterReconciliationDto = {
+  complete?: boolean
+  matched?: boolean | null
+  morning?: MeterSegmentDto
+  afternoon?: MeterSegmentDto
+}
+
+function roomMeterHasMismatch(room: MeterReconciliationDto | undefined): boolean {
+  if (!room) return false
+  if (room.complete && room.matched === false) return true
+  if (room.morning?.complete && room.morning.matched === false) return true
+  if (room.afternoon?.complete && room.afternoon.matched === false) return true
+  return false
+}
+
+/** تحقق يومي: أي غرفة — اليوم كاملاً أو فترة صباحية/مسائية */
 export function laserMeterRoomsMismatch(
   meterReconciliation:
     | {
@@ -16,11 +31,7 @@ export function laserMeterRoomsMismatch(
     | undefined,
 ): boolean {
   if (!meterReconciliation) return false
-  const r1 = meterReconciliation.room1
-  const r2 = meterReconciliation.room2
-  return Boolean(
-    (r1?.complete && r1.matched === false) || (r2?.complete && r2.matched === false),
-  )
+  return roomMeterHasMismatch(meterReconciliation.room1) || roomMeterHasMismatch(meterReconciliation.room2)
 }
 
 export function LaserMeterMismatchOverlay({

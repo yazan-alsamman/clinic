@@ -8,6 +8,7 @@ import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { BusinessDay } from '../models/BusinessDay.js'
+import { Room } from '../models/Room.js'
 import { LaserMonthlyExpenses } from '../models/LaserMonthlyExpenses.js'
 import { LaserSettings } from '../models/LaserSettings.js'
 import { BillingPayment } from '../models/BillingPayment.js'
@@ -242,6 +243,89 @@ function specialistSessionShotsTotal(row) {
     sum += clampSegment(parseShotCount(part))
   }
   return sum
+}
+
+function morningAssigneeId(room) {
+  return room.morningAssignedUserId || room.assignedUserId || null
+}
+
+function isMorningLaserAssignee(room, userId) {
+  const mid = morningAssigneeId(room)
+  return mid != null && String(mid) === String(userId)
+}
+
+function meterSegmentReconciliation(meterStart, meterEnd, shotsInSegment) {
+  const s = meterStart != null ? Number(meterStart) : NaN
+  const e = meterEnd != null ? Number(meterEnd) : NaN
+  const sh = Number(shotsInSegment) || 0
+  if (!Number.isFinite(s) || !Number.isFinite(e)) {
+    return { complete: false, delta: null, matched: null }
+  }
+  const delta = s + sh - e
+  const matched = Math.abs(delta) < 1e-6
+  return { complete: true, delta, matched }
+}
+
+function sumShotsForRoomBeforeCutoff(laserRows, roomNum, cutoff) {
+  if (!cutoff) return 0
+  const roomStr = String(roomNum)
+  const tCut =
+    cutoff instanceof Date ? cutoff.getTime() : new Date(cutoff).getTime()
+  if (!Number.isFinite(tCut)) return 0
+  let sum = 0
+  for (const row of laserRows) {
+    if (String(row.room || '').trim() !== roomStr) continue
+    const u = row.updatedAt ? new Date(row.updatedAt).getTime() : 0
+    if (u <= tCut) sum += specialistSessionShotsTotal(row)
+  }
+  return sum
+}
+
+function buildRoomMeterBundle({
+  laserRows,
+  roomNum,
+  meterStart,
+  meterHalf,
+  meterEnd,
+  halfDayCapturedAt,
+  shotsTotal,
+}) {
+  const shots = Number(shotsTotal) || 0
+  const morningShots =
+    meterHalf != null && halfDayCapturedAt
+      ? sumShotsForRoomBeforeCutoff(laserRows, roomNum, halfDayCapturedAt)
+      : null
+  const afternoonShots =
+    meterHalf != null && halfDayCapturedAt != null && morningShots != null
+      ? Math.max(0, shots - morningShots)
+      : null
+
+  const fullDay = meterSegmentReconciliation(meterStart, meterEnd, shots)
+  const morning =
+    meterHalf != null && morningShots != null
+      ? meterSegmentReconciliation(meterStart, meterHalf, morningShots)
+      : { complete: false, delta: null, matched: null }
+  const afternoon =
+    meterHalf != null && meterEnd != null && afternoonShots != null
+      ? meterSegmentReconciliation(meterHalf, meterEnd, afternoonShots)
+      : { complete: false, delta: null, matched: null }
+
+  let mismatchPhase = null
+  if (morning.complete && morning.matched === false) mismatchPhase = 'morning'
+  else if (afternoon.complete && afternoon.matched === false) mismatchPhase = 'afternoon'
+  else if (fullDay.complete && fullDay.matched === false) mismatchPhase = 'full_day'
+
+  return {
+    complete: fullDay.complete,
+    delta: fullDay.delta,
+    matched: fullDay.matched,
+    morning,
+    afternoon,
+    mismatchPhase,
+    shotsMorning: morningShots,
+    shotsAfternoon: afternoonShots,
+    shotsTotal: shots,
+  }
 }
 
 function resolveReportMonth(rawMonth, fallbackBusinessDate) {
@@ -554,6 +638,41 @@ laserRouter.get('/sessions/today', async (req, res) => {
   }
 })
 
+/** إعلان خروج أخصائي وردية الصباح — يطلِب من السكرتاريا إدخال قراءة نصف اليوم للغرفة المعنية */
+laserRouter.post(
+  '/morning-shift-logout-notify',
+  requireActiveDay,
+  requireRoles('laser'),
+  async (req, res) => {
+    try {
+      const d = req.businessDay
+      if (!d?.active) {
+        res.status(423).json({ error: 'يوم العمل غير مفعّل.' })
+        return
+      }
+      const uid = req.user._id
+      const rooms = await Room.find({}).lean()
+      const pendingRooms = []
+      for (const room of rooms) {
+        if (!isMorningLaserAssignee(room, uid)) continue
+        const n = Number(room.number)
+        if (n === 1 && d.room1MeterHalfDay == null) {
+          d.room1HalfDayPending = true
+          pendingRooms.push(1)
+        } else if (n === 2 && d.room2MeterHalfDay == null) {
+          d.room2HalfDayPending = true
+          pendingRooms.push(2)
+        }
+      }
+      await d.save()
+      res.json({ ok: true, pendingRooms })
+    } catch (e) {
+      console.error(e)
+      res.status(500).json({ error: 'خطأ في الخادم' })
+    }
+  },
+)
+
 laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) => {
   try {
     const date = String(req.query.date || '').trim() || req.businessDate || todayBusinessDate()
@@ -577,7 +696,7 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
             clinicalSessionId: { $in: sessionIds },
             status: { $in: doneStatuses },
           })
-            .select('operatorUserId shotCount room lineItems')
+            .select('operatorUserId shotCount room lineItems updatedAt')
             .lean()
         : []
 
@@ -609,22 +728,29 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
     })
 
     const bd = await BusinessDay.findOne({ businessDate: date })
-      .select('room1MeterStart room2MeterStart room1MeterEnd room2MeterEnd')
+      .select(
+        'room1MeterStart room2MeterStart room1MeterEnd room2MeterEnd room1MeterHalfDay room2MeterHalfDay room1HalfDayCapturedAt room2HalfDayCapturedAt',
+      )
       .lean()
-    function meterReconciliationRow(meterStart, meterEnd, shotsInDay) {
-      const s = meterStart != null ? Number(meterStart) : NaN
-      const e = meterEnd != null ? Number(meterEnd) : NaN
-      const sh = Number(shotsInDay) || 0
-      if (!Number.isFinite(s) || !Number.isFinite(e)) {
-        return { complete: false, delta: null, matched: null }
-      }
-      const delta = s + sh - e
-      const matched = Math.abs(delta) < 1e-6
-      return { complete: true, delta, matched }
-    }
     const meterReconciliation = {
-      room1: meterReconciliationRow(bd?.room1MeterStart, bd?.room1MeterEnd, roomTotals.room1Shots),
-      room2: meterReconciliationRow(bd?.room2MeterStart, bd?.room2MeterEnd, roomTotals.room2Shots),
+      room1: buildRoomMeterBundle({
+        laserRows,
+        roomNum: 1,
+        meterStart: bd?.room1MeterStart,
+        meterHalf: bd?.room1MeterHalfDay,
+        meterEnd: bd?.room1MeterEnd,
+        halfDayCapturedAt: bd?.room1HalfDayCapturedAt,
+        shotsTotal: roomTotals.room1Shots,
+      }),
+      room2: buildRoomMeterBundle({
+        laserRows,
+        roomNum: 2,
+        meterStart: bd?.room2MeterStart,
+        meterHalf: bd?.room2MeterHalfDay,
+        meterEnd: bd?.room2MeterEnd,
+        halfDayCapturedAt: bd?.room2HalfDayCapturedAt,
+        shotsTotal: roomTotals.room2Shots,
+      }),
     }
 
     res.json({ date, rows, roomTotals, meterReconciliation })

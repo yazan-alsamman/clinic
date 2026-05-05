@@ -17,6 +17,10 @@ systemRouter.get('/status', loadBusinessDay, (_req, res) => {
     usdSypRate: rate != null && Number.isFinite(Number(rate)) && Number(rate) > 0 ? Number(rate) : null,
     room1MeterStart: d?.room1MeterStart ?? null,
     room2MeterStart: d?.room2MeterStart ?? null,
+    room1MeterHalfDay: d?.room1MeterHalfDay ?? null,
+    room2MeterHalfDay: d?.room2MeterHalfDay ?? null,
+    room1HalfDayPending: Boolean(d?.room1HalfDayPending),
+    room2HalfDayPending: Boolean(d?.room2HalfDayPending),
     room1MeterEnd: d?.room1MeterEnd ?? null,
     room2MeterEnd: d?.room2MeterEnd ?? null,
   })
@@ -61,6 +65,12 @@ systemRouter.post(
         d.room1MeterEnd = null
         d.room2MeterEnd = null
       }
+      d.room1MeterHalfDay = null
+      d.room2MeterHalfDay = null
+      d.room1HalfDayCapturedAt = null
+      d.room2HalfDayCapturedAt = null
+      d.room1HalfDayPending = false
+      d.room2HalfDayPending = false
       d.active = true
       d.room1MeterStart = room1MeterStart
       d.room2MeterStart = room2MeterStart
@@ -139,6 +149,85 @@ systemRouter.post(
         dayClosed: true,
         room1MeterEnd: d.room1MeterEnd,
         room2MeterEnd: d.room2MeterEnd,
+      })
+    } catch (e) {
+      console.error(e)
+      res.status(500).json({ error: 'خطأ في الخادم' })
+    }
+  },
+)
+
+/** تسجيل قراءة عدّاد نصف اليوم لغرفة ليزر — استقبال أو مدير النظام */
+systemRouter.post(
+  '/record-laser-half-day-meter',
+  authMiddleware,
+  loadBusinessDay,
+  requireRoles('super_admin', 'reception'),
+  async (req, res) => {
+    try {
+      const d = req.businessDay
+      if (!d?.active) {
+        res.status(423).json({ error: 'يوم العمل غير مفعّل.' })
+        return
+      }
+      const room = Number(req.body?.room)
+      if (room !== 1 && room !== 2) {
+        res.status(400).json({ error: 'رقم الغرفة يجب أن يكون 1 أو 2' })
+        return
+      }
+      const reading = Number(req.body?.meterReading)
+      if (!Number.isFinite(reading) || reading < 0) {
+        res.status(400).json({ error: 'قراءة العداد غير صالحة' })
+        return
+      }
+      const start = room === 1 ? d.room1MeterStart : d.room2MeterStart
+      const s = start != null ? Number(start) : NaN
+      if (!Number.isFinite(s)) {
+        res.status(400).json({ error: 'لا توجد قراءة بداية اليوم لهذه الغرفة' })
+        return
+      }
+      if (reading < s) {
+        res.status(400).json({ error: 'قراءة نصف اليوم يجب ألا تقل عن قراءة بداية اليوم' })
+        return
+      }
+      const end = room === 1 ? d.room1MeterEnd : d.room2MeterEnd
+      const e = end != null ? Number(end) : NaN
+      if (Number.isFinite(e) && reading > e) {
+        res.status(400).json({ error: 'قراءة نصف اليوم يجب ألا تتجاوز قراءة نهاية اليوم إن وُجدت' })
+        return
+      }
+      const now = new Date()
+      if (room === 1) {
+        if (d.room1MeterHalfDay != null) {
+          res.status(409).json({ error: 'تم تسجيل قراءة نصف اليوم لغرفة 1 مسبقاً' })
+          return
+        }
+        d.room1MeterHalfDay = reading
+        d.room1HalfDayCapturedAt = now
+        d.room1HalfDayPending = false
+      } else {
+        if (d.room2MeterHalfDay != null) {
+          res.status(409).json({ error: 'تم تسجيل قراءة نصف اليوم لغرفة 2 مسبقاً' })
+          return
+        }
+        d.room2MeterHalfDay = reading
+        d.room2HalfDayCapturedAt = now
+        d.room2HalfDayPending = false
+      }
+      await d.save()
+      await writeAudit({
+        user: req.user,
+        action: 'تسجيل قراءة عدّاد نصف اليوم — ليزر',
+        entityType: 'BusinessDay',
+        entityId: d.businessDate,
+        details: { room, meterReading: reading },
+      })
+      res.json({
+        businessDate: d.businessDate,
+        room1MeterHalfDay: d.room1MeterHalfDay ?? null,
+        room2MeterHalfDay: d.room2MeterHalfDay ?? null,
+        room1HalfDayPending: Boolean(d.room1HalfDayPending),
+        room2HalfDayPending: Boolean(d.room2HalfDayPending),
       })
     } catch (e) {
       console.error(e)

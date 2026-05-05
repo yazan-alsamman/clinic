@@ -7,12 +7,13 @@ import { useAuth } from '../context/AuthContext'
 import { visibleNavForRole, roleLabel } from '../data/nav'
 import { DayBanner } from './DayBanner'
 import { CloseDayModal } from './CloseDayModal'
+import { LaserHalfDayMeterModal } from './LaserHalfDayMeterModal'
 import { LaserMeterMismatchOverlay, laserMeterRoomsMismatch } from './LaserMeterMismatchOverlay'
 import { NotificationBell } from './NotificationBell'
 
 export function AppShell() {
   const { user, logout } = useAuth()
-  const { dayActive } = useClinic()
+  const { dayActive, room1HalfDayPending, room2HalfDayPending, refreshSystem } = useClinic()
   const location = useLocation()
   const navigate = useNavigate()
   const [closeOpen, setCloseOpen] = useState(false)
@@ -24,6 +25,14 @@ export function AppShell() {
   const nav = role ? visibleNavForRole(role) : []
   const canSeeBillingCount = role === 'super_admin' || role === 'reception'
 
+  const laserHalfDayTargetRoom: 1 | 2 | null =
+    role === 'reception' || role === 'super_admin'
+      ? room1HalfDayPending
+        ? 1
+        : room2HalfDayPending
+          ? 2
+          : null
+      : null
   useEffect(() => {
     setNavOpen(false)
   }, [location.pathname])
@@ -177,8 +186,10 @@ export function AppShell() {
             className="btn btn-ghost"
             style={{ fontSize: '0.85rem' }}
             onClick={() => {
-              logout()
-              navigate('/login', { replace: true })
+              void (async () => {
+                await logout()
+                navigate('/login', { replace: true })
+              })()
             }}
           >
             تسجيل الخروج
@@ -201,6 +212,12 @@ export function AppShell() {
         open={laserMeterMismatchOpen}
         businessDateLabel={laserMismatchDateLabel}
         onDismiss={() => setLaserMeterMismatchOpen(false)}
+      />
+
+      <LaserHalfDayMeterModal
+        open={laserHalfDayTargetRoom != null}
+        room={laserHalfDayTargetRoom ?? 1}
+        onRecorded={() => void refreshSystem()}
       />
     </div>
   )

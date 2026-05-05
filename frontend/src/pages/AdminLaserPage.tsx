@@ -70,10 +70,22 @@ type LaserPaymentBreakdown = {
 
 type BankEditorRow = { clientKey: string; name: string; active: boolean; sortOrder: string }
 
+type MeterSegmentRow = {
+  complete: boolean
+  delta: number | null
+  matched: boolean | null
+}
+
 type MeterReconciliationRow = {
   complete: boolean
   delta: number | null
   matched: boolean | null
+  morning?: MeterSegmentRow
+  afternoon?: MeterSegmentRow
+  mismatchPhase?: 'morning' | 'afternoon' | 'full_day' | null
+  shotsMorning?: number | null
+  shotsAfternoon?: number | null
+  shotsTotal?: number
 }
 
 /** مفتاح عميل فريد — بدون الاعتماد على `crypto.randomUUID` (قد يكون غير متوفر على HTTP أو متصفحات قديمة). */
@@ -94,6 +106,32 @@ function formatUsdTableAmount(value: number) {
 }
 
 function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterReconciliationRow }) {
+  const phaseHint =
+    row.mismatchPhase === 'morning'
+      ? 'عدم التطابق في الفترة الصباحية.'
+      : row.mismatchPhase === 'afternoon'
+        ? 'عدم التطابق في الفترة المسائية.'
+        : row.mismatchPhase === 'full_day'
+          ? 'عدم التطابق على مستوى اليوم الكامل.'
+          : ''
+
+  const segLine = (label: string, seg: MeterSegmentRow | undefined) => {
+    if (!seg?.complete) return null
+    const ok = seg.matched === true
+    return (
+      <div
+        style={{
+          fontSize: '0.72rem',
+          marginTop: '0.2rem',
+          fontWeight: 700,
+          color: ok ? 'var(--success)' : 'var(--danger)',
+        }}
+      >
+        {label}: {ok ? 'متطابق' : `فرق Δ ${seg.delta != null ? Number(seg.delta).toLocaleString('ar-SY') : '—'}`}
+      </div>
+    )
+  }
+
   if (!row.complete) {
     return (
       <div
@@ -105,15 +143,21 @@ function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterR
           background: 'var(--bg)',
           color: 'var(--text-muted)',
           fontSize: '0.86rem',
-          minWidth: 160,
+          minWidth: 180,
         }}
       >
         <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: '0.15rem' }}>{roomLabel}</div>
-        التحقق غير متاح (يُحتاج قراءة عداد بداية ونهاية هذا اليوم في إعدادات اليوم).
+        التحقق غير متاح (يُحتاج قراءة بداية ونهاية اليوم؛ وللفصل بين الورديتين يلزم قراءة نصف اليوم من الاستقبال).
       </div>
     )
   }
-  if (row.matched) {
+
+  const segmentsOk =
+    (!row.morning?.complete || row.morning.matched === true) &&
+    (!row.afternoon?.complete || row.afternoon.matched === true)
+  const allOk = row.matched === true && segmentsOk
+
+  if (allOk) {
     return (
       <div
         role="status"
@@ -125,7 +169,7 @@ function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterR
           color: 'var(--success)',
           fontWeight: 800,
           fontSize: '0.95rem',
-          minWidth: 160,
+          minWidth: 180,
           textAlign: 'center',
         }}
       >
@@ -134,6 +178,7 @@ function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterR
       </div>
     )
   }
+
   return (
     <div
       role="status"
@@ -144,13 +189,21 @@ function ShotsMeterMatchBox({ roomLabel, row }: { roomLabel: string; row: MeterR
         background: 'var(--danger-bg)',
         color: 'var(--danger)',
         fontWeight: 800,
-        fontSize: '0.95rem',
-        minWidth: 160,
+        fontSize: '0.9rem',
+        minWidth: 180,
         textAlign: 'center',
       }}
     >
       <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.2rem', opacity: 0.9 }}>{roomLabel}</div>
       لا يوجد تطابق
+      {phaseHint ? (
+        <div style={{ fontSize: '0.74rem', fontWeight: 700, marginTop: '0.25rem' }}>{phaseHint}</div>
+      ) : null}
+      <div style={{ fontSize: '0.72rem', marginTop: '0.35rem', fontWeight: 600 }}>
+        اليوم كامل: Δ {row.delta != null ? Number(row.delta).toLocaleString('ar-SY') : '—'}
+      </div>
+      {segLine('صباحي', row.morning)}
+      {segLine('مسائي', row.afternoon)}
     </div>
   )
 }
@@ -781,9 +834,13 @@ export function AdminLaserPage() {
               className="laser-meter-reconciliation-anchor"
               style={{ marginBottom: '0.95rem' }}
             >
-              <p style={{ margin: '0 0 0.45rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                مطابقة العداد: (قراءة بداية اليوم + ضربات الجلسات المسجّلة) − قراءة نهاية اليوم — يجب أن يساوي{' '}
-                <strong>0</strong> عند التطابق مع الجهاز.
+              <p style={{ margin: '0 0 0.45rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                <strong>اليوم كامل:</strong> (قراءة بداية اليوم + مجموع ضربات الجلسات المسجّلة) − قراءة نهاية اليوم ={' '}
+                <strong>0</strong>.
+                <br />
+                <strong>بعد تسجيل قراءة نصف اليوم:</strong> الصباح — (بداية اليوم + ضربات الجلسات حتى لحظة حفظ نصف اليوم) −
+                قراءة نصف اليوم = 0. المساء — (قراءة نصف اليوم + ضربات الجلسات بعد ذلك) − نهاية اليوم = 0. يُعرض أدناه أي
+                فترة لا تزال غير متطابقة.
               </p>
               <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
                 <ShotsMeterMatchBox roomLabel="الغرفة 1" row={meterReconciliation.room1} />

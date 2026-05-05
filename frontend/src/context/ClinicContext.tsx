@@ -18,6 +18,10 @@ interface SystemStatus {
   usdSypRate: number | null
   room1MeterStart: number | null
   room2MeterStart: number | null
+  room1MeterHalfDay: number | null
+  room2MeterHalfDay: number | null
+  room1HalfDayPending: boolean
+  room2HalfDayPending: boolean
   room1MeterEnd: number | null
   room2MeterEnd: number | null
 }
@@ -28,6 +32,8 @@ interface ClinicContextValue {
   dayClosed: boolean
   /** سعر الصرف لليوم النشط (ل.س لكل 1 USD) أو null */
   usdSypRate: number | null
+  room1HalfDayPending: boolean
+  room2HalfDayPending: boolean
   systemLoading: boolean
   refreshSystem: () => Promise<void>
   startDay: (input: {
@@ -70,9 +76,11 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return
+    const intervalMs =
+      user.role === 'reception' || user.role === 'super_admin' ? 5000 : 15000
     const id = window.setInterval(() => {
       void refreshSystem()
-    }, 15000)
+    }, intervalMs)
     return () => window.clearInterval(id)
   }, [user, refreshSystem])
 
@@ -115,6 +123,8 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
         status?.usdSypRate != null && Number.isFinite(Number(status.usdSypRate)) && Number(status.usdSypRate) > 0
           ? Number(status.usdSypRate)
           : null,
+      room1HalfDayPending: Boolean(status?.room1HalfDayPending),
+      room2HalfDayPending: Boolean(status?.room2HalfDayPending),
       systemLoading,
       refreshSystem,
       startDay,
@@ -125,6 +135,8 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       status?.businessDate,
       status?.dayClosed,
       status?.usdSypRate,
+      status?.room1HalfDayPending,
+      status?.room2HalfDayPending,
       systemLoading,
       refreshSystem,
       startDay,

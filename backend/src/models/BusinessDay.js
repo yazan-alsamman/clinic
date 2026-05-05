@@ -12,6 +12,14 @@ const businessDaySchema = new mongoose.Schema(
     /** قراءة عداد الليزر (غرفة 1 و 2) عند بداية اليوم ونهايته */
     room1MeterStart: { type: Number, default: null },
     room2MeterStart: { type: Number, default: null },
+    /** قراءة نصف اليوم — بعد انتهاء وردية الصباح (عدّاد الجهاز عند خروج أخصائي الصباح) */
+    room1MeterHalfDay: { type: Number, default: null },
+    room2MeterHalfDay: { type: Number, default: null },
+    room1HalfDayCapturedAt: { type: Date, default: null },
+    room2HalfDayCapturedAt: { type: Date, default: null },
+    /** السكرتاريا مطالبون بإدخال قراءة نصف اليوم بعد إعلان خروج أخصائي الصباح */
+    room1HalfDayPending: { type: Boolean, default: false },
+    room2HalfDayPending: { type: Boolean, default: false },
     room1MeterEnd: { type: Number, default: null },
     room2MeterEnd: { type: Number, default: null },
   },
