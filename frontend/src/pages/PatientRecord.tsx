@@ -972,10 +972,13 @@ export function PatientRecord() {
 
   useEffect(() => {
     setLaserLineItems((prev) => {
-      const mappedPrev = new Map(
+      const mappedPrev = new Map<string, LaserSessionLineInput>(
         prev
           .filter((row) => row.procedureOptionId)
-          .map((row) => [`${row.procedureOptionId}|${row.isAddon ? 1 : 0}|${row.optionInstance || 1}`, row] as const),
+          .map((row) => [
+            `${row.procedureOptionId}|${row.isAddon ? 1 : 0}|${row.optionInstance || 1}` as string,
+            row,
+          ]),
       )
       const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
         const isAddon = selectedLaserAddonItemIds.includes(item.id)
