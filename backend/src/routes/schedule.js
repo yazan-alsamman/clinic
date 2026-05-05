@@ -639,10 +639,6 @@ scheduleRouter.get('/arrived', async (req, res) => {
 
 scheduleRouter.post('/arrive/:id', loadBusinessDay, requireActiveDay, async (req, res) => {
   try {
-    if (req.user.role === 'dermatology_manager') {
-      res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء' })
-      return
-    }
     const slot = await ScheduleSlot.findById(req.params.id)
     if (!slot || !slot.patientId) {
       res.status(404).json({ error: 'الموعد غير موجود' })
