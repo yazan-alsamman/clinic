@@ -1459,7 +1459,7 @@ export function PatientRecord() {
         nonPulseGrouped.get(k)?.push(idx)
       })
 
-      for (const [k, indexes] of nonPulseGrouped.entries()) {
+      for (const [, indexes] of nonPulseGrouped.entries()) {
         if (!indexes.length) continue
         const sample = laserLineItems[indexes[0]]
         if (!sample?.procedureOptionId) continue
