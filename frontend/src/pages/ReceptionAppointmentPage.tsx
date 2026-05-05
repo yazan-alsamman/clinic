@@ -627,44 +627,27 @@ export function ReceptionAppointmentPage() {
 
   /** مزامنة الوقت مع المدة والجدول الفعلي — لا تعتمد على قائمة العرض فقط (تجنّب رفض 5/15 دقيقة ومسودة الحجز) */
   useEffect(() => {
+    if (!bookingOpen) return
     const ch = selectedChannel.trim()
     if (!ch) return
     const norm = normalizeTime(appointmentTime)
     const sm = norm ? hmToMinutes(norm) : null
     const dur = bookingDurationMinutes
-    if (sm == null || dur < 1) return
-    const em = sm + dur
-    if (em > DAY_END_MIN || em <= sm) {
-      const picks = availableStartTimesForChannel(selectedChannel)
-      const validPicks = picks.filter((hm) => {
-        const t = hmToMinutes(hm)
-        if (t == null) return false
-        if (t + dur > DAY_END_MIN) return false
-        return !intervalOverlapsBookedSlots(slots, ch, t, t + dur)
-      })
-      const next =
-        validPicks.find((hm) => {
-          const t = hmToMinutes(hm)
-          return t != null && sm != null && t >= sm
-        }) || validPicks[0]
-      if (next) setAppointmentTime(next)
+    if (sm == null || dur < 1) {
+      setFormErr('لا يمكنك حجز هذا الموعد: الوقت المختار غير صالح.')
       return
     }
-    if (!intervalOverlapsBookedSlots(slots, ch, sm, em)) return
-    const picks = availableStartTimesForChannel(selectedChannel)
-    const validPicks = picks.filter((hm) => {
-      const t = hmToMinutes(hm)
-      if (t == null) return false
-      if (t + dur > DAY_END_MIN) return false
-      return !intervalOverlapsBookedSlots(slots, ch, t, t + dur)
-    })
-    const next =
-      validPicks.find((hm) => {
-        const t = hmToMinutes(hm)
-        return t != null && sm != null && t >= sm
-      }) || validPicks[0]
-    if (next && normalizeTime(next) !== norm) setAppointmentTime(next)
-  }, [selectedChannel, appointmentTime, bookingDurationMinutes, slots, availableStartTimesForChannel])
+    const em = sm + dur
+    if (em > DAY_END_MIN || em <= sm) {
+      setFormErr('لا يمكنك حجز هذا الموعد: يتجاوز نهاية الدوام.')
+      return
+    }
+    if (intervalOverlapsBookedSlots(slots, ch, sm, em)) {
+      setFormErr('لا يمكنك حجز هذا الموعد: الوقت يتداخل مع موعد آخر.')
+      return
+    }
+    setFormErr((prev) => (prev.startsWith('لا يمكنك حجز هذا الموعد:') ? '' : prev))
+  }, [bookingOpen, selectedChannel, appointmentTime, bookingDurationMinutes, slots])
 
   const nonLaserProcedureOptions = useMemo(() => {
     if (selectedService === 'dermatology') return DERMATOLOGY_PROCEDURE_OPTIONS
