@@ -85,6 +85,7 @@ function slugifyArabic(v) {
 function optionToDto(row) {
   const male = Math.max(0, Math.round(Number(row.priceMaleSyp ?? row.priceSyp) || 0))
   const female = Math.max(0, Math.round(Number(row.priceFemaleSyp ?? row.priceSyp) || 0))
+  const areaCount = Math.max(1, Math.min(20, Math.trunc(Number(row.areaCount) || 1)))
   return {
     id: String(row._id),
     code: row.code,
@@ -95,6 +96,7 @@ function optionToDto(row) {
     priceSyp: Number(row.priceSyp) || female,
     priceMaleSyp: male,
     priceFemaleSyp: female,
+    areaCount,
     active: Boolean(row.active),
     sortOrder: Number(row.sortOrder) || 0,
   }
@@ -105,13 +107,18 @@ async function ensureDefaultLaserProcedureOptions() {
   if (count > 0) {
     await LaserProcedureOption.updateMany(
       {
-        $or: [{ priceMaleSyp: { $exists: false } }, { priceFemaleSyp: { $exists: false } }],
+        $or: [
+          { priceMaleSyp: { $exists: false } },
+          { priceFemaleSyp: { $exists: false } },
+          { areaCount: { $exists: false } },
+        ],
       },
       [
         {
           $set: {
             priceMaleSyp: { $ifNull: ['$priceMaleSyp', { $ifNull: ['$priceSyp', 0] }] },
             priceFemaleSyp: { $ifNull: ['$priceFemaleSyp', { $ifNull: ['$priceSyp', 0] }] },
+            areaCount: { $ifNull: ['$areaCount', 1] },
           },
         },
       ],
@@ -342,6 +349,8 @@ laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, 
     const priceMaleSyp = Number(body.priceMaleSyp ?? legacyPriceSyp)
     const priceFemaleSyp = Number(body.priceFemaleSyp ?? legacyPriceSyp)
     const sortOrder = Number(body.sortOrder)
+    const areaCountRaw = Number(body.areaCount)
+    const areaCount = Number.isFinite(areaCountRaw) ? Math.trunc(areaCountRaw) : 1
     if (!name) {
       res.status(400).json({ error: 'اسم المنطقة/العرض مطلوب' })
       return
@@ -359,6 +368,10 @@ laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, 
       res.status(400).json({ error: 'سعر الذكور/الإناث بالليرة غير صالح' })
       return
     }
+    if (!Number.isFinite(areaCount) || areaCount < 1 || areaCount > 20) {
+      res.status(400).json({ error: 'عدد المناطق يجب أن يكون بين 1 و 20' })
+      return
+    }
     const option = await LaserProcedureOption.create({
       code: `${groupId}-${slugifyArabic(name)}-${Date.now()}`,
       name,
@@ -368,6 +381,7 @@ laserRouter.post('/procedure-options', requireRoles('super_admin'), async (req, 
       priceSyp: Math.round(priceFemaleSyp),
       priceMaleSyp: Math.round(priceMaleSyp),
       priceFemaleSyp: Math.round(priceFemaleSyp),
+      areaCount,
       active: body.active !== false,
       sortOrder: Number.isFinite(sortOrder) ? sortOrder : 999,
     })
@@ -404,6 +418,14 @@ laserRouter.patch('/procedure-options/:id', requireRoles('super_admin'), async (
       option.groupTitle = LASER_PROCEDURE_GROUPS[groupId]
     }
     if (body.kind != null) option.kind = String(body.kind).trim() === 'offer' ? 'offer' : 'area'
+    if (body.areaCount != null) {
+      const nextAreaCount = Math.trunc(Number(body.areaCount))
+      if (!Number.isFinite(nextAreaCount) || nextAreaCount < 1 || nextAreaCount > 20) {
+        res.status(400).json({ error: 'عدد المناطق يجب أن يكون بين 1 و 20' })
+        return
+      }
+      option.areaCount = nextAreaCount
+    }
     if (body.priceSyp != null || body.priceMaleSyp != null || body.priceFemaleSyp != null) {
       const nextMale = Number(body.priceMaleSyp ?? body.priceSyp ?? option.priceMaleSyp ?? option.priceSyp)
       const nextFemale = Number(body.priceFemaleSyp ?? body.priceSyp ?? option.priceFemaleSyp ?? option.priceSyp)

@@ -15,6 +15,8 @@ const laserProcedureOptionSchema = new mongoose.Schema(
     /** السعر بحسب جنس المريض */
     priceMaleSyp: { type: Number, required: true, min: 0, default: 0 },
     priceFemaleSyp: { type: Number, required: true, min: 0, default: 0 },
+    /** عدد المناطق التي يمثلها العرض (يفيد في إنشاء أسطر الجلسة تلقائياً) */
+    areaCount: { type: Number, required: true, min: 1, max: 20, default: 1 },
     active: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 },
   },

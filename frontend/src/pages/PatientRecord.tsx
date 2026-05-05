@@ -98,6 +98,7 @@ type LaserProcedureItem = {
   priceSyp: number
   priceMaleSyp: number
   priceFemaleSyp: number
+  areaCount: number
   active: boolean
   sortOrder: number
 }
@@ -111,6 +112,7 @@ type LaserProcedureGroup = {
 type LaserSessionLineInput = {
   rowId: string
   procedureOptionId: string
+  optionInstance: number
   areaLabel: string
   pw: string
   pulse: string
@@ -134,6 +136,7 @@ function createLaserLineRow(partial?: Partial<LaserSessionLineInput>): LaserSess
   return {
     rowId: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     procedureOptionId: '',
+    optionInstance: 1,
     areaLabel: '',
     pw: '',
     pulse: '',
@@ -142,6 +145,16 @@ function createLaserLineRow(partial?: Partial<LaserSessionLineInput>): LaserSess
     isAddon: false,
     ...partial,
   }
+}
+
+function splitOfferAreaLabels(offerName: string) {
+  const raw = String(offerName || '').trim()
+  if (!raw) return []
+  return raw
+    .replace(/\s+و\s+/g, '|')
+    .split(/\s*(?:\||\+|،|,|\/|\\)\s*/g)
+    .map((x) => x.trim())
+    .filter(Boolean)
 }
 
 type DermatologySessionRow = {
@@ -962,16 +975,26 @@ export function PatientRecord() {
       const mappedPrev = new Map(
         prev
           .filter((row) => row.procedureOptionId)
-          .map((row) => [row.procedureOptionId, row] as const),
+          .map((row) => [`${row.procedureOptionId}|${row.isAddon ? 1 : 0}|${row.optionInstance || 1}`, row] as const),
       )
-      const nextMappedRows = combinedLaserSaveItems.map((item) =>
-        createLaserLineRow({
-          ...(mappedPrev.get(item.id) || {}),
-          procedureOptionId: item.id,
-          areaLabel: item.name,
-          isAddon: selectedLaserAddonItemIds.includes(item.id),
-        }),
-      )
+      const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
+        const isAddon = selectedLaserAddonItemIds.includes(item.id)
+        const neededRows = item.kind === 'offer' ? Math.max(1, Math.trunc(Number(item.areaCount) || 1)) : 1
+        const parsedNames = item.kind === 'offer' ? splitOfferAreaLabels(item.name) : []
+        return Array.from({ length: neededRows }, (_, idx) => {
+          const optionInstance = idx + 1
+          const key = `${item.id}|${isAddon ? 1 : 0}|${optionInstance}`
+          const parsedLabel = parsedNames[idx] || ''
+          const fallbackLabel = neededRows > 1 ? `${item.name} (${optionInstance})` : item.name
+          return createLaserLineRow({
+            ...(mappedPrev.get(key) || {}),
+            procedureOptionId: item.id,
+            optionInstance,
+            areaLabel: parsedLabel || fallbackLabel,
+            isAddon,
+          })
+        })
+      })
       return nextMappedRows
     })
   }, [combinedLaserSaveItems, selectedLaserAddonItemIds])

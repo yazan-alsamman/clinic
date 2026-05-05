@@ -22,6 +22,7 @@ type LaserProcedureItem = {
   priceSyp: number
   priceMaleSyp: number
   priceFemaleSyp: number
+  areaCount: number
   active: boolean
   sortOrder: number
 }
@@ -64,6 +65,7 @@ export function AdminRooms() {
   const [newKind, setNewKind] = useState<'area' | 'offer'>('area')
   const [newPriceMale, setNewPriceMale] = useState('55000')
   const [newPriceFemale, setNewPriceFemale] = useState('55000')
+  const [newAreaCount, setNewAreaCount] = useState('1')
   const [newSortOrder, setNewSortOrder] = useState('999')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
@@ -71,6 +73,7 @@ export function AdminRooms() {
   const [editKind, setEditKind] = useState<'area' | 'offer'>('area')
   const [editPriceMale, setEditPriceMale] = useState('')
   const [editPriceFemale, setEditPriceFemale] = useState('')
+  const [editAreaCount, setEditAreaCount] = useState('1')
   const [editSortOrder, setEditSortOrder] = useState('999')
   const [pulsePriceSyp, setPulsePriceSyp] = useState('0')
   const [pulsePriceSaving, setPulsePriceSaving] = useState(false)
@@ -384,6 +387,12 @@ export function AdminRooms() {
             onChange={(e) => setNewPriceFemale(e.target.value)}
           />
           <input className="input" placeholder="الترتيب" value={newSortOrder} onChange={(e) => setNewSortOrder(e.target.value)} />
+          <input
+            className="input"
+            placeholder="عدد المناطق في العرض"
+            value={newAreaCount}
+            onChange={(e) => setNewAreaCount(e.target.value)}
+          />
           <button
             type="button"
             className="btn btn-primary"
@@ -396,12 +405,14 @@ export function AdminRooms() {
                   kind: newKind,
                   priceMaleSyp: Number(newPriceMale) || 0,
                   priceFemaleSyp: Number(newPriceFemale) || 0,
+                  areaCount: Math.max(1, Math.min(20, Math.trunc(Number(newAreaCount) || 1))),
                   sortOrder: Number(newSortOrder) || 999,
                 }),
               })
               setNewName('')
               setNewPriceMale('55000')
               setNewPriceFemale('55000')
+              setNewAreaCount('1')
               setNewSortOrder('999')
               await loadProcedureOptions()
             }}
@@ -424,6 +435,7 @@ export function AdminRooms() {
                       <th>النوع</th>
                       <th>سعر الذكور</th>
                       <th>سعر الإناث</th>
+                      <th>عدد المناطق</th>
                       <th>الحالة</th>
                       <th>إجراء</th>
                     </tr>
@@ -435,6 +447,7 @@ export function AdminRooms() {
                         <td>{item.kind === 'offer' ? 'عرض' : 'منطقة'}</td>
                         <td>{Number(item.priceMaleSyp ?? item.priceSyp ?? 0).toLocaleString('en-US')}</td>
                         <td>{Number(item.priceFemaleSyp ?? item.priceSyp ?? 0).toLocaleString('en-US')}</td>
+                        <td>{Math.max(1, Number(item.areaCount) || 1)}</td>
                         <td>{item.active ? 'مفعل' : 'موقوف'}</td>
                         <td style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                           <button
@@ -447,6 +460,7 @@ export function AdminRooms() {
                               setEditKind(item.kind)
                               setEditPriceMale(String(item.priceMaleSyp ?? item.priceSyp ?? 0))
                               setEditPriceFemale(String(item.priceFemaleSyp ?? item.priceSyp ?? 0))
+                              setEditAreaCount(String(Math.max(1, Number(item.areaCount) || 1)))
                               setEditSortOrder(String(item.sortOrder || 999))
                             }}
                           >
@@ -515,6 +529,12 @@ export function AdminRooms() {
                 value={editPriceFemale}
                 onChange={(e) => setEditPriceFemale(e.target.value)}
               />
+              <input
+                className="input"
+                placeholder="عدد المناطق في العرض"
+                value={editAreaCount}
+                onChange={(e) => setEditAreaCount(e.target.value)}
+              />
               <input className="input" value={editSortOrder} onChange={(e) => setEditSortOrder(e.target.value)} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.9rem' }}>
@@ -533,6 +553,7 @@ export function AdminRooms() {
                       kind: editKind,
                       priceMaleSyp: Number(editPriceMale) || 0,
                       priceFemaleSyp: Number(editPriceFemale) || 0,
+                      areaCount: Math.max(1, Math.min(20, Math.trunc(Number(editAreaCount) || 1))),
                       sortOrder: Number(editSortOrder) || 999,
                     }),
                   })
