@@ -39,6 +39,11 @@ function parsePositiveSypInteger(raw) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+function parsePositiveUsd(raw) {
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
 function parseDiscountPercent(raw) {
   if (raw == null || raw === '') return 0
   const n = Number(raw)
@@ -373,7 +378,21 @@ clinicalRouter.post(
         return
       }
 
-      const sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      let sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      const feeCurrency = String(body.feeCurrency || 'SYP').trim().toUpperCase()
+      if (department === 'dermatology' && feeCurrency === 'USD') {
+        const feeUsd = parsePositiveUsd(body.sessionFeeUsd)
+        if (feeUsd == null) {
+          res.status(400).json({ error: 'أدخل سعر الجلسة بالدولار (قيمة أكبر من صفر)' })
+          return
+        }
+        const rate = Number(req.businessDay?.usdSypRate)
+        if (!Number.isFinite(rate) || rate <= 0) {
+          res.status(400).json({ error: 'لا يوجد سعر صرف لليوم. اطلب من المدير إدخال سعر الدولار أولاً.' })
+          return
+        }
+        sessionFeeSyp = Math.round(feeUsd * rate)
+      }
       if (sessionFeeSyp == null) {
         res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (قيمة أكبر من صفر)' })
         return

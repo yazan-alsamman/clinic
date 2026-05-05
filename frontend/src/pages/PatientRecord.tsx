@@ -629,7 +629,9 @@ export function PatientRecord() {
   )
   const [approvingPlan, setApprovingPlan] = useState(false)
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
+  const [dermFeeCurrency, setDermFeeCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
+  const [dermSessionFeeUsd, setDermSessionFeeUsd] = useState('')
   const [dermDiscountPercent, setDermDiscountPercent] = useState('')
   const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
   const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
@@ -3622,14 +3624,38 @@ export function PatientRecord() {
               <strong style={{ color: 'var(--text)' }}>{dermMaterialsCostTotal.toLocaleString('ar-SY')} ل.س</strong>
             </div>
             <div style={{ marginTop: '0.75rem' }}>
-              <label className="form-label">سعر الجلسة (ل.س)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={dermSessionFeeSyp}
-                onChange={(e) => setDermSessionFeeSyp(e.target.value)}
-                placeholder="مثال: 250000"
-              />
+              <label className="form-label">عملة سعر الجلسة</label>
+              <select
+                className="select"
+                value={dermFeeCurrency}
+                onChange={(e) => setDermFeeCurrency(e.target.value === 'USD' ? 'USD' : 'SYP')}
+              >
+                <option value="SYP">ليرة سورية (SYP)</option>
+                <option value="USD">دولار أمريكي (USD)</option>
+              </select>
+            </div>
+            <div style={{ marginTop: '0.75rem' }}>
+              <label className="form-label">
+                سعر الجلسة ({dermFeeCurrency === 'USD' ? 'USD' : 'ل.س'})
+              </label>
+              {dermFeeCurrency === 'USD' ? (
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  dir="ltr"
+                  value={dermSessionFeeUsd}
+                  onChange={(e) => setDermSessionFeeUsd(e.target.value)}
+                  placeholder="مثال: 25"
+                />
+              ) : (
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={dermSessionFeeSyp}
+                  onChange={(e) => setDermSessionFeeSyp(e.target.value)}
+                  placeholder="مثال: 250000"
+                />
+              )}
             </div>
             <div style={{ marginTop: '0.75rem' }}>
               <label className="form-label">نسبة الخصم % (اختياري)</label>
@@ -3664,7 +3690,13 @@ export function PatientRecord() {
                   return
                 }
                 const feeSyp = Math.max(0, Math.round(parseFloat(dermSessionFeeSyp) || 0))
-                if (!(feeSyp > 0)) {
+                const feeUsd = Math.max(0, Number.parseFloat(dermSessionFeeUsd) || 0)
+                if (dermFeeCurrency === 'USD') {
+                  if (!(feeUsd > 0)) {
+                    setDermErr('أدخل سعر الجلسة بالدولار (قيمة أكبر من صفر).')
+                    return
+                  }
+                } else if (!(feeSyp > 0)) {
                   setDermErr('أدخل سعر الجلسة بالليرة (قيمة أكبر من صفر).')
                   return
                 }
@@ -3678,7 +3710,9 @@ export function PatientRecord() {
                     body: JSON.stringify({
                       department: 'dermatology',
                       patientId: id,
-                      sessionFeeSyp: feeSyp,
+                      feeCurrency: dermFeeCurrency,
+                      sessionFeeSyp: dermFeeCurrency === 'SYP' ? feeSyp : undefined,
+                      sessionFeeUsd: dermFeeCurrency === 'USD' ? feeUsd : undefined,
                       discountPercent,
                       procedureDescription: dermProcedureDescription.trim(),
                       notes: '',
@@ -3695,7 +3729,9 @@ export function PatientRecord() {
                   )
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')
+                  setDermFeeCurrency('SYP')
                   setDermSessionFeeSyp('')
+                  setDermSessionFeeUsd('')
                   setDermDiscountPercent('')
                   setDermSelectedMaterials([])
                   setDermOk(
