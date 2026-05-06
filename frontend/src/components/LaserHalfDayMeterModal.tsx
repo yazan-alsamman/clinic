@@ -27,7 +27,16 @@ export function LaserHalfDayMeterModal({
     if (!open) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Half-day meter entry is mandatory: block Escape-based dismiss patterns.
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
     return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
       document.body.style.overflow = prev
     }
   }, [open])
@@ -38,9 +47,11 @@ export function LaserHalfDayMeterModal({
   const ok = Number.isFinite(n) && n >= 0 && !busy
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={`half-day-title-r${room}`} style={{ zIndex: 1200 }}>
       <div className="modal" style={{ maxWidth: 420 }}>
-        <h3 style={{ color: 'var(--danger)', marginTop: 0 }}>قراءة عدّاد نصف اليوم — غرفة {room}</h3>
+        <h3 id={`half-day-title-r${room}`} style={{ color: 'var(--danger)', marginTop: 0 }}>
+          قراءة عدّاد نصف اليوم — غرفة {room}
+        </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
           قامت أخصائية وردية الصباح بتسجيل الخروج. أدخل قراءة عدّاد الجهاز الحالية لهذه الغرفة (قراءة نصف اليوم)
           ليتم التحقق من تطابق الضربات للفترة الصباحية والمسائية.
