@@ -122,7 +122,7 @@ export function LaserCreateSessionPage() {
                       navigate(
                         `/patients/${s.patientId}?tab=laser&laserProc=${encodeURIComponent(
                           String(s.procedureType || '').trim(),
-                        )}&laserSlotId=${encodeURIComponent(String(s.id))}`,
+                        )}&laserSlotId=${encodeURIComponent(String(s.id))}&laserRoom=${encodeURIComponent(String(s.roomNumber || ''))}`,
                       )
                     }
                     style={{ cursor: 'pointer' }}

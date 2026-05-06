@@ -1342,6 +1342,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const scheduleSlotId = String(body.scheduleSlotId || '').trim()
 
     let linkedSlot = null
+    let resolvedRoom = String(body.room ?? '1').trim()
+    if (resolvedRoom !== '2') resolvedRoom = '1'
     if (scheduleSlotId) {
       linkedSlot = await ScheduleSlot.findById(scheduleSlotId)
       if (!linkedSlot) {
@@ -1372,6 +1374,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         res.status(403).json({ error: 'هذا الموعد مرتبط بأخصائي آخر' })
         return
       }
+      const slotRoom = String(linkedSlot.roomNumber ?? '').trim()
+      if (slotRoom === '1' || slotRoom === '2') resolvedRoom = slotRoom
     }
 
     const catalogRows =
@@ -1403,7 +1407,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         treatmentNumber,
         patientId: patient._id,
         operatorUserId: req.user._id,
-        room: String(body.room ?? '1'),
+        room: resolvedRoom,
         laserType,
         pw: mergedPw,
         pulse: mergedPulse,

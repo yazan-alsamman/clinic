@@ -605,7 +605,6 @@ export function PatientRecord() {
   }, [searchParams])
 
   const [laserType, setLaserType] = useState<(typeof laserTypes)[number]>('Mix')
-  const room: '1' | '2' = '1'
   const [laserCatalog, setLaserCatalog] = useState<LaserCategory[]>([])
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
@@ -615,6 +614,8 @@ export function PatientRecord() {
   const [selectedLaserAddonItemIds, setSelectedLaserAddonItemIds] = useState<string[]>([])
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
+  const roomFromQuery = String(searchParams.get('laserRoom') || '').trim()
+  const room: '1' | '2' = roomFromQuery === '2' ? '2' : '1'
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
   const [laserLineItems, setLaserLineItems] = useState<LaserSessionLineInput[]>([])
   const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
