@@ -1178,15 +1178,40 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const rawLineItems = parseLaserSessionLineItems(body.laserLineItems)
     const settings = await getOrCreateLaserSettings()
     const ppuSyp = Math.max(0, Math.round(Number(settings.pricePerPulseSyp) || 0))
-    const normalizedLineItems = rawLineItems.map((row) => {
+    const distributedAreaPriceByIndex = new Map()
+    const nonPulseGroupedIndexes = new Map()
+    rawLineItems.forEach((row, idx) => {
+      if (!row?.procedureOptionId || row.chargeByPulseCount) return
+      const key = `${row.procedureOptionId}|${row.isAddon ? 1 : 0}`
+      if (!nonPulseGroupedIndexes.has(key)) nonPulseGroupedIndexes.set(key, [])
+      nonPulseGroupedIndexes.get(key).push(idx)
+    })
+    for (const indexes of nonPulseGroupedIndexes.values()) {
+      if (!Array.isArray(indexes) || indexes.length === 0) continue
+      const sample = rawLineItems[indexes[0]]
+      const option =
+        sample?.procedureOptionId && procedureOptionsById.has(sample.procedureOptionId)
+          ? procedureOptionsById.get(sample.procedureOptionId)
+          : null
+      const fullAreaPriceSyp = option ? resolveProcedurePriceForGender(option, patientGender) : 0
+      const count = indexes.length
+      const base = Math.floor(fullAreaPriceSyp / count)
+      const remainder = fullAreaPriceSyp - base * count
+      indexes.forEach((idx, pos) => {
+        distributedAreaPriceByIndex.set(idx, base + (pos < remainder ? 1 : 0))
+      })
+    }
+
+    const normalizedLineItems = rawLineItems.map((row, idx) => {
       const option =
         row.procedureOptionId && procedureOptionsById.has(row.procedureOptionId)
           ? procedureOptionsById.get(row.procedureOptionId)
           : null
       const resolvedAreaLabel = row.areaLabel || String(option?.name || '').trim().slice(0, 120)
       const areaPriceSyp = option ? resolveProcedurePriceForGender(option, patientGender) : 0
+      const distributedAreaPrice = distributedAreaPriceByIndex.get(idx)
       const shots = parseShotCount(row.shotCount)
-      let lineCostSyp = areaPriceSyp
+      let lineCostSyp = distributedAreaPrice ?? areaPriceSyp
       if (row.chargeByPulseCount) {
         if (!(ppuSyp > 0)) {
           lineCostSyp = 0
