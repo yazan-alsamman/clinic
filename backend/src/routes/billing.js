@@ -1041,3 +1041,53 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
+
+/** إلغاء بند تحصيل معلّق (مدير النظام فقط) — يُخفى من جدول التحصيل */
+billingRouter.delete('/:id', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!mongoose.isValidObjectId(id)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+
+    const bi = await BillingItem.findById(id)
+    if (!bi) {
+      res.status(404).json({ error: 'البند غير موجود' })
+      return
+    }
+    if (bi.status !== 'pending_payment') {
+      res.status(400).json({ error: 'يمكن حذف البنود المعلّقة فقط' })
+      return
+    }
+
+    bi.status = 'cancelled'
+    bi.paymentId = null
+    bi.paidAt = null
+    await bi.save()
+
+    try {
+      await writeAudit({
+        user: req.user,
+        action: 'إلغاء بند تحصيل معلّق',
+        entityType: 'BillingItem',
+        entityId: bi._id,
+        details: {
+          previousStatus: 'pending_payment',
+          nextStatus: 'cancelled',
+          department: bi.department,
+          businessDate: bi.businessDate,
+          amountDueSyp: Math.round(Number(bi.amountDueSyp) || 0),
+          procedureLabel: String(bi.procedureLabel || ''),
+        },
+      })
+    } catch (auditErr) {
+      console.error('writeAudit (cancel billing item):', auditErr)
+    }
+
+    res.json({ ok: true, billingItem: { id: String(bi._id), status: bi.status } })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})

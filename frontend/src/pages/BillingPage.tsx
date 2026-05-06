@@ -76,6 +76,7 @@ export function BillingPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
@@ -467,6 +468,24 @@ export function BillingPage() {
     }
   }
 
+  async function deletePendingItem(item: Item) {
+    if (user?.role !== 'super_admin') return
+    const ok = window.confirm(
+      `هل تريد حذف بند التحصيل لهذا المريض؟\n${item.patientName || 'مريض'} — ${item.procedureLabel}`,
+    )
+    if (!ok) return
+    setErr('')
+    setDeleteBusyId(item.id)
+    try {
+      await api(`/api/billing/${encodeURIComponent(item.id)}`, { method: 'DELETE' })
+      await load()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'تعذر حذف بند التحصيل')
+    } finally {
+      setDeleteBusyId(null)
+    }
+  }
+
   if (!allowed) {
     return (
       <>
@@ -566,6 +585,17 @@ export function BillingPage() {
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {user?.role === 'super_admin' ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={deleteBusyId === b.id || busyId === b.id || packageBusyId === b.id}
+                      onClick={() => void deletePendingItem(b)}
+                      style={{ color: 'var(--danger)' }}
+                    >
+                      {deleteBusyId === b.id ? 'جاري الحذف…' : 'حذف البند'}
+                    </button>
+                  ) : null}
                   {b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
                     <button
                       type="button"
