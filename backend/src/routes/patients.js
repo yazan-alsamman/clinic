@@ -6,6 +6,7 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
+import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { authMiddleware, requireActiveDay } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
@@ -123,6 +124,18 @@ function normalizePatientProfilePayload(body) {
     payload.lactationStatus = normalizeLactationStatus(body.lactationStatus)
   }
   return payload
+}
+
+async function nextSequentialFileNumber() {
+  const top = await Patient.aggregate([
+    { $match: { fileNumber: { $regex: '^[0-9]+$' } } },
+    { $addFields: { fileNumberNum: { $toLong: '$fileNumber' } } },
+    { $sort: { fileNumberNum: -1 } },
+    { $limit: 1 },
+    { $project: { fileNumberNum: 1 } },
+  ])
+  const maxNum = Number(top?.[0]?.fileNumberNum || 0)
+  return String(maxNum + 1)
 }
 
 function canManagePackages(role) {
@@ -926,6 +939,56 @@ patientsRouter.get('/:id', async (req, res) => {
   }
 })
 
+patientsRouter.delete('/:id', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ error: 'معرّف المريض غير صالح' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).select('_id name fileNumber').lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+
+    const [appointmentsCount, clinicalSessionsCount, laserSessionsCount, billingItemsCount, billingPaymentsCount] =
+      await Promise.all([
+        ScheduleSlot.countDocuments({ patientId: p._id }),
+        ClinicalSession.countDocuments({ patientId: p._id }),
+        LaserSession.countDocuments({ patientId: p._id }),
+        BillingItem.countDocuments({ patientId: p._id }),
+        BillingPayment.countDocuments({ patientId: p._id }),
+      ])
+
+    const linkedTotal =
+      appointmentsCount + clinicalSessionsCount + laserSessionsCount + billingItemsCount + billingPaymentsCount
+    if (linkedTotal > 0) {
+      res.status(400).json({
+        error:
+          'لا يمكن حذف هذا المريض لأنه مرتبط بسجلات (مواعيد/جلسات/فواتير). احذف فقط المرضى بدون أي سجلات مرتبطة.',
+      })
+      return
+    }
+
+    await Patient.deleteOne({ _id: p._id })
+    await writeAudit({
+      user: req.user,
+      action: 'حذف ملف مريض',
+      entityType: 'Patient',
+      entityId: p._id,
+      details: { name: String(p.name || ''), fileNumber: String(p.fileNumber || '') },
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 patientsRouter.post('/', requireActiveDay, async (req, res) => {
   try {
     if (!['super_admin', 'reception'].includes(req.user.role)) {
@@ -933,20 +996,40 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
       return
     }
     const body = req.body ?? {}
-    const fileNumber = String(body.fileNumber || '').trim()
-    if (!fileNumber) {
-      res.status(400).json({ error: 'رقم الإضبارة مطلوب' })
-      return
-    }
+    const requestedFileNumber = String(body.fileNumber || '').trim()
+    const shouldAutoAssignFileNumber =
+      !requestedFileNumber || /^tmp[-_]/i.test(requestedFileNumber)
     const normalized = normalizePatientProfilePayload(body)
     const paperLaserEntries = normalizePaperLaserEntries(body.paperLaserEntries)
-    const p = await Patient.create({
-      fileNumber,
-      ...normalized,
-      departments: Array.isArray(body.departments) ? body.departments : [],
-      paperLaserEntries,
-      lastVisit: new Date(),
-    })
+    let p = null
+    const attempts = shouldAutoAssignFileNumber ? 6 : 1
+    let currentFileNumber = requestedFileNumber
+    for (let i = 0; i < attempts; i += 1) {
+      if (shouldAutoAssignFileNumber) {
+        currentFileNumber = await nextSequentialFileNumber()
+      }
+      if (!currentFileNumber) {
+        res.status(400).json({ error: 'رقم الإضبارة مطلوب' })
+        return
+      }
+      try {
+        p = await Patient.create({
+          fileNumber: currentFileNumber,
+          ...normalized,
+          departments: Array.isArray(body.departments) ? body.departments : [],
+          paperLaserEntries,
+          lastVisit: new Date(),
+        })
+        break
+      } catch (createErr) {
+        if (createErr?.code === 11000 && shouldAutoAssignFileNumber) continue
+        throw createErr
+      }
+    }
+    if (!p) {
+      res.status(409).json({ error: 'تعذر توليد رقم إضبارة تلقائي حالياً — أعد المحاولة' })
+      return
+    }
     let portalCredentials = null
     try {
       portalCredentials = await provisionPortalCredentials(p)

@@ -75,8 +75,12 @@ export function PatientSearch() {
   const [saving, setSaving] = useState(false)
   const [portalCreds, setPortalCreds] = useState<{ username: string; password: string } | null>(null)
   const [createdPatientId, setCreatedPatientId] = useState<string | null>(null)
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
+  const [deleteErr, setDeleteErr] = useState('')
+  const [reloadToken, setReloadToken] = useState(0)
 
   const allowAdd = canRegisterPatients(user?.role)
+  const canDeletePatients = user?.role === 'super_admin'
 
   useEffect(() => {
     if (!q.trim()) {
@@ -142,7 +146,7 @@ export function PatientSearch() {
     return () => {
       cancelled = true
     }
-  }, [debouncedQ, page])
+  }, [debouncedQ, page, reloadToken])
 
   const filtered = useMemo(() => list, [list])
   const searchActive = debouncedQ.length > 0
@@ -242,33 +246,64 @@ export function PatientSearch() {
           </div>
         ) : (
           <div>
+            {deleteErr ? (
+              <p style={{ color: 'var(--danger)', marginTop: 0, marginBottom: '0.75rem' }}>{deleteErr}</p>
+            ) : null}
             {filtered.map((p) => (
-              <Link key={p.id} to={`/patients/${p.id}`} className="patient-row">
-                <div className="patient-avatar">{initials(p.name)}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  رقم الإضبارة: {p.fileNumber || '—'} ·
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    الميلاد: {p.dob || '—'} · آخر زيارة: {p.lastVisit || '—'}
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Link to={`/patients/${p.id}`} className="patient-row" style={{ flex: 1 }}>
+                  <div className="patient-avatar">{initials(p.name)}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>{p.name}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      رقم الإضبارة: {p.fileNumber || '—'} ·
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      الميلاد: {p.dob || '—'} · آخر زيارة: {p.lastVisit || '—'}
+                    </div>
+                    <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      {p.departments.includes('laser') && (
+                        <span className="chip chip-laser">ليزر</span>
+                      )}
+                      {p.departments.includes('dermatology') && (
+                        <span className="chip chip-derm">جلدية</span>
+                      )}
+                      {p.departments.includes('dental') && (
+                        <span className="chip chip-dental">أسنان</span>
+                      )}
+                      {p.departments.includes('solarium') && (
+                        <span className="chip">سولاريوم</span>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                    {p.departments.includes('laser') && (
-                      <span className="chip chip-laser">ليزر</span>
-                    )}
-                    {p.departments.includes('dermatology') && (
-                      <span className="chip chip-derm">جلدية</span>
-                    )}
-                    {p.departments.includes('dental') && (
-                      <span className="chip chip-dental">أسنان</span>
-                    )}
-                    {p.departments.includes('solarium') && (
-                      <span className="chip">سولاريوم</span>
-                    )}
-                  </div>
-                </div>
-              </Link>
+                </Link>
+                {canDeletePatients ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={deleteBusyId === p.id}
+                    style={{ color: 'var(--danger)', whiteSpace: 'nowrap' }}
+                    onClick={async () => {
+                      const ok = window.confirm(
+                        `هل تريد حذف ملف المريض نهائياً؟\n${p.name} — رقم الإضبارة: ${p.fileNumber || '—'}`,
+                      )
+                      if (!ok) return
+                      setDeleteErr('')
+                      setDeleteBusyId(p.id)
+                      try {
+                        await api(`/api/patients/${encodeURIComponent(p.id)}`, { method: 'DELETE' })
+                        setReloadToken((x) => x + 1)
+                      } catch (e) {
+                        setDeleteErr(e instanceof ApiError ? e.message : 'تعذر حذف ملف المريض')
+                      } finally {
+                        setDeleteBusyId(null)
+                      }
+                    }}
+                  >
+                    {deleteBusyId === p.id ? 'جاري الحذف…' : 'حذف الملف'}
+                  </button>
+                ) : null}
+              </div>
             ))}
             {totalPages > 1 ? (
               <nav

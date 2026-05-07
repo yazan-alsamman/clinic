@@ -183,13 +183,6 @@ function todayYmd() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function tempFileNumber() {
-  const d = new Date()
-  return `TMP-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${d.getTime()
-    .toString()
-    .slice(-6)}`
-}
-
 function inferRoomNumber(channel: string) {
   const m = String(channel || '').match(/room\s*(\d+)/i)
   if (!m) return null
@@ -626,7 +619,7 @@ export function ReceptionAppointmentPage() {
     try {
       const data = await api<{ patient: Patient }>('/api/patients', {
         method: 'POST',
-        body: JSON.stringify({ name, fileNumber: tempFileNumber(), gender }),
+        body: JSON.stringify({ name, gender }),
       })
       setPicked(data.patient)
       setPatientHits([])
