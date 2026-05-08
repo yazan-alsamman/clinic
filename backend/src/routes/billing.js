@@ -81,6 +81,132 @@ function parseMoneyInput(v, mode) {
   return n
 }
 
+async function fetchPaidBillingItemsWithPayments(businessDate) {
+  const items = await BillingItem.find({
+    businessDate,
+    status: 'paid',
+    paymentId: { $ne: null },
+  })
+    .sort({ paidAt: 1, createdAt: 1 })
+    .populate('patientId', 'name')
+    .populate('providerUserId', 'name')
+    .lean()
+
+  const payIds = [...new Set(items.map((i) => i.paymentId).filter(Boolean))]
+  const payments = payIds.length
+    ? await BillingPayment.find({ _id: { $in: payIds } }).populate('receivedBy', 'name').lean()
+    : []
+  const payById = new Map(payments.map((p) => [String(p._id), p]))
+  return { items, payById }
+}
+
+function aggregateReceptionPaidItems(items, payById) {
+  const cash = { totalSyp: 0, totalUsd: 0 }
+  const bankMap = new Map()
+  let refundsRecordedSyp = 0
+  let refundsRecordedUsd = 0
+  /** @type {Record<string, { key: string, label: string, transactionCount: number, cashSyp: number, cashUsd: number, bankSyp: number, bankUsd: number }>} */
+  const byDept = {}
+  const transactions = []
+
+  for (const bi of items) {
+    const p = payById.get(String(bi.paymentId))
+    if (!p) continue
+
+    const payCur = String(p.payCurrency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
+    const sypPart = Math.round(Number(p.receivedAmountSyp) || 0)
+    const usdPart = round2(Number(p.receivedAmountUsd) || 0)
+    const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
+    const refSyp = Math.round(Number(p.patientRefundSyp) || 0)
+    const refUsd = round2(Number(p.patientRefundUsd) || 0)
+    refundsRecordedSyp += refSyp
+    refundsRecordedUsd += refUsd
+
+    const deptKey = String(bi.department || 'other')
+    if (!byDept[deptKey]) {
+      byDept[deptKey] = {
+        key: deptKey,
+        label: DEPT_LABEL_AR[deptKey] ?? deptKey,
+        transactionCount: 0,
+        cashSyp: 0,
+        cashUsd: 0,
+        bankSyp: 0,
+        bankUsd: 0,
+      }
+    }
+    byDept[deptKey].transactionCount += 1
+
+    const usdNet = payCur === 'USD' ? round2(usdPart - refUsd) : usdPart
+    const sypNetForCashbook = payCur === 'USD' ? -refSyp : sypPart
+
+    if (channel === 'cash') {
+      if (payCur === 'USD') {
+        cash.totalUsd = round2(cash.totalUsd + usdNet)
+        cash.totalSyp += sypNetForCashbook
+        byDept[deptKey].cashUsd = round2(byDept[deptKey].cashUsd + usdNet)
+        byDept[deptKey].cashSyp += sypNetForCashbook
+      } else {
+        cash.totalSyp += sypPart
+        byDept[deptKey].cashSyp += sypPart
+      }
+    } else {
+      const label = String(p.bankName || '').trim() || 'بنك'
+      const cur = bankMap.get(label) || { bankName: label, totalSyp: 0, totalUsd: 0 }
+      if (payCur === 'USD') {
+        cur.totalUsd = round2(cur.totalUsd + usdNet)
+        cur.totalSyp += sypNetForCashbook
+        byDept[deptKey].bankUsd = round2(byDept[deptKey].bankUsd + usdNet)
+        byDept[deptKey].bankSyp += sypNetForCashbook
+      } else {
+        cur.totalSyp += sypPart
+        byDept[deptKey].bankSyp += sypPart
+      }
+      bankMap.set(label, cur)
+    }
+
+    const patientName =
+      bi.patientId && typeof bi.patientId === 'object' && 'name' in bi.patientId
+        ? String(bi.patientId.name || '').trim()
+        : ''
+    const providerName =
+      bi.providerUserId && typeof bi.providerUserId === 'object' && 'name' in bi.providerUserId
+        ? String(bi.providerUserId.name || '').trim()
+        : ''
+    const receivedByName =
+      p.receivedBy && typeof p.receivedBy === 'object' && 'name' in p.receivedBy
+        ? String(p.receivedBy.name || '').trim()
+        : ''
+
+    transactions.push({
+      billingItemId: String(bi._id),
+      paymentId: String(p._id),
+      paidAt: bi.paidAt ? new Date(bi.paidAt).toISOString() : null,
+      patientName: patientName || '—',
+      providerName: providerName || '—',
+      receivedByName: receivedByName || '—',
+      department: deptKey,
+      departmentLabel: DEPT_LABEL_AR[deptKey] ?? deptKey,
+      procedureLabel: String(bi.procedureLabel || '—'),
+      paymentChannel: channel,
+      bankName: channel === 'bank' ? String(p.bankName || '').trim() || '—' : '',
+      payCurrency: payCur,
+      receivedAmountSyp: sypPart,
+      receivedAmountUsd: usdPart,
+      amountDueSyp: Math.round(Number(bi.amountDueSyp) || 0),
+      settlementDeltaSyp: Math.round(Number(p.settlementDeltaSyp) || 0),
+      patientRefundSyp: refSyp,
+      patientRefundUsd: refUsd,
+    })
+  }
+
+  return { cash, bankMap, refundsRecordedSyp, refundsRecordedUsd, byDept, transactions }
+}
+
+async function buildReceptionPaidDayRollup(businessDate) {
+  const { items, payById } = await fetchPaidBillingItemsWithPayments(businessDate)
+  return aggregateReceptionPaidItems(items, payById)
+}
+
 async function getOrCreatePaymentSettings() {
   let doc = await PaymentSettings.findById('default').lean()
   if (!doc) {
@@ -364,126 +490,16 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
         ? Number(ybd.usdSypRate)
         : null
 
-    const items = await BillingItem.find({
-      businessDate,
-      status: 'paid',
-      paymentId: { $ne: null },
-    })
-      .sort({ paidAt: 1, createdAt: 1 })
-      .populate('patientId', 'name')
-      .populate('providerUserId', 'name')
-      .lean()
+    const {
+      cash,
+      bankMap,
+      refundsRecordedSyp,
+      refundsRecordedUsd,
+      byDept,
+      transactions,
+    } = await buildReceptionPaidDayRollup(businessDate)
 
     const movementRows = await CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean()
-
-    const payIds = [...new Set(items.map((i) => i.paymentId).filter(Boolean))]
-    const payments = payIds.length
-      ? await BillingPayment.find({ _id: { $in: payIds } })
-          .populate('receivedBy', 'name')
-          .lean()
-      : []
-    const payById = new Map(payments.map((p) => [String(p._id), p]))
-
-    const cash = { totalSyp: 0, totalUsd: 0 }
-    const bankMap = new Map()
-    let refundsRecordedSyp = 0
-    let refundsRecordedUsd = 0
-    /** @type {Record<string, { key: string, label: string, transactionCount: number, cashSyp: number, cashUsd: number, bankSyp: number, bankUsd: number }>} */
-    const byDept = {}
-
-    const transactions = []
-
-    for (const bi of items) {
-      const p = payById.get(String(bi.paymentId))
-      if (!p) continue
-
-      const payCur = String(p.payCurrency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
-      const sypPart = Math.round(Number(p.receivedAmountSyp) || 0)
-      const usdPart = round2(Number(p.receivedAmountUsd) || 0)
-      const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
-      const refSyp = Math.round(Number(p.patientRefundSyp) || 0)
-      const refUsd = round2(Number(p.patientRefundUsd) || 0)
-      refundsRecordedSyp += refSyp
-      refundsRecordedUsd += refUsd
-
-      const deptKey = String(bi.department || 'other')
-      if (!byDept[deptKey]) {
-        byDept[deptKey] = {
-          key: deptKey,
-          label: DEPT_LABEL_AR[deptKey] ?? deptKey,
-          transactionCount: 0,
-          cashSyp: 0,
-          cashUsd: 0,
-          bankSyp: 0,
-          bankUsd: 0,
-        }
-      }
-      byDept[deptKey].transactionCount += 1
-
-      /** صافي ما يبقى في الصندوق/البنك بعد الترجيع (USD: ناقص ترجيع دولار؛ ليرة: ناقص ترجيع ليرة) */
-      const usdNet = payCur === 'USD' ? round2(usdPart - refUsd) : usdPart
-      const sypNetForCashbook =
-        payCur === 'USD' ? -refSyp : sypPart
-
-      if (channel === 'cash') {
-        if (payCur === 'USD') {
-          cash.totalUsd = round2(cash.totalUsd + usdNet)
-          cash.totalSyp += sypNetForCashbook
-          byDept[deptKey].cashUsd = round2(byDept[deptKey].cashUsd + usdNet)
-          byDept[deptKey].cashSyp += sypNetForCashbook
-        } else {
-          cash.totalSyp += sypPart
-          byDept[deptKey].cashSyp += sypPart
-        }
-      } else {
-        const label = String(p.bankName || '').trim() || 'بنك'
-        const cur = bankMap.get(label) || { bankName: label, totalSyp: 0, totalUsd: 0 }
-        if (payCur === 'USD') {
-          cur.totalUsd = round2(cur.totalUsd + usdNet)
-          cur.totalSyp += sypNetForCashbook
-          byDept[deptKey].bankUsd = round2(byDept[deptKey].bankUsd + usdNet)
-          byDept[deptKey].bankSyp += sypNetForCashbook
-        } else {
-          cur.totalSyp += sypPart
-          byDept[deptKey].bankSyp += sypPart
-        }
-        bankMap.set(label, cur)
-      }
-
-      const patientName =
-        bi.patientId && typeof bi.patientId === 'object' && 'name' in bi.patientId
-          ? String(bi.patientId.name || '').trim()
-          : ''
-      const providerName =
-        bi.providerUserId && typeof bi.providerUserId === 'object' && 'name' in bi.providerUserId
-          ? String(bi.providerUserId.name || '').trim()
-          : ''
-      const receivedByName =
-        p.receivedBy && typeof p.receivedBy === 'object' && 'name' in p.receivedBy
-          ? String(p.receivedBy.name || '').trim()
-          : ''
-
-      transactions.push({
-        billingItemId: String(bi._id),
-        paymentId: String(p._id),
-        paidAt: bi.paidAt ? new Date(bi.paidAt).toISOString() : null,
-        patientName: patientName || '—',
-        providerName: providerName || '—',
-        receivedByName: receivedByName || '—',
-        department: deptKey,
-        departmentLabel: DEPT_LABEL_AR[deptKey] ?? deptKey,
-        procedureLabel: String(bi.procedureLabel || '—'),
-        paymentChannel: channel,
-        bankName: channel === 'bank' ? String(p.bankName || '').trim() || '—' : '',
-        payCurrency: payCur,
-        receivedAmountSyp: sypPart,
-        receivedAmountUsd: usdPart,
-        amountDueSyp: Math.round(Number(bi.amountDueSyp) || 0),
-        settlementDeltaSyp: Math.round(Number(p.settlementDeltaSyp) || 0),
-        patientRefundSyp: refSyp,
-        patientRefundUsd: refUsd,
-      })
-    }
 
     const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
     const expense = { totalSyp: 0, totalUsd: 0 }
@@ -540,6 +556,27 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
       byDepartment: Object.values(byDept).sort((a, b) => a.label.localeCompare(b.label, 'ar')),
       transactions,
     })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** سجل عمليات التحصيل المؤكدة لتاريخ عمل محدد (YYYY-MM-DD) — لوحة الجرد: الجدول فقط */
+billingRouter.get('/reception-collection-log', requireRoles('reception', 'super_admin'), async (req, res) => {
+  try {
+    const raw = String(req.query.date || '').trim()
+    let businessDate
+    if (!raw) {
+      businessDate = todayBusinessDate()
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      businessDate = raw
+    } else {
+      res.status(400).json({ error: 'تنسيق التاريخ غير صالح — استخدم YYYY-MM-DD' })
+      return
+    }
+    const { transactions } = await buildReceptionPaidDayRollup(businessDate)
+    res.json({ businessDate, transactions })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

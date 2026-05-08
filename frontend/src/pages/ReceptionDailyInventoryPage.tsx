@@ -101,6 +101,12 @@ export function ReceptionDailyInventoryPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
+  /** تاريخ عرض «سجل العمليات» فقط — باقي الصفحة تبقى ليوم الجرد الحالي */
+  const [operationsLogDate, setOperationsLogDate] = useState('')
+  const [operationsLogRows, setOperationsLogRows] = useState<TxRow[]>([])
+  const [operationsLogLoading, setOperationsLogLoading] = useState(false)
+  const [operationsLogErr, setOperationsLogErr] = useState('')
+
   const load = useCallback(async () => {
     if (!allowed) {
       setLoading(false)
@@ -122,6 +128,40 @@ export function ReceptionDailyInventoryPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!allowed || !data?.businessDate) return
+    const effectiveDate = operationsLogDate || data.businessDate
+
+    if (effectiveDate === data.businessDate) {
+      setOperationsLogRows(data.transactions)
+      setOperationsLogErr('')
+      setOperationsLogLoading(false)
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      setOperationsLogLoading(true)
+      setOperationsLogErr('')
+      try {
+        const res = await api<{ businessDate: string; transactions: TxRow[] }>(
+          `/api/billing/reception-collection-log?date=${encodeURIComponent(effectiveDate)}`,
+        )
+        if (!cancelled) setOperationsLogRows(res.transactions || [])
+      } catch (e) {
+        if (!cancelled) {
+          setOperationsLogRows([])
+          setOperationsLogErr(e instanceof ApiError ? e.message : 'تعذر تحميل سجل العمليات لهذا التاريخ')
+        }
+      } finally {
+        if (!cancelled) setOperationsLogLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [allowed, operationsLogDate, data?.businessDate, data?.transactions])
 
   if (!allowed) {
     return (
@@ -145,6 +185,18 @@ export function ReceptionDailyInventoryPage() {
         day: 'numeric',
       })
     : '—'
+
+  const rawOpsDate = (operationsLogDate || d?.businessDate || '').trim()
+  const effectiveOperationsLogDate = /^\d{4}-\d{2}-\d{2}$/.test(rawOpsDate) ? rawOpsDate : ''
+
+  const operationsLogDateLabel = effectiveOperationsLogDate
+    ? new Date(effectiveOperationsLogDate + 'T12:00:00').toLocaleDateString('ar-SY', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : ''
 
   return (
     <div style={{ maxWidth: 1180, margin: '0 auto' }}>
@@ -516,12 +568,57 @@ export function ReceptionDailyInventoryPage() {
 
           <section>
             <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.65rem', color: 'var(--text)' }}>
-              سجل العمليات ({d.summary.transactionCount.toLocaleString('ar-SY')})
+              سجل العمليات ({operationsLogRows.length.toLocaleString('ar-SY')})
             </h2>
+            <div
+              className="card"
+              style={{
+                marginBottom: '0.65rem',
+                padding: '0.65rem 0.85rem',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <label className="form-label" htmlFor="inv-ops-log-date" style={{ margin: 0 }}>
+                  تاريخ السجل
+                </label>
+                <input
+                  id="inv-ops-log-date"
+                  type="date"
+                  className="input"
+                  dir="ltr"
+                  style={{ width: 'auto', minWidth: 160 }}
+                  value={operationsLogDate || d.businessDate || ''}
+                  onChange={(e) => setOperationsLogDate(e.target.value)}
+                  disabled={!d.businessDate}
+                />
+              </div>
+              <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                يعرض هذا القسم فقط عمليات التحصيل المؤكدة لـ{' '}
+                <strong>{operationsLogDateLabel || '—'}</strong>. ملخص الجرد أعلاه يخص
+                يوم العمل الحالي للنظام (<strong>{dateLabel}</strong>) دون تغيير.
+              </p>
+              {operationsLogErr ? (
+                <p style={{ margin: '0.5rem 0 0', color: 'var(--danger)', fontSize: '0.85rem' }}>{operationsLogErr}</p>
+              ) : null}
+            </div>
             <div
               className="card"
               style={{ padding: 0, overflow: 'auto', maxHeight: 'min(70vh, 720px)', border: '1px solid var(--border)' }}
             >
+              {operationsLogLoading ? (
+                <div style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  جاري تحميل السجل…
+                </div>
+              ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
                 <thead>
                   <tr style={{ background: 'linear-gradient(180deg, #e0f2fe, #eef2ff)', position: 'sticky', top: 0, zIndex: 1 }}>
@@ -541,14 +638,14 @@ export function ReceptionDailyInventoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {d.transactions.length === 0 ? (
+                  {operationsLogRows.length === 0 ? (
                     <tr>
                       <td colSpan={13} style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        لا توجد عمليات تحصيل مؤكدة لهذا اليوم بعد.
+                        لا توجد عمليات تحصيل مؤكدة للتاريخ المحدد ({operationsLogDateLabel || '—'}).
                       </td>
                     </tr>
                   ) : (
-                    d.transactions.map((t, idx) => {
+                    operationsLogRows.map((t, idx) => {
                       const cashRow = t.paymentChannel === 'cash'
                       const bg = cashRow ? (idx % 2 === 0 ? 'rgba(22,163,74,0.06)' : 'rgba(22,163,74,0.1)') : idx % 2 === 0 ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.1)'
                       return (
@@ -611,6 +708,7 @@ export function ReceptionDailyInventoryPage() {
                   )}
                 </tbody>
               </table>
+              )}
             </div>
           </section>
         </>
