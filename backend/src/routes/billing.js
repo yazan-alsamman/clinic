@@ -576,6 +576,7 @@ billingRouter.get('/reception-collection-log', requireRoles('reception', 'super_
       return
     }
     const { transactions } = await buildReceptionPaidDayRollup(businessDate)
+    res.setHeader('Cache-Control', 'private, no-store')
     res.json({ businessDate, transactions })
   } catch (e) {
     console.error(e)

@@ -129,16 +129,24 @@ export function ReceptionDailyInventoryPage() {
     void load()
   }, [load])
 
+  /** صفوف اليوم الحالي من استجابة الجرد — لا يعتمد على جلب منفصل */
   useEffect(() => {
     if (!allowed || !data?.businessDate) return
-    const effectiveDate = operationsLogDate || data.businessDate
+    const picked = operationsLogDate.trim()
+    const invDay = String(data.businessDate).trim()
+    if (picked && picked !== invDay) return
 
-    if (effectiveDate === data.businessDate) {
-      setOperationsLogRows(data.transactions)
-      setOperationsLogErr('')
-      setOperationsLogLoading(false)
-      return
-    }
+    setOperationsLogRows(data.transactions)
+    setOperationsLogErr('')
+    setOperationsLogLoading(false)
+  }, [allowed, operationsLogDate, data?.businessDate, data?.transactions])
+
+  /** أي يوم آخر: جلب منفصل — بدون الاعتماد على data.transactions حتى لا يُلغَى الطلب عند كل تحديث للجرد */
+  useEffect(() => {
+    if (!allowed || !data?.businessDate) return
+    const picked = operationsLogDate.trim()
+    const invDay = String(data.businessDate).trim()
+    if (!picked || picked === invDay) return
 
     let cancelled = false
     ;(async () => {
@@ -146,7 +154,8 @@ export function ReceptionDailyInventoryPage() {
       setOperationsLogErr('')
       try {
         const res = await api<{ businessDate: string; transactions: TxRow[] }>(
-          `/api/billing/reception-collection-log?date=${encodeURIComponent(effectiveDate)}`,
+          `/api/billing/reception-collection-log?date=${encodeURIComponent(picked)}`,
+          { cache: 'no-store' },
         )
         if (!cancelled) setOperationsLogRows(res.transactions || [])
       } catch (e) {
@@ -161,7 +170,7 @@ export function ReceptionDailyInventoryPage() {
     return () => {
       cancelled = true
     }
-  }, [allowed, operationsLogDate, data?.businessDate, data?.transactions])
+  }, [allowed, operationsLogDate, data?.businessDate])
 
   if (!allowed) {
     return (
@@ -602,9 +611,10 @@ export function ReceptionDailyInventoryPage() {
                 />
               </div>
               <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                يعرض هذا القسم فقط عمليات التحصيل المؤكدة لـ{' '}
-                <strong>{operationsLogDateLabel || '—'}</strong>. ملخص الجرد أعلاه يخص
-                يوم العمل الحالي للنظام (<strong>{dateLabel}</strong>) دون تغيير.
+                يمكن لجميع من يملكون هذه الصفحة (استقبال أو مدير) اختيار <strong>تاريخ السجل</strong> لعرض عمليات التحصيل
+                المؤكدة لذلك اليوم. الصف المعروض الآن لـ <strong>{operationsLogDateLabel || '—'}</strong>. أما ملخص
+                الجرد والأرقام أعلاه فيبقى دائماً لـ <strong>يوم العمل الحالي للنظام ({dateLabel})</strong> حتى يبقى
+                التسوية اليومية واضحة.
               </p>
               {operationsLogErr ? (
                 <p style={{ margin: '0.5rem 0 0', color: 'var(--danger)', fontSize: '0.85rem' }}>{operationsLogErr}</p>
