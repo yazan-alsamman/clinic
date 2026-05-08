@@ -19,6 +19,7 @@ export type NavKey =
   | 'admin_skin_procedures'
   | 'appointments_booked'
   | 'reception_appointment'
+  | 'reception_walk_in_session'
   | 'dental'
   | 'billing_queue'
   | 'reception_cash_movement'
