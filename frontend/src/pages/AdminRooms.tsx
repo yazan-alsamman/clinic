@@ -34,6 +34,15 @@ type DermatologyBoard = {
   assigned: { id: string; name: string } | null
 }
 
+type SecretaryShiftPayload = {
+  morningShiftStart: string
+  morningShiftEnd: string
+  eveningShiftStart: string
+  eveningShiftEnd: string
+  morningAssigned: { id: string; name: string } | null
+  eveningAssigned: { id: string; name: string } | null
+}
+
 const GROUP_OPTIONS = [
   { value: 'face', label: 'الوجه' },
   { value: 'upper', label: 'الجزء العلوي' },
@@ -81,6 +90,12 @@ export function AdminRooms() {
   const [laserCoverPriceSyp, setLaserCoverPriceSyp] = useState('0')
   const [laserCoverSaving, setLaserCoverSaving] = useState(false)
   const [laserCoverMsg, setLaserCoverMsg] = useState('')
+  const [receptionUsers, setReceptionUsers] = useState<LaserUser[]>([])
+  const [secMorningUserId, setSecMorningUserId] = useState('')
+  const [secEveningUserId, setSecEveningUserId] = useState('')
+  const [secretaryShifts, setSecretaryShifts] = useState<SecretaryShiftPayload | null>(null)
+  const [secSaving, setSecSaving] = useState(false)
+  const [secMsg, setSecMsg] = useState('')
 
   async function loadProcedureOptions() {
     setProcLoading(true)
@@ -115,6 +130,8 @@ export function AdminRooms() {
       ])
       setRooms(rData.rooms)
       setLaserUsers(uData.users.filter((u) => u.role === 'laser' && u.active !== false))
+      const recv = uData.users.filter((u) => u.role === 'reception' && u.active !== false)
+      setReceptionUsers(recv)
       setDermUsers(
         uData.users.filter(
           (u) =>
@@ -125,9 +142,19 @@ export function AdminRooms() {
         ),
       )
       setDermBoards((dData.boards || []).sort((a, b) => a.index - b.index))
+      try {
+        const secData = await api<SecretaryShiftPayload>('/api/rooms/secretary-shifts')
+        setSecretaryShifts(secData)
+        setSecMorningUserId(secData.morningAssigned?.id || '')
+        setSecEveningUserId(secData.eveningAssigned?.id || '')
+      } catch {
+        setSecretaryShifts(null)
+      }
     } catch {
       setRooms([])
       setDermBoards([])
+      setSecretaryShifts(null)
+      setReceptionUsers([])
     } finally {
       setLoading(false)
     }
@@ -270,6 +297,125 @@ export function AdminRooms() {
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: '1rem' }}>
+        <h2 className="card-title">ورديات سكرتارية الاستقبال</h2>
+        <p className="page-desc">
+          حدِّد من يعمل على المكتب في كل وردية — الصباح من الساعة 9 صباحاً إلى 3 عصراً، والمساء من 3 عصراً إلى 9
+          مساءً.
+        </p>
+        {!secretaryShifts && !loading ? (
+          <p style={{ color: 'var(--danger)', margin: 0 }}>تعذر تحميل إعدادات الورديات.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: '1rem', maxWidth: 520 }}>
+            <div
+              style={{
+                padding: '0.75rem 1rem',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+              }}
+            >
+              <p style={{ margin: '0 0 0.35rem', fontWeight: 700 }}>الوردية الصباحية</p>
+              <p style={{ margin: '0 0 0.6rem', fontSize: '0.85rem', color: 'var(--text-muted)' }} dir="ltr">
+                {secretaryShifts?.morningShiftStart ?? '09:00'} – {secretaryShifts?.morningShiftEnd ?? '15:00'}
+              </p>
+              <label className="form-label" htmlFor="sec-morning-user">
+                السكرتارية
+              </label>
+              <select
+                id="sec-morning-user"
+                className="select"
+                value={secMorningUserId}
+                onChange={(e) => {
+                  setSecMsg('')
+                  setSecMorningUserId(e.target.value)
+                }}
+              >
+                <option value="">— بدون تعيين —</option>
+                {receptionUsers.map((u) => (
+                  <option key={`sec-am-${u.id}`} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div
+              style={{
+                padding: '0.75rem 1rem',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+              }}
+            >
+              <p style={{ margin: '0 0 0.35rem', fontWeight: 700 }}>الوردية المسائية</p>
+              <p style={{ margin: '0 0 0.6rem', fontSize: '0.85rem', color: 'var(--text-muted)' }} dir="ltr">
+                {secretaryShifts?.eveningShiftStart ?? '15:00'} – {secretaryShifts?.eveningShiftEnd ?? '21:00'}
+              </p>
+              <label className="form-label" htmlFor="sec-evening-user">
+                السكرتارية
+              </label>
+              <select
+                id="sec-evening-user"
+                className="select"
+                value={secEveningUserId}
+                onChange={(e) => {
+                  setSecMsg('')
+                  setSecEveningUserId(e.target.value)
+                }}
+              >
+                <option value="">— بدون تعيين —</option>
+                {receptionUsers.map((u) => (
+                  <option key={`sec-pm-${u.id}`} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={secSaving || !secretaryShifts}
+                onClick={async () => {
+                  setSecSaving(true)
+                  setSecMsg('')
+                  try {
+                    const saved = await api<SecretaryShiftPayload>('/api/rooms/secretary-shifts', {
+                      method: 'PATCH',
+                      body: JSON.stringify({
+                        morningUserId: secMorningUserId || null,
+                        eveningUserId: secEveningUserId || null,
+                      }),
+                    })
+                    setSecretaryShifts(saved)
+                    setSecMorningUserId(saved.morningAssigned?.id || '')
+                    setSecEveningUserId(saved.eveningAssigned?.id || '')
+                    setSecMsg('تم حفظ تعيين الورديات.')
+                  } catch (e) {
+                    setSecMsg(e instanceof ApiError ? e.message : 'تعذر الحفظ')
+                  } finally {
+                    setSecSaving(false)
+                  }
+                }}
+              >
+                {secSaving ? 'جاري الحفظ…' : 'حفظ تعيين السكرتارية'}
+              </button>
+            </div>
+            {secMsg ? (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '0.84rem',
+                  color: secMsg.includes('تعذر') || secMsg.includes('خطأ') ? 'var(--danger)' : 'var(--success)',
+                }}
+              >
+                {secMsg}
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
 
       <div className="card" style={{ marginTop: '1rem' }}>
         <h2 className="card-title">جداول سكرتاريا الجلدية</h2>

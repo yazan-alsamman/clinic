@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { Room } from '../models/Room.js'
+import { SecretaryShiftSettings } from '../models/SecretaryShiftSettings.js'
 import { User } from '../models/User.js'
 import { authMiddleware, requireRoles } from '../middleware/auth.js'
 import { writeAudit } from '../utils/audit.js'
@@ -12,6 +13,117 @@ const DEFAULT_MORNING_START = '09:00'
 const DEFAULT_MORNING_END = '15:00'
 const DEFAULT_EVENING_START = '15:00'
 const DEFAULT_EVENING_END = '21:00'
+
+async function getOrCreateSecretaryShiftSettings() {
+  let doc = await SecretaryShiftSettings.findById('default')
+    .populate('morningAssignedUserId', 'name role active')
+    .populate('eveningAssignedUserId', 'name role active')
+    .lean()
+  if (!doc) {
+    await SecretaryShiftSettings.create({
+      _id: 'default',
+      morningAssignedUserId: null,
+      eveningAssignedUserId: null,
+      morningShiftStart: DEFAULT_MORNING_START,
+      morningShiftEnd: DEFAULT_MORNING_END,
+      eveningShiftStart: DEFAULT_EVENING_START,
+      eveningShiftEnd: DEFAULT_EVENING_END,
+    })
+    doc = await SecretaryShiftSettings.findById('default')
+      .populate('morningAssignedUserId', 'name role active')
+      .populate('eveningAssignedUserId', 'name role active')
+      .lean()
+  }
+  return doc
+}
+
+function mapSecretaryShiftPayload(doc) {
+  const m = doc?.morningAssignedUserId
+  const e = doc?.eveningAssignedUserId
+  return {
+    morningShiftStart: doc?.morningShiftStart || DEFAULT_MORNING_START,
+    morningShiftEnd: doc?.morningShiftEnd || DEFAULT_MORNING_END,
+    eveningShiftStart: doc?.eveningShiftStart || DEFAULT_EVENING_START,
+    eveningShiftEnd: doc?.eveningShiftEnd || DEFAULT_EVENING_END,
+    morningAssigned:
+      m && typeof m === 'object' && m._id
+        ? { id: String(m._id), name: String(m.name || '').trim() || '—' }
+        : null,
+    eveningAssigned:
+      e && typeof e === 'object' && e._id
+        ? { id: String(e._id), name: String(e.name || '').trim() || '—' }
+        : null,
+  }
+}
+
+roomsRouter.get('/secretary-shifts', async (_req, res) => {
+  try {
+    const doc = await getOrCreateSecretaryShiftSettings()
+    res.json(mapSecretaryShiftPayload(doc))
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+roomsRouter.patch('/secretary-shifts', async (req, res) => {
+  try {
+    const morningUserId = req.body?.morningUserId
+    const eveningUserId = req.body?.eveningUserId
+
+    async function validateReceptionUser(id) {
+      if (id === null || id === '' || id === undefined) return null
+      const u = await User.findById(id).lean()
+      if (!u || u.role !== 'reception' || u.active === false) {
+        throw new Error('INVALID_RECEPTION_USER')
+      }
+      return u._id
+    }
+
+    let morningAssignedUserId = null
+    let eveningAssignedUserId = null
+    try {
+      morningAssignedUserId = await validateReceptionUser(morningUserId)
+      eveningAssignedUserId = await validateReceptionUser(eveningUserId)
+    } catch (err) {
+      if (String(err.message) === 'INVALID_RECEPTION_USER') {
+        res.status(400).json({ error: 'يجب اختيار مستخدمين بدور الاستقبال ونشطين' })
+        return
+      }
+      throw err
+    }
+
+    await SecretaryShiftSettings.findOneAndUpdate(
+      { _id: 'default' },
+      {
+        $set: {
+          morningAssignedUserId,
+          eveningAssignedUserId,
+          morningShiftStart: DEFAULT_MORNING_START,
+          morningShiftEnd: DEFAULT_MORNING_END,
+          eveningShiftStart: DEFAULT_EVENING_START,
+          eveningShiftEnd: DEFAULT_EVENING_END,
+        },
+      },
+      { upsert: true, new: true },
+    )
+    const doc = await getOrCreateSecretaryShiftSettings()
+    await writeAudit({
+      user: req.user,
+      action: 'تحديث ورديات سكرتارية الاستقبال',
+      entityType: 'SecretaryShiftSettings',
+      entityId: 'default',
+      details: {
+        morningAssignedUserId: morningAssignedUserId ? String(morningAssignedUserId) : null,
+        eveningAssignedUserId: eveningAssignedUserId ? String(eveningAssignedUserId) : null,
+      },
+    })
+    res.json(mapSecretaryShiftPayload(doc))
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
 
 roomsRouter.get('/', async (_req, res) => {
   try {
