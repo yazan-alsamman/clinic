@@ -189,7 +189,9 @@ export function ReceptionDailyInventoryPage() {
       })
     : ''
 
-  const stubInv = apiData.morning ?? apiData.evening ?? (apiData as InventoryPayload)
+  /** لا تصل إلى `.morning` قبل تحميل `data` — وإلا null.morning يعطل الصفحة أثناء التحميل أو بعد خطأ التحميل */
+  const stubInv: InventoryPayload | null =
+    apiData == null ? null : (apiData.morning ?? apiData.evening ?? (apiData as InventoryPayload))
 
   return (
     <div style={{ maxWidth: 1180, margin: '0 auto' }}>
@@ -328,9 +330,9 @@ export function ReceptionDailyInventoryPage() {
               >
                 <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: 1.55 }}>
                   <strong>مدير النظام:</strong> يعرض أدناه جردان كاملان منفصلان حسب{' '}
-                  <strong>وقت تسجيل التحصيل</strong> (توقيت دمشق): الصباح من {apiData.shiftBounds?.morning.start} إلى{' '}
-                  {apiData.shiftBounds?.morning.end}، والمساء من {apiData.shiftBounds?.evening.start} إلى{' '}
-                  {apiData.shiftBounds?.evening.end}. أي مبالغ خارج هاتين الفترتين تظهر أدناه إن وُجدت.
+                  <strong>وقت تسجيل التحصيل</strong> (توقيت دمشق): الصباح من {apiData.shiftBounds?.morning?.start} إلى{' '}
+                  {apiData.shiftBounds?.morning?.end}، والمساء من {apiData.shiftBounds?.evening?.start} إلى{' '}
+                  {apiData.shiftBounds?.evening?.end}. أي مبالغ خارج هاتين الفترتين تظهر أدناه إن وُجدت.
                 </p>
               </div>
 
@@ -338,7 +340,7 @@ export function ReceptionDailyInventoryPage() {
                 <ReceptionInventoryDetailBody
                   variant="full"
                   inv={apiData.morning}
-                  sectionTitle={`الوردية الصباحية (${apiData.shiftBounds?.morning.start}–${apiData.shiftBounds?.morning.end})`}
+                  sectionTitle={`الوردية الصباحية (${apiData.shiftBounds?.morning?.start}–${apiData.shiftBounds?.morning?.end})`}
                   opsRows={apiData.morning.transactions}
                   opsLoading={false}
                   opsErr=""
@@ -357,7 +359,7 @@ export function ReceptionDailyInventoryPage() {
                 <ReceptionInventoryDetailBody
                   variant="full"
                   inv={apiData.evening}
-                  sectionTitle={`الوردية المسائية (${apiData.shiftBounds?.evening.start}–${apiData.shiftBounds?.evening.end})`}
+                  sectionTitle={`الوردية المسائية (${apiData.shiftBounds?.evening?.start}–${apiData.shiftBounds?.evening?.end})`}
                   opsRows={apiData.evening.transactions}
                   opsLoading={false}
                   opsErr=""
@@ -404,7 +406,7 @@ export function ReceptionDailyInventoryPage() {
                   </p>
                   <ReceptionInventoryDetailBody
                     variant="operationsOnly"
-                    inv={stubInv}
+                    inv={stubInv!}
                     opsRows={adminHistoricalOpsRows}
                     opsLoading={operationsLogLoading}
                     opsErr={operationsLogErr}
@@ -466,8 +468,8 @@ export function ReceptionDailyInventoryPage() {
                   <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: 1.55 }}>
                     <strong>عرضك:</strong>{' '}
                     {apiData.secretaryShift === 'morning'
-                      ? `وردية الصباح فقط (${apiData.shiftBounds?.morning.start}–${apiData.shiftBounds?.morning.end}، توقيت دمشق).`
-                      : `وردية المساء فقط (${apiData.shiftBounds?.evening.start}–${apiData.shiftBounds?.evening.end}، توقيت دمشق).`}
+                      ? `وردية الصباح فقط (${apiData.shiftBounds?.morning?.start}–${apiData.shiftBounds?.morning?.end}، توقيت دمشق).`
+                      : `وردية المساء فقط (${apiData.shiftBounds?.evening?.start}–${apiData.shiftBounds?.evening?.end}، توقيت دمشق).`}
                   </p>
                 </div>
               ) : null}
