@@ -98,6 +98,8 @@ export default function App() {
                 <Route path="/reception/cash-movement" element={<ReceptionCashMovementPage />} />
                 <Route path="/reception/daily-inventory" element={<ReceptionDailyInventoryPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
+                {/* الرابط القديم للتقرير المُزال — يوجّه لصفحة الجرد المالي للاستقبال */}
+                <Route path="/reports/daily" element={<Navigate to="/reception/daily-inventory" replace />} />
                 <Route path="/reports/insights" element={<InsightsPage />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />
