@@ -10,8 +10,11 @@ import { Patient } from '../models/Patient.js'
 import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
+import { SecretaryShiftSettings } from '../models/SecretaryShiftSettings.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2, round6 } from '../utils/money.js'
+import { normalizeHm, hmToMinutes } from '../utils/scheduleTime.js'
+import { wallMinutesAsiaDamascus } from '../utils/shiftTime.js'
 
 /** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
 function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
@@ -180,7 +183,11 @@ function aggregateReceptionPaidItems(items, payById) {
     transactions.push({
       billingItemId: String(bi._id),
       paymentId: String(p._id),
-      paidAt: bi.paidAt ? new Date(bi.paidAt).toISOString() : null,
+      paidAt: p.receivedAt
+        ? new Date(p.receivedAt).toISOString()
+        : bi.paidAt
+          ? new Date(bi.paidAt).toISOString()
+          : null,
       patientName: patientName || '—',
       providerName: providerName || '—',
       receivedByName: receivedByName || '—',
@@ -200,6 +207,116 @@ function aggregateReceptionPaidItems(items, payById) {
   }
 
   return { cash, bankMap, refundsRecordedSyp, refundsRecordedUsd, byDept, transactions }
+}
+
+const DEFAULT_INV_SHIFT = {
+  morningStart: '09:00',
+  morningEnd: '15:00',
+  eveningStart: '15:00',
+  eveningEnd: '21:00',
+}
+
+async function loadSecretaryShiftBounds() {
+  const doc = await SecretaryShiftSettings.findById('default').lean()
+  return {
+    morningStart: normalizeHm(doc?.morningShiftStart) || DEFAULT_INV_SHIFT.morningStart,
+    morningEnd: normalizeHm(doc?.morningShiftEnd) || DEFAULT_INV_SHIFT.morningEnd,
+    eveningStart: normalizeHm(doc?.eveningShiftStart) || DEFAULT_INV_SHIFT.eveningStart,
+    eveningEnd: normalizeHm(doc?.eveningShiftEnd) || DEFAULT_INV_SHIFT.eveningEnd,
+    morningUserId: doc?.morningAssignedUserId ? String(doc.morningAssignedUserId) : null,
+    eveningUserId: doc?.eveningAssignedUserId ? String(doc.eveningAssignedUserId) : null,
+  }
+}
+
+function paymentWallMinutes(p, bi) {
+  const inst = p?.receivedAt ? new Date(p.receivedAt) : bi?.paidAt ? new Date(bi.paidAt) : null
+  if (!inst || Number.isNaN(inst.getTime())) return null
+  return wallMinutesAsiaDamascus(inst)
+}
+
+function shiftKindFromMinutes(mins, cfg) {
+  if (mins == null) return 'outside'
+  const ms = hmToMinutes(cfg.morningStart)
+  const me = hmToMinutes(cfg.morningEnd)
+  const es = hmToMinutes(cfg.eveningStart)
+  const ee = hmToMinutes(cfg.eveningEnd)
+  if (ms == null || me == null || es == null || ee == null) return 'outside'
+  if (mins >= ms && mins < me) return 'morning'
+  if (mins >= es && mins < ee) return 'evening'
+  return 'outside'
+}
+
+function filterItemsByShiftKind(items, payById, cfg, kind) {
+  return items.filter((bi) => {
+    const p = payById.get(String(bi.paymentId))
+    if (!p) return false
+    const mins = paymentWallMinutes(p, bi)
+    return shiftKindFromMinutes(mins, cfg) === kind
+  })
+}
+
+function filterMovementsByShiftKind(movementRows, cfg, kind) {
+  return movementRows.filter((m) => {
+    const mins = m.createdAt ? wallMinutesAsiaDamascus(new Date(m.createdAt)) : null
+    return shiftKindFromMinutes(mins, cfg) === kind
+  })
+}
+
+function composeReceptionInventoryPayload(rollup, movementRowsFiltered, pendingCount, meta) {
+  const { businessDate, dayActive, usdSypRate } = meta
+  const { cash, bankMap, refundsRecordedSyp, refundsRecordedUsd, byDept, transactions } = rollup
+  const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
+  const expense = { totalSyp: 0, totalUsd: 0 }
+  const receipt = { totalSyp: 0, totalUsd: 0 }
+  const normalizedMovements = movementRowsFiltered.map((m) => {
+    const kind = normalizeCashMovementKind(m.kind)
+    const amountSyp = Math.round(Number(m.amountSyp) || 0)
+    const amountUsd = round2(Number(m.amountUsd) || 0)
+    if (kind === 'expense') {
+      expense.totalSyp += amountSyp
+      expense.totalUsd = round2(expense.totalUsd + amountUsd)
+    } else {
+      receipt.totalSyp += amountSyp
+      receipt.totalUsd = round2(receipt.totalUsd + amountUsd)
+    }
+    return {
+      id: String(m._id),
+      businessDate: String(m.businessDate || ''),
+      kind,
+      reason: String(m.reason || ''),
+      amountSyp,
+      amountUsd,
+      createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+    }
+  })
+
+  const adjustedCashSyp = cash.totalSyp - expense.totalSyp + receipt.totalSyp
+  const adjustedCashUsd = round2(cash.totalUsd - expense.totalUsd + receipt.totalUsd)
+  const totalsSyp = adjustedCashSyp + banks.reduce((s, b) => s + (Math.round(Number(b.totalSyp)) || 0), 0)
+  const totalsUsd = round2(adjustedCashUsd + banks.reduce((s, b) => s + (Number(b.totalUsd) || 0), 0))
+
+  return {
+    businessDate,
+    dateLockedToToday: true,
+    dayActive,
+    usdSypRate,
+    summary: {
+      cashBase: { totalSyp: cash.totalSyp, totalUsd: round2(cash.totalUsd) },
+      cash: { totalSyp: adjustedCashSyp, totalUsd: adjustedCashUsd },
+      banks,
+      totals: { totalSyp: totalsSyp, totalUsd: totalsUsd },
+      refundsRecorded: { totalSyp: refundsRecordedSyp, totalUsd: round2(refundsRecordedUsd) },
+      transactionCount: transactions.length,
+      pendingCollectionCount: pendingCount,
+    },
+    cashMovements: {
+      expense: { totalSyp: expense.totalSyp, totalUsd: round2(expense.totalUsd) },
+      receipt: { totalSyp: receipt.totalSyp, totalUsd: round2(receipt.totalUsd) },
+      rows: normalizedMovements,
+    },
+    byDepartment: Object.values(byDept).sort((a, b) => a.label.localeCompare(b.label, 'ar')),
+    transactions,
+  }
 }
 
 async function buildReceptionPaidDayRollup(businessDate) {
@@ -490,71 +607,95 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
         ? Number(ybd.usdSypRate)
         : null
 
-    const {
-      cash,
-      bankMap,
-      refundsRecordedSyp,
-      refundsRecordedUsd,
-      byDept,
-      transactions,
-    } = await buildReceptionPaidDayRollup(businessDate)
-
+    const { items, payById } = await fetchPaidBillingItemsWithPayments(businessDate)
     const movementRows = await CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean()
+    const pendingCount = await BillingItem.countDocuments({ businessDate, status: 'pending_payment' })
+    const shiftCfg = await loadSecretaryShiftBounds()
 
-    const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
-    const expense = { totalSyp: 0, totalUsd: 0 }
-    const receipt = { totalSyp: 0, totalUsd: 0 }
-    const normalizedMovements = movementRows.map((m) => {
-      const kind = normalizeCashMovementKind(m.kind)
-      const amountSyp = Math.round(Number(m.amountSyp) || 0)
-      const amountUsd = round2(Number(m.amountUsd) || 0)
-      if (kind === 'expense') {
-        expense.totalSyp += amountSyp
-        expense.totalUsd = round2(expense.totalUsd + amountUsd)
-      } else {
-        receipt.totalSyp += amountSyp
-        receipt.totalUsd = round2(receipt.totalUsd + amountUsd)
-      }
-      return {
-        id: String(m._id),
-        businessDate: String(m.businessDate || ''),
-        kind,
-        reason: String(m.reason || ''),
-        amountSyp,
-        amountUsd,
-        createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
-      }
+    const role = req.user.role
+    const userId = String(req.user._id)
+
+    if (role === 'super_admin') {
+      const rollupM = aggregateReceptionPaidItems(filterItemsByShiftKind(items, payById, shiftCfg, 'morning'), payById)
+      const rollupE = aggregateReceptionPaidItems(filterItemsByShiftKind(items, payById, shiftCfg, 'evening'), payById)
+      const rollupO = aggregateReceptionPaidItems(filterItemsByShiftKind(items, payById, shiftCfg, 'outside'), payById)
+      const movM = filterMovementsByShiftKind(movementRows, shiftCfg, 'morning')
+      const movE = filterMovementsByShiftKind(movementRows, shiftCfg, 'evening')
+      const movO = filterMovementsByShiftKind(movementRows, shiftCfg, 'outside')
+      const meta = { businessDate, dayActive, usdSypRate }
+      const morning = composeReceptionInventoryPayload(rollupM, movM, pendingCount, meta)
+      const evening = composeReceptionInventoryPayload(rollupE, movE, pendingCount, meta)
+      const outsideShift = composeReceptionInventoryPayload(rollupO, movO, pendingCount, meta)
+      const outsideEmpty =
+        (outsideShift.summary.transactionCount || 0) === 0 &&
+        (outsideShift.cashMovements?.rows?.length || 0) === 0
+
+      res.json({
+        inventoryMode: 'admin_split',
+        businessDate,
+        dateLockedToToday: true,
+        dayActive,
+        usdSypRate,
+        pendingCollectionCount: pendingCount,
+        shiftBounds: {
+          morning: { start: shiftCfg.morningStart, end: shiftCfg.morningEnd },
+          evening: { start: shiftCfg.eveningStart, end: shiftCfg.eveningEnd },
+        },
+        morning,
+        evening,
+        ...(outsideEmpty ? {} : { outsideShift }),
+      })
+      return
+    }
+
+    let assignedKind = null
+    if (shiftCfg.morningUserId === userId) assignedKind = 'morning'
+    else if (shiftCfg.eveningUserId === userId) assignedKind = 'evening'
+
+    if (!assignedKind) {
+      const emptyRollup = aggregateReceptionPaidItems([], payById)
+      const body = composeReceptionInventoryPayload(emptyRollup, [], pendingCount, {
+        businessDate,
+        dayActive,
+        usdSypRate,
+      })
+      res.json({
+        inventoryMode: 'reception_unassigned',
+        businessDate,
+        dateLockedToToday: true,
+        dayActive,
+        usdSypRate,
+        secretaryShiftUnassigned: true,
+        shiftBounds: {
+          morning: { start: shiftCfg.morningStart, end: shiftCfg.morningEnd },
+          evening: { start: shiftCfg.eveningStart, end: shiftCfg.eveningEnd },
+        },
+        ...body,
+      })
+      return
+    }
+
+    const filteredItems = filterItemsByShiftKind(items, payById, shiftCfg, assignedKind)
+    const rollup = aggregateReceptionPaidItems(filteredItems, payById)
+    const movFiltered = filterMovementsByShiftKind(movementRows, shiftCfg, assignedKind)
+    const body = composeReceptionInventoryPayload(rollup, movFiltered, pendingCount, {
+      businessDate,
+      dayActive,
+      usdSypRate,
     })
 
-    const adjustedCashSyp = cash.totalSyp - expense.totalSyp + receipt.totalSyp
-    const adjustedCashUsd = round2(cash.totalUsd - expense.totalUsd + receipt.totalUsd)
-    const totalsSyp = adjustedCashSyp + banks.reduce((s, b) => s + (Math.round(Number(b.totalSyp)) || 0), 0)
-    const totalsUsd = round2(adjustedCashUsd + banks.reduce((s, b) => s + (Number(b.totalUsd) || 0), 0))
-
-    const pendingCount = await BillingItem.countDocuments({ businessDate, status: 'pending_payment' })
-
     res.json({
+      inventoryMode: 'reception_shift',
+      secretaryShift: assignedKind,
       businessDate,
-      /** ثابت: لا يُسمح بطلب أيام أخرى من واجهة الاستقبال */
       dateLockedToToday: true,
       dayActive,
       usdSypRate,
-      summary: {
-        cashBase: { totalSyp: cash.totalSyp, totalUsd: round2(cash.totalUsd) },
-        cash: { totalSyp: adjustedCashSyp, totalUsd: adjustedCashUsd },
-        banks,
-        totals: { totalSyp: totalsSyp, totalUsd: totalsUsd },
-        refundsRecorded: { totalSyp: refundsRecordedSyp, totalUsd: round2(refundsRecordedUsd) },
-        transactionCount: transactions.length,
-        pendingCollectionCount: pendingCount,
+      shiftBounds: {
+        morning: { start: shiftCfg.morningStart, end: shiftCfg.morningEnd },
+        evening: { start: shiftCfg.eveningStart, end: shiftCfg.eveningEnd },
       },
-      cashMovements: {
-        expense: { totalSyp: expense.totalSyp, totalUsd: round2(expense.totalUsd) },
-        receipt: { totalSyp: receipt.totalSyp, totalUsd: round2(receipt.totalUsd) },
-        rows: normalizedMovements,
-      },
-      byDepartment: Object.values(byDept).sort((a, b) => a.label.localeCompare(b.label, 'ar')),
-      transactions,
+      ...body,
     })
   } catch (e) {
     console.error(e)
@@ -580,9 +721,27 @@ billingRouter.get('/reception-collection-log', requireRoles('reception', 'super_
       res.status(403).json({ error: 'لا يمكن لقسم الاستقبال عرض سجل أيام أخرى.' })
       return
     }
-    const { transactions } = await buildReceptionPaidDayRollup(businessDate)
+    if (req.user.role === 'super_admin') {
+      const { transactions } = await buildReceptionPaidDayRollup(businessDate)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ businessDate, transactions })
+      return
+    }
+    const { items, payById } = await fetchPaidBillingItemsWithPayments(businessDate)
+    const shiftCfg = await loadSecretaryShiftBounds()
+    const uid = String(req.user._id)
+    let assignedKind = null
+    if (shiftCfg.morningUserId === uid) assignedKind = 'morning'
+    else if (shiftCfg.eveningUserId === uid) assignedKind = 'evening'
+    if (!assignedKind) {
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ businessDate, transactions: [] })
+      return
+    }
+    const filtered = filterItemsByShiftKind(items, payById, shiftCfg, assignedKind)
+    const rollup = aggregateReceptionPaidItems(filtered, payById)
     res.setHeader('Cache-Control', 'private, no-store')
-    res.json({ businessDate, transactions })
+    res.json({ businessDate, transactions: rollup.transactions })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
