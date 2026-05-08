@@ -8,8 +8,6 @@ import { PatientPortalGuard } from './components/PatientPortalGuard'
 import { PatientPortalShell } from './components/PatientPortalShell'
 
 // All page components are lazy-loaded: each route becomes its own JS chunk.
-// This keeps the initial bundle small and defers xlsx (used only in DailyReport)
-// until that page is actually visited.
 const lazyPage = <T extends Record<string, React.ComponentType>>(
   loader: () => Promise<T>,
   name: keyof T,
@@ -22,7 +20,6 @@ const BookedAppointmentsPage    = lazyPage(() => import('./pages/BookedAppointme
 const ReceptionAppointmentPage  = lazyPage(() => import('./pages/ReceptionAppointmentPage'), 'ReceptionAppointmentPage')
 const DentalPage                = lazyPage(() => import('./pages/DentalPage'), 'DentalPage')
 const InventoryPage             = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage')
-const DailyReport               = lazyPage(() => import('./pages/DailyReport'), 'DailyReport')
 const InsightsPage              = lazyPage(() => import('./pages/InsightsPage'), 'InsightsPage')
 const AdminUsers                = lazyPage(() => import('./pages/AdminUsers'), 'AdminUsers')
 const AdminSendNotificationsPage = lazyPage(() => import('./pages/AdminSendNotificationsPage'), 'AdminSendNotificationsPage')
@@ -101,7 +98,6 @@ export default function App() {
                 <Route path="/reception/cash-movement" element={<ReceptionCashMovementPage />} />
                 <Route path="/reception/daily-inventory" element={<ReceptionDailyInventoryPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
-                <Route path="/reports/daily" element={<DailyReport />} />
                 <Route path="/reports/insights" element={<InsightsPage />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />

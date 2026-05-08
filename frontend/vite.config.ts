@@ -26,11 +26,6 @@ export default defineConfig({
           if (id.includes('/node_modules/react-router')) {
             return 'vendor-router'
           }
-          // xlsx is only imported by DailyReport (lazy). Keeping it in its own
-          // chunk ensures the large library never appears in the initial load.
-          if (id.includes('/node_modules/xlsx/')) {
-            return 'vendor-xlsx'
-          }
         },
       },
     },

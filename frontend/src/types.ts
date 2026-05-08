@@ -24,7 +24,6 @@ export type NavKey =
   | 'reception_cash_movement'
   | 'reception_daily_inventory'
   | 'inventory'
-  | 'reports_daily'
   | 'reports_insights'
   | 'admin_users'
   | 'admin_send_notifications'

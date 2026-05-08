@@ -1671,30 +1671,3 @@ button:focus:not(:focus-visible) {
     outline-offset: 4px;
   }
 }
-
-/* طباعة تقرير الجرد اليومي — إظهار المحتوى فقط */
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  #daily-report-print,
-  #daily-report-print * {
-    visibility: visible;
-  }
-  #daily-report-print {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    background: #fff;
-    color: #111;
-  }
-  #daily-report-print .page-title,
-  #daily-report-print .page-desc,
-  #daily-report-print .data-table th,
-  #daily-report-print .data-table td {
-    color: #111;
-  }
-  #daily-report-print .data-table th {
-    background: #eee !important;
-  }
-}

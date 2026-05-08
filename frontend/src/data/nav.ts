@@ -15,7 +15,6 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'reception_cash_movement', path: '/reception/cash-movement', label: 'حركة الصندوق' },
   { key: 'reception_daily_inventory', path: '/reception/daily-inventory', label: 'جرد مالي يومي' },
   { key: 'inventory', path: '/inventory', label: 'المستودع' },
-  { key: 'reports_daily', path: '/reports/daily', label: 'تقرير الجرد اليومي' },
   { key: 'reports_insights', path: '/reports/insights', label: 'ذكاء الأعمال' },
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
   { key: 'admin_skin_procedures', path: '/admin/skin-procedures', label: 'إجراءات البشرة' },
