@@ -566,13 +566,18 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
 billingRouter.get('/reception-collection-log', requireRoles('reception', 'super_admin'), async (req, res) => {
   try {
     const raw = String(req.query.date || '').trim()
+    const today = todayBusinessDate()
     let businessDate
     if (!raw) {
-      businessDate = todayBusinessDate()
+      businessDate = today
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
       businessDate = raw
     } else {
       res.status(400).json({ error: 'تنسيق التاريخ غير صالح — استخدم YYYY-MM-DD' })
+      return
+    }
+    if (req.user.role === 'reception' && businessDate !== today) {
+      res.status(403).json({ error: 'لا يمكن لقسم الاستقبال عرض سجل أيام أخرى.' })
       return
     }
     const { transactions } = await buildReceptionPaidDayRollup(businessDate)

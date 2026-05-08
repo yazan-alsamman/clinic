@@ -96,6 +96,8 @@ export function ReceptionDailyInventoryPage() {
   const { user } = useAuth()
   const { businessDate: ctxDate, usdSypRate: ctxRate, refreshSystem } = useClinic()
   const allowed = user?.role && ACCESS.includes(user.role as Role)
+  /** مدير النظام فقط يستطيع عرض سجل التحصيل لأيام سابقة؛ الاستقبال يرى اليوم الحالي فقط */
+  const canBrowseOperationsHistory = user?.role === 'super_admin'
 
   const [data, setData] = useState<InventoryPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -129,21 +131,27 @@ export function ReceptionDailyInventoryPage() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (canBrowseOperationsHistory) return
+    setOperationsLogDate('')
+  }, [canBrowseOperationsHistory])
+
   /** صفوف اليوم الحالي من استجابة الجرد — لا يعتمد على جلب منفصل */
   useEffect(() => {
     if (!allowed || !data?.businessDate) return
     const picked = operationsLogDate.trim()
     const invDay = String(data.businessDate).trim()
-    if (picked && picked !== invDay) return
+    const viewingHistorical = Boolean(picked && picked !== invDay)
+    if (viewingHistorical && canBrowseOperationsHistory) return
 
     setOperationsLogRows(data.transactions)
     setOperationsLogErr('')
     setOperationsLogLoading(false)
-  }, [allowed, operationsLogDate, data?.businessDate, data?.transactions])
+  }, [allowed, canBrowseOperationsHistory, operationsLogDate, data?.businessDate, data?.transactions])
 
-  /** أي يوم آخر: جلب منفصل — بدون الاعتماد على data.transactions حتى لا يُلغَى الطلب عند كل تحديث للجرد */
+  /** أي يوم آخر: جلب منفصل — بدون الاعتماد على data.transactions حتى لا يُلغَى الطلب عند كل تحديث للجرد (مدير النظام فقط) */
   useEffect(() => {
-    if (!allowed || !data?.businessDate) return
+    if (!allowed || !canBrowseOperationsHistory || !data?.businessDate) return
     const picked = operationsLogDate.trim()
     const invDay = String(data.businessDate).trim()
     if (!picked || picked === invDay) return
@@ -170,7 +178,7 @@ export function ReceptionDailyInventoryPage() {
     return () => {
       cancelled = true
     }
-  }, [allowed, operationsLogDate, data?.businessDate])
+  }, [allowed, canBrowseOperationsHistory, operationsLogDate, data?.businessDate])
 
   if (!allowed) {
     return (
@@ -596,25 +604,55 @@ export function ReceptionDailyInventoryPage() {
                   justifyContent: 'space-between',
                 }}
               >
-                <label className="form-label" htmlFor="inv-ops-log-date" style={{ margin: 0 }}>
+                <label
+                  className="form-label"
+                  htmlFor={canBrowseOperationsHistory ? 'inv-ops-log-date' : 'inv-ops-log-date-readonly'}
+                  style={{ margin: 0 }}
+                >
                   تاريخ السجل
                 </label>
-                <input
-                  id="inv-ops-log-date"
-                  type="date"
-                  className="input"
-                  dir="ltr"
-                  style={{ width: 'auto', minWidth: 160 }}
-                  value={operationsLogDate || d.businessDate || ''}
-                  onChange={(e) => setOperationsLogDate(e.target.value)}
-                  disabled={!d.businessDate}
-                />
+                {canBrowseOperationsHistory ? (
+                  <input
+                    id="inv-ops-log-date"
+                    type="date"
+                    className="input"
+                    dir="ltr"
+                    style={{ width: 'auto', minWidth: 160 }}
+                    value={operationsLogDate || d.businessDate || ''}
+                    onChange={(e) => setOperationsLogDate(e.target.value)}
+                    disabled={!d.businessDate}
+                  />
+                ) : (
+                  <span
+                    id="inv-ops-log-date-readonly"
+                    className="input"
+                    dir="ltr"
+                    style={{
+                      display: 'inline-block',
+                      width: 'auto',
+                      minWidth: 160,
+                      opacity: 0.95,
+                      cursor: 'default',
+                      background: 'var(--surface-2, var(--surface))',
+                    }}
+                  >
+                    {d.businessDate || '—'}
+                  </span>
+                )}
               </div>
               <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                يمكن لجميع من يملكون هذه الصفحة (استقبال أو مدير) اختيار <strong>تاريخ السجل</strong> لعرض عمليات التحصيل
-                المؤكدة لذلك اليوم. الصف المعروض الآن لـ <strong>{operationsLogDateLabel || '—'}</strong>. أما ملخص
-                الجرد والأرقام أعلاه فيبقى دائماً لـ <strong>يوم العمل الحالي للنظام ({dateLabel})</strong> حتى يبقى
-                التسوية اليومية واضحة.
+                {canBrowseOperationsHistory ? (
+                  <>
+                    يمكن <strong>لمدير النظام</strong> اختيار تاريخ السجل لعرض عمليات التحصيل المؤكدة لذلك اليوم. المعروض
+                    الآن: <strong>{operationsLogDateLabel || '—'}</strong>. ملخص الجرد أعلاه يبقى لـ{' '}
+                    <strong>يوم العمل الحالي ({dateLabel})</strong>.
+                  </>
+                ) : (
+                  <>
+                    <strong>قسم الاستقبال</strong> يرى سجل العمليات لـ <strong>اليوم الحالي فقط</strong> (
+                    {operationsLogDateLabel || dateLabel}). ملخص الجرد أعلاه لنفس اليوم.
+                  </>
+                )}
               </p>
               {operationsLogErr ? (
                 <p style={{ margin: '0.5rem 0 0', color: 'var(--danger)', fontSize: '0.85rem' }}>{operationsLogErr}</p>
