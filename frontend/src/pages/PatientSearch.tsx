@@ -78,6 +78,7 @@ export function PatientSearch() {
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [deleteErr, setDeleteErr] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
+  const [nextFileNumberLoading, setNextFileNumberLoading] = useState(false)
 
   const allowAdd = canRegisterPatients(user?.role)
   const canDeletePatients = user?.role === 'super_admin'
@@ -165,6 +166,20 @@ export function PatientSearch() {
     setFormErr('')
     setForm({ ...emptyForm, name: q.trim() })
     setAddOpen(true)
+    setNextFileNumberLoading(true)
+    void (async () => {
+      try {
+        const data = await api<{ nextFileNumber: string }>('/api/patients/next-file-number')
+        const next = String(data.nextFileNumber || '').trim()
+        if (next) {
+          setForm((f) => ({ ...f, fileNumber: next }))
+        }
+      } catch {
+        setFormErr('تعذر تحميل رقم الإضبارة المقترح — يمكنك إدخال الرقم يدوياً أو إغلاق النافذة وإعادة المحاولة.')
+      } finally {
+        setNextFileNumberLoading(false)
+      }
+    })()
   }
 
   return (
@@ -446,9 +461,13 @@ export function PatientSearch() {
                 <input
                   id="np-file-number"
                   className="input"
+                  dir="ltr"
+                  disabled={nextFileNumberLoading}
                   value={form.fileNumber}
                   onChange={(e) => setForm((f) => ({ ...f, fileNumber: e.target.value }))}
-                  placeholder="مثال: D-000123"
+                  placeholder={
+                    nextFileNumberLoading ? 'جاري جلب الرقم التالي…' : 'يُقترح تلقائياً — يمكنك التعديل'
+                  }
                 />
               </div>
               <div>
@@ -616,7 +635,10 @@ export function PatientSearch() {
                 type="button"
                 className="btn btn-secondary"
                 disabled={saving}
-                onClick={() => setAddOpen(false)}
+                onClick={() => {
+                  setNextFileNumberLoading(false)
+                  setAddOpen(false)
+                }}
               >
                 إلغاء
               </button>
@@ -628,10 +650,6 @@ export function PatientSearch() {
                   setFormErr('')
                   const name = form.name.trim()
                   const fileNumber = form.fileNumber.trim()
-                  if (!fileNumber) {
-                    setFormErr('رقم الإضبارة مطلوب')
-                    return
-                  }
                   if (!name) {
                     setFormErr('الاسم مطلوب')
                     return
@@ -644,7 +662,7 @@ export function PatientSearch() {
                     }>('/api/patients', {
                       method: 'POST',
                       body: JSON.stringify({
-                        fileNumber,
+                        fileNumber: fileNumber || undefined,
                         name,
                         dob: form.dob,
                         phone: form.phone.trim(),

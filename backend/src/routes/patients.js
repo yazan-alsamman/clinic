@@ -256,6 +256,21 @@ patientsRouter.get('/financial-balances', async (req, res) => {
   }
 })
 
+/** الرقم التالي لإضبارة جديدة — أكبر قيمة رقمية محضة بين أرقام الإضبارات الحالية + ١ */
+patientsRouter.get('/next-file-number', async (req, res) => {
+  try {
+    if (!['super_admin', 'reception'].includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const nextFileNumber = await nextSequentialFileNumber()
+    res.json({ nextFileNumber })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 /** جلسات ليزر + معاينات جلدية + مواعيد محجوزة لهذا المريض */
 patientsRouter.get('/:id/clinical-history', async (req, res) => {
   try {
