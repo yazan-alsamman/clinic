@@ -93,6 +93,27 @@ export function ReceptionDailyInventoryPage() {
     }
   }, [allowed, canBrowseOperationsHistory, operationsLogDate, data?.businessDate])
 
+  /** يجب أن تبقى كل الـ hooks فوق أي return — وإلا يحدث تعطل عند انتقال allowed من false إلى true */
+  const apiDataForHooks = data as InventoryApiPayload | null
+
+  const mergedAdminSplitRows = useMemo(() => {
+    if (!apiDataForHooks || apiDataForHooks.inventoryMode !== 'admin_split' || !apiDataForHooks.morning || !apiDataForHooks.evening)
+      return []
+    return [
+      ...apiDataForHooks.morning.transactions,
+      ...apiDataForHooks.evening.transactions,
+      ...(apiDataForHooks.outsideShift?.transactions ?? []),
+    ]
+  }, [data])
+
+  const adminHistoricalOpsRows = useMemo(() => {
+    if (!apiDataForHooks || apiDataForHooks.inventoryMode !== 'admin_split') return []
+    const picked = operationsLogDate.trim()
+    const invDay = String(apiDataForHooks.businessDate || '').trim()
+    if (!picked || picked === invDay) return mergedAdminSplitRows
+    return operationsLogRows
+  }, [data, apiDataForHooks?.inventoryMode, apiDataForHooks?.businessDate, operationsLogDate, mergedAdminSplitRows, operationsLogRows])
+
   if (!allowed) {
     return (
       <>
@@ -133,29 +154,6 @@ export function ReceptionDailyInventoryPage() {
         day: 'numeric',
       })
     : ''
-
-  const mergedAdminSplitRows = useMemo(() => {
-    if (apiData.inventoryMode !== 'admin_split' || !apiData.morning || !apiData.evening) return []
-    return [
-      ...apiData.morning.transactions,
-      ...apiData.evening.transactions,
-      ...(apiData.outsideShift?.transactions ?? []),
-    ]
-  }, [apiData])
-
-  const adminHistoricalOpsRows = useMemo(() => {
-    if (apiData.inventoryMode !== 'admin_split') return []
-    const picked = operationsLogDate.trim()
-    const invDay = String(apiData.businessDate || '').trim()
-    if (!picked || picked === invDay) return mergedAdminSplitRows
-    return operationsLogRows
-  }, [
-    apiData.inventoryMode,
-    apiData.businessDate,
-    operationsLogDate,
-    mergedAdminSplitRows,
-    operationsLogRows,
-  ])
 
   const stubInv = apiData.morning ?? apiData.evening ?? (apiData as InventoryPayload)
 
