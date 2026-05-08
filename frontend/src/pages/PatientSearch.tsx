@@ -462,11 +462,20 @@ export function PatientSearch() {
                   id="np-file-number"
                   className="input"
                   dir="ltr"
+                  readOnly
+                  aria-readonly="true"
                   disabled={nextFileNumberLoading}
                   value={form.fileNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, fileNumber: e.target.value }))}
-                  placeholder={
-                    nextFileNumberLoading ? 'جاري جلب الرقم التالي…' : 'يُقترح تلقائياً — يمكنك التعديل'
+                  title="يُحدَّد تلقائياً من النظام ولا يمكن تعديله يدوياً"
+                  placeholder={nextFileNumberLoading ? 'جاري جلب الرقم التالي…' : '—'}
+                  style={
+                    nextFileNumberLoading
+                      ? undefined
+                      : {
+                          cursor: 'default',
+                          background: 'var(--surface-muted, rgba(0, 0, 0, 0.04))',
+                          color: 'var(--text)',
+                        }
                   }
                 />
               </div>
