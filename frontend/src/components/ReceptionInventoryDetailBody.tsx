@@ -61,6 +61,27 @@ export function ReceptionInventoryDetailBody({
 }: ReceptionInventoryDetailBodyProps) {
   const sid = sectionKey ? `-${sectionKey}` : ''
 
+  if (variant === 'full') {
+    const s = d.summary
+    if (
+      !s?.cash ||
+      !s?.totals ||
+      !Array.isArray(s.banks) ||
+      !Array.isArray(d.byDepartment) ||
+      !Array.isArray(d.transactions)
+    ) {
+      return (
+        <div className="card" style={{ borderRight: '4px solid var(--danger)', marginBottom: '1rem' }}>
+          <p style={{ margin: 0, fontWeight: 700, color: 'var(--danger)' }}>تعذر عرض الجرد</p>
+          <p style={{ margin: '0.4rem 0 0', fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+            استجابة الخادم غير مكتملة أو تعارض إصدارات (الواجهة أحدث من الخادم). حدّث خدمة الـ API وأعد تشغيلها، ثم أعد
+            تحميل الصفحة.
+          </p>
+        </div>
+      )
+    }
+  }
+
   if (variant === 'operationsOnly') {
     return (
       <section>

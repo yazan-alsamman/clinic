@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { ReceptionInventoryDetailBody } from '../components/ReceptionInventoryDetailBody'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
@@ -7,6 +7,40 @@ import type { InventoryApiPayload, InventoryPayload, TxRow } from '../types/rece
 import type { Role } from '../types'
 
 const ACCESS: Role[] = ['reception', 'super_admin']
+
+/** يعرض رسالة بدلاً من شاشة بيضاء عند أي خطأ غير متوقى أثناء الرسم */
+class ReceptionInventoryCrashBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[ReceptionDailyInventory]', error.message, info.componentStack)
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="card" style={{ marginTop: '1rem', borderRight: '4px solid var(--danger)' }}>
+          <p style={{ margin: 0, fontWeight: 700, color: 'var(--danger)' }}>تعطل عرض صفحة الجرد</p>
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-word' }}>
+            {this.state.error.message}
+          </p>
+          <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            حدّث الصفحة بعد تحديث الخادم والواجهة على السيرفر. إذا استمر الخطأ، افتح أدوات المطوّر (F12) ← Console وأرسل
+            لقطة للشاشة.
+          </p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 export function ReceptionDailyInventoryPage() {
   const { user } = useAuth()
@@ -260,6 +294,7 @@ export function ReceptionDailyInventoryPage() {
         </div>
       ) : null}
 
+      <ReceptionInventoryCrashBoundary>
       {d && !loading ? (
         <>
           {pendingBannerCount > 0 ? (
@@ -456,6 +491,7 @@ export function ReceptionDailyInventoryPage() {
           )}
         </>
       ) : null}
+      </ReceptionInventoryCrashBoundary>
     </div>
   )
 }
