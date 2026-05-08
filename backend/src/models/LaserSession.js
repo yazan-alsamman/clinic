@@ -45,6 +45,9 @@ const laserSessionSchema = new mongoose.Schema(
     isPackageSession: { type: Boolean, default: false },
     patientPackageId: { type: String, default: '' },
     patientPackageSessionId: { type: String, default: '' },
+    /** خيار كفر ليزر — يُحدد المدير السعر في إعدادات الليزر */
+    laserCoverApplied: { type: Boolean, default: false },
+    laserCoverSyp: { type: Number, default: 0 },
   },
   { timestamps: true },
 )

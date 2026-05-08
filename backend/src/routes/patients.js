@@ -578,6 +578,8 @@ patientsRouter.get('/:id/financial-billing-detail/:billingItemId', async (req, r
             status: laser.status,
             operatorName: String(laser.operatorUserId?.name || '').trim(),
             treatmentNumber: laser.treatmentNumber,
+            laserCoverApplied: laser.laserCoverApplied === true,
+            laserCoverSyp: Math.max(0, Math.round(Number(laser.laserCoverSyp) || 0)),
           }
         : null,
     })

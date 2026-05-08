@@ -339,8 +339,8 @@ function resolveReportMonth(rawMonth, fallbackBusinessDate) {
 async function getOrCreateLaserSettings() {
   let doc = await LaserSettings.findById('default').lean()
   if (!doc) {
-    await LaserSettings.create({ _id: 'default', pricePerPulseSyp: 0 })
-    doc = { _id: 'default', pricePerPulseSyp: 0 }
+    await LaserSettings.create({ _id: 'default', pricePerPulseSyp: 0, laserCoverSyp: 0 })
+    doc = { _id: 'default', pricePerPulseSyp: 0, laserCoverSyp: 0 }
   }
   return doc
 }
@@ -395,6 +395,7 @@ laserRouter.get('/pricing-settings', async (req, res) => {
     const doc = await getOrCreateLaserSettings()
     res.json({
       pricePerPulseSyp: Math.max(0, Math.round(Number(doc.pricePerPulseSyp) || 0)),
+      laserCoverSyp: Math.max(0, Math.round(Number(doc.laserCoverSyp) || 0)),
     })
   } catch (e) {
     console.error(e)
@@ -404,20 +405,35 @@ laserRouter.get('/pricing-settings', async (req, res) => {
 
 laserRouter.patch('/pricing-settings', requireRoles('super_admin'), async (req, res) => {
   try {
-    const pricePerPulseSyp = Math.max(0, Math.round(Number(req.body?.pricePerPulseSyp) || 0))
-    await LaserSettings.findOneAndUpdate(
-      { _id: 'default' },
-      { $set: { pricePerPulseSyp } },
-      { upsert: true, new: true },
-    )
+    const body = req.body ?? {}
+    const set = {}
+    if (body.pricePerPulseSyp != null) {
+      set.pricePerPulseSyp = Math.max(0, Math.round(Number(body.pricePerPulseSyp) || 0))
+    }
+    if (body.laserCoverSyp != null) {
+      set.laserCoverSyp = Math.max(0, Math.round(Number(body.laserCoverSyp) || 0))
+    }
+    if (Object.keys(set).length === 0) {
+      const doc = await getOrCreateLaserSettings()
+      res.json({
+        pricePerPulseSyp: Math.max(0, Math.round(Number(doc.pricePerPulseSyp) || 0)),
+        laserCoverSyp: Math.max(0, Math.round(Number(doc.laserCoverSyp) || 0)),
+      })
+      return
+    }
+    await LaserSettings.findOneAndUpdate({ _id: 'default' }, { $set: set }, { upsert: true, new: true })
+    const doc = await getOrCreateLaserSettings()
     await writeAudit({
       user: req.user,
-      action: 'تحديث سعر ضربة الليزر (محاسبة بعدد الضربات)',
+      action: 'تحديث إعدادات تسعير الليزر',
       entityType: 'LaserSettings',
       entityId: 'default',
-      details: { pricePerPulseSyp },
+      details: set,
     })
-    res.json({ pricePerPulseSyp })
+    res.json({
+      pricePerPulseSyp: Math.max(0, Math.round(Number(doc.pricePerPulseSyp) || 0)),
+      laserCoverSyp: Math.max(0, Math.round(Number(doc.laserCoverSyp) || 0)),
+    })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -1292,6 +1308,25 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
             )
           : parsePositiveSypInteger(body.costSyp)
     }
+
+    const includeLaserCover = Boolean(body.includeLaserCover)
+    const laserCoverSypSetting = Math.max(0, Math.round(Number(settings.laserCoverSyp) || 0))
+    let laserCoverAppliedSyp = 0
+    if (includeLaserCover) {
+      if (!(laserCoverSypSetting > 0)) {
+        res.status(400).json({
+          error:
+            'لم يُحدد سعر كفر الليزر — يضبطه المدير في «الغرف وتعيين أخصائيي الليزر» ضمن أسعار المناطق والعروض.',
+        })
+        return
+      }
+      laserCoverAppliedSyp = laserCoverSypSetting
+      if (isPackageSession) {
+        packageAddOnGrossSyp += laserCoverAppliedSyp
+      }
+      costGrossSyp += laserCoverAppliedSyp
+    }
+
     if (!isPackageSession && !(costGrossSyp > 0)) {
       res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالليرة (قيمة أكبر من صفر)' })
       return
@@ -1392,10 +1427,9 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       isPackageSession && addonManualLabels.length
         ? ` — إضافات خارج الباكج: ${addonManualLabels.join('، ')}`
         : ''
-    const procedureDescription = `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}${addonSuffix}`.slice(
-      0,
-      500,
-    )
+    const laserCoverSuffix = laserCoverAppliedSyp > 0 ? ' — كفر ليزر' : ''
+    const procedureDescription =
+      `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}${addonSuffix}${laserCoverSuffix}`.slice(0, 500)
 
     const treatmentNumber = await nextSequence('laserTreatment')
 
@@ -1426,6 +1460,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         isPackageSession,
         patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
         patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
+        laserCoverApplied: laserCoverAppliedSyp > 0,
+        laserCoverSyp: laserCoverAppliedSyp,
       })
 
       cs = await ClinicalSession.create({
@@ -1498,7 +1534,11 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         action: 'إنشاء جلسة ليزر وبند فوترة معلّق',
         entityType: 'LaserSession',
         entityId: String(s._id),
-        details: { billingItemId: String(bi._id), amountDueSyp },
+        details: {
+          billingItemId: String(bi._id),
+          amountDueSyp,
+          laserCoverSyp: laserCoverAppliedSyp,
+        },
       })
     } catch (auditErr) {
       console.error('writeAudit after laser session:', auditErr)

@@ -78,6 +78,9 @@ export function AdminRooms() {
   const [pulsePriceSyp, setPulsePriceSyp] = useState('0')
   const [pulsePriceSaving, setPulsePriceSaving] = useState(false)
   const [pulsePriceMsg, setPulsePriceMsg] = useState('')
+  const [laserCoverPriceSyp, setLaserCoverPriceSyp] = useState('0')
+  const [laserCoverSaving, setLaserCoverSaving] = useState(false)
+  const [laserCoverMsg, setLaserCoverMsg] = useState('')
 
   async function loadProcedureOptions() {
     setProcLoading(true)
@@ -86,10 +89,14 @@ export function AdminRooms() {
       const data = await api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options?includeInactive=1')
       setGroups(data.groups || [])
       try {
-        const pricing = await api<{ pricePerPulseSyp: number }>('/api/laser/pricing-settings')
+        const pricing = await api<{ pricePerPulseSyp: number; laserCoverSyp?: number }>(
+          '/api/laser/pricing-settings',
+        )
         setPulsePriceSyp(String(Math.max(0, Math.round(Number(pricing.pricePerPulseSyp) || 0))))
+        setLaserCoverPriceSyp(String(Math.max(0, Math.round(Number(pricing.laserCoverSyp) || 0))))
       } catch {
         setPulsePriceSyp('0')
+        setLaserCoverPriceSyp('0')
       }
     } catch {
       setGroups([])
@@ -358,6 +365,73 @@ export function AdminRooms() {
               }}
             >
               {pulsePriceMsg}
+            </p>
+          ) : null}
+        </div>
+        <div
+          style={{
+            marginBottom: '1rem',
+            marginTop: '0.75rem',
+            padding: '0.9rem 1rem',
+            borderRadius: 12,
+            border: '1px solid var(--border)',
+            background: 'linear-gradient(135deg, #faf5ff 0%, #ecfeff 100%)',
+          }}
+        >
+          <h3 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>سعر خيار «كفر ليزر»</h3>
+          <p style={{ margin: '0 0 0.55rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            عند إنشاء الجلسة يمكن للأخصائي تفعيل «كفر ليزر»؛ يُضاف هذا المبلغ إلى بند الفوترة للمريض.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem', alignItems: 'center' }}>
+            <label className="form-label" htmlFor="laser-cover-price-syp" style={{ margin: 0 }}>
+              السعر (ل.س)
+            </label>
+            <input
+              id="laser-cover-price-syp"
+              className="input"
+              dir="ltr"
+              inputMode="numeric"
+              style={{ maxWidth: 160 }}
+              value={laserCoverPriceSyp}
+              onChange={(e) => {
+                setLaserCoverMsg('')
+                setLaserCoverPriceSyp(e.target.value)
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={laserCoverSaving}
+              onClick={async () => {
+                setLaserCoverSaving(true)
+                setLaserCoverMsg('')
+                try {
+                  const nSyp = Math.max(0, Math.round(parseFloat(laserCoverPriceSyp.replace(/,/g, '')) || 0))
+                  const data = await api<{ laserCoverSyp?: number }>('/api/laser/pricing-settings', {
+                    method: 'PATCH',
+                    body: JSON.stringify({ laserCoverSyp: nSyp }),
+                  })
+                  setLaserCoverPriceSyp(String(Math.max(0, Math.round(Number(data.laserCoverSyp) ?? nSyp))))
+                  setLaserCoverMsg('تم حفظ سعر كفر الليزر.')
+                } catch (e) {
+                  setLaserCoverMsg(e instanceof ApiError ? e.message : 'تعذر الحفظ')
+                } finally {
+                  setLaserCoverSaving(false)
+                }
+              }}
+            >
+              {laserCoverSaving ? 'جاري الحفظ…' : 'حفظ'}
+            </button>
+          </div>
+          {laserCoverMsg ? (
+            <p
+              style={{
+                margin: '0.5rem 0 0',
+                fontSize: '0.84rem',
+                color: laserCoverMsg.includes('تعذر') ? 'var(--danger)' : 'var(--success)',
+              }}
+            >
+              {laserCoverMsg}
             </p>
           ) : null}
         </div>

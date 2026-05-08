@@ -94,6 +94,8 @@ export async function getClinicalBundleForPatientId(pid) {
       isPackageSession: s.isPackageSession === true,
       patientPackageId: String(s.patientPackageId || ''),
       patientPackageSessionId: String(s.patientPackageSessionId || ''),
+      laserCoverApplied: s.laserCoverApplied === true,
+      laserCoverSyp: Math.max(0, Math.round(Number(s.laserCoverSyp) || 0)),
     }
   })
 

@@ -58,6 +58,8 @@ type ClinicalLaserRow = {
   isPackageSession?: boolean
   patientPackageId?: string
   patientPackageSessionId?: string
+  laserCoverApplied?: boolean
+  laserCoverSyp?: number
 }
 
 type ClinicalDermRow = {
@@ -619,6 +621,9 @@ export function PatientRecord() {
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
   const [laserLineItems, setLaserLineItems] = useState<LaserSessionLineInput[]>([])
   const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
+  /** سعر «كفر ليزر» كما يحدده المدير في إعدادات الليزر */
+  const [laserCoverPriceSyp, setLaserCoverPriceSyp] = useState(0)
+  const [laserCoverSelected, setLaserCoverSelected] = useState(false)
   const [laserNotes, setLaserNotes] = useState('')
   const [nextTreatmentHint, setNextTreatmentHint] = useState('—')
   const [savingLaser, setSavingLaser] = useState(false)
@@ -1140,6 +1145,10 @@ export function PatientRecord() {
   }, [id, tab])
 
   useEffect(() => {
+    setLaserCoverSelected(false)
+  }, [id])
+
+  useEffect(() => {
     if (tab !== 'laser' || !role || !canAccessTab(role, 'laser')) return
     let cancelled = false
     ;(async () => {
@@ -1149,14 +1158,16 @@ export function PatientRecord() {
         const [catalogData, procData, pricingData] = await Promise.all([
           api<{ categories: LaserCategory[] }>('/api/laser/catalog'),
           api<{ groups: LaserProcedureGroup[] }>('/api/laser/procedure-options'),
-          api<{ pricePerPulseSyp: number }>('/api/laser/pricing-settings').catch(() => ({
+          api<{ pricePerPulseSyp: number; laserCoverSyp?: number }>('/api/laser/pricing-settings').catch(() => ({
             pricePerPulseSyp: 0,
+            laserCoverSyp: 0,
           })),
         ])
         if (!cancelled) {
           setLaserCatalog(catalogData.categories)
           setLaserProcedureGroups(procData.groups || [])
           setLaserPricePerPulseSyp(Math.max(0, Math.round(Number(pricingData.pricePerPulseSyp) || 0)))
+          setLaserCoverPriceSyp(Math.max(0, Math.round(Number(pricingData.laserCoverSyp) || 0)))
           setSelectedLaserItemIds((prev) => {
             const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
             if (!bookedLaserProcedureText) return validPrev
@@ -1196,6 +1207,7 @@ export function PatientRecord() {
           setLaserProcedureGroups([])
           setSelectedLaserItemIds([])
           setLaserPricePerPulseSyp(0)
+          setLaserCoverPriceSyp(0)
           setLaserProcedureErr('تعذر تحميل مناطق وعروض الليزر')
         }
       } finally {
@@ -1498,6 +1510,26 @@ export function PatientRecord() {
     () => laserLineItemsWithPricing.reduce((sum, row) => sum + (Number(row.lineCostSyp) || 0), 0),
     [laserLineItemsWithPricing],
   )
+
+  const laserAddonLinesTotalSyp = useMemo(
+    () =>
+      laserLineItemsWithPricing
+        .filter((row) => row.isAddon)
+        .reduce((sum, row) => sum + (Number(row.lineCostSyp) || 0), 0),
+    [laserLineItemsWithPricing],
+  )
+
+  const laserInvoicePreviewSyp = useMemo(() => {
+    const extra = laserCoverSelected ? laserCoverPriceSyp : 0
+    if (activeLaserPackage) return laserAddonLinesTotalSyp + extra
+    return selectedLaserTotalSyp + extra
+  }, [
+    activeLaserPackage,
+    laserAddonLinesTotalSyp,
+    selectedLaserTotalSyp,
+    laserCoverSelected,
+    laserCoverPriceSyp,
+  ])
 
   useEffect(() => {
     if (!activeLaserPackage) setSelectedLaserAddonItemIds([])
@@ -3204,26 +3236,88 @@ export function PatientRecord() {
                     <strong>{laserPricePerPulseSyp.toLocaleString('ar-SY')} ل.س</strong> ).
                   </p>
                 </div>
+                <div
+                  style={{
+                    marginTop: '0.65rem',
+                    padding: '0.55rem 0.65rem',
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface-solid)',
+                  }}
+                >
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.5rem',
+                      cursor: laserCoverPriceSyp > 0 ? 'pointer' : 'not-allowed',
+                      margin: 0,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={laserCoverSelected}
+                      disabled={!(laserCoverPriceSyp > 0)}
+                      onChange={(e) => setLaserCoverSelected(e.target.checked)}
+                      style={{ marginTop: '0.15rem' }}
+                    />
+                    <span style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>
+                      <strong>كفر ليزر</strong>
+                      {laserCoverPriceSyp > 0 ? (
+                        <>
+                          {' '}
+                          — يُضاف <strong>{laserCoverPriceSyp.toLocaleString('ar-SY')} ل.س</strong> إلى بند الفوترة عند
+                          التفعيل.
+                        </>
+                      ) : (
+                        <>
+                          {' '}
+                          — يحدد المدير سعره من «الغرف وتعيين أخصائيي الليزر» ضمن أسعار الليزر.
+                        </>
+                      )}
+                    </span>
+                  </label>
+                </div>
                 {activeLaserPackage ? (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
                     <p style={{ margin: '0 0 0.35rem', color: 'var(--success)' }}>
                       <strong>جلسة ضمن باكج مدفوع مسبقاً</strong> — لا يُحسب سعر المناطق ضمن الباكج على هذه الجلسة.
                     </p>
-                    <p style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>
-                      <strong>إضافات خارج الباكج:</strong>{' '}
-                      {laserAddonTotalSyp > 0 ? (
-                        <>{laserAddonTotalSyp.toLocaleString('ar-SY')} ل.س</>
+                    <p style={{ margin: '0 0 0.35rem', fontVariantNumeric: 'tabular-nums' }}>
+                      <strong>إضافات خارج الباكج (من أسطر الجلسة):</strong>{' '}
+                      {laserAddonLinesTotalSyp > 0 ? (
+                        <>{laserAddonLinesTotalSyp.toLocaleString('ar-SY')} ل.س</>
                       ) : (
                         <span style={{ color: 'var(--text-muted)' }}>لا توجد إضافات خارج الباكج</span>
                       )}
                     </p>
+                    {laserCoverSelected && laserCoverPriceSyp > 0 ? (
+                      <p style={{ margin: '0 0 0.35rem', fontVariantNumeric: 'tabular-nums' }}>
+                        <strong>كفر ليزر:</strong> {laserCoverPriceSyp.toLocaleString('ar-SY')} ل.س
+                      </p>
+                    ) : null}
+                    <p style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                      <strong>المستحق على الفاتورة (تقريبي):</strong>{' '}
+                      {laserInvoicePreviewSyp.toLocaleString('ar-SY')} ل.س
+                    </p>
                   </div>
                 ) : (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
-                    <strong>سعر الجلسة:</strong>{' '}
-                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('ar-SY') : '0'} ل.س
-                    </span>
+                    <p style={{ margin: '0 0 0.35rem', fontVariantNumeric: 'tabular-nums' }}>
+                      <strong>سعر الجلسة:</strong>{' '}
+                      <span>
+                        {selectedLaserTotalSyp > 0 ? selectedLaserTotalSyp.toLocaleString('ar-SY') : '0'} ل.س
+                      </span>
+                    </p>
+                    {laserCoverSelected && laserCoverPriceSyp > 0 ? (
+                      <p style={{ margin: '0 0 0.35rem', fontVariantNumeric: 'tabular-nums' }}>
+                        <strong>كفر ليزر:</strong> {laserCoverPriceSyp.toLocaleString('ar-SY')} ل.س
+                      </p>
+                    ) : null}
+                    <p style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                      <strong>المستحق على الفاتورة (تقريبي، قبل أي حسم مستقبلي من الخادم):</strong>{' '}
+                      {laserInvoicePreviewSyp.toLocaleString('ar-SY')} ل.س
+                    </p>
                   </div>
                 )}
                 {laserProcedureErr ? (
@@ -3263,6 +3357,10 @@ export function PatientRecord() {
                   setLaserSessionErr('يوجد سطر بدون اسم منطقة/عرض. أكمل الاسم أو احذف السطر.')
                   return
                 }
+                if (laserCoverSelected && !(laserCoverPriceSyp > 0)) {
+                  setLaserSessionErr('تعذر تفعيل كفر ليزر قبل أن يحدد المدير سعره في إعدادات الليزر.')
+                  return
+                }
                 if (!activeLaserPackage) {
                   const pulseRows = laserLineItemsWithPricing.filter((row) => row.chargeByPulseCount)
                   if (pulseRows.length > 0) {
@@ -3281,7 +3379,7 @@ export function PatientRecord() {
                       return
                     }
                   }
-                  if (!(selectedLaserTotalSyp > 0)) {
+                  if (!(selectedLaserTotalSyp > 0) && !(laserCoverSelected && laserCoverPriceSyp > 0)) {
                     setLaserSessionErr('اختر مناطق/عروض بسعر صالح أو فعّل محاسبة الضربات مع عدد ضربات صحيح.')
                     return
                   }
@@ -3321,6 +3419,7 @@ export function PatientRecord() {
                       chargeByPulseCount: !activeLaserPackage && laserLineItemsWithPricing.some((x) => x.chargeByPulseCount),
                       discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
+                      includeLaserCover: laserCoverSelected,
                     }),
                   })
                   const due = Number(created.billingItem?.amountDueSyp || 0)
@@ -3333,6 +3432,7 @@ export function PatientRecord() {
                       : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`,
                   )
                   setLaserNotes('')
+                  setLaserCoverSelected(false)
                   setSelectedLaserItemIds([])
                   setSelectedLaserAddonItemIds([])
                   setLaserLineItems([])
