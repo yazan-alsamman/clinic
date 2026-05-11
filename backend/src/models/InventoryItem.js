@@ -14,7 +14,10 @@ const inventoryItemSchema = new mongoose.Schema(
     unit: { type: String, default: 'unit' },
     safetyStockLevel: { type: Number, default: 5 },
     quantity: { type: Number, default: 0 },
+    /** تكلفة الوحدة بالليرة — تُستخدم مباشرة في التكلفة إن كانت أكبر من صفر */
     unitCost: { type: Number, default: 0 },
+    /** تكلفة الوحدة بالدولار — تُحوَّل لليرة عند الاستهلاك إذا لم يُضبط unitCost */
+    unitCostUsd: { type: Number, default: 0 },
   },
   { timestamps: true },
 )

@@ -141,9 +141,11 @@ function sessionToPatientRow(r) {
  * خصم المواد مع إرجاع الكميات عند الفشل
  * @param {Array<{ inventoryItemId: string, quantity: number }>} rawLines
  */
-async function consumeMaterials(rawLines) {
+async function consumeMaterials(rawLines, opts = {}) {
   const applied = []
   const snapshot = []
+  const usdSypRate = Number(opts.usdSypRate)
+  const rateOk = Number.isFinite(usdSypRate) && usdSypRate > 0
   try {
     for (const line of rawLines || []) {
       const qty = Math.max(0, Number(line.quantity) || 0)
@@ -159,14 +161,24 @@ async function consumeMaterials(rawLines) {
       item.quantity -= qty
       await item.save()
       applied.push({ id: item._id, qty })
-      const unitCost = Number(item.unitCost) || 0
+      const costSypStored = Math.round(Number(item.unitCost) || 0)
+      const costUsd = Number(item.unitCostUsd) || 0
+      let unitCostSyp = costSypStored
+      if (unitCostSyp <= 0 && costUsd > 0) {
+        if (!rateOk) {
+          throw new Error(
+            `المادة «${item.name}» مسعّرة بالدولار فقط — لا يوجد سعر صرف دولار لليوم. اطلب إدخال سعر الصرف أولاً.`,
+          )
+        }
+        unitCostSyp = Math.round(costUsd * usdSypRate)
+      }
       snapshot.push({
         inventoryItemId: item._id,
         sku: item.sku,
         name: item.name,
         quantity: qty,
-        unitCostSyp: unitCost,
-        lineCostSyp: Math.round(unitCost * qty),
+        unitCostSyp,
+        lineCostSyp: Math.round(unitCostSyp * qty),
         chargedUnitPriceSyp: 0,
         lineChargeSyp: 0,
       })
@@ -405,7 +417,9 @@ clinicalRouter.post(
       const materialsInput = Array.isArray(body.materials) ? body.materials : []
       let materialLines = []
       try {
-        materialLines = await consumeMaterials(materialsInput)
+        materialLines = await consumeMaterials(materialsInput, {
+          usdSypRate: Number(req.businessDay?.usdSypRate),
+        })
       } catch (invErr) {
         res.status(400).json({ error: String(invErr.message || invErr) })
         return
@@ -624,7 +638,9 @@ clinicalRouter.patch(
       const appendInput = Array.isArray(body.appendMaterials) ? body.appendMaterials : []
       let newLines = []
       try {
-        newLines = await consumeMaterials(appendInput)
+        newLines = await consumeMaterials(appendInput, {
+          usdSypRate: Number(req.businessDay?.usdSypRate),
+        })
       } catch (invErr) {
         res.status(400).json({ error: String(invErr.message || invErr) })
         return

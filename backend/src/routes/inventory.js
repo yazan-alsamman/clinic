@@ -28,8 +28,14 @@ const DEPARTMENT_SKU_PREFIX = {
   solarium: 'SOL',
 }
 
-function isDermWarehouseRole(role) {
-  return role === 'dermatology_manager' || role === 'dermatology_assistant_manager'
+function isDermWarehouseManagerRole(role) {
+  return role === 'dermatology_manager'
+}
+function isDermWarehouseAssistantRole(role) {
+  return role === 'dermatology_assistant_manager'
+}
+function isDermWarehouseStaffRole(role) {
+  return isDermWarehouseManagerRole(role) || isDermWarehouseAssistantRole(role)
 }
 function isSkinWarehouseRole(role) {
   return role === 'skin_specialist'
@@ -46,15 +52,22 @@ async function generateInventorySku(department) {
   throw new Error('تعذر توليد SKU تلقائي فريد')
 }
 function parseNonNegativeUnitCostSyp(body) {
-  if (body.unitCostSyp != null) {
+  if (body.unitCostSyp != null && body.unitCostSyp !== '') {
     const n = Math.round(Number(body.unitCostSyp))
     if (Number.isFinite(n) && n >= 0) return n
   }
-  if (body.unitCost != null) {
+  if (body.unitCost != null && body.unitCost !== '') {
     const n = Math.round(Number(body.unitCost))
     if (Number.isFinite(n) && n >= 0) return n
   }
   return 0
+}
+
+function parseNonNegativeUnitCostUsd(body) {
+  if (body.unitCostUsd == null || body.unitCostUsd === '') return 0
+  const n = Number(body.unitCostUsd)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return Math.round(n * 100) / 100
 }
 
 function itemDto(i) {
@@ -69,6 +82,7 @@ function itemDto(i) {
     quantity: o.quantity ?? 0,
     safetyStockLevel: o.safetyStockLevel ?? 0,
     unitCost: o.unitCost ?? 0,
+    unitCostUsd: o.unitCostUsd ?? 0,
     lowStock: (o.quantity ?? 0) <= (o.safetyStockLevel ?? 0),
   }
 }
@@ -82,7 +96,7 @@ inventoryRouter.get('/items', async (req, res) => {
     const activeOnly = String(req.query.activeOnly || '') === '1'
     const inStockOnly = String(req.query.inStockOnly || '') === '1'
     const q = {}
-    if (isDermWarehouseRole(req.user.role)) {
+    if (isDermWarehouseStaffRole(req.user.role)) {
       q.department = 'dermatology_private'
     } else if (isSkinWarehouseRole(req.user.role)) {
       q.department = 'skin'
@@ -112,13 +126,18 @@ inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager'
       res.status(400).json({ error: 'اسم المادة مطلوب' })
       return
     }
-    const department = isDermWarehouseRole(req.user.role)
+    const department = isDermWarehouseStaffRole(req.user.role)
       ? 'dermatology_private'
       : isSkinWarehouseRole(req.user.role)
         ? 'skin'
         : normalizeDepartment(body.department)
     const sku = await generateInventorySku(department)
-    const unitCostSyp = parseNonNegativeUnitCostSyp(body)
+    let unitCostSyp = parseNonNegativeUnitCostSyp(body)
+    let unitCostUsd = parseNonNegativeUnitCostUsd(body)
+    if (isDermWarehouseAssistantRole(req.user.role)) {
+      unitCostSyp = 0
+      unitCostUsd = 0
+    }
     const doc = await InventoryItem.create({
       sku,
       name,
@@ -128,6 +147,7 @@ inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager'
       quantity: Number(body.quantity) || 0,
       safetyStockLevel: Number(body.safetyStockLevel) || 0,
       unitCost: unitCostSyp,
+      unitCostUsd,
     })
     await writeAudit({
       user: req.user,
@@ -154,7 +174,7 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
       res.status(404).json({ error: 'المادة غير موجودة' })
       return
     }
-    if (isDermWarehouseRole(req.user.role) && item.department !== 'dermatology_private') {
+    if (isDermWarehouseStaffRole(req.user.role) && item.department !== 'dermatology_private') {
       res.status(403).json({ error: 'لا صلاحية لتعديل هذا الصنف' })
       return
     }
@@ -164,6 +184,18 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
     }
 
     const body = req.body ?? {}
+
+    if (isDermWarehouseAssistantRole(req.user.role)) {
+      const forbidden = ['sku', 'name', 'active', 'unit', 'department', 'unitCost', 'unitCostSyp', 'unitCostUsd']
+      for (const k of forbidden) {
+        if (body[k] != null) {
+          res.status(403).json({
+            error: 'تعديل الاسم أو السعر أو SKU أو الوحدة أو حالة التفعيل متاح لمدير قسم الجلدية فقط',
+          })
+          return
+        }
+      }
+    }
 
     if (body.sku != null) {
       const next = String(body.sku).trim()
@@ -177,7 +209,7 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
     if (body.name != null) item.name = String(body.name).trim()
     if (body.active != null) item.active = body.active !== false
     if (body.department != null) {
-      item.department = isDermWarehouseRole(req.user.role)
+      item.department = isDermWarehouseStaffRole(req.user.role)
         ? 'dermatology_private'
         : isSkinWarehouseRole(req.user.role)
           ? 'skin'
@@ -189,6 +221,9 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
       item.safetyStockLevel = Math.max(0, Number(body.safetyStockLevel))
     if (body.unitCost != null || body.unitCostSyp != null) {
       item.unitCost = parseNonNegativeUnitCostSyp(body)
+    }
+    if (body.unitCostUsd != null) {
+      item.unitCostUsd = parseNonNegativeUnitCostUsd(body)
     }
 
     await item.save()

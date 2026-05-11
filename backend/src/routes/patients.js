@@ -101,7 +101,8 @@ function normalizeString(raw, maxLen = 4000) {
 function normalizePatientProfilePayload(body) {
   const gender = normalizeGender(body.gender)
   const marital = normalizeString(body.marital, 120)
-  const isFemaleMarried = gender === 'female' && marital === 'متزوجة'
+  const isFemaleMarried =
+    gender === 'female' && (marital === 'متزوجة' || marital === 'متزوج')
   const payload = {
     name: normalizeString(body.name, 220) || 'مريض جديد',
     dob: normalizeString(body.dob, 40),

@@ -6,13 +6,14 @@ import type { Patient } from '../types'
 
 type Dept = 'laser' | 'dermatology' | 'dental' | 'solarium'
 
+type NewPatientMaritalChoice = 'متزوج' | 'أعزب'
+
 const emptyForm = {
   fileNumber: '',
   name: '',
   dob: '',
   phone: '',
-  gender: '' as '' | 'male' | 'female',
-  marital: '',
+  marital: 'أعزب' as NewPatientMaritalChoice,
   occupation: '',
   medicalHistory: '',
   surgicalHistory: '',
@@ -543,13 +544,20 @@ export function PatientSearch() {
                   <label className="form-label" htmlFor="np-marital">
                     الحالة الاجتماعية
                   </label>
-                  <input
+                  <select
                     id="np-marital"
                     className="input"
-                    placeholder="مثال: متزوج / عزباء"
                     value={form.marital}
-                    onChange={(e) => setForm((f) => ({ ...f, marital: e.target.value }))}
-                  />
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        marital: e.target.value as NewPatientMaritalChoice,
+                      }))
+                    }
+                  >
+                    <option value="متزوج">متزوج</option>
+                    <option value="أعزب">أعزب</option>
+                  </select>
                 </div>
                 <div>
                   <label className="form-label" htmlFor="np-job">
@@ -676,7 +684,7 @@ export function PatientSearch() {
                         dob: form.dob,
                         phone: form.phone.trim(),
                         gender: form.gender,
-                        marital: form.marital.trim(),
+                        marital: form.marital,
                         occupation: form.occupation.trim(),
                         medicalHistory: form.medicalHistory.trim(),
                         surgicalHistory: form.surgicalHistory.trim(),
