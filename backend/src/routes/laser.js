@@ -1428,8 +1428,50 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         ? ` — إضافات خارج الباكج: ${addonManualLabels.join('، ')}`
         : ''
     const laserCoverSuffix = laserCoverAppliedSyp > 0 ? ' — كفر ليزر' : ''
-    const procedureDescription =
+    const procedureDescriptionBase =
       `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}${addonSuffix}${laserCoverSuffix}`.slice(0, 500)
+
+    /** يظهر لدى الاستقبال على التحصيل عند وجود محاسبة بعدد الضربات */
+    const pulseLineItems = normalizedLineItems.filter((row) => row.chargeByPulseCount)
+    const legacyWholeSessionPulse =
+      !isPackageSession && normalizedLineItems.length === 0 && Boolean(chargeByPulseCount)
+    let pulseBillingReceptionNote = ''
+    if (pulseLineItems.length > 0) {
+      const names = pulseLineItems
+        .map((row) => String(row.areaLabel || '').trim())
+        .filter((x) => Boolean(x))
+      if (names.length === 1) {
+        pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات للمنطقة: ${names[0]}`
+      } else if (names.length > 1) {
+        pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات للمناطق: ${names.join('، ')}`
+      } else {
+        pulseBillingReceptionNote = 'تم إضافة محاسبة على عدد الضربات لهذه الجلسة'
+      }
+    } else if (legacyWholeSessionPulse) {
+      const hint = areaPart && areaPart !== 'بدون مناطق محددة' ? areaPart : 'المناطق المحددة'
+      pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات (${hint})`
+    }
+
+    const procedureDescription = (
+      pulseBillingReceptionNote
+        ? `${procedureDescriptionBase} — ${pulseBillingReceptionNote}`
+        : procedureDescriptionBase
+    ).slice(0, 500)
+
+    let procedureLabel = procedureDescription
+    if (procedureLabel.length > 200) {
+      if (pulseBillingReceptionNote) {
+        const sep = ' — '
+        const headLen = pulseBillingReceptionNote.length + sep.length
+        const tailRoom = 200 - headLen
+        procedureLabel =
+          tailRoom > 24
+            ? `${pulseBillingReceptionNote}${sep}${procedureDescriptionBase.slice(0, tailRoom)}`
+            : pulseBillingReceptionNote.slice(0, 200)
+      } else {
+        procedureLabel = procedureDescription.slice(0, 200)
+      }
+    }
 
     const treatmentNumber = await nextSequence('laserTreatment')
 
@@ -1485,7 +1527,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         patientId: patient._id,
         providerUserId: req.user._id,
         department: 'laser',
-        procedureLabel: procedureDescription.slice(0, 200) || 'ليزر',
+        procedureLabel: procedureLabel || 'ليزر',
         amountDueSyp,
         currency: 'SYP',
         businessDate,
