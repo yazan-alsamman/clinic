@@ -147,7 +147,9 @@ export function DermatologyFinancePage() {
           <p style={{ margin: '0.45rem 0 0', fontWeight: 800, color: '#064e3b' }}>
             {renderSyp(data?.totals.netRevenueSyp || 0)}
           </p>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#047857' }}>من مستندات الجلدية المرحلة فقط.</p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#047857' }}>
+            من المستندات المرحلة لقسم الجلدية وجلسات البشرة (الجدول).
+          </p>
         </div>
         <div className="card" style={{ borderColor: '#fb923c', background: 'linear-gradient(160deg, #fff7ed 0%, #ffedd5 100%)' }}>
           <h3 style={{ margin: 0, color: '#9a3412' }}>إجمالي المصاريف</h3>

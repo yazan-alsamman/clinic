@@ -15,6 +15,7 @@ import { notifyAppointmentCancelled } from '../services/scheduleCancelNotify.js'
 import {
   normalizeHm,
   hmToMinutes,
+  minutesToHm,
   slotIntervalMinutes,
   intervalsOverlapHalfOpen,
 } from '../utils/scheduleTime.js'
@@ -572,7 +573,11 @@ scheduleRouter.get('/', async (req, res) => {
   }
 })
 
-scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, res) => {
+/**
+ * تعيين موعد في الجدول.
+ * @param {boolean} allowWalkInOverlapBypass إن true: مسموح فقط من مسار «وصول بدون موعد» — يتجاهل تداخل الفترات ويزحف الوقت عند تعارض خانة بنفس البداية.
+ */
+async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
   try {
     const body = req.body ?? {}
     const businessDate = String(body.businessDate || '').trim() || todayBusinessDate()
@@ -632,31 +637,69 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
       }
     }
     const { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName } = resolved
+    const walkInOverride = allowWalkInOverlapBypass === true
+
     const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName: effectiveProviderName }).lean()
-    const existing = sameProvSlots.find((o) => normalizeHm(o.time) === time) ?? null
+    const findExistingAt = (tStr) => sameProvSlots.find((o) => normalizeHm(o.time) === normalizeHm(tStr)) ?? null
+
+    let assignTime = time
+    let assignEndTime = endTime
+    let startMinCur = startMin
+    let endMinCur = endMin
+    let existing = findExistingAt(assignTime)
+
     if (existing?.patientId && String(existing.patientId) !== String(patient._id)) {
-      res.status(409).json({ error: 'هذه الخانة محجوزة لمريض آخر' })
-      return
+      if (!walkInOverride) {
+        res.status(409).json({ error: 'هذه الخانة محجوزة لمريض آخر' })
+        return
+      }
+      const duration = endMinCur - startMinCur
+      const dayEndMin = 21 * 60
+      let shifted = false
+      for (let m = startMinCur; m + duration <= dayEndMin; m += 1) {
+        const tStr = minutesToHm(m)
+        const eStr = minutesToHm(m + duration)
+        const ex = findExistingAt(tStr)
+        if (!ex || !ex.patientId || String(ex.patientId) === String(patient._id)) {
+          assignTime = tStr
+          assignEndTime = eStr
+          startMinCur = m
+          endMinCur = m + duration
+          existing = ex
+          shifted = true
+          break
+        }
+      }
+      if (!shifted) {
+        res.status(409).json({
+          error: 'تعذر إيجاد وقت غير محجوز على هذا السطر في نفس اليوم — جرّب وقتاً آخر أو غداً.',
+        })
+        return
+      }
     }
-    const overlapCheck = await assertNoOverlapForProvider({
-      businessDate,
-      providerName: effectiveProviderName,
-      startTime: time,
-      endTime,
-      ignoreId: existing?._id ?? null,
-    })
+
+    let overlapCheck = { ok: true }
+    if (!walkInOverride) {
+      overlapCheck = await assertNoOverlapForProvider({
+        businessDate,
+        providerName: effectiveProviderName,
+        startTime: assignTime,
+        endTime: assignEndTime,
+        ignoreId: existing?._id ?? null,
+      })
+    }
     if (overlapCheck.error) {
       res.status(409).json({ error: overlapCheck.error })
       return
     }
-    const filter = existing ? { _id: existing._id } : { businessDate, time, providerName: effectiveProviderName }
+    const filter = existing ? { _id: existing._id } : { businessDate, time: assignTime, providerName: effectiveProviderName }
     const slot = await ScheduleSlot.findOneAndUpdate(
       filter,
       {
         $set: {
           businessDate,
-          time,
-          endTime,
+          time: assignTime,
+          endTime: assignEndTime,
           providerName: effectiveProviderName,
           serviceType,
           roomNumber,
@@ -678,13 +721,13 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
     await Patient.updateOne({ _id: patient._id }, { $set: { lastVisit: new Date() } })
     await writeAudit({
       user: req.user,
-      action: 'تعيين موعد لمريض',
+      action: walkInOverride ? 'تعيين موعد لمريض (وصول بدون موعد — تجاوز الفراغ)' : 'تعيين موعد لمريض',
       entityType: 'ScheduleSlot',
       entityId: slot._id,
       details: {
         businessDate,
-        time,
-        endTime,
+        time: assignTime,
+        endTime: assignEndTime,
         providerName: effectiveProviderName,
         serviceType,
         roomNumber,
@@ -709,7 +752,23 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
+}
+
+/** حجز عادي — يُطبَّق شرط عدم تداخل المواعيد دائماً */
+scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, res) => {
+  await runScheduleAssign(req, res, false)
 })
+
+/** وصول بدون موعد (صفحة الاستقبال فقط) — يتجاهل تداخل الفترات؛ لا يُستدعى من حجز الموعد العادي */
+scheduleRouter.post(
+  '/walk-in-assign',
+  loadBusinessDay,
+  requireActiveDay,
+  requireRoles('reception', 'super_admin'),
+  async (req, res) => {
+    await runScheduleAssign(req, res, true)
+  },
+)
 
 scheduleRouter.get('/arrived', async (req, res) => {
   try {

@@ -15,6 +15,14 @@ export function hmToMinutes(hhmm) {
   return h * 60 + min
 }
 
+/** دقائق منذ منتصف الليل → HH:mm (مقيّد بيوم واحد) */
+export function minutesToHm(totalMin) {
+  const m = Math.max(0, Math.min(Math.floor(Number(totalMin) || 0), 23 * 60 + 59))
+  const h = Math.floor(m / 60)
+  const min = m % 60
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+
 /** فاصل [start,end) بالدقائق؛ بدون endTime صالح نفترض 30 دقيقة (بيانات قديمة) */
 export function slotIntervalMinutes(doc) {
   const s = hmToMinutes(doc.time)

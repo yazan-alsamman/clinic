@@ -269,7 +269,7 @@ export async function postBillingPayment(paymentId, postedBy) {
 
   let paramKey = 'calc.profile.laser'
   let fallback = 'CLINIC_NET_SHARE'
-  if (department === 'dermatology' || department === 'solarium') {
+  if (department === 'dermatology' || department === 'solarium' || department === 'skin') {
     paramKey = 'calc.profile.dermatology'
   } else if (department === 'dental') {
     paramKey = material > 0 ? 'calc.profile.dental_ortho' : 'calc.profile.dental_general'
@@ -305,7 +305,7 @@ export async function postBillingPayment(paymentId, postedBy) {
   const revenueGl =
     department === 'laser'
       ? GL.revenue_laser
-      : department === 'dermatology' || department === 'solarium'
+      : department === 'dermatology' || department === 'solarium' || department === 'skin'
         ? GL.revenue_derm
         : GL.revenue_dental
 

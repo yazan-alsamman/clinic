@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import type { Patient } from '../types'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
-import { slotIntervalFromRow, intervalsOverlapHalfOpen } from '../utils/scheduleTime'
 
 const DAY_START_MIN = 9 * 60
 const DAY_END_MIN = 21 * 60
@@ -77,21 +76,6 @@ function resolveLaserItemPriceByGender(item: LaserProcedureItem, gender: '' | 'm
   if (gender === 'male' && item.priceMaleSyp != null) return Math.max(0, Math.round(Number(item.priceMaleSyp) || 0))
   if (gender === 'female' && item.priceFemaleSyp != null) return Math.max(0, Math.round(Number(item.priceFemaleSyp) || 0))
   return Math.max(0, Math.round(Number(item.priceSyp) || 0))
-}
-
-function intervalOverlapsBookedSlots(
-  slotRows: SlotRow[],
-  providerName: string,
-  startMin: number,
-  endMin: number,
-): boolean {
-  const p = providerName.trim()
-  return slotRows.some((x) => {
-    if (String(x.providerName || '').trim() !== p) return false
-    const o = slotIntervalFromRow(x.time, x.endTime)
-    if (!o) return false
-    return intervalsOverlapHalfOpen(startMin, endMin, o.start, o.end)
-  })
 }
 
 function patientDebtCreditSyp(p: Patient) {
@@ -361,9 +345,8 @@ export function ReceptionWalkInSessionPage() {
     for (let m = DAY_START_MIN; m + duration <= DAY_END_MIN; m += 15) {
       const time = toHm(m)
       const endTime = toHm(m + duration)
-      if (intervalOverlapsBookedSlots(slots, params.providerName, m, m + duration)) continue
       try {
-        const data = await api<{ slot?: { id: string } }>('/api/schedule/assign', {
+        const data = await api<{ slot?: { id: string } }>('/api/schedule/walk-in-assign', {
           method: 'POST',
           body: JSON.stringify({
             businessDate,
@@ -395,7 +378,7 @@ export function ReceptionWalkInSessionPage() {
         break
       }
     }
-    setFormErr(lastErr || 'تعذر إيجاد وقتاً فارغاً على هذا السطر اليوم — حدّث الجدول وحاول مجدداً.')
+    setFormErr(lastErr || 'تعذر تسجيل الوصول — حدّث الجدول أو جرّب وقتاً آخر.')
   }
 
   async function submitLaser() {
@@ -420,9 +403,8 @@ export function ReceptionWalkInSessionPage() {
         const match = optData.providers.find((p) => p.userId === selectedLaserProviderId)
         if (!match) continue
         const channel = `Laser Room ${match.roomNumber}`
-        if (intervalOverlapsBookedSlots(slots, channel, m, m + WALK_IN_DURATION_MIN)) continue
         try {
-          const data = await api<{ slot?: { id: string } }>('/api/schedule/assign', {
+          const data = await api<{ slot?: { id: string } }>('/api/schedule/walk-in-assign', {
             method: 'POST',
             body: JSON.stringify({
               businessDate,
@@ -456,9 +438,7 @@ export function ReceptionWalkInSessionPage() {
           break
         }
       }
-      setFormErr(
-        lastErr || 'تعذر إيجاد وقتاً لهذا الأخصائي ضمن الدوام — جرّب أخصائياً آخر أو حدّث الجدول.',
-      )
+      setFormErr(lastErr || 'تعذر تسجيل وصول الليزر — جرّب وقتاً آخر أو أخصائياً آخر.')
     } finally {
       setSaving(false)
     }
@@ -504,9 +484,8 @@ export function ReceptionWalkInSessionPage() {
         const time = toHm(m)
         const endTime = toHm(m + WALK_IN_DURATION_MIN)
         const channel = 'قسم البشرة'
-        if (intervalOverlapsBookedSlots(slots, channel, m, m + WALK_IN_DURATION_MIN)) continue
         try {
-          const data = await api<{ slot?: { id: string } }>('/api/schedule/assign', {
+          const data = await api<{ slot?: { id: string } }>('/api/schedule/walk-in-assign', {
             method: 'POST',
             body: JSON.stringify({
               businessDate,
@@ -535,7 +514,7 @@ export function ReceptionWalkInSessionPage() {
           break
         }
       }
-      setFormErr(lastErr || 'تعذر إيجاد وقتاً فارغاً لقسم البشرة اليوم.')
+      setFormErr(lastErr || 'تعذر تسجيل وصول قسم البشرة.')
     } finally {
       setSaving(false)
     }
@@ -577,7 +556,8 @@ export function ReceptionWalkInSessionPage() {
       <h1 className="page-title">إنشاء جلسة بدون موعد</h1>
       <p className="page-desc">
         تسجيل مريض وصولاً مباشرةً دون حجز مسبق: يُنشأ موعد اليوم مع «وصل المريض» فيظهر عند الأخصائي في صفحة «إنشاء جلسة»
-        لاستكمال الجلسة؛ يصل المبلغ إلى التحصيل بعد إنهاء الجلسة.
+        لاستكمال الجلسة حتى لو كان جدول الأخصائي ممتلئاً (يُسمح بتداخل المواعيد عند الوصول المباشر). يصل المبلغ إلى التحصيل بعد
+        إنهاء الجلسة.
       </p>
 
       {assignBlocked ? (
@@ -596,6 +576,9 @@ export function ReceptionWalkInSessionPage() {
         <button type="button" className="btn btn-secondary" style={{ marginRight: '0.75rem' }} onClick={() => void loadSlots()}>
           تحديث الجدول
         </button>
+        {!slotsLoading && slots.length > 0 ? (
+          <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}> — {slots.length} موعد في الجدول</span>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginBottom: '1rem' }}>
