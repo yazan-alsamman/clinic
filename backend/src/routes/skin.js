@@ -38,7 +38,7 @@ async function ensureDefaults() {
 
 skinRouter.get(
   '/procedure-options',
-  requireRoles('super_admin', 'reception', 'skin_specialist'),
+  requireRoles('super_admin', 'reception'),
   async (_req, res) => {
     try {
       await ensureDefaults()

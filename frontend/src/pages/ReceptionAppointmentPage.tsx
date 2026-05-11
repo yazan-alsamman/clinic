@@ -26,7 +26,7 @@ const SERVICE_CHANNELS: Record<ServiceValue, string[]> = {
   laser: ['Laser Room 1', 'Laser Room 2'],
   dental: ['أسنان'],
   dermatology: ['د.لورا', 'د.سامر', 'د.محمد'],
-  skin: ['أخصائي بشرة'],
+  skin: ['قسم البشرة'],
   solarium: ['سولاريوم'],
 }
 
@@ -281,7 +281,8 @@ export function ReceptionAppointmentPage() {
   const [patientSearchLoading, setPatientSearchLoading] = useState(false)
   const [picked, setPicked] = useState<Patient | null>(null)
   const [declinedNewPatientForName, setDeclinedNewPatientForName] = useState<string | null>(null)
-  const [newPatientGenderIntent, setNewPatientGenderIntent] = useState<'' | 'male' | 'female'>('')
+  const [newPatientGenderPending, setNewPatientGenderPending] = useState<'' | 'male' | 'female'>('')
+  const [newPatientPhoneForCreate, setNewPatientPhoneForCreate] = useState('')
   const [creatingPatient, setCreatingPatient] = useState(false)
 
   const [saving, setSaving] = useState(false)
@@ -438,6 +439,13 @@ export function ReceptionAppointmentPage() {
     }
   }, [patientQ, declinedNewPatientForName])
 
+  useEffect(() => {
+    if (!bookingOpen) {
+      setNewPatientGenderPending('')
+      setNewPatientPhoneForCreate('')
+    }
+  }, [bookingOpen])
+
   /** تحديث الذمة/الرصيد من ملف المريض عند الاختيار */
   useEffect(() => {
     const id = picked?.id
@@ -558,7 +566,7 @@ export function ReceptionAppointmentPage() {
   )
 
   const selectedGenderForLaserPricing: '' | 'male' | 'female' =
-    picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderIntent
+    picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderPending
 
   const selectedLaserTotalSyp = useMemo(
     () =>
@@ -610,20 +618,34 @@ export function ReceptionAppointmentPage() {
     setSelectedLaserItemIds((prev) => prev.filter((id) => laserItemById.has(id)))
   }, [laserItemById])
 
-  async function createNewPatientAndSelect(gender: 'male' | 'female') {
+  function selectGenderForNewPatient(gender: 'male' | 'female') {
+    setFormErr('')
+    setNewPatientGenderPending(gender)
+  }
+
+  async function createNewPatientFromSearch() {
+    const gender = newPatientGenderPending
+    if (gender !== 'male' && gender !== 'female') return
     const name = patientQ.trim()
     if (name.length < 2) return
+    const phoneRaw = newPatientPhoneForCreate.trim()
+    const digits = phoneRaw.replace(/\D/g, '')
+    if (digits.length < 7) {
+      setFormErr('أدخل رقم موبايل صالحاً (7 أرقام على الأقل) لإكمال إنشاء الملف.')
+      return
+    }
     setFormErr('')
-    setNewPatientGenderIntent(gender)
     setCreatingPatient(true)
     try {
       const data = await api<{ patient: Patient }>('/api/patients', {
         method: 'POST',
-        body: JSON.stringify({ name, gender }),
+        body: JSON.stringify({ name, gender, phone: phoneRaw }),
       })
       setPicked(data.patient)
       setPatientHits([])
       setDeclinedNewPatientForName(null)
+      setNewPatientGenderPending('')
+      setNewPatientPhoneForCreate('')
       setSuccessMsg(
         `تم إنشاء ملف المريض «${data.patient.name}». أكمل أدناه حجز الموعد، ويمكنك لاحقاً إكمال بياناته من صفحة المرضى.`,
       )
@@ -894,6 +916,8 @@ export function ReceptionAppointmentPage() {
                                     setFormErr('')
                                     setSuccessMsg('')
                                     setDeclinedNewPatientForName(null)
+                                    setNewPatientGenderPending('')
+                                    setNewPatientPhoneForCreate('')
                                     setBookingOpen(true)
                                   }}
                                 >
@@ -959,6 +983,8 @@ export function ReceptionAppointmentPage() {
                             setFormErr('')
                             setSuccessMsg('')
                             setDeclinedNewPatientForName(null)
+                            setNewPatientGenderPending('')
+                            setNewPatientPhoneForCreate('')
                             setBookingOpen(true)
                           }}
                         >
@@ -1033,13 +1059,23 @@ export function ReceptionAppointmentPage() {
                 onChange={(e) => {
                   setPatientQ(e.target.value)
                   if (picked) setPicked(null)
-                  if (declinedNewPatientForName) setNewPatientGenderIntent('')
+                  setNewPatientGenderPending('')
+                  setNewPatientPhoneForCreate('')
                 }}
               />
               {picked ? (
                 <p style={{ marginTop: '0.65rem', marginBottom: 0 }}>
                   المختار: <strong>{picked.name}</strong>{' '}
-                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem' }}
+                    onClick={() => {
+                      setPicked(null)
+                      setNewPatientGenderPending('')
+                      setNewPatientPhoneForCreate('')
+                    }}
+                  >
                     إلغاء الاختيار
                   </button>
                 </p>
@@ -1059,9 +1095,10 @@ export function ReceptionAppointmentPage() {
                           setPicked(p)
                           setPatientQ(p.name)
                           setPatientHits([])
-                          setNewPatientGenderIntent(
+                          setNewPatientGenderPending(
                             p.gender === 'male' || p.gender === 'female' ? p.gender : '',
                           )
+                          setNewPatientPhoneForCreate('')
                         }}
                       >
                         {p.name}
@@ -1090,17 +1127,17 @@ export function ReceptionAppointmentPage() {
                       type="button"
                       className="btn btn-primary"
                       disabled={creatingPatient || assignBlocked}
-                      onClick={() => void createNewPatientAndSelect('male')}
+                      onClick={() => selectGenderForNewPatient('male')}
                     >
-                      {creatingPatient ? 'جاري الإنشاء…' : 'نعم، المريض ذكر'}
+                      نعم، المريض ذكر
                     </button>
                     <button
                       type="button"
                       className="btn btn-primary"
                       disabled={creatingPatient || assignBlocked}
-                      onClick={() => void createNewPatientAndSelect('female')}
+                      onClick={() => selectGenderForNewPatient('female')}
                     >
-                      {creatingPatient ? 'جاري الإنشاء…' : 'نعم، المريضة أنثى'}
+                      نعم، المريضة أنثى
                     </button>
                     <button
                       type="button"
@@ -1108,16 +1145,50 @@ export function ReceptionAppointmentPage() {
                       disabled={creatingPatient}
                       onClick={() => {
                         setDeclinedNewPatientForName(patientQ.trim())
-                        setNewPatientGenderIntent('')
+                        setNewPatientGenderPending('')
+                        setNewPatientPhoneForCreate('')
                       }}
                     >
                       لا
                     </button>
                   </div>
-                  {newPatientGenderIntent ? (
-                    <p style={{ margin: '0.6rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-                      تم اختيار الجنس مؤقتاً للتسعير: <strong>{newPatientGenderIntent === 'male' ? 'ذكر' : 'أنثى'}</strong>
-                    </p>
+                  {newPatientGenderPending ? (
+                    <div style={{ marginTop: '0.85rem' }}>
+                      <p style={{ margin: '0 0 0.45rem', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                        تم اختيار الجنس مؤقتاً للتسعير:{' '}
+                        <strong>{newPatientGenderPending === 'male' ? 'ذكر' : 'أنثى'}</strong> — أدخل رقم الموبايل لإكمال
+                        إنشاء الملف والحجز.
+                      </p>
+                      <label className="form-label" htmlFor="reception-new-patient-phone" style={{ marginBottom: '0.25rem' }}>
+                        رقم الموبايل
+                      </label>
+                      <input
+                        id="reception-new-patient-phone"
+                        className="input"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        placeholder="مثال: 09xxxxxxxx"
+                        value={newPatientPhoneForCreate}
+                        onChange={(e) => setNewPatientPhoneForCreate(e.target.value)}
+                        disabled={creatingPatient || assignBlocked}
+                        style={{ maxWidth: 280, marginBottom: '0.55rem' }}
+                      />
+                      <div>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={
+                            creatingPatient ||
+                            assignBlocked ||
+                            newPatientPhoneForCreate.trim().replace(/\D/g, '').length < 7
+                          }
+                          onClick={() => void createNewPatientFromSearch()}
+                        >
+                          {creatingPatient ? 'جاري إنشاء الملف…' : 'إنشاء الملف ومتابعة الحجز'}
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
                 </div>
               ) : null}

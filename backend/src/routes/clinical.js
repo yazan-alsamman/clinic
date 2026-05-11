@@ -26,11 +26,10 @@ const CLINICAL_ROLES = [
   'dermatology_assistant_manager',
   'dental_branch',
   'solarium',
-  'skin_specialist',
 ]
 const RECEPTION_CREATE_ROLES = ['super_admin', 'reception']
 /** تعديل جلسة (وصف / مواد): استقبال أو المقدّم أو المدير */
-const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium', 'skin_specialist']
+const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
 /** عرض جلسات المريض */
 const PATIENT_SESSION_VIEW_ROLES = [...CLINICAL_ROLES, 'reception']
 
@@ -57,16 +56,19 @@ function userRoleForSessionDepartment(dept) {
     dermatology: 'dermatology',
     dental: 'dental_branch',
     solarium: 'solarium',
-    skin: 'skin_specialist',
   }
   return m[dept] || null
 }
 
 async function assertActiveProviderForDepartment(providerUserId, department) {
-  const needRole = userRoleForSessionDepartment(department)
-  if (!needRole) throw new Error('قسم غير صالح')
   const u = await User.findById(providerUserId).lean()
   if (!u || !u.active) throw new Error('المقدّم غير موجود أو غير نشط')
+  if (department === 'skin') {
+    if (u.role === 'reception' || u.role === 'super_admin') return
+    throw new Error('جلسة بشرة: يجب أن يكون المقدّم من الاستقبال أو مدير النظام')
+  }
+  const needRole = userRoleForSessionDepartment(department)
+  if (!needRole) throw new Error('قسم غير صالح')
   if (u.role !== needRole) throw new Error('المستخدم المختار لا يطابق دور القسم المطلوب')
 }
 
@@ -87,7 +89,6 @@ function departmentFromRequest(req) {
   }
   if (role === 'dental_branch') return 'dental'
   if (role === 'solarium') return 'solarium'
-  if (role === 'skin_specialist') return 'skin'
   return null
 }
 
@@ -205,6 +206,16 @@ clinicalRouter.get('/provider-options', requireRoles(...RECEPTION_CREATE_ROLES),
     const department = String(req.query.department || '').trim()
     if (!SESSION_DEPARTMENTS.includes(department)) {
       res.status(400).json({ error: 'قسم غير صالح' })
+      return
+    }
+    if (department === 'skin') {
+      const users = await User.find({ role: { $in: ['reception', 'super_admin'] }, active: true })
+        .select('name')
+        .sort({ name: 1 })
+        .lean()
+      res.json({
+        providers: users.map((u) => ({ id: String(u._id), name: u.name || '—' })),
+      })
       return
     }
     const role = userRoleForSessionDepartment(department)

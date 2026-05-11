@@ -7,7 +7,6 @@ npm install
 pm2 restart clinic-api
 
 
-
 cd /var/www/clinic/frontend
 npm install
 npm run build

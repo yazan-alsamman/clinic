@@ -126,7 +126,8 @@ export function ReceptionWalkInSessionPage() {
   const [patientSearchLoading, setPatientSearchLoading] = useState(false)
   const [picked, setPicked] = useState<Patient | null>(null)
   const [declinedNewPatientForName, setDeclinedNewPatientForName] = useState<string | null>(null)
-  const [newPatientGenderIntent, setNewPatientGenderIntent] = useState<'' | 'male' | 'female'>('')
+  const [newPatientGenderPending, setNewPatientGenderPending] = useState<'' | 'male' | 'female'>('')
+  const [newPatientPhoneForCreate, setNewPatientPhoneForCreate] = useState('')
   const [creatingPatient, setCreatingPatient] = useState(false)
 
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
@@ -337,22 +338,36 @@ export function ReceptionWalkInSessionPage() {
   )
 
   const selectedGenderForLaser: '' | 'male' | 'female' =
-    picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderIntent
+    picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderPending
 
-  async function createNewPatientAndSelect(gender: 'male' | 'female') {
+  function selectGenderForNewPatient(gender: 'male' | 'female') {
+    setFormErr('')
+    setNewPatientGenderPending(gender)
+  }
+
+  async function createNewPatientFromSearch() {
+    const gender = newPatientGenderPending
+    if (gender !== 'male' && gender !== 'female') return
     const name = patientQ.trim()
     if (name.length < 2) return
+    const phoneRaw = newPatientPhoneForCreate.trim()
+    const digits = phoneRaw.replace(/\D/g, '')
+    if (digits.length < 7) {
+      setFormErr('أدخل رقم موبايل صالحاً (7 أرقام على الأقل) لإكمال إنشاء الملف.')
+      return
+    }
     setFormErr('')
-    setNewPatientGenderIntent(gender)
     setCreatingPatient(true)
     try {
       const data = await api<{ patient: Patient }>('/api/patients', {
         method: 'POST',
-        body: JSON.stringify({ name, gender }),
+        body: JSON.stringify({ name, gender, phone: phoneRaw }),
       })
       setPicked(data.patient)
       setPatientHits([])
       setDeclinedNewPatientForName(null)
+      setNewPatientGenderPending('')
+      setNewPatientPhoneForCreate('')
       setSuccessMsg(`تم إنشاء ملف «${data.patient.name}». أكمل نوع الجلسة ثم التأكيد.`)
     } catch (e) {
       if (e instanceof ApiError && e.status === 423) {
@@ -521,7 +536,7 @@ export function ReceptionWalkInSessionPage() {
       for (let m = DAY_START_MIN; m + WALK_IN_DURATION_MIN <= DAY_END_MIN; m += 15) {
         const time = toHm(m)
         const endTime = toHm(m + WALK_IN_DURATION_MIN)
-        const channel = 'أخصائي بشرة'
+        const channel = 'قسم البشرة'
         if (intervalOverlapsBookedSlots(slots, channel, m, m + WALK_IN_DURATION_MIN)) continue
         try {
           const data = await api<{ slot?: { id: string } }>('/api/schedule/assign', {
@@ -541,7 +556,7 @@ export function ReceptionWalkInSessionPage() {
           await api(`/api/schedule/arrive/${encodeURIComponent(slotId)}`, { method: 'POST' })
           await loadSlots()
           navigate(`/patients/${picked.id}?tab=solarium&dermProc=${encodeURIComponent(proc)}`)
-          setSuccessMsg('تم تسجيل الوصول — يمكن لمختصة البشرة متابعة الجلسة من «إنشاء جلسة».')
+          setSuccessMsg('تم تسجيل الوصول — بند التحصيل يُنشأ تلقائياً حسب نوع الإجراء.')
           return
         } catch (e) {
           lastErr = e instanceof ApiError ? e.message : 'فشل الحجز'
@@ -686,14 +701,27 @@ export function ReceptionWalkInSessionPage() {
           id="wi-patient-q"
           className="input"
           value={patientQ}
-          onChange={(e) => setPatientQ(e.target.value)}
+          onChange={(e) => {
+            setPatientQ(e.target.value)
+            setNewPatientGenderPending('')
+            setNewPatientPhoneForCreate('')
+          }}
           placeholder="اكتب جزءاً من الاسم…"
           autoComplete="off"
         />
         {picked ? (
           <p style={{ marginTop: '0.65rem' }}>
             المختار: <strong>{picked.name}</strong>{' '}
-            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setPicked(null)}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem' }}
+              onClick={() => {
+                setPicked(null)
+                setNewPatientGenderPending('')
+                setNewPatientPhoneForCreate('')
+              }}
+            >
               إلغاء
             </button>
           </p>
@@ -711,7 +739,8 @@ export function ReceptionWalkInSessionPage() {
                     setPicked(p)
                     setPatientQ(p.name)
                     setPatientHits([])
-                    setNewPatientGenderIntent(p.gender === 'male' || p.gender === 'female' ? p.gender : '')
+                    setNewPatientGenderPending(p.gender === 'male' || p.gender === 'female' ? p.gender : '')
+                    setNewPatientPhoneForCreate('')
                   }}
                 >
                   {p.name}
@@ -735,27 +764,65 @@ export function ReceptionWalkInSessionPage() {
                 type="button"
                 className="btn btn-primary"
                 disabled={creatingPatient || assignBlocked}
-                onClick={() => void createNewPatientAndSelect('male')}
+                onClick={() => selectGenderForNewPatient('male')}
               >
-                {creatingPatient ? '…' : 'ذكر'}
+                ذكر
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
                 disabled={creatingPatient || assignBlocked}
-                onClick={() => void createNewPatientAndSelect('female')}
+                onClick={() => selectGenderForNewPatient('female')}
               >
-                {creatingPatient ? '…' : 'أنثى'}
+                أنثى
               </button>
               <button
                 type="button"
                 className="btn btn-secondary"
                 disabled={creatingPatient}
-                onClick={() => setDeclinedNewPatientForName(patientQ.trim())}
+                onClick={() => {
+                  setDeclinedNewPatientForName(patientQ.trim())
+                  setNewPatientGenderPending('')
+                  setNewPatientPhoneForCreate('')
+                }}
               >
                 لا
               </button>
             </div>
+            {newPatientGenderPending ? (
+              <div style={{ marginTop: '0.85rem' }}>
+                <p style={{ margin: '0 0 0.45rem', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                  أدخل رقم الموبايل ثم أنشئ الملف للمتابعة.
+                </p>
+                <label className="form-label" htmlFor="wi-new-patient-phone" style={{ marginBottom: '0.25rem' }}>
+                  رقم الموبايل
+                </label>
+                <input
+                  id="wi-new-patient-phone"
+                  className="input"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="مثال: 09xxxxxxxx"
+                  value={newPatientPhoneForCreate}
+                  onChange={(e) => setNewPatientPhoneForCreate(e.target.value)}
+                  disabled={creatingPatient || assignBlocked}
+                  style={{ maxWidth: 280, marginBottom: '0.55rem' }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={
+                    creatingPatient ||
+                    assignBlocked ||
+                    newPatientPhoneForCreate.trim().replace(/\D/g, '').length < 7
+                  }
+                  onClick={() => void createNewPatientFromSearch()}
+                >
+                  {creatingPatient ? 'جاري الإنشاء…' : 'إنشاء الملف'}
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {debtCredit && (debtCredit.debt > 0 || debtCredit.credit > 0) ? (

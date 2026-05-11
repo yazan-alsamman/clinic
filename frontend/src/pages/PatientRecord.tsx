@@ -215,6 +215,7 @@ function clinicalDeptLabelAr(d: string) {
     dermatology: 'جلدية',
     dental: 'أسنان',
     solarium: 'سولاريوم',
+    skin: 'بشرة',
   }
   return m[d] || d
 }
@@ -222,6 +223,7 @@ function clinicalDeptLabelAr(d: string) {
 function inventoryDepartmentsQueryForClinicalDept(dept: string) {
   if (dept === 'laser') return 'laser'
   if (dept === 'dental') return 'dental'
+  if (dept === 'skin') return 'skin'
   if (dept === 'dermatology') return 'dermatology,skin,solarium'
   if (dept === 'solarium') return 'solarium,skin'
   return 'dermatology,skin,solarium'
@@ -742,7 +744,7 @@ export function PatientRecord() {
       setDermSessions(rows.filter((s) => s.department === 'dermatology'))
       setLaserClinSessions(rows.filter((s) => s.department === 'laser'))
       setDentalClinSessions(rows.filter((s) => s.department === 'dental'))
-      setSolSessions(rows.filter((s) => s.department === 'solarium'))
+      setSolSessions(rows.filter((s) => s.department === 'solarium' || s.department === 'skin'))
     } catch {
       /* lists unchanged */
     }
@@ -4105,18 +4107,20 @@ export function PatientRecord() {
       {tab === 'solarium' &&
         (canAccessTab(role, 'solarium') ? (
           <div className="card">
-            <h2 className="card-title">جلسات السولاريوم</h2>
+            <h2 className="card-title">السولاريوم والبشرة</h2>
             <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              تُنشأ بنود التحصيل عادة من الاستقبال. أكمل هنا الوصف الطبي والمواد المستخدمة من المستودع.
+              السولاريوم: تُنشأ بنود التحصيل من الاستقبال. البشرة: يُنشأ بند التحصيل تلقائياً عند حجز الموعد حسب
+              نوع الإجراء — يمكن تكميل الوصف والمواد من المستودع دون تغيير المبلغ.
             </p>
             {solSessions.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات سولاريوم لهذا المريض.</p>
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات سولاريوم أو بشرة مسجّلة.</p>
             ) : (
               <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>التاريخ</th>
+                      <th>القسم</th>
                       <th>الوصف</th>
                       <th>المقدّم</th>
                       <th>المستحق</th>
@@ -4128,6 +4132,7 @@ export function PatientRecord() {
                     {solSessions.map((s) => (
                       <tr key={s.id}>
                         <td>{s.businessDate}</td>
+                        <td>{clinicalDeptLabelAr(s.department)}</td>
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
                         <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>

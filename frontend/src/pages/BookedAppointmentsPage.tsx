@@ -62,8 +62,7 @@ const canOpenPage = (role: string | undefined) =>
   role === 'dermatology' ||
   role === 'dermatology_manager' ||
   role === 'dermatology_assistant_manager' ||
-  role === 'dental_branch' ||
-  role === 'skin_specialist'
+  role === 'dental_branch'
 
 function fullScheduleRoles(role: string | undefined) {
   return role === 'super_admin' || role === 'reception' || role === 'dermatology_manager'

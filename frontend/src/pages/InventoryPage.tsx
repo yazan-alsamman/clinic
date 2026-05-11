@@ -39,10 +39,10 @@ export function InventoryPage() {
   const isDermWarehouseManager = user?.role === 'dermatology_manager'
   const isDermWarehouseAssistant = user?.role === 'dermatology_assistant_manager'
   const isDermWarehouseStaff = isDermWarehouseManager || isDermWarehouseAssistant
-  const isSkinWarehouseSpecialist = user?.role === 'skin_specialist'
-  const canRead = user?.role === 'super_admin' || isDermWarehouseStaff || isSkinWarehouseSpecialist
-  const canCreate = user?.role === 'super_admin' || isDermWarehouseStaff || isSkinWarehouseSpecialist
-  const canEdit = user?.role === 'super_admin' || isDermWarehouseStaff || isSkinWarehouseSpecialist
+  const isReceptionSkinWarehouse = user?.role === 'reception'
+  const canRead = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
+  const canCreate = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
+  const canEdit = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
 
   const [rows, setRows] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
@@ -70,14 +70,18 @@ export function InventoryPage() {
     }
     try {
       setLoading(true)
-      const data = await api<{ items: Item[] }>('/api/inventory/items')
+      const invUrl =
+        user?.role === 'reception'
+          ? '/api/inventory/items?departments=skin'
+          : '/api/inventory/items'
+      const data = await api<{ items: Item[] }>(invUrl)
       setRows(data.items)
     } catch {
       setRows([])
     } finally {
       setLoading(false)
     }
-  }, [canRead])
+  }, [canRead, user?.role])
 
   useEffect(() => {
     void load()
@@ -120,6 +124,8 @@ export function InventoryPage() {
   const showDermDualPricingEdit = isAdmin && editForm.department === 'dermatology_private'
   const showDermManagerFullEdit =
     !isAdmin && isDermWarehouseManager && editItem?.department === 'dermatology_private'
+  const showReceptionSkinFullEdit =
+    !isAdmin && isReceptionSkinWarehouse && editItem?.department === 'skin'
 
   return (
     <>
@@ -170,7 +176,7 @@ export function InventoryPage() {
               <th>الكمية</th>
               <th>حد الأمان</th>
               <th>الحالة</th>
-              {isDermWarehouseStaff || isAdmin || isSkinWarehouseSpecialist ? <th>السعر</th> : null}
+              {isDermWarehouseStaff || isAdmin || isReceptionSkinWarehouse ? <th>السعر</th> : null}
               {canEdit ? <th>إجراءات</th> : null}
             </tr>
           </thead>
@@ -178,7 +184,7 @@ export function InventoryPage() {
             {loading ? (
               <tr>
                 <td
-                  colSpan={(canEdit ? 1 : 0) + (isDermWarehouseStaff || isAdmin || isSkinWarehouseSpecialist ? 1 : 0) + 6}
+                  colSpan={(canEdit ? 1 : 0) + (isDermWarehouseStaff || isAdmin || isReceptionSkinWarehouse ? 1 : 0) + 6}
                 >
                   جاري التحميل…
                 </td>
@@ -187,7 +193,7 @@ export function InventoryPage() {
               <tr>
                 <td
                   colSpan={
-                    (canEdit ? 1 : 0) + (isDermWarehouseStaff || isAdmin || isSkinWarehouseSpecialist ? 1 : 0) + 6
+                    (canEdit ? 1 : 0) + (isDermWarehouseStaff || isAdmin || isReceptionSkinWarehouse ? 1 : 0) + 6
                   }
                   style={{ color: 'var(--text-muted)' }}
                 >
@@ -229,7 +235,7 @@ export function InventoryPage() {
                       </span>
                     )}
                   </td>
-                  {isDermWarehouseStaff || isAdmin || isSkinWarehouseSpecialist ? (
+                  {isDermWarehouseStaff || isAdmin || isReceptionSkinWarehouse ? (
                     <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)', direction: 'ltr' }}>
                       {r.department === 'dermatology_private' ? (
                         <>
@@ -344,7 +350,7 @@ export function InventoryPage() {
                   />
                 </div>
               </div>
-              {isSkinWarehouseSpecialist ? (
+              {isReceptionSkinWarehouse ? (
                 <div>
                   <label className="form-label" htmlFor="inv-cost">
                     تكلفة الوحدة (ل.س) (اختياري)
@@ -444,7 +450,7 @@ export function InventoryPage() {
                     if (showDermDualPricingCreate) {
                       createPayload.unitCost = Number(createForm.unitCost) || 0
                       createPayload.unitCostUsd = Number(createForm.unitCostUsd) || 0
-                    } else if (isSkinWarehouseSpecialist || isAdmin) {
+                    } else if (isReceptionSkinWarehouse || isAdmin) {
                       createPayload.unitCost = Number(createForm.unitCost) || undefined
                     }
                     await api('/api/inventory/items', {
@@ -538,7 +544,7 @@ export function InventoryPage() {
                     <span style={{ fontSize: '0.9rem' }}>المادة فعّالة للاستخدام السريري</span>
                   </label>
                 </>
-              ) : showDermManagerFullEdit ? (
+              ) : showDermManagerFullEdit || showReceptionSkinFullEdit ? (
                 <>
                   <div>
                     <label className="form-label" htmlFor="ed-sku-dm">
@@ -574,7 +580,9 @@ export function InventoryPage() {
                       onChange={(e) => setEditForm((f) => ({ ...f, unit: e.target.value }))}
                     />
                   </div>
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>القسم: مستودع جلدية</p>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    القسم: {showDermManagerFullEdit ? 'مستودع جلدية' : 'بشرة'}
+                  </p>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
@@ -586,7 +594,8 @@ export function InventoryPage() {
                 </>
               ) : (
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                  يمكنك تعديل الكمية وحد الأمان فقط. التعديل الكامل للمادة والسعر من مدير قسم الجلدية.
+                  يمكنك تعديل الكمية وحد الأمان فقط. التعديل الكامل من مدير قسم الجلدية أو الاستقبال (مستودع
+                  البشرة).
                 </p>
               )}
               <div className="grid-2" style={{ gap: '0.65rem' }}>
@@ -694,6 +703,19 @@ export function InventoryPage() {
                     </div>
                   </div>
                 </>
+              ) : showReceptionSkinFullEdit ? (
+                <div>
+                  <label className="form-label" htmlFor="ed-cost-skin">
+                    تكلفة الوحدة (ل.س)
+                  </label>
+                  <input
+                    id="ed-cost-skin"
+                    className="input"
+                    inputMode="decimal"
+                    value={editForm.unitCost}
+                    onChange={(e) => setEditForm((f) => ({ ...f, unitCost: e.target.value }))}
+                  />
+                </div>
               ) : null}
               {formErr ? (
                 <p style={{ margin: 0, color: 'var(--danger)', fontSize: '0.85rem' }}>{formErr}</p>
@@ -715,7 +737,7 @@ export function InventoryPage() {
                 onClick={async () => {
                   if (!editItem) return
                   setFormErr('')
-                  if (isAdmin || showDermManagerFullEdit) {
+                  if (isAdmin || showDermManagerFullEdit || showReceptionSkinFullEdit) {
                     if (!editForm.sku.trim() || !editForm.name.trim()) {
                       setFormErr('SKU والاسم مطلوبان')
                       return
@@ -746,6 +768,14 @@ export function InventoryPage() {
                       body.department = 'dermatology_private'
                       body.unitCost = Number(editForm.unitCost) || 0
                       body.unitCostUsd = Number(editForm.unitCostUsd) || 0
+                      body.active = editForm.active
+                    } else if (showReceptionSkinFullEdit) {
+                      body.sku = editForm.sku.trim()
+                      body.name = editForm.name.trim()
+                      body.unit = editForm.unit.trim()
+                      body.department = 'skin'
+                      body.unitCost = Number(editForm.unitCost) || 0
+                      body.unitCostUsd = 0
                       body.active = editForm.active
                     }
                     await api(`/api/inventory/items/${editItem.id}`, {

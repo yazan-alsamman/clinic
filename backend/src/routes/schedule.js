@@ -2,6 +2,9 @@ import { Router } from 'express'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
+import { SkinProcedureOption } from '../models/SkinProcedureOption.js'
+import { ClinicalSession } from '../models/ClinicalSession.js'
+import { BillingItem } from '../models/BillingItem.js'
 import { Room } from '../models/Room.js'
 import { DermatologyBoard } from '../models/DermatologyBoard.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
@@ -20,7 +23,7 @@ export const scheduleRouter = Router()
 
 scheduleRouter.use(authMiddleware)
 
-const providerRoles = ['laser', 'dermatology', 'dental_branch', 'skin_specialist']
+const providerRoles = ['laser', 'dermatology', 'dental_branch']
 const SERVICE_TYPES = ['laser', 'dental', 'dermatology', 'solarium', 'skin', 'other']
 const DERMATOLOGY_PROVIDER_ROLES = ['dermatology', 'dermatology_manager', 'dermatology_assistant_manager']
 const DEFAULT_DERMATOLOGY_BOARDS = [
@@ -125,15 +128,86 @@ async function resolveProviderAssignment({ serviceType, providerName, roomNumber
     assignedSpecialistUserId = board.assignedUserId._id
     assignedSpecialistName = String(board.assignedUserId.name || '').trim()
   } else if (serviceType === 'skin') {
-    const specialist = await User.findOne({ role: 'skin_specialist', active: true }).select('_id name').lean()
-    if (!specialist?._id || !specialist?.name) {
-      return { error: 'لا يوجد أخصائية بشرة نشطة في النظام' }
-    }
-    effectiveProviderName = 'أخصائي بشرة'
-    assignedSpecialistUserId = specialist._id
-    assignedSpecialistName = String(specialist.name || '').trim()
+    effectiveProviderName = 'قسم البشرة'
+    assignedSpecialistUserId = null
+    assignedSpecialistName = ''
   }
   return { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName }
+}
+
+const PATIENT_DEPARTMENTS = ['laser', 'dermatology', 'dental', 'solarium', 'skin']
+
+async function deleteSkinBillingForScheduleSlotId(slotId) {
+  if (!slotId) return
+  const prev = await ClinicalSession.findOne({ scheduleSlotId: slotId })
+  if (!prev?._id) return
+  await BillingItem.deleteMany({ clinicalSessionId: prev._id })
+  await ClinicalSession.deleteOne({ _id: prev._id })
+}
+
+async function syncSkinAppointmentBillingForSlot(slot, reqUser) {
+  await deleteSkinBillingForScheduleSlotId(slot._id)
+  if (String(slot.serviceType) !== 'skin' || !slot.patientId) return { ok: true }
+  const proc = String(slot.procedureType || '').trim()
+  if (!proc) return { ok: true }
+  const opt = await SkinProcedureOption.findOne({ name: proc, active: { $ne: false } }).lean()
+  const amount = Math.round(Number(opt?.priceSyp) || 0)
+  if (!(amount > 0)) return { error: 'نوع إجراء البشرة غير معرّف أو بلا سعر' }
+  const patient = await Patient.findById(slot.patientId)
+  if (!patient) return { error: 'المريض غير موجود' }
+  let cs = null
+  try {
+    const bd = String(slot.businessDate || '').trim()
+    cs = await ClinicalSession.create({
+      patientId: patient._id,
+      providerUserId: reqUser._id,
+      department: 'skin',
+      procedureDescription: proc.slice(0, 500),
+      sessionFeeSyp: amount,
+      businessDate: bd,
+      notes: '',
+      materials: [],
+      materialCostSypTotal: 0,
+      materialChargeSypTotal: 0,
+      createdByReceptionUserId: reqUser._id,
+      scheduleSlotId: slot._id,
+    })
+    const bi = await BillingItem.create({
+      clinicalSessionId: cs._id,
+      patientId: patient._id,
+      providerUserId: reqUser._id,
+      department: 'skin',
+      procedureLabel: proc.slice(0, 200),
+      listAmountDueSyp: amount,
+      discountPercent: 0,
+      effectiveAmountDueSyp: amount,
+      amountDueSyp: amount,
+      currency: 'SYP',
+      businessDate: bd,
+      status: 'pending_payment',
+    })
+    cs.billingItemId = bi._id
+    await cs.save()
+    const prevDeps = Array.isArray(patient.departments) ? patient.departments : []
+    const cleaned = prevDeps.filter((d) => PATIENT_DEPARTMENTS.includes(d))
+    patient.departments = [...new Set([...cleaned, 'skin'])]
+    patient.lastVisit = new Date()
+    await patient.save()
+    await writeAudit({
+      user: reqUser,
+      action: 'موعد بشرة: جلسة وبند تحصيل حسب نوع الإجراء',
+      entityType: 'ClinicalSession',
+      entityId: cs._id,
+      details: { scheduleSlotId: String(slot._id), amountDueSyp: amount, procedureType: proc },
+    })
+  } catch (e) {
+    if (cs?._id) {
+      await BillingItem.deleteMany({ clinicalSessionId: cs._id })
+      await ClinicalSession.findByIdAndDelete(cs._id)
+    }
+    throw e
+  }
+  return { ok: true }
 }
 
 async function ensureDermatologyBoards() {
@@ -186,7 +260,6 @@ scheduleRouter.get(
     'dermatology_manager',
     'dermatology_assistant_manager',
     'dental_branch',
-    'skin_specialist',
   ),
   async (req, res) => {
     try {
@@ -391,7 +464,6 @@ scheduleRouter.get('/providers', async (_req, res) => {
           'dermatology_assistant_manager',
           'dental_branch',
           'solarium',
-          'skin_specialist',
         ],
       },
       active: true,
@@ -489,8 +561,6 @@ scheduleRouter.get('/', async (req, res) => {
     }
     if (req.user.role === 'dermatology_manager') {
       query.serviceType = 'dermatology'
-    } else if (req.user.role === 'skin_specialist') {
-      query.serviceType = 'skin'
     }
     const slots = await ScheduleSlot.find(query)
       .sort({ time: 1, providerName: 1 })
@@ -546,6 +616,20 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
     if (resolved.error) {
       res.status(400).json({ error: resolved.error })
       return
+    }
+    if (serviceType === 'skin') {
+      const opt = await SkinProcedureOption.findOne({
+        name: procedureType.trim(),
+        active: { $ne: false },
+      }).lean()
+      const amount = Math.round(Number(opt?.priceSyp) || 0)
+      if (!(amount > 0)) {
+        res.status(400).json({
+          error:
+            'نوع إجراء البشرة غير معرّف أو بلا سعر — اختر من القائمة أو أضِف السعر من إدارة إجراءات البشرة',
+        })
+        return
+      }
     }
     const { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName } = resolved
     const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName: effectiveProviderName }).lean()
@@ -609,6 +693,13 @@ scheduleRouter.post('/assign', loadBusinessDay, requireActiveDay, async (req, re
         patientId: String(patient._id),
       },
     })
+    if (serviceType === 'skin') {
+      const syncRes = await syncSkinAppointmentBillingForSlot(slot, req.user)
+      if (syncRes.error) {
+        res.status(500).json({ error: syncRes.error })
+        return
+      }
+    }
     res.json({ slot: slotToDto(slot) })
   } catch (e) {
     if (e.code === 11000) {
@@ -696,6 +787,20 @@ scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async
       res.status(400).json({ error: resolved.error })
       return
     }
+    if (serviceType === 'skin') {
+      const opt = await SkinProcedureOption.findOne({
+        name: procedureType.trim(),
+        active: { $ne: false },
+      }).lean()
+      const amount = Math.round(Number(opt?.priceSyp) || 0)
+      if (!(amount > 0)) {
+        res.status(400).json({
+          error:
+            'نوع إجراء البشرة غير معرّف أو بلا سعر — اختر من القائمة أو أضِف السعر من إدارة إجراءات البشرة',
+        })
+        return
+      }
+    }
     const { effectiveProviderName, roomNumber, assignedSpecialistUserId, assignedSpecialistName } = resolved
     const overlapCheck = await assertNoOverlapForProvider({
       businessDate,
@@ -725,6 +830,15 @@ scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async
       entityId: slot._id,
       details: { businessDate, time, endTime, providerName: effectiveProviderName, procedureType },
     })
+    if (serviceType === 'skin') {
+      const syncRes = await syncSkinAppointmentBillingForSlot(slot, req.user)
+      if (syncRes.error) {
+        res.status(400).json({ error: syncRes.error })
+        return
+      }
+    } else {
+      await deleteSkinBillingForScheduleSlotId(slot._id)
+    }
     res.json({ slot: slotToDto(slot) })
   } catch (e) {
     console.error(e)
@@ -781,6 +895,16 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
       entityId: slot._id,
       details: { providerName: effectiveProviderName, serviceType, roomNumber, assignedSpecialistName },
     })
+    const stAfter = normalizeServiceType(slot.serviceType)
+    if (stAfter === 'skin') {
+      const syncRes = await syncSkinAppointmentBillingForSlot(slot, req.user)
+      if (syncRes.error) {
+        res.status(400).json({ error: syncRes.error })
+        return
+      }
+    } else {
+      await deleteSkinBillingForScheduleSlotId(slot._id)
+    }
     res.json({ slot: slotToDto(slot) })
   } catch (e) {
     console.error(e)
@@ -806,6 +930,7 @@ scheduleRouter.delete('/cancel/:id', loadBusinessDay, requireActiveDay, async (r
         console.error('notifyAppointmentCancelled:', notifyErr)
       }
     }
+    await deleteSkinBillingForScheduleSlotId(slot._id)
     await ScheduleSlot.deleteOne({ _id: slot._id })
     await writeAudit({
       user: req.user,
@@ -841,6 +966,7 @@ scheduleRouter.post('/clear', loadBusinessDay, requireActiveDay, async (req, res
       res.status(404).json({ error: 'الموعد غير موجود' })
       return
     }
+    await deleteSkinBillingForScheduleSlotId(hit._id)
     const slot = await ScheduleSlot.findByIdAndDelete(hit._id)
     if (!slot) {
       res.status(404).json({ error: 'الموعد غير موجود' })

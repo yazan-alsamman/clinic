@@ -6,7 +6,6 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'patients', path: '/patients', label: 'المرضى' },
   { key: 'laser_create_session', path: '/laser/create-session', label: 'إنشاء جلسة' },
   { key: 'dermatology_create_session', path: '/dermatology/create-session', label: 'إنشاء جلسة' },
-  { key: 'skin_create_session', path: '/skin/create-session', label: 'إنشاء جلسة' },
   { key: 'dermatology_finance', path: '/dermatology/finance', label: 'مالية' },
   { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
   { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
@@ -31,7 +30,6 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
 const SUPER_ADMIN_HIDDEN_SESSION_KEYS = new Set<NavKey>([
   'laser_create_session',
   'dermatology_create_session',
-  'skin_create_session',
 ])
 
 const roleNav: Record<Role, NavKey[]> = {
@@ -76,7 +74,6 @@ const roleNav: Record<Role, NavKey[]> = {
   ],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
   solarium: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
-  skin_specialist: ['dashboard', 'appointments_booked', 'skin_create_session', 'inventory', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {
@@ -100,7 +97,6 @@ export function roleLabel(role: Role): string {
     dermatology_assistant_manager: 'مساعد رئيس قسم الجلدية',
     dental_branch: 'أسنان — فرع',
     solarium: 'سولاريوم',
-    skin_specialist: 'أخصائي بشرة',
   }
   return map[role] ?? 'مستخدم'
 }
@@ -118,6 +114,5 @@ export function canAccessTab(
   }
   if (role === 'dental_branch') return tab === 'dental'
   if (role === 'solarium') return tab === 'solarium'
-  if (role === 'skin_specialist') return tab === 'solarium'
   return false
 }

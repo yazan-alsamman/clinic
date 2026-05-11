@@ -24,7 +24,6 @@ const CLINICAL_ROLES = [
   'dermatology_assistant_manager',
   'dental_branch',
   'solarium',
-  'skin_specialist',
 ]
 
 const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']
@@ -300,8 +299,7 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
       role === 'dermatology' ||
       role === 'dermatology_manager' ||
       role === 'dermatology_assistant_manager' ||
-      role === 'dental_branch' ||
-      role === 'skin_specialist'
+      role === 'dental_branch'
     const needDentalPlan = fullAccess || role === 'dental_branch'
 
     const bundle = await getClinicalBundleForPatientId(pid)

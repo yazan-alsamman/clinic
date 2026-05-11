@@ -42,6 +42,15 @@ const clinicalSessionSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    /** ربط بموعد بشرة — جلسة تحصيل واحدة لكل موعد */
+    scheduleSlotId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ScheduleSlot',
+      sparse: true,
+      unique: true,
+      index: true,
+      default: undefined,
+    },
     isPackageSession: { type: Boolean, default: false },
     patientPackageId: { type: String, default: '' },
     patientPackageSessionId: { type: String, default: '' },
