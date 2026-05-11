@@ -13,6 +13,7 @@ const emptyForm = {
   name: '',
   dob: '',
   phone: '',
+  gender: '' as '' | 'male' | 'female',
   marital: 'أعزب' as NewPatientMaritalChoice,
   occupation: '',
   medicalHistory: '',
