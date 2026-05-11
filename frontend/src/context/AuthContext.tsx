@@ -25,7 +25,7 @@ function normalizeRole(raw: unknown): Role {
   if (role === 'laser') return 'laser'
   if (role === 'dermatology') return 'dermatology'
   if (role === 'dental_branch') return 'dental_branch'
-  if (role === 'solarium') return 'solarium'
+  if (role === 'solarium') return 'reception'
   if (role === 'skin_specialist' || role === 'skin specialist') return 'reception'
   if (
     role === 'dermatology_manager' ||

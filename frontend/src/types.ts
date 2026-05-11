@@ -6,7 +6,6 @@ export type Role =
   | 'dermatology_manager'
   | 'dermatology_assistant_manager'
   | 'dental_branch'
-  | 'solarium'
 
 export type NavKey =
   | 'dashboard'
@@ -18,6 +17,7 @@ export type NavKey =
   | 'appointments_booked'
   | 'reception_appointment'
   | 'reception_walk_in_session'
+  | 'reception_solarium'
   | 'dental'
   | 'billing_queue'
   | 'reception_cash_movement'

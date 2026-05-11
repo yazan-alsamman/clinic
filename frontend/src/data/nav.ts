@@ -10,6 +10,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'appointments_booked', path: '/appointments', label: 'المواعيد المحجوزة' },
   { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
   { key: 'reception_walk_in_session', path: '/reception/walk-in-session', label: 'إنشاء جلسة بدون موعد' },
+  { key: 'reception_solarium', path: '/reception/solarium', label: 'سولاريوم' },
   { key: 'dental', path: '/dental', label: 'الأسنان' },
   { key: 'billing_queue', path: '/billing', label: 'التحصيل' },
   { key: 'reception_cash_movement', path: '/reception/cash-movement', label: 'حركة الصندوق' },
@@ -40,6 +41,7 @@ const roleNav: Record<Role, NavKey[]> = {
     'appointments_booked',
     'reception_appointment',
     'reception_walk_in_session',
+    'reception_solarium',
     'billing_queue',
     'reception_cash_movement',
     'reception_daily_inventory',
@@ -73,7 +75,6 @@ const roleNav: Record<Role, NavKey[]> = {
     'account_password',
   ],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
-  solarium: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {
@@ -96,15 +97,11 @@ export function roleLabel(role: Role): string {
     dermatology_manager: 'مدير قسم الجلدية',
     dermatology_assistant_manager: 'مساعد رئيس قسم الجلدية',
     dental_branch: 'أسنان — فرع',
-    solarium: 'سولاريوم',
   }
   return map[role] ?? 'مستخدم'
 }
 
-export function canAccessTab(
-  role: Role,
-  tab: 'laser' | 'dermatology' | 'dental' | 'solarium',
-): boolean {
+export function canAccessTab(role: Role, tab: 'laser' | 'dermatology' | 'dental'): boolean {
   if (role === 'super_admin') return true
   /** الاستقبال: نظرة عامة + الحساب فقط — بدون تبويبات ليزر/جلدية/أسنان */
   if (role === 'reception') return false
@@ -113,6 +110,16 @@ export function canAccessTab(
     return tab === 'dermatology'
   }
   if (role === 'dental_branch') return tab === 'dental'
-  if (role === 'solarium') return tab === 'solarium'
   return false
+}
+
+/** تبويب البشرة في ملف المريض — استقبال + إدارة الجلدية + المدير */
+export function canAccessSkinCareTab(role: Role | undefined): boolean {
+  if (!role) return false
+  if (role === 'super_admin' || role === 'reception') return true
+  return (
+    role === 'dermatology' ||
+    role === 'dermatology_manager' ||
+    role === 'dermatology_assistant_manager'
+  )
 }

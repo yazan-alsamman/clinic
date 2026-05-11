@@ -17,7 +17,6 @@ const SERVICE_OPTIONS = [
   { value: 'dental', label: 'أسنان' },
   { value: 'dermatology', label: 'جلدية' },
   { value: 'skin', label: 'بشرة' },
-  { value: 'solarium', label: 'سولاريوم' },
 ] as const
 
 type ServiceValue = (typeof SERVICE_OPTIONS)[number]['value']
@@ -27,7 +26,6 @@ const SERVICE_CHANNELS: Record<ServiceValue, string[]> = {
   dental: ['أسنان'],
   dermatology: ['د.لورا', 'د.سامر', 'د.محمد'],
   skin: ['قسم البشرة'],
-  solarium: ['سولاريوم'],
 }
 
 const LASER_ROOM_TITLES: Record<string, string> = {

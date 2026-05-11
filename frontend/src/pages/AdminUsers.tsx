@@ -12,7 +12,6 @@ const ROLES: Role[] = [
   'dermatology_manager',
   'dermatology_assistant_manager',
   'dental_branch',
-  'solarium',
 ]
 
 type Row = {
@@ -71,8 +70,7 @@ export function AdminUsers() {
     r === 'dermatology' ||
     r === 'dermatology_manager' ||
     r === 'dermatology_assistant_manager' ||
-    r === 'dental_branch' ||
-    r === 'solarium'
+    r === 'dental_branch'
 
   function openEdit(u: Row) {
     setFormErr('')

@@ -6,7 +6,7 @@ type Item = {
   sku: string
   name: string
   active: boolean
-  department: 'laser' | 'dermatology' | 'dermatology_private' | 'dental' | 'skin' | 'solarium'
+  department: 'laser' | 'dermatology' | 'dermatology_private' | 'dental' | 'skin'
   unit: string
   quantity: number
   safetyStockLevel: number
@@ -31,7 +31,6 @@ const DEPARTMENT_OPTIONS: Array<{ value: Item['department']; label: string }> = 
   { value: 'dermatology_private', label: 'مستودع جلدية' },
   { value: 'dental', label: 'أسنان' },
   { value: 'skin', label: 'بشرة' },
-  { value: 'solarium', label: 'سولاريوم' },
 ]
 
 export function InventoryPage() {

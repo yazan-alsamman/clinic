@@ -24,7 +24,7 @@ const DERMATOLOGY_PROCEDURE_OPTIONS = [
 
 const DEFAULT_SKIN_NAMES = ['عادي', 'VIP', 'دلال', 'organic', 'كاربوكسي'] as const
 
-type WalkKind = 'laser' | 'dermatology' | 'skin' | 'dental' | 'solarium'
+type WalkKind = 'laser' | 'dermatology' | 'skin' | 'dental'
 
 type SlotRow = {
   id: string
@@ -145,11 +145,6 @@ export function ReceptionWalkInSessionPage() {
 
   const [dentalProcedure, setDentalProcedure] = useState('')
 
-  const [solariumMinutes, setSolariumMinutes] = useState<6 | 12>(6)
-  const [solariumProviders, setSolariumProviders] = useState<{ id: string; name: string }[]>([])
-  const [solariumProviderId, setSolariumProviderId] = useState('')
-  const [solariumAmountSyp, setSolariumAmountSyp] = useState('')
-
   const loadSlots = useCallback(async () => {
     if (!canUse) return
     setSlotsLoading(true)
@@ -255,34 +250,6 @@ export function ReceptionWalkInSessionPage() {
         if (!cancelled) {
           setSkinProcedureOptions([])
           setSkinProcedureName('')
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [canUse, kind])
-
-  useEffect(() => {
-    if (!canUse || kind !== 'solarium') return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const data = await api<{ providers: { id: string; name: string }[] }>(
-          '/api/clinical/provider-options?department=solarium',
-        )
-        const rows = data.providers || []
-        if (!cancelled) {
-          setSolariumProviders(rows)
-          setSolariumProviderId((prev) => {
-            if (prev && rows.some((r) => r.id === prev)) return prev
-            return rows[0]?.id || ''
-          })
-        }
-      } catch {
-        if (!cancelled) {
-          setSolariumProviders([])
-          setSolariumProviderId('')
         }
       }
     })()
@@ -555,7 +522,7 @@ export function ReceptionWalkInSessionPage() {
           if (!slotId) throw new Error('لم يُعاد معرف الموعد')
           await api(`/api/schedule/arrive/${encodeURIComponent(slotId)}`, { method: 'POST' })
           await loadSlots()
-          navigate(`/patients/${picked.id}?tab=solarium&dermProc=${encodeURIComponent(proc)}`)
+          navigate(`/patients/${picked.id}?tab=skin_care&dermProc=${encodeURIComponent(proc)}`)
           setSuccessMsg('تم تسجيل الوصول — بند التحصيل يُنشأ تلقائياً حسب نوع الإجراء.')
           return
         } catch (e) {
@@ -594,54 +561,6 @@ export function ReceptionWalkInSessionPage() {
     }
   }
 
-  async function submitSolarium() {
-    if (!picked || !solariumProviderId) {
-      setFormErr('اختر المريض ومقدّم السولاريوم')
-      return
-    }
-    const fee = Math.max(0, Math.round(Number(solariumAmountSyp.replace(/[^\d.]/g, '')) || 0))
-    if (!(fee > 0)) {
-      setFormErr('أدخل المبلغ المقبوض بالليرة (أكبر من صفر)')
-      return
-    }
-    setSaving(true)
-    setFormErr('')
-    try {
-      const procLabel = `سولاريوم — ${solariumMinutes} دقيقة`
-      const sessionRes = await api<{ billingItem?: { id: string } }>('/api/clinical/sessions/reception', {
-        method: 'POST',
-        body: JSON.stringify({
-          patientId: picked.id,
-          providerUserId: solariumProviderId,
-          department: 'solarium',
-          sessionFeeSyp: fee,
-          procedureDescription: procLabel,
-          businessDate,
-        }),
-      })
-      const billId = sessionRes.billingItem?.id
-      if (!billId) throw new Error('لم يُعاد معرف بند التحصيل')
-      await api(`/api/billing/${encodeURIComponent(billId)}/complete-payment`, {
-        method: 'POST',
-        body: JSON.stringify({
-          payCurrency: 'SYP',
-          paymentChannel: 'cash',
-          amountSyp: fee,
-          discountPercent: 0,
-        }),
-      })
-      setSuccessMsg(
-        `تم تسجيل جلسة السولاريوم (${procLabel}) وتحصيل ${fmtSypAmount(fee)} نقداً — يُرحّل المبلغ إلى الجرد المالي اليومي.`,
-      )
-      setSolariumAmountSyp('')
-      void loadSlots()
-    } catch (e) {
-      setFormErr(e instanceof ApiError ? e.message : 'تعذر إتمام التسجيل أو التحصيل')
-    } finally {
-      setSaving(false)
-    }
-  }
-
   if (!canUse) {
     return (
       <>
@@ -658,7 +577,7 @@ export function ReceptionWalkInSessionPage() {
       <h1 className="page-title">إنشاء جلسة بدون موعد</h1>
       <p className="page-desc">
         تسجيل مريض وصولاً مباشرةً دون حجز مسبق: يُنشأ موعد اليوم مع «وصل المريض» فيظهر عند الأخصائي في صفحة «إنشاء جلسة»
-        لاستكمال الجلسة؛ يصل المبلغ إلى التحصيل بعد إنهاء الجلسة (ما عدا السولاريوم حيث يُحصّل نقداً فوراً ويُرحّل للجرد).
+        لاستكمال الجلسة؛ يصل المبلغ إلى التحصيل بعد إنهاء الجلسة.
       </p>
 
       {assignBlocked ? (
@@ -686,7 +605,6 @@ export function ReceptionWalkInSessionPage() {
           <option value="dermatology">جلدية</option>
           <option value="skin">بشرة</option>
           <option value="dental">أسنان</option>
-          <option value="solarium">سولاريوم</option>
         </select>
       </div>
 
@@ -1003,67 +921,6 @@ export function ReceptionWalkInSessionPage() {
           >
             {saving ? 'جاري التسجيل…' : 'تسجيل الوصول وفتح ملف الأسنان'}
           </button>
-        </div>
-      ) : null}
-
-      {kind === 'solarium' ? (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h2 className="card-title" style={{ marginTop: 0 }}>
-            السولاريوم — تحصيل فوري
-          </h2>
-          <label className="form-label">مدة الجلسة</label>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <input type="radio" name="solmin" checked={solariumMinutes === 6} onChange={() => setSolariumMinutes(6)} />6 دقائق
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <input type="radio" name="solmin" checked={solariumMinutes === 12} onChange={() => setSolariumMinutes(12)} />12 دقيقة
-            </label>
-          </div>
-          <label className="form-label" style={{ marginTop: '0.85rem' }}>
-            المقدّم
-          </label>
-          <select
-            className="select"
-            style={{ width: '100%', maxWidth: 420 }}
-            value={solariumProviderId}
-            onChange={(e) => setSolariumProviderId(e.target.value)}
-          >
-            <option value="">— اختر —</option>
-            {solariumProviders.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <label className="form-label" style={{ marginTop: '0.85rem' }}>
-            المبلغ المقبوض (ل.س) — يُرحّل للجرد عبر التحصيل
-          </label>
-          <input
-            className="input"
-            dir="ltr"
-            style={{ maxWidth: 220 }}
-            inputMode="numeric"
-            value={solariumAmountSyp}
-            onChange={(e) => setSolariumAmountSyp(e.target.value)}
-            placeholder="مثال: 150000"
-          />
-          <button
-            type="button"
-            className="btn btn-primary"
-            style={{ marginTop: '1rem' }}
-            disabled={saving || assignBlocked || !picked}
-            onClick={() => void submitSolarium()}
-          >
-            {saving ? 'جاري الحفظ…' : 'تسجيل الجلسة والتحصيل النقدي'}
-          </button>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.65rem' }}>
-            بعد النجاح يمكن مراجعة البند من{' '}
-            <Link to="/billing" style={{ color: 'var(--cyan)' }}>
-              التحصيل
-            </Link>{' '}
-            أو الجرد المالي اليومي.
-          </p>
         </div>
       ) : null}
 

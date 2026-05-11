@@ -4,7 +4,7 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import type { Patient } from '../types'
 
-type Dept = 'laser' | 'dermatology' | 'dental' | 'solarium'
+type Dept = 'laser' | 'dermatology' | 'dental'
 
 type NewPatientMaritalChoice = 'متزوج' | 'أعزب'
 
@@ -287,9 +287,6 @@ export function PatientSearch() {
                       )}
                       {p.departments.includes('dental') && (
                         <span className="chip chip-dental">أسنان</span>
-                      )}
-                      {p.departments.includes('solarium') && (
-                        <span className="chip">سولاريوم</span>
                       )}
                     </div>
                   </div>
@@ -616,7 +613,6 @@ export function PatientSearch() {
                       { key: 'laser' as const, label: 'ليزر', cls: 'chip-laser' },
                       { key: 'dermatology' as const, label: 'جلدية', cls: 'chip-derm' },
                       { key: 'dental' as const, label: 'أسنان', cls: 'chip-dental' },
-                      { key: 'solarium' as const, label: 'سولاريوم', cls: 'chip' },
                     ] as const
                   ).map((d) => (
                     <button

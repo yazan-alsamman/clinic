@@ -32,6 +32,7 @@ const BillingPage               = lazyPage(() => import('./pages/BillingPage'), 
 const ReceptionCashMovementPage = lazyPage(() => import('./pages/ReceptionCashMovementPage'), 'ReceptionCashMovementPage')
 const ReceptionDailyInventoryPage = lazyPage(() => import('./pages/ReceptionDailyInventoryPage'), 'ReceptionDailyInventoryPage')
 const ReceptionWalkInSessionPage = lazyPage(() => import('./pages/ReceptionWalkInSessionPage'), 'ReceptionWalkInSessionPage')
+const ReceptionSolariumPage = lazyPage(() => import('./pages/ReceptionSolariumPage'), 'ReceptionSolariumPage')
 const AccountPassword           = lazyPage(() => import('./pages/AccountPassword'), 'AccountPassword')
 const LaserCreateSessionPage    = lazyPage(() => import('./pages/LaserCreateSessionPage'), 'LaserCreateSessionPage')
 const SkinCreateSessionPage = lazyPage(() => import('./pages/SkinCreateSessionPage'), 'SkinCreateSessionPage')
@@ -95,6 +96,7 @@ export default function App() {
                 <Route path="/dermatology/finance" element={<DermatologyFinancePage />} />
                 <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
                 <Route path="/reception/walk-in-session" element={<ReceptionWalkInSessionPage />} />
+                <Route path="/reception/solarium" element={<ReceptionSolariumPage />} />
                 <Route path="/dental" element={<DentalPage />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/reception/cash-movement" element={<ReceptionCashMovementPage />} />

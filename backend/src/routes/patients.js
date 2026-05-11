@@ -23,7 +23,6 @@ const CLINICAL_ROLES = [
   'dermatology_manager',
   'dermatology_assistant_manager',
   'dental_branch',
-  'solarium',
 ]
 
 const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
-import { canAccessTab } from '../data/nav'
+import { canAccessSkinCareTab, canAccessTab } from '../data/nav'
 import { api, ApiError } from '../api/client'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 import type { LaserCategory, Patient, Role } from '../types'
@@ -16,7 +16,7 @@ type Tab =
   | 'laser'
   | 'dermatology'
   | 'dental'
-  | 'solarium'
+  | 'skin_care'
 
 const laserTypes = ['Mix', 'Yag', 'Alex'] as const
 
@@ -591,17 +591,19 @@ export function PatientRecord() {
   const [loadErr, setLoadErr] = useState('')
   const [tab, setTab] = useState<Tab>('overview')
   useEffect(() => {
-    const requested = searchParams.get('tab')
+    let requested = searchParams.get('tab')
+    if (requested === 'solarium') requested = 'skin_care'
     if (!requested) return
     const allowed: Tab[] = [
       'overview',
       'account',
+      'packages',
       'financial',
       'sessions',
       'laser',
       'dermatology',
       'dental',
-      'solarium',
+      'skin_care',
     ]
     if (allowed.includes(requested as Tab)) {
       setTab(requested as Tab)
@@ -652,7 +654,7 @@ export function PatientRecord() {
   const [laserClinSessions, setLaserClinSessions] = useState<DermatologySessionRow[]>([])
   const [dentalClinSessions, setDentalClinSessions] = useState<DermatologySessionRow[]>([])
   const [solSessions, setSolSessions] = useState<DermatologySessionRow[]>([])
-  const [recvDept, setRecvDept] = useState<'laser' | 'dermatology' | 'dental' | 'solarium'>('dermatology')
+  const [recvDept, setRecvDept] = useState<'laser' | 'dermatology' | 'dental'>('dermatology')
   const [recvProviders, setRecvProviders] = useState<{ id: string; name: string }[]>([])
   const [recvProviderId, setRecvProviderId] = useState('')
   const [recvFeeSyp, setRecvFeeSyp] = useState('')
@@ -744,7 +746,7 @@ export function PatientRecord() {
       setDermSessions(rows.filter((s) => s.department === 'dermatology'))
       setLaserClinSessions(rows.filter((s) => s.department === 'laser'))
       setDentalClinSessions(rows.filter((s) => s.department === 'dental'))
-      setSolSessions(rows.filter((s) => s.department === 'solarium' || s.department === 'skin'))
+      setSolSessions(rows.filter((s) => s.department === 'skin'))
     } catch {
       /* lists unchanged */
     }
@@ -1249,7 +1251,7 @@ export function PatientRecord() {
       tab === 'dermatology' ||
       tab === 'laser' ||
       tab === 'dental' ||
-      tab === 'solarium'
+      tab === 'skin_care'
     if (needSessions) void refreshClinicalSessionLists()
   }, [tab, id, role, refreshClinicalSessionLists])
 
@@ -1399,7 +1401,7 @@ export function PatientRecord() {
       { key: 'laser', label: 'الليزر' },
       { key: 'dermatology', label: 'الجلدية' },
       { key: 'dental', label: 'الأسنان' },
-      { key: 'solarium', label: 'السولاريوم' },
+      { key: 'skin_care', label: 'البشرة' },
     ]
     if (!role) {
       return allTabs.filter((t) => t.key === 'overview')
@@ -1416,7 +1418,7 @@ export function PatientRecord() {
         (t.key === 'laser' && canAccessTab(role, 'laser')) ||
         (t.key === 'dermatology' && canAccessTab(role, 'dermatology')) ||
         (t.key === 'dental' && canAccessTab(role, 'dental')) ||
-        (t.key === 'solarium' && canAccessTab(role, 'solarium')),
+        (t.key === 'skin_care' && canAccessSkinCareTab(role)),
     )
   }, [role])
 
@@ -2915,13 +2917,12 @@ export function PatientRecord() {
                   className="input"
                   value={recvDept}
                   onChange={(e) =>
-                    setRecvDept(e.target.value as 'laser' | 'dermatology' | 'dental' | 'solarium')
+                    setRecvDept(e.target.value as 'laser' | 'dermatology' | 'dental')
                   }
                 >
                   <option value="laser">ليزر</option>
                   <option value="dermatology">جلدية</option>
                   <option value="dental">أسنان</option>
-                  <option value="solarium">سولاريوم</option>
                 </select>
               </div>
               <div>
@@ -4104,16 +4105,16 @@ export function PatientRecord() {
           </div>
         ))}
 
-      {tab === 'solarium' &&
-        (canAccessTab(role, 'solarium') ? (
+      {tab === 'skin_care' &&
+        (canAccessSkinCareTab(role) ? (
           <div className="card">
-            <h2 className="card-title">السولاريوم والبشرة</h2>
+            <h2 className="card-title">البشرة</h2>
             <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              السولاريوم: تُنشأ بنود التحصيل من الاستقبال. البشرة: يُنشأ بند التحصيل تلقائياً عند حجز الموعد حسب
-              نوع الإجراء — يمكن تكميل الوصف والمواد من المستودع دون تغيير المبلغ.
+              يُنشأ بند التحصيل تلقائياً عند حجز موعد البشرة حسب نوع الإجراء — يمكن تكميل الوصف والمواد من المستودع دون
+              تغيير المبلغ.
             </p>
             {solSessions.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات سولاريوم أو بشرة مسجّلة.</p>
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات بشرة مسجّلة.</p>
             ) : (
               <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
                 <table className="data-table">
@@ -4160,7 +4161,7 @@ export function PatientRecord() {
           </div>
         ) : (
           <div className="no-access">
-            <strong>لا تملك صلاحية قسم السولاريوم</strong>
+            <strong>لا تملك صلاحية عرض جلسات البشرة</strong>
           </div>
         ))}
 

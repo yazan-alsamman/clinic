@@ -25,11 +25,10 @@ const CLINICAL_ROLES = [
   'dermatology_manager',
   'dermatology_assistant_manager',
   'dental_branch',
-  'solarium',
 ]
 const RECEPTION_CREATE_ROLES = ['super_admin', 'reception']
 /** تعديل جلسة (وصف / مواد): استقبال أو المقدّم أو المدير */
-const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch', 'solarium']
+const SESSION_EDIT_ROLES = ['super_admin', 'reception', 'laser', 'dermatology', 'dental_branch']
 /** عرض جلسات المريض */
 const PATIENT_SESSION_VIEW_ROLES = [...CLINICAL_ROLES, 'reception']
 
@@ -55,7 +54,6 @@ function userRoleForSessionDepartment(dept) {
     laser: 'laser',
     dermatology: 'dermatology',
     dental: 'dental_branch',
-    solarium: 'solarium',
   }
   return m[dept] || null
 }
@@ -88,7 +86,6 @@ function departmentFromRequest(req) {
     return 'dermatology'
   }
   if (role === 'dental_branch') return 'dental'
-  if (role === 'solarium') return 'solarium'
   return null
 }
 

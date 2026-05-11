@@ -7,7 +7,7 @@ export type ProcedureCategory = 'laser' | 'dermatology' | 'dental' | 'other'
 export type ProcedureCategoryFilter = 'all' | ProcedureCategory
 
 /** خيارات حجز الموعد من الاستقبال — مصدر واحد للقائمة والتصنيف */
-export const APPOINTMENT_PROCEDURE_OPTIONS = ['ليزر', 'جلدية', 'بشرة', 'سولاريوم', 'أسنان'] as const
+export const APPOINTMENT_PROCEDURE_OPTIONS = ['ليزر', 'جلدية', 'بشرة', 'أسنان'] as const
 
 export type AppointmentProcedureOption = (typeof APPOINTMENT_PROCEDURE_OPTIONS)[number]
 

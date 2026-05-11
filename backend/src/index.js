@@ -21,6 +21,7 @@ import { notificationsRouter } from './routes/notifications.js'
 import { patientAuthRouter } from './routes/patientAuth.js'
 import { patientPortalRouter } from './routes/patientPortal.js'
 import { skinRouter } from './routes/skin.js'
+import { solariumRouter } from './routes/solarium.js'
 
 let dbConnected = false
 
@@ -64,6 +65,7 @@ app.use('/api/clinical', clinicalRouter)
 app.use('/api/billing', billingRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/skin', skinRouter)
+app.use('/api/solarium', solariumRouter)
 
 app.use((err, _req, res, _next) => {
   console.error(err)

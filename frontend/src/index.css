@@ -791,7 +791,7 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.tooth-btn):not(.btn):n
   content: '🦷';
 }
 
-.patient-record-tabs .tab[data-tab-key='solarium']::before {
+.patient-record-tabs .tab[data-tab-key='skin_care']::before {
   content: '☀';
 }
 

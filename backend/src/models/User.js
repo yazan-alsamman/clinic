@@ -8,7 +8,6 @@ const ROLES = [
   'dermatology_manager',
   'dermatology_assistant_manager',
   'dental_branch',
-  'solarium',
 ]
 
 const userSchema = new mongoose.Schema(

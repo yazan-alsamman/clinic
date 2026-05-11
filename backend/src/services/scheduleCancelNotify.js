@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import { User } from '../models/User.js'
 import { UserNotification } from '../models/UserNotification.js'
 
-const PROVIDER_MATCH_ROLES = ['laser', 'dermatology', 'dental_branch', 'solarium']
+const PROVIDER_MATCH_ROLES = ['laser', 'dermatology', 'dental_branch']
 
 function isLaserSlot(slot) {
   const st = String(slot.serviceType || '').toLowerCase()
