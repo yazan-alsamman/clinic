@@ -82,6 +82,8 @@ type DermatologyMaterialOption = {
   unit: string
   quantity: number
   unitCost: number
+  /** تكلفة الوحدة بالدولار عندما لا يُستخدم سعر الليرة */
+  unitCostUsd?: number
   active: boolean
 }
 
@@ -1569,20 +1571,22 @@ export function PatientRecord() {
     setDermSelectedMaterials((prev) => prev.map((line, i) => (i === idx ? { ...line, [field]: value } : line)))
   }
 
-  const dermMaterialsCostTotal = useMemo(
-    () =>
-      Math.round(
-        dermSelectedMaterials.reduce((sum, line) => {
-          const qty = Math.max(0, Number.parseFloat(String(line.quantity || '')) || 0)
-          if (!line.inventoryItemId || qty <= 0) return sum
-          const item = dermMaterialsCatalog.find((x) => x.id === line.inventoryItemId)
-          if (!item) return sum
-          const unitCost = Math.max(0, Math.round(Number(item.unitCost) || 0))
-          return sum + qty * unitCost
-        }, 0),
-      ),
-    [dermSelectedMaterials, dermMaterialsCatalog],
-  )
+  /** يطابق استهلاك المستودع: unitCost بالليرة أولاً، وإلا unitCostUsd بالدولار */
+  const dermMaterialsCostBreakdown = useMemo(() => {
+    let syp = 0
+    let usd = 0
+    for (const line of dermSelectedMaterials) {
+      const qty = Math.max(0, Number.parseFloat(String(line.quantity || '')) || 0)
+      if (!line.inventoryItemId || qty <= 0) continue
+      const item = dermMaterialsCatalog.find((x) => x.id === line.inventoryItemId)
+      if (!item) continue
+      const ucSyp = Math.max(0, Math.round(Number(item.unitCost) || 0))
+      const ucUsd = Number(item.unitCostUsd) || 0
+      if (ucSyp > 0) syp += qty * ucSyp
+      else if (ucUsd > 0) usd += qty * ucUsd
+    }
+    return { syp: Math.round(syp), usd: Math.round(usd * 10000) / 10000 }
+  }, [dermSelectedMaterials, dermMaterialsCatalog])
 
   if (loadErr || (!patient && !loadErr)) {
     if (!patient && !loadErr) {
@@ -3732,7 +3736,26 @@ export function PatientRecord() {
             )}
             <div style={{ marginTop: '0.75rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
               سعر مواد هذه الجلسة:{' '}
-              <strong style={{ color: 'var(--text)' }}>{dermMaterialsCostTotal.toLocaleString('ar-SY')} ل.س</strong>
+              <strong style={{ color: 'var(--text)' }}>
+                {dermMaterialsCostBreakdown.syp > 0 ? (
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {dermMaterialsCostBreakdown.syp.toLocaleString('ar-SY')} ل.س
+                  </span>
+                ) : null}
+                {dermMaterialsCostBreakdown.syp > 0 && dermMaterialsCostBreakdown.usd > 0 ? ' + ' : null}
+                {dermMaterialsCostBreakdown.usd > 0 ? (
+                  <span dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {dermMaterialsCostBreakdown.usd.toLocaleString('en-US', {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 4,
+                    })}{' '}
+                    USD
+                  </span>
+                ) : null}
+                {dermMaterialsCostBreakdown.syp <= 0 && dermMaterialsCostBreakdown.usd <= 0 ? (
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>0</span>
+                ) : null}
+              </strong>
             </div>
             <div style={{ marginTop: '0.75rem' }}>
               <label className="form-label">عملة سعر الجلسة</label>
