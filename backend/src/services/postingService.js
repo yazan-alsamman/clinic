@@ -260,7 +260,8 @@ export async function postBillingPayment(paymentId, postedBy) {
   const cs = await ClinicalSession.findById(bi.clinicalSessionId).lean()
   if (!cs) throw new Error('الجلسة السريرية غير موجودة')
 
-  const businessDate = bi.businessDate
+  /** تاريخ الترحيل في الدفتر = يوم التحصيل (وقت الدفعة) حتى تظهر المالية في يوم استلام النقد وليس بالضرورة يوم إنشاء الجلسة */
+  const businessDate = toYmdLocal(pay.receivedAt || pay.createdAt || new Date())
   const department = bi.department
   const providerId = bi.providerUserId
   const material = round2(Number(cs.materialCostSypTotal) || 0)

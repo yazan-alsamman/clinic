@@ -69,28 +69,53 @@ export function DermatologyFinancePage() {
     return Math.round((Number(data.totals.materialCostSyp) || 0) + (Number(data.totals.doctorShareSyp) || 0))
   }, [data])
 
-  const load = useCallback(async () => {
-    if (!allowed) return
-    setLoading(true)
-    setErr('')
-    try {
-      const q =
-        period === 'daily'
-          ? `period=daily&date=${encodeURIComponent(date || businessDate || '')}`
-          : `period=monthly&month=${encodeURIComponent(month || '')}`
-      const res = await api<FinanceSummary>(`/api/dermatology/finance-summary?${q}`)
-      setData(res)
-    } catch (e) {
-      setData(null)
-      setErr(e instanceof ApiError ? e.message : 'تعذر تحميل التقرير المالي')
-    } finally {
-      setLoading(false)
-    }
-  }, [allowed, period, date, month, businessDate])
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!allowed) return
+      const silent = Boolean(opts?.silent)
+      if (!silent) {
+        setLoading(true)
+        setErr('')
+      }
+      try {
+        const q =
+          period === 'daily'
+            ? `period=daily&date=${encodeURIComponent(date || businessDate || '')}`
+            : `period=monthly&month=${encodeURIComponent(month || '')}`
+        const res = await api<FinanceSummary>(`/api/dermatology/finance-summary?${q}`)
+        setData(res)
+        setErr('')
+      } catch (e) {
+        if (!silent) {
+          setData(null)
+          setErr(e instanceof ApiError ? e.message : 'تعذر تحميل التقرير المالي')
+        }
+      } finally {
+        if (!silent) setLoading(false)
+      }
+    },
+    [allowed, period, date, month, businessDate],
+  )
 
   useEffect(() => {
     if (!allowed) return
     void load()
+  }, [allowed, load])
+
+  /** تحديث تلقائي بعد التحصيل دون إعادة فتح الصفحة (بدون إظهار حالة التحميل) */
+  useEffect(() => {
+    if (!allowed) return
+    const id = window.setInterval(() => void load({ silent: true }), 8000)
+    return () => window.clearInterval(id)
+  }, [allowed, load])
+
+  useEffect(() => {
+    if (!allowed) return
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void load({ silent: true })
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
   }, [allowed, load])
 
   if (!allowed) {
@@ -127,7 +152,7 @@ export function DermatologyFinancePage() {
         ) : (
           <input className="input" type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ maxWidth: 220 }} />
         )}
-        <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void load()}>
+        <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void load({})}>
           {loading ? 'جاري التحديث…' : 'تحديث'}
         </button>
       </div>

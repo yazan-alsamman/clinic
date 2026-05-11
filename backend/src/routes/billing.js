@@ -1085,6 +1085,8 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
     })
 
+    /** يوم التحصيل في التقارير المالية (مالية الجلدية وغيرها) — لا يُعتمد تاريخ إنشاء الجلسة فقط */
+    bi.businessDate = todayBusinessDate()
     bi.status = 'paid'
     bi.paymentId = payment._id
     bi.paidAt = new Date()

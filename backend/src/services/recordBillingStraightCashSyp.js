@@ -4,6 +4,7 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { Patient } from '../models/Patient.js'
 import { postBillingPayment } from './postingService.js'
 import { writeAudit } from '../utils/audit.js'
+import { todayBusinessDate } from '../utils/date.js'
 
 /**
  * تأكيد تحصيل نقدي بالليرة بالكامل لبند معلّق (بدون خصم، بدون دولار).
@@ -51,6 +52,7 @@ export async function recordBillingStraightCashSyp({ billingItemId, receivedByUs
     effectiveAmountDueSyp: savedEffectiveDueSyp,
   })
 
+  bi.businessDate = todayBusinessDate()
   bi.status = 'paid'
   bi.paymentId = payment._id
   bi.paidAt = new Date()
