@@ -7,6 +7,7 @@ import { User } from '../models/User.js'
 import { InventoryItem } from '../models/InventoryItem.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
+import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
@@ -398,6 +399,37 @@ clinicalRouter.post(
         return
       }
 
+      let providerUserId = req.user._id
+      let scheduleSlotIdToSave
+      const scheduleSlotIdRaw = String(body.scheduleSlotId || '').trim()
+      if (scheduleSlotIdRaw && mongoose.isValidObjectId(scheduleSlotIdRaw)) {
+        if (department !== 'dermatology') {
+          res.status(400).json({ error: 'ربط الموعد مسموح فقط لجلسات الجلدية' })
+          return
+        }
+        const slot = await ScheduleSlot.findById(scheduleSlotIdRaw).lean()
+        if (!slot || !slot.patientId || String(slot.patientId) !== String(patient._id)) {
+          res.status(400).json({ error: 'الموعد غير موجود أو لا يخص هذا المريض' })
+          return
+        }
+        const st = String(slot.serviceType || '').trim().toLowerCase()
+        if (st !== 'dermatology') {
+          res.status(400).json({ error: 'الموعد المحدد ليس موعد جلدية' })
+          return
+        }
+        if (!slot.assignedSpecialistUserId) {
+          res.status(400).json({ error: 'لا يوجد طبيب مُعرَّف لهذا الموعد — راجع ربط لوحة الجلدية' })
+          return
+        }
+        const conflict = await ClinicalSession.findOne({ scheduleSlotId: slot._id }).lean()
+        if (conflict) {
+          res.status(409).json({ error: 'يوجد جلسة مرتبطة بهذا الموعد بالفعل' })
+          return
+        }
+        scheduleSlotIdToSave = slot._id
+        providerUserId = slot.assignedSpecialistUserId
+      }
+
       let sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
       const feeCurrency = String(body.feeCurrency || 'SYP').trim().toUpperCase()
       if (department === 'dermatology' && feeCurrency === 'USD') {
@@ -456,7 +488,7 @@ clinicalRouter.post(
       try {
         cs = await ClinicalSession.create({
           patientId: patient._id,
-          providerUserId: req.user._id,
+          providerUserId,
           department,
           procedureDescription,
           sessionFeeSyp,
@@ -465,12 +497,13 @@ clinicalRouter.post(
           materials: materialLines,
           materialCostSypTotal,
           materialChargeSypTotal,
+          ...(scheduleSlotIdToSave ? { scheduleSlotId: scheduleSlotIdToSave } : {}),
         })
 
         const bi = await BillingItem.create({
           clinicalSessionId: cs._id,
           patientId: patient._id,
-          providerUserId: req.user._id,
+          providerUserId,
           department,
           procedureLabel: procedureDescription || 'إجراء',
           listAmountDueSyp,

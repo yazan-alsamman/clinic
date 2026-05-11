@@ -58,9 +58,8 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       return
     }
 
-    /** جلدية + بشرة: مواعيد البشرة من الجدول تُخزَّن كـ department=skin لكنها ضمن عمل قسم الجلدية */
     const docs = await FinancialDocument.find({
-      department: { $in: ['dermatology', 'skin'] },
+      department: 'dermatology',
       status: 'posted',
       businessDate: { $gte: range.from, $lte: range.to },
     })
@@ -138,7 +137,7 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       },
       rows: detailRows,
       notes: [
-        'الإيراد = خط net_revenue من المستندات المرحلة (قسم الجلدية وجلسات البشرة المرتبطة بالجدول).',
+        'الإيراد = خط net_revenue من المستندات المرحلة لقسم الجلدية فقط.',
         'المصاريف المعروضة = كلفة المواد + حصة الطبيب من نفس المستندات.',
         'صافي الربح = خط clinic_net.',
         'قاعدة د.سامر: (مجموع جلساته − تكلفة المواد في جلساته) × 50% = مستحق الدكتور.',

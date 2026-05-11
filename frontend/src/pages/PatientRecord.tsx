@@ -620,6 +620,8 @@ export function PatientRecord() {
   const [selectedLaserAddonItemIds, setSelectedLaserAddonItemIds] = useState<string[]>([])
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
+  const bookedDermProcedureText = (searchParams.get('dermProc') || '').trim()
+  const bookedDermSlotId = (searchParams.get('dermSlotId') || '').trim()
   const roomFromQuery = String(searchParams.get('laserRoom') || '').trim()
   const room: '1' | '2' = roomFromQuery === '2' ? '2' : '1'
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
@@ -1222,6 +1224,11 @@ export function PatientRecord() {
       cancelled = true
     }
   }, [tab, role, bookedLaserProcedureText])
+
+  useEffect(() => {
+    if (tab !== 'dermatology' || !bookedDermProcedureText) return
+    setDermProcedureDescription(bookedDermProcedureText)
+  }, [tab, bookedDermProcedureText])
 
   useEffect(() => {
     if (tab !== 'laser' || !id || !role || !canAccessTab(role, 'laser')) return
@@ -3805,6 +3812,7 @@ export function PatientRecord() {
                   return
                 }
                 const discountPercent = Math.max(0, Math.min(100, Number.parseFloat(dermDiscountPercent) || 0))
+                const dermScheduleSlotId = /^[a-fA-F0-9]{24}$/.test(bookedDermSlotId) ? bookedDermSlotId : undefined
                 setDermSaving(true)
                 try {
                   const created = await api<{
@@ -3822,6 +3830,7 @@ export function PatientRecord() {
                       notes: '',
                       materials: payloadMaterials,
                       businessDate: clinicBusinessDate ?? undefined,
+                      ...(dermScheduleSlotId ? { scheduleSlotId: dermScheduleSlotId } : {}),
                     }),
                   })
                   const sessionsData = await api<{ sessions: DermatologySessionRow[] }>(
