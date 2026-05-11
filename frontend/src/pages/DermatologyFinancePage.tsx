@@ -10,11 +10,19 @@ type FinanceRow = {
   businessDate: string
   patientName: string
   providerName: string
-  sourceType: string
-  netRevenueSyp: number
+  collectedSyp: number
+  materialCostSypPriced: number
+  materialCostUsdPriced: number
+  materialCostSypTotal: number
+}
+
+type ProviderShareBlock = {
+  providerLabel: string
+  sessionRevenueSyp: number
   materialCostSyp: number
-  doctorShareSyp: number
-  clinicNetSyp: number
+  netAfterMaterialSyp: number
+  payableShareSyp: number
+  clinicShareSyp: number
 }
 
 type FinanceSummary = {
@@ -22,28 +30,32 @@ type FinanceSummary = {
   from: string
   to: string
   label: string
+  sharePercent: number
   totals: {
-    netRevenueSyp: number
-    materialCostSyp: number
-    doctorShareSyp: number
-    clinicNetSyp: number
+    collectedRevenueSyp: number
+    materialExpenseSypFromSypPricedItems: number
+    materialExpenseUsdFromUsdPricedItems: number
   }
-  samerShare?: {
-    providerName: string
-    totalSessionRevenueSyp: number
+  loraShare: ProviderShareBlock
+  samerShare: ProviderShareBlock
+  others: {
+    sessionRevenueSyp: number
     materialCostSyp: number
-    netAfterMaterialSyp: number
-    sharePercent: number
-    clinicAddedFromMaterialSyp: number
-    payableShareSyp: number
-    adjustedClinicNetSyp: number
+    clinicKeepsSyp: number
   }
+  clinicNetSyp: number
   rows: FinanceRow[]
   notes: string[]
 }
 
 function renderSyp(value: number) {
   return `${Math.round(Number(value) || 0).toLocaleString('ar-SY')} ل.س`
+}
+
+function renderUsd(value: number) {
+  const n = Number(value) || 0
+  const t = Math.round(n * 100) / 100
+  return `${t.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} USD`
 }
 
 export function DermatologyFinancePage() {
@@ -64,9 +76,9 @@ export function DermatologyFinancePage() {
     if (!month && businessDate) setMonth(String(businessDate).slice(0, 7))
   }, [businessDate, month])
 
-  const expenseTotal = useMemo(() => {
-    if (!data) return 0
-    return Math.round((Number(data.totals.materialCostSyp) || 0) + (Number(data.totals.doctorShareSyp) || 0))
+  const hasOthers = useMemo(() => {
+    if (!data) return false
+    return (Number(data.others?.sessionRevenueSyp) || 0) > 0
   }, [data])
 
   const load = useCallback(
@@ -102,7 +114,6 @@ export function DermatologyFinancePage() {
     void load()
   }, [allowed, load])
 
-  /** تحديث تلقائي بعد التحصيل دون إعادة فتح الصفحة (بدون إظهار حالة التحميل) */
   useEffect(() => {
     if (!allowed) return
     const id = window.setInterval(() => void load({ silent: true }), 8000)
@@ -127,10 +138,15 @@ export function DermatologyFinancePage() {
     )
   }
 
+  const pct = Number(data?.sharePercent ?? 50)
+
   return (
     <>
       <h1 className="page-title">مالية الجلدية</h1>
-      <p className="page-desc">تفصيل واضح للإيرادات والمصاريف وصافي الربح الخاص بعيادة الجلدية.</p>
+      <p className="page-desc">
+        أرقام مبنية على تحصيل الاستقبال لبنود الجلدية المسدّدة في النطاق، وتكلفة المواد من الجلسات المرتبطة، وحصص
+        50% لد.لورا ود.سامر بعد خصم المواد.
+      </p>
 
       <div className="toolbar" style={{ marginTop: '0.95rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
         <button
@@ -163,47 +179,75 @@ export function DermatologyFinancePage() {
         style={{
           marginTop: '1rem',
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
           gap: '0.75rem',
         }}
       >
         <div className="card" style={{ borderColor: '#34d399', background: 'linear-gradient(160deg, #ecfdf5 0%, #d1fae5 100%)' }}>
           <h3 style={{ margin: 0, color: '#065f46' }}>إجمالي الإيرادات</h3>
           <p style={{ margin: '0.45rem 0 0', fontWeight: 800, color: '#064e3b' }}>
-            {renderSyp(data?.totals.netRevenueSyp || 0)}
+            {renderSyp(data?.totals.collectedRevenueSyp || 0)}
           </p>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#047857' }}>من مستندات قسم الجلدية المرحلة فقط.</p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#047857' }}>
+            مجموع مبالغ التحصيل (استقبال) لجميع الجلسات الجلدية المسدّدة في النطاق — يتحدّث مع كل تحصيل.
+          </p>
         </div>
+
         <div className="card" style={{ borderColor: '#fb923c', background: 'linear-gradient(160deg, #fff7ed 0%, #ffedd5 100%)' }}>
-          <h3 style={{ margin: 0, color: '#9a3412' }}>إجمالي المصاريف</h3>
-          <p style={{ margin: '0.45rem 0 0', fontWeight: 800, color: '#7c2d12' }}>{renderSyp(expenseTotal)}</p>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#c2410c' }}>كلفة المواد + حصة الطبيب.</p>
-        </div>
-        <div className="card" style={{ borderColor: '#818cf8', background: 'linear-gradient(160deg, #eef2ff 0%, #e0e7ff 100%)' }}>
-          <h3 style={{ margin: 0, color: '#3730a3' }}>صافي الربح</h3>
-          <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#312e81' }}>
-            {renderSyp(data?.samerShare?.adjustedClinicNetSyp ?? data?.totals.clinicNetSyp ?? 0)}
+          <h3 style={{ margin: 0, color: '#9a3412' }}>إجمالي المصاريف (مواد)</h3>
+          <p style={{ margin: '0.45rem 0 0', fontWeight: 700, color: '#7c2d12' }}>
+            مواد بسعر ليرة: {renderSyp(data?.totals.materialExpenseSypFromSypPricedItems || 0)}
           </p>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#4f46e5' }}>
-            يشمل إضافة 50% المتبقية من (جلسات د.سامر بعد خصم المواد) بقيمة (
-            {renderSyp(data?.samerShare?.clinicAddedFromMaterialSyp || 0)}).
+          <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#9a3412' }}>
+            مواد بسعر دولار (تقدير بالدولار): {renderUsd(data?.totals.materialExpenseUsdFromUsdPricedItems || 0)}
+          </p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#c2410c' }}>
+            يُستند إلى سطور المواد في الجلسة وسعر المخزون (ليرة أو دولار) وسعر الصرف لليوم عند الحاجة.
           </p>
         </div>
+
+        <div className="card" style={{ borderColor: '#e879f9', background: 'linear-gradient(160deg, #fdf4ff 0%, #fae8ff 100%)' }}>
+          <h3 style={{ margin: 0, color: '#86198f' }}>حصة الدكتورة لورا</h3>
+          <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#701a75' }}>
+            {renderSyp(data?.loraShare?.payableShareSyp || 0)}
+          </p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#a21caf' }}>
+            (جلساتها {renderSyp(data?.loraShare?.sessionRevenueSyp || 0)} − مواد {renderSyp(data?.loraShare?.materialCostSyp || 0)}) ={' '}
+            {renderSyp(data?.loraShare?.netAfterMaterialSyp || 0)} × {pct}% = {renderSyp(data?.loraShare?.payableShareSyp || 0)}
+          </p>
+        </div>
+
         <div className="card" style={{ borderColor: '#0ea5e9', background: 'linear-gradient(160deg, #ecfeff 0%, #cffafe 100%)' }}>
-          <h3 style={{ margin: 0, color: '#0c4a6e' }}>نسبة الدكتور سامر</h3>
+          <h3 style={{ margin: 0, color: '#0c4a6e' }}>حصة الدكتور سامر</h3>
           <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#0c4a6e' }}>
             {renderSyp(data?.samerShare?.payableShareSyp || 0)}
           </p>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#0369a1' }}>
-            المعادلة: (مجموع جلساته {renderSyp(data?.samerShare?.totalSessionRevenueSyp || 0)} − تكلفة المواد{' '}
-            {renderSyp(data?.samerShare?.materialCostSyp || 0)}) = {renderSyp(data?.samerShare?.netAfterMaterialSyp || 0)} ثم ×{' '}
-            {Number(data?.samerShare?.sharePercent || 50).toLocaleString('ar-SY')}% = {renderSyp(data?.samerShare?.payableShareSyp || 0)}.
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#0369a1' }}>
+            (جلساته {renderSyp(data?.samerShare?.sessionRevenueSyp || 0)} − مواد {renderSyp(data?.samerShare?.materialCostSyp || 0)}) ={' '}
+            {renderSyp(data?.samerShare?.netAfterMaterialSyp || 0)} × {pct}% = {renderSyp(data?.samerShare?.payableShareSyp || 0)}
+          </p>
+        </div>
+
+        <div className="card" style={{ borderColor: '#818cf8', background: 'linear-gradient(160deg, #eef2ff 0%, #e0e7ff 100%)' }}>
+          <h3 style={{ margin: 0, color: '#3730a3' }}>صافي الربح للمركز</h3>
+          <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#312e81' }}>{renderSyp(data?.clinicNetSyp || 0)}</p>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#4f46e5' }}>
+            50% المتبقية من صافي د.لورا ({renderSyp(data?.loraShare?.clinicShareSyp || 0)}) + 50% المتبقية من صافي د.سامر (
+            {renderSyp(data?.samerShare?.clinicShareSyp || 0)})
+            {hasOthers ? ` + جلسات أخرى (${renderSyp(data?.others?.clinicKeepsSyp || 0)})` : ''}.
           </p>
         </div>
       </div>
 
+      {hasOthers ? (
+        <p style={{ marginTop: '0.75rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+          يوجد تحصيل لجلدية بمقدّمين آخرين: إيراد {renderSyp(data?.others?.sessionRevenueSyp || 0)} — مواد{' '}
+          {renderSyp(data?.others?.materialCostSyp || 0)} — يُحسب صافيهم بالكامل لصالح المركز ضمن «صافي الربح».
+        </p>
+      ) : null}
+
       <div className="card" style={{ marginTop: '1rem' }}>
-        <h2 className="card-title">تفصيل العمليات المالية</h2>
+        <h2 className="card-title">تفصيل التحصيلات</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginBottom: '0.7rem' }}>
           النطاق: {data?.from || '—'} إلى {data?.to || '—'}.
         </p>
@@ -223,10 +267,10 @@ export function DermatologyFinancePage() {
                 <th>التاريخ</th>
                 <th>المريض</th>
                 <th>الطبيب</th>
-                <th>الإيراد</th>
-                <th>مواد</th>
-                <th>حصة طبيب</th>
-                <th>الصافي</th>
+                <th>المحصّل</th>
+                <th>مواد (ل.س)</th>
+                <th>مواد (USD)</th>
+                <th>إجمالي مواد</th>
               </tr>
             </thead>
             <tbody>
@@ -237,7 +281,7 @@ export function DermatologyFinancePage() {
               ) : !data || data.rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ color: 'var(--text-muted)' }}>
-                    لا توجد بيانات في هذا النطاق.
+                    لا توجد تحصيلات جلدية مسدّدة في هذا النطاق.
                   </td>
                 </tr>
               ) : (
@@ -246,10 +290,10 @@ export function DermatologyFinancePage() {
                     <td>{row.businessDate || '—'}</td>
                     <td>{row.patientName || '—'}</td>
                     <td>{row.providerName || '—'}</td>
-                    <td style={{ color: '#047857', fontWeight: 700 }}>{renderSyp(row.netRevenueSyp)}</td>
-                    <td style={{ color: '#b45309' }}>{renderSyp(row.materialCostSyp)}</td>
-                    <td style={{ color: '#c2410c' }}>{renderSyp(row.doctorShareSyp)}</td>
-                    <td style={{ color: '#3730a3', fontWeight: 800 }}>{renderSyp(row.clinicNetSyp)}</td>
+                    <td style={{ color: '#047857', fontWeight: 700 }}>{renderSyp(row.collectedSyp)}</td>
+                    <td style={{ color: '#b45309' }}>{renderSyp(row.materialCostSypPriced)}</td>
+                    <td style={{ color: '#0369a1' }}>{renderUsd(row.materialCostUsdPriced)}</td>
+                    <td style={{ color: '#57534e' }}>{renderSyp(row.materialCostSypTotal)}</td>
                   </tr>
                 ))
               )}

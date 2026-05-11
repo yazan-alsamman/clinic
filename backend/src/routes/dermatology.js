@@ -2,7 +2,10 @@ import { Router } from 'express'
 import { Patient } from '../models/Patient.js'
 import { InventoryItem } from '../models/InventoryItem.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
-import { FinancialDocument } from '../models/FinancialDocument.js'
+import { BillingItem } from '../models/BillingItem.js'
+import { BillingPayment } from '../models/BillingPayment.js'
+import { ClinicalSession } from '../models/ClinicalSession.js'
+import { BusinessDay } from '../models/BusinessDay.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
@@ -34,12 +37,26 @@ function parseRange({ period, date, month }) {
   return { period: 'daily', from: d, to: d, label: d }
 }
 
-function sumLineAmount(lines, lineType) {
-  return Math.round(
-    (Array.isArray(lines) ? lines : [])
-      .filter((l) => String(l?.lineType || '') === lineType)
-      .reduce((s, l) => s + (Number(l?.amountSyp) || 0), 0),
-  )
+function providerNameMatchesLora(name) {
+  const raw = String(name || '').trim()
+  const s = raw.toLowerCase()
+  return /لورا|laura|lora/.test(raw) || s.includes('lora') || s.includes('laura')
+}
+
+function providerNameMatchesSamer(name) {
+  return /سامر|samer/.test(String(name || '').trim())
+}
+
+/** تكلفة مواد السطر: جزء يُحسب كسعر ليرة، وجزء يُعرض بالدولار (إن وُجد سعر صرف) */
+function splitMaterialLineCost(lineCostSyp, inv, usdSypRate) {
+  const line = Math.round(Number(lineCostSyp) || 0)
+  const ucSyp = Math.round(Number(inv?.unitCost) || 0)
+  const ucUsd = Number(inv?.unitCostUsd) || 0
+  const rate = Number(usdSypRate) || 0
+  if (ucSyp > 0) return { sypPricedSyp: line, usdPricedUsd: 0 }
+  if (ucUsd > 0 && rate > 0) return { sypPricedSyp: 0, usdPricedUsd: line / rate }
+  if (ucUsd > 0) return { sypPricedSyp: line, usdPricedUsd: 0 }
+  return { sypPricedSyp: line, usdPricedUsd: 0 }
 }
 
 dermatologyRouter.get('/finance-summary', async (req, res) => {
@@ -58,91 +75,156 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       return
     }
 
-    const docs = await FinancialDocument.find({
+    const items = await BillingItem.find({
       department: 'dermatology',
-      status: 'posted',
+      status: 'paid',
+      paymentId: { $ne: null },
       businessDate: { $gte: range.from, $lte: range.to },
     })
-      .sort({ businessDate: 1, postedAt: 1 })
+      .sort({ paidAt: 1, businessDate: 1 })
       .populate('patientId', 'name')
       .populate('providerUserId', 'name')
       .lean()
 
-    const detailRows = docs.map((d) => {
-      const netRevenueSyp = sumLineAmount(d.lines, 'net_revenue')
-      const materialCostSyp = sumLineAmount(d.lines, 'material_cost')
-      const doctorShareSyp = sumLineAmount(d.lines, 'doctor_share')
-      const clinicNetSyp = sumLineAmount(d.lines, 'clinic_net')
-      return {
-        id: String(d._id),
-        businessDate: String(d.businessDate || ''),
-        patientName: String(d.patientId?.name || '—').trim(),
-        providerName: String(d.providerUserId?.name || '—').trim(),
-        sourceType: String(d.sourceType || ''),
-        netRevenueSyp,
-        materialCostSyp,
-        doctorShareSyp,
-        clinicNetSyp,
+    const sessionIds = [...new Set(items.map((i) => i.clinicalSessionId).filter(Boolean).map(String))]
+    const sessions =
+      sessionIds.length > 0
+        ? await ClinicalSession.find({ _id: { $in: sessionIds } })
+            .select('materials materialCostSypTotal businessDate')
+            .lean()
+        : []
+    const sessionById = new Map(sessions.map((s) => [String(s._id), s]))
+
+    const payIds = [...new Set(items.map((i) => i.paymentId).filter(Boolean).map(String))]
+    const payments =
+      payIds.length > 0 ? await BillingPayment.find({ _id: { $in: payIds } }).select('amountSyp').lean() : []
+    const payById = new Map(payments.map((p) => [String(p._id), p]))
+
+    const datesForRate = [...new Set(items.map((i) => String(i.businessDate || '').trim()).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))]
+    const bdays =
+      datesForRate.length > 0
+        ? await BusinessDay.find({ businessDate: { $in: datesForRate } }).select('businessDate usdSypRate').lean()
+        : []
+    const rateByDate = new Map(bdays.map((b) => [b.businessDate, Number(b.usdSypRate) || 0]))
+
+    const invIds = new Set()
+    for (const s of sessions) {
+      for (const m of s.materials || []) {
+        if (m?.inventoryItemId) invIds.add(String(m.inventoryItemId))
       }
-    })
+    }
+    const invDocs =
+      invIds.size > 0 ? await InventoryItem.find({ _id: { $in: [...invIds] } }).select('unitCost unitCostUsd name').lean() : []
+    const invById = new Map(invDocs.map((i) => [String(i._id), i]))
 
-    const totals = detailRows.reduce(
-      (acc, row) => ({
-        netRevenueSyp: acc.netRevenueSyp + row.netRevenueSyp,
-        materialCostSyp: acc.materialCostSyp + row.materialCostSyp,
-        doctorShareSyp: acc.doctorShareSyp + row.doctorShareSyp,
-        clinicNetSyp: acc.clinicNetSyp + row.clinicNetSyp,
-      }),
-      { netRevenueSyp: 0, materialCostSyp: 0, doctorShareSyp: 0, clinicNetSyp: 0 },
-    )
-    totals.netRevenueSyp = Math.round(totals.netRevenueSyp)
-    totals.materialCostSyp = Math.round(totals.materialCostSyp)
-    totals.doctorShareSyp = Math.round(totals.doctorShareSyp)
-    totals.clinicNetSyp = Math.round(totals.clinicNetSyp)
+    const sharePercent = 50
+    let totalCollectedSyp = 0
+    let totalMaterialSypPricedSyp = 0
+    let totalMaterialUsdPricedUsd = 0
 
-    const samerRows = detailRows.filter((row) => /سامر/.test(String(row.providerName || '')))
-    const samerTotalSessionRevenueSyp = Math.round(
-      samerRows.reduce((sum, row) => sum + (Number(row.netRevenueSyp) || 0), 0),
-    )
-    const samerMaterialCostSyp = Math.round(
-      samerRows.reduce((sum, row) => sum + (Number(row.materialCostSyp) || 0), 0),
-    )
-    const samerSharePercent = 50
-    const samerNetAfterMaterialSyp = Math.round(
-      samerTotalSessionRevenueSyp - samerMaterialCostSyp,
-    )
-    const samerPayableSyp = Math.round(
-      samerNetAfterMaterialSyp * (samerSharePercent / 100),
-    )
-    const samerClinicAddedFromMaterialSyp = Math.round(samerNetAfterMaterialSyp - samerPayableSyp)
-    const adjustedClinicNetSyp = Math.round(
-      totals.clinicNetSyp + samerClinicAddedFromMaterialSyp,
-    )
+    let loraRevenueSyp = 0
+    let loraMaterialSyp = 0
+    let samerRevenueSyp = 0
+    let samerMaterialSyp = 0
+    let otherRevenueSyp = 0
+    let otherMaterialSyp = 0
+
+    const rows = []
+
+    for (const bi of items) {
+      const pay = payById.get(String(bi.paymentId))
+      const collected = Math.round(Number(pay?.amountSyp) || 0)
+      const cs = sessionById.get(String(bi.clinicalSessionId))
+      const matTotal = Math.round(Number(cs?.materialCostSypTotal) || 0)
+      const providerName = String(bi.providerUserId?.name || '—').trim()
+      const patientName = String(bi.patientId?.name || '—').trim()
+      const bd = String(bi.businessDate || '').trim()
+      const rate = rateByDate.get(bd) || 0
+
+      let rowMatSyp = 0
+      let rowMatUsd = 0
+      for (const line of cs?.materials || []) {
+        const inv = invById.get(String(line.inventoryItemId))
+        const sp = splitMaterialLineCost(line.lineCostSyp, inv, rate)
+        rowMatSyp += Math.round(sp.sypPricedSyp)
+        rowMatUsd += Number.isFinite(sp.usdPricedUsd) ? sp.usdPricedUsd : 0
+      }
+
+      totalCollectedSyp += collected
+      totalMaterialSypPricedSyp += rowMatSyp
+      totalMaterialUsdPricedUsd += rowMatUsd
+
+      if (providerNameMatchesLora(providerName)) {
+        loraRevenueSyp += collected
+        loraMaterialSyp += matTotal
+      } else if (providerNameMatchesSamer(providerName)) {
+        samerRevenueSyp += collected
+        samerMaterialSyp += matTotal
+      } else {
+        otherRevenueSyp += collected
+        otherMaterialSyp += matTotal
+      }
+
+      rows.push({
+        id: String(bi._id),
+        businessDate: bd,
+        patientName,
+        providerName,
+        collectedSyp: collected,
+        materialCostSypPriced: rowMatSyp,
+        materialCostUsdPriced: Math.round(rowMatUsd * 10000) / 10000,
+        materialCostSypTotal: matTotal,
+      })
+    }
+
+    const poolLora = Math.max(0, loraRevenueSyp - loraMaterialSyp)
+    const poolSamer = Math.max(0, samerRevenueSyp - samerMaterialSyp)
+    const loraPayableSyp = Math.round(poolLora * (sharePercent / 100))
+    const samerPayableSyp = Math.round(poolSamer * (sharePercent / 100))
+    const loraClinicHalfSyp = Math.round(poolLora - loraPayableSyp)
+    const samerClinicHalfSyp = Math.round(poolSamer - samerPayableSyp)
+    const otherNetSyp = Math.max(0, otherRevenueSyp - otherMaterialSyp)
+    const clinicNetSyp = Math.round(loraClinicHalfSyp + samerClinicHalfSyp + otherNetSyp)
 
     res.json({
       period: range.period,
       from: range.from,
       to: range.to,
       label: range.label,
-      totals,
-      samerShare: {
-        providerName: 'د.سامر',
-        totalSessionRevenueSyp: samerTotalSessionRevenueSyp,
-        materialCostSyp: samerMaterialCostSyp,
-        netAfterMaterialSyp: samerNetAfterMaterialSyp,
-        sharePercent: samerSharePercent,
-        clinicAddedFromMaterialSyp: samerClinicAddedFromMaterialSyp,
-        payableShareSyp: samerPayableSyp,
-        adjustedClinicNetSyp,
+      sharePercent,
+      totals: {
+        collectedRevenueSyp: Math.round(totalCollectedSyp),
+        materialExpenseSypFromSypPricedItems: Math.round(totalMaterialSypPricedSyp),
+        materialExpenseUsdFromUsdPricedItems: Math.round(totalMaterialUsdPricedUsd * 10000) / 10000,
       },
-      rows: detailRows,
+      loraShare: {
+        providerLabel: 'الدكتورة لورا',
+        sessionRevenueSyp: Math.round(loraRevenueSyp),
+        materialCostSyp: Math.round(loraMaterialSyp),
+        netAfterMaterialSyp: Math.round(poolLora),
+        payableShareSyp: loraPayableSyp,
+        clinicShareSyp: loraClinicHalfSyp,
+      },
+      samerShare: {
+        providerLabel: 'الدكتور سامر',
+        sessionRevenueSyp: Math.round(samerRevenueSyp),
+        materialCostSyp: Math.round(samerMaterialSyp),
+        netAfterMaterialSyp: Math.round(poolSamer),
+        payableShareSyp: samerPayableSyp,
+        clinicShareSyp: samerClinicHalfSyp,
+      },
+      others: {
+        sessionRevenueSyp: Math.round(otherRevenueSyp),
+        materialCostSyp: Math.round(otherMaterialSyp),
+        clinicKeepsSyp: Math.round(otherNetSyp),
+      },
+      clinicNetSyp,
+      rows,
       notes: [
-        'الإيراد = خط net_revenue من المستندات المرحلة لقسم الجلدية فقط.',
-        'تاريخ السطر في الجدول = يوم التحصيل (استلام الدفع)، وليس بالضرورة يوم تسجيل الجلسة في النظام.',
-        'المصاريف المعروضة = كلفة المواد + حصة الطبيب من نفس المستندات.',
-        'صافي الربح = خط clinic_net.',
-        'قاعدة د.سامر: (مجموع جلساته − تكلفة المواد في جلساته) × 50% = مستحق الدكتور.',
-        'الـ 50% المتبقية من نفس الناتج تُضاف إلى صافي أرباح القسم.',
+        'الإيراد = مجموع مبالغ التحصيل (دفعات الاستقبال) لبنود جلدية مسدّدة في النطاق — تاريخ السطر هو يوم التحصيل المخزّن على البند.',
+        'تكلفة المواد: تُجمع من جلسات الجلدية المرتبطة؛ تُقسَّم للعرض بين مواد بسعر ليرة (unitCost) ومواد بسعر دولار (unitCostUsd) مع تحويل عرض الدولار باستخدام سعر الصرف المسجّل لذلك اليوم.',
+        'حصة د.لورا ود.سامر = (مجموع تحصيل جلسات الطبيب − تكلفة المواد في جلساته) × 50%.',
+        'صافي ربح المركز في البطاقة = 50% المتبقية من د.لورا + 50% المتبقية من د.سامر + صافي جلسات أطباء آخرين (كامل الصافي لصالح المركز).',
       ],
     })
   } catch (e) {
