@@ -1,10 +1,11 @@
 import { Router } from 'express'
-import mongoose from 'mongoose'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { Patient } from '../models/Patient.js'
+import { User } from '../models/User.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BillingItem } from '../models/BillingItem.js'
+import { BillingPayment } from '../models/BillingPayment.js'
 import { SolariumSettings } from '../models/SolariumSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
@@ -56,6 +57,79 @@ solariumRouter.get('/settings', requireRoles(...ACCESS_READ), async (_req, res) 
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+function normalizeBusinessDateQuery(raw, fallback) {
+  const s = String(raw || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  return String(fallback || '').trim() || todayBusinessDate()
+}
+
+function classifySolariumRow(procedureDescription) {
+  const p = String(procedureDescription || '')
+  if (p.includes('باكج مسبق الدفع')) return 'package'
+  if (/\d+\s*دقيقة/.test(p)) return 'walk_in'
+  return 'other'
+}
+
+/**
+ * سجل يومي لمدير النظام: جلسات سولاريوم (زائر) + باكجات مسبقة الدفع المحصّلة — حسب تاريخ العمل.
+ */
+solariumRouter.get('/daily-register', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const businessDate = normalizeBusinessDateQuery(req.query.businessDate, req.businessDate)
+    const sessions = await ClinicalSession.find({ department: 'solarium', businessDate })
+      .sort({ createdAt: -1 })
+      .lean()
+
+    const biIds = sessions.map((s) => s.billingItemId).filter(Boolean)
+    const patientIds = sessions.map((s) => s.patientId).filter(Boolean)
+
+    const [billingItems, payments, patients] = await Promise.all([
+      biIds.length ? BillingItem.find({ _id: { $in: biIds } }).lean() : [],
+      biIds.length ? BillingPayment.find({ billingItemId: { $in: biIds } }).lean() : [],
+      patientIds.length ? Patient.find({ _id: { $in: patientIds } }).select('name fileNumber').lean() : [],
+    ])
+
+    const biById = new Map(billingItems.map((b) => [String(b._id), b]))
+    const payByBi = new Map(payments.map((p) => [String(p.billingItemId), p]))
+    const receiverIds = [...new Set(payments.map((p) => p.receivedBy).filter(Boolean).map(String))]
+    const receivers =
+      receiverIds.length > 0 ? await User.find({ _id: { $in: receiverIds } }).select('name').lean() : []
+    const userById = new Map(receivers.map((u) => [String(u._id), u]))
+    const patById = new Map(patients.map((p) => [String(p._id), p]))
+
+    const rows = sessions.map((cs) => {
+      const bid = cs.billingItemId ? String(cs.billingItemId) : ''
+      const bi = bid ? biById.get(bid) : null
+      const pay = bid ? payByBi.get(bid) : null
+      const pid = cs.patientId ? String(cs.patientId) : ''
+      const patient = pid ? patById.get(pid) : null
+      const receivedById = pay?.receivedBy ? String(pay.receivedBy) : ''
+      const receiver = receivedById ? userById.get(receivedById) : null
+      const proc = String(cs.procedureDescription || bi?.procedureLabel || '')
+      const kind = classifySolariumRow(proc)
+      const amountSyp = Math.round(Number(bi?.amountDueSyp ?? bi?.effectiveAmountDueSyp ?? cs.sessionFeeSyp) || 0)
+      return {
+        id: String(cs._id),
+        businessDate: String(cs.businessDate || businessDate),
+        createdAt: cs.createdAt ? new Date(cs.createdAt).toISOString() : null,
+        kind,
+        procedureDescription: proc,
+        patientName: patient?.name ? String(patient.name) : '—',
+        fileNumber: patient?.fileNumber ? String(patient.fileNumber) : '',
+        amountSyp,
+        billingStatus: bi?.status ? String(bi.status) : '',
+        receivedByName: receiver?.name ? String(receiver.name).trim() : '—',
+        receivedAt: pay?.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
+      }
+    })
+
+    res.json({ businessDate, rows })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'تعذر تحميل السجل اليومي' })
   }
 })
 

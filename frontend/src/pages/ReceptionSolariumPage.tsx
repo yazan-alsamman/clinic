@@ -1,8 +1,38 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { api, ApiError } from '../api/client'
 import type { Role } from '../types'
+
+type SolariumRegisterRow = {
+  id: string
+  businessDate: string
+  createdAt: string | null
+  kind: 'walk_in' | 'package' | 'other'
+  procedureDescription: string
+  patientName: string
+  fileNumber: string
+  amountSyp: number
+  billingStatus: string
+  receivedByName: string
+  receivedAt: string | null
+}
+
+function kindLabelAr(kind: SolariumRegisterRow['kind']) {
+  if (kind === 'walk_in') return 'جلسة زائر (6/12 د)'
+  if (kind === 'package') return 'باكج مسبق الدفع'
+  return 'أخرى'
+}
+
+function formatDt(iso: string | null) {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('ar-SY', { dateStyle: 'short', timeStyle: 'short' })
+  } catch {
+    return iso
+  }
+}
 
 export function ReceptionSolariumPage() {
   const { user } = useAuth()
@@ -22,6 +52,29 @@ export function ReceptionSolariumPage() {
   const [savingPrices, setSavingPrices] = useState(false)
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
+  const registerInit = useRef(false)
+  const [registerDate, setRegisterDate] = useState('')
+  const [registerRows, setRegisterRows] = useState<SolariumRegisterRow[]>([])
+  const [registerLoading, setRegisterLoading] = useState(false)
+  const [registerErr, setRegisterErr] = useState('')
+
+  const loadRegister = useCallback(async () => {
+    if (role !== 'super_admin' || !registerDate.trim()) return
+    setRegisterErr('')
+    setRegisterLoading(true)
+    try {
+      const q = new URLSearchParams({ businessDate: registerDate.trim() })
+      const d = await api<{ businessDate: string; rows: SolariumRegisterRow[] }>(
+        `/api/solarium/daily-register?${q.toString()}`,
+      )
+      setRegisterRows(Array.isArray(d.rows) ? d.rows : [])
+    } catch (e) {
+      setRegisterErr(e instanceof ApiError ? e.message : 'تعذر تحميل السجل')
+      setRegisterRows([])
+    } finally {
+      setRegisterLoading(false)
+    }
+  }, [role, registerDate])
 
   const loadSettings = useCallback(async () => {
     if (!allowed) return
@@ -43,6 +96,18 @@ export function ReceptionSolariumPage() {
   useEffect(() => {
     void loadSettings()
   }, [loadSettings])
+
+  useEffect(() => {
+    if (role !== 'super_admin' || registerInit.current) return
+    registerInit.current = true
+    const v = (businessDate || '').trim()
+    setRegisterDate(v || new Date().toISOString().slice(0, 10))
+  }, [role, businessDate])
+
+  useEffect(() => {
+    if (role !== 'super_admin' || !registerDate) return
+    void loadRegister()
+  }, [role, registerDate, loadRegister])
 
   async function savePrices() {
     if (role !== 'super_admin') return
@@ -91,6 +156,7 @@ export function ReceptionSolariumPage() {
       setOk('تم تسجيل الجلسة والتحصيل النقدي — يظهر المبلغ في الجرد المالي اليومي.')
       setDisplayName('')
       void loadSettings()
+      if (role === 'super_admin') void loadRegister()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'تعذر التأكيد')
     } finally {
@@ -145,6 +211,85 @@ export function ReceptionSolariumPage() {
               {savingPrices ? 'جاري الحفظ…' : 'حفظ الأسعار'}
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {role === 'super_admin' ? (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <h2 className="card-title" style={{ marginTop: 0 }}>
+            سجل السولاريوم اليومي
+          </h2>
+          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: 0 }}>
+            جلسات الزائر (6/12 دقيقة) وباكجات السولاريوم المدفوعة مسبقاً من ملفات المرضى — حسب <strong>تاريخ العمل</strong> المسجّل
+            على الجلسة. اختر أي تاريخ لعرض أيام سابقة.
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginTop: '0.65rem' }}>
+            <div>
+              <label className="form-label">تاريخ العرض</label>
+              <input
+                className="input"
+                type="date"
+                dir="ltr"
+                style={{ maxWidth: 200 }}
+                value={registerDate}
+                onChange={(e) => setRegisterDate(e.target.value)}
+              />
+            </div>
+            <button type="button" className="btn btn-secondary" disabled={registerLoading} onClick={() => void loadRegister()}>
+              {registerLoading ? 'جاري التحميل…' : 'تحديث'}
+            </button>
+          </div>
+          {registerErr ? <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{registerErr}</p> : null}
+          {registerLoading && registerRows.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', marginTop: '0.75rem' }}>جاري التحميل…</p>
+          ) : registerRows.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', marginTop: '0.75rem' }}>لا توجد عمليات مسجّلة في هذا التاريخ.</p>
+          ) : (
+            <div className="table-wrap" style={{ marginTop: '0.85rem' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>وقت التسجيل</th>
+                    <th>النوع</th>
+                    <th>المريض / الملف</th>
+                    <th>الوصف</th>
+                    <th>المبلغ (ل.س)</th>
+                    <th>حصل بواسطة</th>
+                    <th>حالة الفوترة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {registerRows.map((r) => (
+                    <tr key={r.id}>
+                      <td>{formatDt(r.createdAt)}</td>
+                      <td>{kindLabelAr(r.kind)}</td>
+                      <td>
+                        <span style={{ fontWeight: 600 }}>{r.patientName}</span>
+                        {r.fileNumber ? (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}> — {r.fileNumber}</span>
+                        ) : null}
+                      </td>
+                      <td style={{ maxWidth: 280, whiteSpace: 'pre-wrap', fontSize: '0.88rem' }}>{r.procedureDescription}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.amountSyp.toLocaleString('ar-SY')}</td>
+                      <td>{r.receivedByName}</td>
+                      <td>{r.billingStatus || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={4} style={{ fontWeight: 700 }}>
+                      الإجمالي
+                    </td>
+                    <td style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                      {registerRows.reduce((s, r) => s + (Number(r.amountSyp) || 0), 0).toLocaleString('ar-SY')}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
 
