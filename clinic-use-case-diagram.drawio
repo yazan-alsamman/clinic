@@ -1,0 +1,246 @@
+<mxfile host="app.diagrams.net" agent="Cursor-UseCase" version="22.1.0" type="device">
+  <diagram id="uc-clinic" name="Use cases — عيادة د. إلياس دحدل">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4000" pageHeight="2800" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="&lt;b&gt;مخطط حالات الاستخدام — نظام إدارة المركز الطبي والتجميل&lt;/b&gt;&#xa;(مستخرج من مسارات الواجهة والأدوار في المشروع UI_UX)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- System boundary -->
+        <mxCell id="sys" value="نظام تشغيل العيادة (ويب الموظفين والإدارة)" style="shape=rectangle;whiteSpace=wrap;html=1;align=center;verticalAlign=top;spacingTop=4;fillColor=#f5f5f5;strokeColor=#333333;strokeWidth=2;dashed=0;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="280" y="80" width="3180" height="2180" as="geometry" />
+        </mxCell>
+
+        <!-- Actors LEFT -->
+        <mxCell id="act_admin" value="مدير النظام" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="200" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="act_reception" value="استقبال" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="420" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="act_laser" value="أخصائي ليزر" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="60" y="620" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="act_derm" value="طبيب / أخصائي جلدية" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#e6d0de;strokeColor=#996185;" vertex="1" parent="1">
+          <mxGeometry x="60" y="820" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="act_derm_mgr" value="مدير قسم الجلدية" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#e6d0de;strokeColor=#996185;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1020" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="act_derm_asst" value="مساعد رئيس قسم الجلدية" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#e6d0de;strokeColor=#996185;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1220" width="40" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="act_dental" value="فرع الأسنان" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#cfe2f3;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1420" width="40" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Patient portal boundary (nested visual - dashed box) -->
+        <mxCell id="portal_box" value="بوابة المريض (/patient — حساب منفصل)" style="shape=rectangle;whiteSpace=wrap;html=1;align=center;verticalAlign=top;spacingTop=6;fillColor=#e8f4e8;strokeColor=#82b366;strokeWidth=2;dashed=1;fontStyle=2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1780" width="1080" height="420" as="geometry" />
+        </mxCell>
+        <mxCell id="act_patient" value="مريض&#xa;(بوابة)" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="140" y="1920" width="40" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Use cases — general -->
+        <mxCell id="uc_login" value="تسجيل الدخول" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#ffffff;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="360" y="120" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_dashboard" value="لوحة التحكم" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#ffffff;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="540" y="120" width="130" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_password" value="تغيير كلمة المرور" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#ffffff;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="710" y="120" width="150" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Patients & appointments -->
+        <mxCell id="uc_patients" value="البحث وإدارة المرضى" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="260" width="160" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_record" value="ملف المريض الكامل&#xa;(تبويبات حسب الصلاحية)" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="530" y="250" width="180" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_appts" value="المواعيد المحجوزة" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="740" y="260" width="150" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_add_appt" value="إضافة موعد" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="920" y="260" width="130" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_walkin" value="جلسة بدون موعد&#xa;(استقبال)" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="250" width="150" height="86" as="geometry" />
+        </mxCell>
+
+        <!-- Clinical sessions -->
+        <mxCell id="uc_laser_s" value="إنشاء جلسة ليزر" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="420" width="150" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_derm_s" value="إنشاء جلسة جلدية" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="520" y="420" width="150" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_skin_s" value="إنشاء جلسة عناية بالبشرة" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="420" width="190" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_solarium" value="تسجيل سولاريوم" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="920" y="420" width="140" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_dental" value="إدارة أسنان المريض" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#cfe2f3;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="420" width="160" height="76" as="geometry" />
+        </mxCell>
+
+        <!-- Billing & ops -->
+        <mxCell id="uc_billing" value="التحصيل (قائمة البنود)" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="560" width="170" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_cash" value="حركة الصندوق" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="540" y="560" width="140" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_inventory" value="المستودع" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fad9d5;strokeColor=#ae4132;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="710" y="560" width="120" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_daily" value="الجرد المالي اليومي" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="560" width="160" height="76" as="geometry" />
+        </mxCell>
+
+        <!-- Dermatology finance -->
+        <mxCell id="uc_derm_fin" value="تقرير مالية الجلدية" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="560" width="160" height="76" as="geometry" />
+        </mxCell>
+
+        <!-- Admin -->
+        <mxCell id="uc_users" value="إدارة المستخدمين" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="260" width="150" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_notify" value="إرسال إشعارات" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="260" width="130" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_audit" value="سجل النشاط" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1680" y="260" width="120" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_rooms" value="الغرف والتخصيص" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1830" y="260" width="140" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_laser_adm" value="إعدادات الليزر والعدادات" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="400" width="190" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_skin_adm" value="إجراءات البشرة (تعريفات)" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="400" width="180" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_balances" value="الذمم المالية" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1770" y="400" width="130" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_expenses" value="جداول المصاريف" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1930" y="400" width="130" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_fin_dash" value="لوحة المالية العامة" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2090" y="400" width="160" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_close_day" value="إغلاق يوم العمل" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2280" y="400" width="130" height="76" as="geometry" />
+        </mxCell>
+
+        <!-- Portal UCs -->
+        <mxCell id="uc_p_dash" value="لوحة المريض" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="400" y="1880" width="130" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_p_prof" value="الملف الشخصي" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="560" y="1880" width="120" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_p_rec" value="السجلات الطبية" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="710" y="1880" width="130" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_p_appt" value="مواعيدي" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="870" y="1880" width="110" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_p_fin" value="الوضع المالي" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="1880" width="120" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_p_sec" value="أمان الحساب" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="1880" width="120" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note1" value="قيود: يوم العمل النشط يمنع بعض العمليات للأدوار غير المدير؛ المصاريف ولوحة المالية العامة لمدير النظام فقط؛ مالية الجلدية لمدير القسم أو المدير." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#fff9e6;strokeColor=#d6b656;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2460" y="120" width="920" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="note2" value="الخطوط تمثّل ارتباط الممثل بحالة الاستخدام (وليست كل الصلاحيات التفصيلية). راجع roleNav في frontend/src/data/nav.ts للتفاصيل." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#e6f2ff;strokeColor=#4a90d9;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2460" y="230" width="920" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Associations: admin to many admin UCs -->
+        <mxCell id="l_a_users" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.33;" edge="1" parent="1" source="act_admin" target="uc_users"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_notify" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.38;" edge="1" parent="1" source="act_admin" target="uc_notify"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_audit" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.43;" edge="1" parent="1" source="act_admin" target="uc_audit"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_rooms" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.48;" edge="1" parent="1" source="act_admin" target="uc_rooms"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_lasadm" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.55;" edge="1" parent="1" source="act_admin" target="uc_laser_adm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_skinadm" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.6;" edge="1" parent="1" source="act_admin" target="uc_skin_adm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_bal" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.65;" edge="1" parent="1" source="act_admin" target="uc_balances"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_exp" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.7;" edge="1" parent="1" source="act_admin" target="uc_expenses"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_find" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.75;" edge="1" parent="1" source="act_admin" target="uc_fin_dash"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_close" style="endArrow=none;html=1;rounded=0;entryX=0;entryY=0.5;exitX=1;exitY=0.8;" edge="1" parent="1" source="act_admin" target="uc_close_day"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_a_pat" style="endArrow=none;html=1;rounded=0;dashed=1;exitX=1;exitY=0.25;entryX=0;entryY=0.5;" edge="1" parent="1" source="act_admin" target="uc_patients"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="220" y="220" /><mxPoint x="220" y="298" /></Array></mxGeometry></mxCell>
+        <mxCell id="l_a_bill" style="endArrow=none;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="act_admin" target="uc_billing"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="200" y="598" /></Array></mxGeometry></mxCell>
+        <mxCell id="l_a_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_admin" target="uc_dashboard"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="200" y="155" /></Array></mxGeometry></mxCell>
+        <mxCell id="l_a_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_admin" target="uc_password"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="200" y="155" /></Array></mxGeometry></mxCell>
+
+        <mxCell id="l_r_pat" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_patients"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_rec" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_record"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_ap" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_appts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_add" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_add_appt"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_wk" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_walkin"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_sol" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_solarium"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_bill" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_billing"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_cash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_cash"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_inv" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_inventory"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_daily" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_daily"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_dashboard"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_r_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_reception" target="uc_password"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="l_l_las" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_laser" target="uc_laser_s"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_l_ap" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_laser" target="uc_appts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_l_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_laser" target="uc_dashboard"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_l_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_laser" target="uc_password"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="l_d_pat" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm" target="uc_patients"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_d_ap" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm" target="uc_appts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_d_ds" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm" target="uc_derm_s"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_d_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm" target="uc_dashboard"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_d_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm" target="uc_password"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="l_dm_add" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_add_appt"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_df" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_derm_fin"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_pat" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_patients"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_ds" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_derm_s"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_inv" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_inventory"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_ap" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_appts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_dashboard"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dm_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_mgr" target="uc_password"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="l_da_pat" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_asst" target="uc_patients"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_da_ds" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_asst" target="uc_derm_s"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_da_inv" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_asst" target="uc_inventory"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_da_ap" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_asst" target="uc_appts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_da_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_asst" target="uc_dashboard"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_da_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_derm_asst" target="uc_password"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="l_dt_pat" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_dental" target="uc_patients"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dt_den" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_dental" target="uc_dental"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dt_ap" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_dental" target="uc_appts"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dt_dash" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_dental" target="uc_dashboard"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_dt_pwd" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_dental" target="uc_password"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="l_p_all" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_patient" target="uc_p_dash"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_p_prof" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_patient" target="uc_p_prof"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_p_rec" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_patient" target="uc_p_rec"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_p_appt" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_patient" target="uc_p_appt"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_p_fin" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_patient" target="uc_p_fin"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_p_sec" style="endArrow=none;html=1;rounded=0;" edge="1" parent="1" source="act_patient" target="uc_p_sec"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- include: record includes patients search flow - skip to keep simple -->
+
+        <mxCell id="l_login_all" style="endArrow=none;html=1;rounded=0;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="act_admin" target="uc_login"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="200" y="100" /></Array></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
