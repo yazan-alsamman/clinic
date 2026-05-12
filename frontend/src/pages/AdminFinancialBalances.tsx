@@ -22,6 +22,14 @@ type FinLine = {
   patientPackageId?: string
 }
 
+type PatientWipeHit = {
+  id: string
+  fileNumber: string
+  name: string
+  outstandingDebtSyp?: number
+  prepaidCreditSyp?: number
+}
+
 type PackageDetailPayload = {
   package: {
     id: string
@@ -140,6 +148,13 @@ export function AdminFinancialBalances() {
   const [detailErr, setDetailErr] = useState('')
   const [detailPayload, setDetailPayload] = useState<DetailPayload | null>(null)
 
+  const [wipeFileNumber, setWipeFileNumber] = useState('')
+  const [wipePatient, setWipePatient] = useState<PatientWipeHit | null>(null)
+  const [wipeErr, setWipeErr] = useState('')
+  const [wipeOk, setWipeOk] = useState('')
+  const [wipeSearchBusy, setWipeSearchBusy] = useState(false)
+  const [wipeActionBusy, setWipeActionBusy] = useState(false)
+
   const load = useCallback(async () => {
     if (!allowed) return
     setErr('')
@@ -235,6 +250,78 @@ export function AdminFinancialBalances() {
     setDetailErr('')
   }
 
+  async function searchPatientForWipe() {
+    const raw = wipeFileNumber.trim()
+    setWipeErr('')
+    setWipeOk('')
+    setWipePatient(null)
+    if (!raw) {
+      setWipeErr('أدخل رقم الإضبارة.')
+      return
+    }
+    setWipeSearchBusy(true)
+    try {
+      const data = await api<{ patients: PatientWipeHit[] }>(
+        `/api/patients?q=${encodeURIComponent(raw)}&pageSize=30`,
+      )
+      const list = Array.isArray(data.patients) ? data.patients : []
+      const exact = list.filter((x) => String(x.fileNumber || '').trim() === raw)
+      if (exact.length === 1) {
+        setWipePatient(exact[0])
+        return
+      }
+      if (exact.length > 1) {
+        setWipeErr('تعارض: أكثر من ملف بنفس رقم الإضبارة — راجع البيانات.')
+        return
+      }
+      if (list.length === 1) {
+        setWipePatient(list[0])
+        setWipeErr('تنبيه: لم يُعثر على تطابق تام لرقم الإضبارة — عُرض أقرب نتيجة واحدة.')
+        return
+      }
+      setWipeErr('لم يُعثر على مريض بهذا الرقم.')
+    } catch (e) {
+      setWipeErr(e instanceof ApiError ? e.message : 'تعذر البحث')
+    } finally {
+      setWipeSearchBusy(false)
+    }
+  }
+
+  async function clearStoredBalance(kind: 'debt' | 'credit') {
+    if (!wipePatient) return
+    const debt = Math.round(Number(wipePatient.outstandingDebtSyp) || 0)
+    const credit = Math.round(Number(wipePatient.prepaidCreditSyp) || 0)
+    const label =
+      kind === 'debt'
+        ? `مسح الذمة المخزّنة على المريض (${debt.toLocaleString('ar-SY')} ل.س)؟ لا يُعدّل بنود الفوترة في النظام.`
+        : `مسح الرصيد الإضافي المخزّن (${credit.toLocaleString('ar-SY')} ل.س)؟`
+    if (!window.confirm(label)) return
+    setWipeActionBusy(true)
+    setWipeErr('')
+    setWipeOk('')
+    try {
+      const d = await api<{ summary: { outstandingDebtSyp: number; prepaidCreditSyp: number } }>(
+        `/api/patients/${encodeURIComponent(wipePatient.id)}/financial-clear-balance`,
+        { method: 'POST', body: JSON.stringify({ kind }) },
+      )
+      setWipePatient((prev) =>
+        prev
+          ? {
+              ...prev,
+              outstandingDebtSyp: Number(d.summary?.outstandingDebtSyp) || 0,
+              prepaidCreditSyp: Number(d.summary?.prepaidCreditSyp) || 0,
+            }
+          : prev,
+      )
+      setWipeOk(kind === 'debt' ? 'تم مسح الذمة المخزّنة.' : 'تم مسح الرصيد الإضافي المخزّن.')
+      void load()
+    } catch (e) {
+      setWipeErr(e instanceof ApiError ? e.message : 'تعذر التنفيذ')
+    } finally {
+      setWipeActionBusy(false)
+    }
+  }
+
   if (!allowed) {
     return (
       <>
@@ -249,8 +336,81 @@ export function AdminFinancialBalances() {
       <h1 className="page-title">ذمم مالية</h1>
       <p className="page-desc">
         كل سطر يمثل ذمة أو رصيداً إضافياً من التحصيل أو من باكج ليزر. اضغط «التفاصيل» لعرض الجلسة/البند أو تفاصيل
-        الباكج.
+        الباكج. يمكن لمدير النظام فقط تصفية الذمة أو الرصيد الإضافي <strong>المخزّن على ملف المريض</strong> من القسم
+        أدناه (لا يُلغى بنود الفوترة غير المطابقة).
       </p>
+
+      <section className="card" style={{ marginTop: '1rem', borderColor: 'var(--border)' }}>
+        <h2 className="card-title" style={{ marginTop: 0 }}>
+          تصفية ذمة أو رصيد إضافي (مخزّن على المريض)
+        </h2>
+        <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: 0 }}>
+          أدخل رقم الإضبارة ثم «بحث». يُصفّر الحقل المعني على سجل المريض فقط ويُسجَّل في سجل التدقيق. أسطر الجدول
+          المرتبطة ببنود تحصيل لا تُحذف تلقائياً.
+        </p>
+        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <label className="form-label">رقم الإضبارة</label>
+            <input
+              className="input"
+              dir="ltr"
+              style={{ minWidth: '10rem' }}
+              value={wipeFileNumber}
+              onChange={(e) => setWipeFileNumber(e.target.value)}
+              placeholder="مثال: 1024"
+            />
+          </div>
+          <button type="button" className="btn btn-secondary" disabled={wipeSearchBusy} onClick={() => void searchPatientForWipe()}>
+            {wipeSearchBusy ? 'جاري البحث…' : 'بحث'}
+          </button>
+        </div>
+        {wipeErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{wipeErr}</p> : null}
+        {wipeOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{wipeOk}</p> : null}
+        {wipePatient ? (
+          <div style={{ marginTop: '1rem', padding: '0.85rem', borderRadius: 10, border: '1px solid var(--border)' }}>
+            <div style={{ fontWeight: 700, marginBottom: '0.35rem' }}>{wipePatient.name}</div>
+            <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
+              الإضبارة: <span dir="ltr">{wipePatient.fileNumber || '—'}</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <div>
+                <span className="form-label">ذمة مخزّنة</span>
+                <div style={{ fontWeight: 700, color: 'var(--danger)', fontVariantNumeric: 'tabular-nums' }}>
+                  {(Math.round(Number(wipePatient.outstandingDebtSyp) || 0)).toLocaleString('ar-SY')} ل.س
+                </div>
+              </div>
+              <div>
+                <span className="form-label">رصيد إضافي مخزّن</span>
+                <div style={{ fontWeight: 700, color: 'var(--success)', fontVariantNumeric: 'tabular-nums' }}>
+                  {(Math.round(Number(wipePatient.prepaidCreditSyp) || 0)).toLocaleString('ar-SY')} ل.س
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
+                disabled={wipeActionBusy || (Math.round(Number(wipePatient.outstandingDebtSyp) || 0) <= 0)}
+                onClick={() => void clearStoredBalance('debt')}
+              >
+                مسح الذمة المخزّنة
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={wipeActionBusy || (Math.round(Number(wipePatient.prepaidCreditSyp) || 0) <= 0)}
+                onClick={() => void clearStoredBalance('credit')}
+              >
+                مسح الرصيد الإضافي المخزّن
+              </button>
+              <Link className="btn btn-primary" to={`/patients/${wipePatient.id}`}>
+                فتح ملف المريض
+              </Link>
+            </div>
+          </div>
+        ) : null}
+      </section>
 
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.75rem' }}>
         <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void load()}>

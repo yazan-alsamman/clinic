@@ -737,6 +737,80 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
   }
 })
 
+/**
+ * تصفية الحقل المخزّن على المريض فقط: outstandingDebtSyp أو prepaidCreditSyp (لا يعدّل بنود الفوترة).
+ * للمدير فقط — يُستخدم لتصحيح أرشفة الذمم/الرصيد الظاهر في صفحة الذمم.
+ */
+patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const patientId = String(req.params.id || '').trim()
+    if (!mongoose.isValidObjectId(patientId)) {
+      res.status(400).json({ error: 'معرّف المريض غير صالح' })
+      return
+    }
+    const kind = String(req.body?.kind || '').trim()
+    if (kind !== 'debt' && kind !== 'credit') {
+      res.status(400).json({ error: 'حدد النوع: debt أو credit' })
+      return
+    }
+    const p = await Patient.findById(patientId).lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
+
+    let debtAfter = debtBefore
+    let creditAfter = creditBefore
+    if (kind === 'debt') {
+      debtAfter = 0
+    } else {
+      creditAfter = 0
+    }
+
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $set: {
+          outstandingDebtSyp: debtAfter,
+          prepaidCreditSyp: creditAfter,
+        },
+      },
+    )
+
+    await writeAudit({
+      user: req.user,
+      action: kind === 'debt' ? 'تصفية ذمة مخزّنة لمريض (مدير)' : 'تصفية رصيد إضافي مخزّن لمريض (مدير)',
+      entityType: 'Patient',
+      entityId: p._id,
+      details: {
+        kind,
+        debtBefore,
+        debtAfter,
+        creditBefore,
+        creditAfter,
+        fileNumber: String(p.fileNumber || ''),
+        name: String(p.name || ''),
+      },
+    })
+
+    res.json({
+      summary: {
+        outstandingDebtSyp: debtAfter,
+        prepaidCreditSyp: creditAfter,
+      },
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 patientsRouter.get('/:id/packages', async (req, res) => {
   try {
     if (!canReadPatients(req.user.role)) {
