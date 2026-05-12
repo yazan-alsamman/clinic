@@ -31,6 +31,8 @@ export type NavKey =
   | 'admin_laser'
   | 'admin_accounting'
   | 'admin_financial_balances'
+  | 'admin_expenses'
+  | 'general_finance_dashboard'
   | 'account_password'
 
 export interface Patient {

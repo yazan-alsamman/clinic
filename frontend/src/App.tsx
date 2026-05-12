@@ -28,6 +28,11 @@ const AdminRooms                = lazyPage(() => import('./pages/AdminRooms'), '
 const AdminLaserPage            = lazyPage(() => import('./pages/AdminLaserPage'), 'AdminLaserPage')
 const AdminAccounting           = lazyPage(() => import('./pages/AdminAccounting'), 'AdminAccounting')
 const AdminFinancialBalances    = lazyPage(() => import('./pages/AdminFinancialBalances'), 'AdminFinancialBalances')
+const AdminExpensesPage           = lazyPage(() => import('./pages/AdminExpensesPage'), 'AdminExpensesPage')
+const GeneralFinanceDashboardPage = lazyPage(
+  () => import('./pages/GeneralFinanceDashboardPage'),
+  'GeneralFinanceDashboardPage',
+)
 const BillingPage               = lazyPage(() => import('./pages/BillingPage'), 'BillingPage')
 const ReceptionCashMovementPage = lazyPage(() => import('./pages/ReceptionCashMovementPage'), 'ReceptionCashMovementPage')
 const ReceptionDailyInventoryPage = lazyPage(() => import('./pages/ReceptionDailyInventoryPage'), 'ReceptionDailyInventoryPage')
@@ -113,6 +118,8 @@ export default function App() {
                 <Route path="/admin/laser" element={<AdminLaserPage />} />
                 <Route path="/admin/accounting" element={<AdminAccounting />} />
                 <Route path="/admin/financial-balances" element={<AdminFinancialBalances />} />
+                <Route path="/admin/expenses" element={<AdminExpensesPage />} />
+                <Route path="/admin/finance-dashboard" element={<GeneralFinanceDashboardPage />} />
                 <Route path="/account/password" element={<AccountPassword />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
