@@ -889,8 +889,16 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         })
       } catch (inner) {
         if (cs?._id && !billingPaid) {
-          await BillingItem.deleteMany({ clinicalSessionId: cs._id })
-          await ClinicalSession.findByIdAndDelete(cs._id)
+          try {
+            const biRows = await BillingItem.find({ clinicalSessionId: cs._id }).select('_id').lean()
+            for (const row of biRows) {
+              await BillingPayment.deleteMany({ billingItemId: row._id })
+            }
+            await BillingItem.deleteMany({ clinicalSessionId: cs._id })
+            await ClinicalSession.findByIdAndDelete(cs._id)
+          } catch (cleanErr) {
+            console.error('solarium package rollback:', cleanErr)
+          }
         } else if (cs?._id && billingPaid) {
           console.error('Solarium package: cash collected but patient package save failed', inner)
           try {
@@ -907,11 +915,18 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         }
         console.error(inner)
         const msg = String(inner?.message || inner)
-        if (msg.includes('البند') || msg.includes('دفعة')) {
+        const clientMsg =
+          msg.includes('البند') ||
+          msg.includes('دفعة') ||
+          msg.includes('ملف حساب') ||
+          msg.includes('لا يوجد مبلغ') ||
+          msg.includes('ParseError') ||
+          msg.includes('تعبير')
+        if (clientMsg) {
           res.status(400).json({ error: msg })
           return
         }
-        res.status(500).json({ error: 'تعذر إنشاء باكج السولاريوم أو التحصيل' })
+        res.status(500).json({ error: msg.trim() ? msg : 'تعذر إنشاء باكج السولاريوم أو التحصيل' })
       }
       return
     }

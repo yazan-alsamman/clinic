@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { config } from './config.js'
 import { connectDb } from './db.js'
+import { ensureDefaultCalculationProfiles } from './services/ensureDefaultCalculationProfiles.js'
 import { authRouter } from './routes/auth.js'
 import { systemRouter } from './routes/system.js'
 import { patientsRouter } from './routes/patients.js'
@@ -81,9 +82,10 @@ app.listen(config.port, host, () => {
 })
 
 connectDb()
-  .then(() => {
+  .then(async () => {
     dbConnected = true
     console.log('MongoDB connected')
+    await ensureDefaultCalculationProfiles()
   })
   .catch((err) => {
     console.error('MongoDB connection failed:', err?.message || err)
