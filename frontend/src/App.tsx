@@ -20,13 +20,11 @@ const BookedAppointmentsPage    = lazyPage(() => import('./pages/BookedAppointme
 const ReceptionAppointmentPage  = lazyPage(() => import('./pages/ReceptionAppointmentPage'), 'ReceptionAppointmentPage')
 const DentalPage                = lazyPage(() => import('./pages/DentalPage'), 'DentalPage')
 const InventoryPage             = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage')
-const InsightsPage              = lazyPage(() => import('./pages/InsightsPage'), 'InsightsPage')
 const AdminUsers                = lazyPage(() => import('./pages/AdminUsers'), 'AdminUsers')
 const AdminSendNotificationsPage = lazyPage(() => import('./pages/AdminSendNotificationsPage'), 'AdminSendNotificationsPage')
 const AdminAudit                = lazyPage(() => import('./pages/AdminAudit'), 'AdminAudit')
 const AdminRooms                = lazyPage(() => import('./pages/AdminRooms'), 'AdminRooms')
 const AdminLaserPage            = lazyPage(() => import('./pages/AdminLaserPage'), 'AdminLaserPage')
-const AdminAccounting           = lazyPage(() => import('./pages/AdminAccounting'), 'AdminAccounting')
 const AdminFinancialBalances    = lazyPage(() => import('./pages/AdminFinancialBalances'), 'AdminFinancialBalances')
 const AdminExpensesPage           = lazyPage(() => import('./pages/AdminExpensesPage'), 'AdminExpensesPage')
 const GeneralFinanceDashboardPage = lazyPage(
@@ -109,14 +107,12 @@ export default function App() {
                 <Route path="/inventory" element={<InventoryPage />} />
                 {/* الرابط القديم للتقرير المُزال — يوجّه لصفحة الجرد المالي للاستقبال */}
                 <Route path="/reports/daily" element={<Navigate to="/reception/daily-inventory" replace />} />
-                <Route path="/reports/insights" element={<InsightsPage />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />
                 <Route path="/admin/send-notifications" element={<AdminSendNotificationsPage />} />
                 <Route path="/admin/audit" element={<AdminAudit />} />
                 <Route path="/admin/rooms" element={<AdminRooms />} />
                 <Route path="/admin/laser" element={<AdminLaserPage />} />
-                <Route path="/admin/accounting" element={<AdminAccounting />} />
                 <Route path="/admin/financial-balances" element={<AdminFinancialBalances />} />
                 <Route path="/admin/expenses" element={<AdminExpensesPage />} />
                 <Route path="/admin/finance-dashboard" element={<GeneralFinanceDashboardPage />} />
