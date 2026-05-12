@@ -28,7 +28,7 @@ const packageSessionSchema = new mongoose.Schema(
 
 const patientPackageSchema = new mongoose.Schema(
   {
-    department: { type: String, enum: ['laser'], default: 'laser' },
+    department: { type: String, enum: ['laser', 'solarium'], default: 'laser' },
     title: { type: String, default: '' },
     sessionsCount: { type: Number, default: 0, min: 1 },
     packageTotalSyp: { type: Number, default: 0, min: 0 },

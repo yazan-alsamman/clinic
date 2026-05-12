@@ -68,7 +68,7 @@ export interface Patient {
   }>
   sessionPackages?: Array<{
     id: string
-    department: 'laser'
+    department: 'laser' | 'solarium'
     title: string
     sessionsCount: number
     packageTotalSyp: number

@@ -200,7 +200,7 @@ type PatientPackageSession = {
 
 type PatientPackage = {
   id: string
-  department: 'laser'
+  department: 'laser' | 'solarium'
   title: string
   sessionsCount: number
   packageTotalSyp: number
@@ -725,6 +725,12 @@ export function PatientRecord() {
   const [packageTotalSyp, setPackageTotalSyp] = useState('')
   const [packagePaidSyp, setPackagePaidSyp] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
+  const [solariumPkgSessions, setSolariumPkgSessions] = useState('10')
+  const [solariumPkgAmount, setSolariumPkgAmount] = useState('')
+  const [solariumPkgNotes, setSolariumPkgNotes] = useState('')
+  const [solariumPkgBusy, setSolariumPkgBusy] = useState(false)
+  const [solariumPkgErr, setSolariumPkgErr] = useState('')
+  const [solariumPkgOk, setSolariumPkgOk] = useState('')
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
   const [laserSessionCompleting, setLaserSessionCompleting] = useState(false)
   const [laserDetailActionErr, setLaserDetailActionErr] = useState('')
@@ -1451,7 +1457,7 @@ export function PatientRecord() {
       .filter((x): x is NonNullable<typeof x> => Boolean(x))
       .map((x) => ({
         id: String(x.id),
-        department: 'laser',
+        department: x.department === 'solarium' ? 'solarium' : 'laser',
         title: String(x.title || ''),
         sessionsCount: Number(x.sessionsCount) || 0,
         packageTotalSyp: Number(x.packageTotalSyp) || 0,
@@ -2505,6 +2511,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 value={packageTitle}
+                disabled={packageBusy || solariumPkgBusy}
                 onChange={(e) => setPackageTitle(e.target.value)}
                 placeholder="مثال: باكج ليزر 6 جلسات"
               />
@@ -2514,6 +2521,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="numeric"
+                disabled={packageBusy || solariumPkgBusy}
                 value={packageSessionsCount}
                 onChange={(e) => setPackageSessionsCount(e.target.value)}
                 placeholder="6"
@@ -2524,6 +2532,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="decimal"
+                disabled={packageBusy || solariumPkgBusy}
                 value={packageTotalSyp}
                 onChange={(e) => setPackageTotalSyp(e.target.value)}
                 placeholder="0"
@@ -2534,6 +2543,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="decimal"
+                disabled={packageBusy || solariumPkgBusy}
                 value={packagePaidSyp}
                 onChange={(e) => setPackagePaidSyp(e.target.value)}
                 placeholder="0"
@@ -2545,6 +2555,7 @@ export function PatientRecord() {
             <textarea
               className="textarea"
               rows={2}
+              disabled={packageBusy || solariumPkgBusy}
               value={packageNotes}
               onChange={(e) => setPackageNotes(e.target.value)}
               placeholder="ملاحظات إضافية على الباكج..."
@@ -2556,7 +2567,7 @@ export function PatientRecord() {
             type="button"
             className="btn btn-primary"
             style={{ marginTop: '0.9rem' }}
-            disabled={packageBusy}
+            disabled={packageBusy || solariumPkgBusy}
             onClick={async () => {
               if (!id) return
               setPackageErr('')
@@ -2618,6 +2629,110 @@ export function PatientRecord() {
             {packageBusy ? 'جاري الحفظ…' : 'حفظ الباكج'}
           </button>
 
+          <h2 className="card-title" style={{ marginTop: '1.75rem' }}>
+            باكج سولاريوم (تحصيل فوري)
+          </h2>
+          <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+            يُدخل الاستقبال عدد جلسات الباكج والمبلغ النقدي المأخوذ من المريض. عند الضغط على «إنشاء الباكج وتحصيل» يُسجَّل
+            المبلغ في الجرد المالي كتحصيل سولاريوم، وتظهر الجلسات في الملف لاستهلاكها واحدةً تلو الأخرى.
+          </p>
+          <div className="grid-2" style={{ marginTop: '0.75rem' }}>
+            <div>
+              <label className="form-label">عدد جلسات الباكج</label>
+              <input
+                className="input"
+                inputMode="numeric"
+                disabled={packageBusy || solariumPkgBusy}
+                value={solariumPkgSessions}
+                onChange={(e) => setSolariumPkgSessions(e.target.value)}
+                placeholder="10"
+              />
+            </div>
+            <div>
+              <label className="form-label">المبلغ المحصّل (ل.س)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                disabled={packageBusy || solariumPkgBusy}
+                value={solariumPkgAmount}
+                onChange={(e) => setSolariumPkgAmount(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: '0.75rem' }}>
+            <label className="form-label">ملاحظات (اختياري)</label>
+            <textarea
+              className="textarea"
+              rows={2}
+              disabled={packageBusy || solariumPkgBusy}
+              value={solariumPkgNotes}
+              onChange={(e) => setSolariumPkgNotes(e.target.value)}
+              placeholder="ملاحظات على الباكج…"
+            />
+          </div>
+          {solariumPkgErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{solariumPkgErr}</p> : null}
+          {solariumPkgOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{solariumPkgOk}</p> : null}
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ marginTop: '0.9rem' }}
+            disabled={packageBusy || solariumPkgBusy}
+            onClick={async () => {
+              if (!id) return
+              setSolariumPkgErr('')
+              setSolariumPkgOk('')
+              const sessionsCount = Math.max(1, parseInt(solariumPkgSessions || '0', 10) || 0)
+              if (!sessionsCount || sessionsCount > 200) {
+                setSolariumPkgErr('حدد عدد جلسات بين 1 و 200.')
+                return
+              }
+              const collected = Math.max(0, Math.round(parseFloat(solariumPkgAmount) || 0))
+              if (!(collected > 0)) {
+                setSolariumPkgErr('أدخل المبلغ المحصّل بالليرة.')
+                return
+              }
+              setSolariumPkgBusy(true)
+              try {
+                const data = await api<{
+                  package: PatientPackage
+                  summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+                }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    department: 'solarium',
+                    sessionsCount,
+                    collectedAmountSyp: collected,
+                    notes: solariumPkgNotes.trim(),
+                  }),
+                })
+                setPatient((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
+                        prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
+                        departments: Array.from(
+                          new Set([...(prev.departments || []), 'solarium' as const]),
+                        ),
+                        sessionPackages: [...(Array.isArray(prev.sessionPackages) ? prev.sessionPackages : []), data.package],
+                      }
+                    : prev,
+                )
+                setSolariumPkgOk('تم إنشاء باكج السولاريوم والتحصيل بنجاح.')
+                setSolariumPkgSessions('10')
+                setSolariumPkgAmount('')
+                setSolariumPkgNotes('')
+              } catch (e) {
+                setSolariumPkgErr(e instanceof ApiError ? e.message : 'تعذر إنشاء الباكج')
+              } finally {
+                setSolariumPkgBusy(false)
+              }
+            }}
+          >
+            {solariumPkgBusy ? 'جاري التحصيل…' : 'إنشاء الباكج وتحصيل'}
+          </button>
+
           <h3 className="card-title" style={{ marginTop: '1.35rem', fontSize: '0.95rem' }}>
             الباكجات المسجلة
           </h3>
@@ -2636,8 +2751,25 @@ export function PatientRecord() {
                       </p>
                     )
                   })()}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    <strong>{pkg.title || `باكج ليزر (${pkg.sessionsCount} جلسة)`}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <strong>
+                        {pkg.title ||
+                          (pkg.department === 'solarium'
+                            ? `باكج سولاريوم (${pkg.sessionsCount} جلسة)`
+                            : `باكج ليزر (${pkg.sessionsCount} جلسة)`)}
+                      </strong>
+                      <span
+                        className="chip"
+                        style={{
+                          fontSize: '0.72rem',
+                          background:
+                            pkg.department === 'solarium' ? 'rgba(245, 158, 11, 0.18)' : 'var(--surface-2)',
+                        }}
+                      >
+                        {pkg.department === 'solarium' ? 'سولاريوم' : 'ليزر'}
+                      </span>
+                    </div>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
                       {pkg.createdAt ? formatClinicDate(pkg.createdAt) : '—'}
                     </span>
@@ -2646,14 +2778,20 @@ export function PatientRecord() {
                     إجمالي الباكج: <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
                     <strong>{renderMoneySyp(pkg.paidAmountSyp)}</strong>
                   </p>
-                  <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                    حالة التسوية:{' '}
-                    {pkg.settlementDeltaSyp < 0
-                      ? `ذمة ${Math.abs(pkg.settlementDeltaSyp).toLocaleString('ar-SY')} ل.س`
-                      : pkg.settlementDeltaSyp > 0
-                        ? `رصيد إضافي ${pkg.settlementDeltaSyp.toLocaleString('ar-SY')} ل.س`
-                        : 'متوازن'}
-                  </p>
+                  {pkg.department === 'solarium' ? (
+                    <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                      تم تحصيل المبلغ نقداً عند إنشاء الباكج ويظهر في الجرد المالي ضمن السولاريوم.
+                    </p>
+                  ) : (
+                    <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                      حالة التسوية:{' '}
+                      {pkg.settlementDeltaSyp < 0
+                        ? `ذمة ${Math.abs(pkg.settlementDeltaSyp).toLocaleString('ar-SY')} ل.س`
+                        : pkg.settlementDeltaSyp > 0
+                          ? `رصيد إضافي ${pkg.settlementDeltaSyp.toLocaleString('ar-SY')} ل.س`
+                          : 'متوازن'}
+                    </p>
+                  )}
                   <div style={{ display: 'grid', gap: '0.4rem' }}>
                     {pkg.sessions.map((s) => (
                       <label
@@ -2671,7 +2809,7 @@ export function PatientRecord() {
                         <input
                           type="checkbox"
                           checked={s.completedByReception}
-                          disabled={s.completedByReception || packageBusy}
+                          disabled={s.completedByReception || packageBusy || solariumPkgBusy}
                           onChange={async (e) => {
                             if (!id) return
                             const nextCompleted = e.target.checked
@@ -2697,7 +2835,11 @@ export function PatientRecord() {
                                     }
                                   : prev,
                               )
-                              setPackageOk('تم تثبيت إتمام جلسة الباكج.')
+                              setPackageOk(
+                                pkg.department === 'solarium'
+                                  ? 'تم تسجيل استهلاك جلسة السولاريوم.'
+                                  : 'تم تثبيت إتمام جلسة الباكج.',
+                              )
                             } catch (err) {
                               setPackageErr(err instanceof ApiError ? err.message : 'تعذر تحديث جلسة الباكج')
                             } finally {
@@ -2707,7 +2849,12 @@ export function PatientRecord() {
                         />
                         <span>
                           {s.label}
-                          {s.linkedLaserSessionId ? (
+                          {pkg.department === 'solarium' ? (
+                            <span style={{ color: 'var(--text-muted)' }}>
+                              {' '}
+                              — {s.completedByReception ? 'تم استهلاك الجلسة' : 'لم تُستهلك بعد — انقر لتسجيل الزيارة'}
+                            </span>
+                          ) : s.linkedLaserSessionId ? (
                             <span style={{ color: 'var(--text-muted)' }}> — مرتبطة بجلسة ليزر</span>
                           ) : (
                             <span style={{ color: 'var(--text-muted)' }}> — بانتظار تسجيل الجلسة</span>

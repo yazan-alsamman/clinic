@@ -11,6 +11,8 @@ import { authMiddleware, requireActiveDay } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
 import { writeAudit } from '../utils/audit.js'
+import { todayBusinessDate } from '../utils/date.js'
+import { recordBillingStraightCashSyp } from '../services/recordBillingStraightCashSyp.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
@@ -139,6 +141,26 @@ async function nextSequentialFileNumber() {
 
 function canManagePackages(role) {
   return role === 'super_admin' || role === 'reception'
+}
+
+/** تسمية جلسات باكج السولاريوم للعرض في الملف (مذكر أنثوي مع العدد للجلسات بعد العاشرة) */
+function solariumPackageSessionLabelAr(zeroBasedIndex) {
+  const n = zeroBasedIndex + 1
+  const ord = [
+    '',
+    'الأولى',
+    'الثانية',
+    'الثالثة',
+    'الرابعة',
+    'الخامسة',
+    'السادسة',
+    'السابعة',
+    'الثامنة',
+    'التاسعة',
+    'العاشرة',
+  ]
+  if (n >= 1 && n <= 10) return `الجلسة ${ord[n]}`
+  return `الجلسة ${n.toLocaleString('ar-SY')}`
 }
 
 function serializePackage(pkg) {
@@ -746,15 +768,159 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       return
     }
     const department = String(req.body?.department || 'laser').trim() || 'laser'
-    if (department !== 'laser') {
-      res.status(400).json({ error: 'حالياً الباكج متاح لقسم الليزر فقط' })
-      return
-    }
     const sessionsCount = Math.max(1, Math.min(200, Number.parseInt(String(req.body?.sessionsCount || '0'), 10) || 0))
     if (!sessionsCount) {
       res.status(400).json({ error: 'عدد الجلسات غير صالح' })
       return
     }
+
+    if (department === 'solarium') {
+      const collectedSyp = parsePositiveSypInteger(
+        req.body?.collectedAmountSyp ?? req.body?.paidAmountSyp ?? req.body?.amountSyp,
+      )
+      if (collectedSyp == null) {
+        res.status(400).json({ error: 'أدخل المبلغ المحصّل بالليرة (أكبر من صفر)' })
+        return
+      }
+      const title =
+        String(req.body?.title || '').trim().slice(0, 160) || `باكج سولاريوم (${sessionsCount} جلسة)`
+      const notes = String(req.body?.notes || '').trim().slice(0, 1200)
+      const businessDate = String(req.body?.businessDate || '').trim() || req.businessDate || todayBusinessDate()
+      const patientName = String(p.name || '').trim()
+
+      let cs = null
+      let billingPaid = false
+      try {
+        const procedureDescription = `سولاريوم — باكج مسبق الدفع (${sessionsCount} جلسة)${patientName ? ` — ${patientName}` : ''}`
+        cs = await ClinicalSession.create({
+          patientId: p._id,
+          providerUserId: req.user._id,
+          department: 'solarium',
+          procedureDescription,
+          sessionFeeSyp: collectedSyp,
+          businessDate,
+          notes: notes ? notes.slice(0, 500) : '',
+          materials: [],
+          materialCostSypTotal: 0,
+          materialChargeSypTotal: 0,
+          createdByReceptionUserId: req.user._id,
+        })
+
+        const bi = await BillingItem.create({
+          clinicalSessionId: cs._id,
+          patientId: p._id,
+          providerUserId: req.user._id,
+          department: 'solarium',
+          procedureLabel: procedureDescription,
+          listAmountDueSyp: collectedSyp,
+          discountPercent: 0,
+          effectiveAmountDueSyp: collectedSyp,
+          amountDueSyp: collectedSyp,
+          currency: 'SYP',
+          businessDate,
+          status: 'pending_payment',
+        })
+        cs.billingItemId = bi._id
+        await cs.save()
+
+        const payResult = await recordBillingStraightCashSyp({
+          billingItemId: bi._id,
+          receivedByUser: req.user,
+        })
+        billingPaid = true
+
+        const packageId = new mongoose.Types.ObjectId()
+        const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
+          _id: new mongoose.Types.ObjectId(),
+          label: solariumPackageSessionLabelAr(idx),
+          completedByReception: false,
+          completedAt: null,
+          completedByUserId: null,
+          linkedLaserSessionId: null,
+          linkedBillingItemId: null,
+        }))
+        const packageDoc = {
+          _id: packageId,
+          department: 'solarium',
+          title,
+          sessionsCount,
+          packageTotalSyp: collectedSyp,
+          paidAmountSyp: collectedSyp,
+          settlementDeltaSyp: 0,
+          notes,
+          createdByUserId: req.user._id,
+          sessions,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+
+        await Patient.updateOne(
+          { _id: p._id },
+          {
+            $push: { sessionPackages: packageDoc },
+            $addToSet: { departments: 'solarium' },
+          },
+        )
+
+        const freshDebtCredit = await Patient.findById(p._id).select('outstandingDebtSyp prepaidCreditSyp').lean()
+
+        await writeAudit({
+          user: req.user,
+          action: 'إنشاء باكج سولاريوم وتحصيل',
+          entityType: 'Patient',
+          entityId: p._id,
+          details: {
+            packageId: String(packageId),
+            department: 'solarium',
+            sessionsCount,
+            collectedSyp,
+            clinicalSessionId: String(cs._id),
+            billingItemId: String(bi._id),
+            paymentId: payResult.paymentId,
+          },
+        })
+
+        res.status(201).json({
+          package: serializePackage(packageDoc),
+          summary: {
+            outstandingDebtSyp: Math.round(Number(freshDebtCredit?.outstandingDebtSyp) || 0),
+            prepaidCreditSyp: Math.round(Number(freshDebtCredit?.prepaidCreditSyp) || 0),
+          },
+        })
+      } catch (inner) {
+        if (cs?._id && !billingPaid) {
+          await BillingItem.deleteMany({ clinicalSessionId: cs._id })
+          await ClinicalSession.findByIdAndDelete(cs._id)
+        } else if (cs?._id && billingPaid) {
+          console.error('Solarium package: cash collected but patient package save failed', inner)
+          try {
+            await writeAudit({
+              user: req.user,
+              action: 'تحذير: تحصيل باكج سولاريوم دون حفظ الباكج في ملف المريض',
+              entityType: 'Patient',
+              entityId: p._id,
+              details: { clinicalSessionId: String(cs._id), error: String(inner?.message || inner) },
+            })
+          } catch (auditErr) {
+            console.error(auditErr)
+          }
+        }
+        console.error(inner)
+        const msg = String(inner?.message || inner)
+        if (msg.includes('البند') || msg.includes('دفعة')) {
+          res.status(400).json({ error: msg })
+          return
+        }
+        res.status(500).json({ error: 'تعذر إنشاء باكج السولاريوم أو التحصيل' })
+      }
+      return
+    }
+
+    if (department !== 'laser') {
+      res.status(400).json({ error: 'نوع الباكج غير مدعوم' })
+      return
+    }
+
     const packageTotalSyp = parsePositiveSypInteger(req.body?.packageTotalSyp)
     if (packageTotalSyp == null) {
       res.status(400).json({ error: 'أدخل إجمالي سعر الباكج بالليرة' })
