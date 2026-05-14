@@ -1035,22 +1035,21 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
 
     const packageId = new mongoose.Types.ObjectId()
-    let laserPackageTemplateId = ''
-    let procedureOptionIdsSnap = []
-    let areaCountSnap = 0
-    let title = String(req.body?.title || '').trim().slice(0, 160)
     const tplId = String(req.body?.laserPackageTemplateId || '').trim()
-    if (tplId) {
-      const tpl = await LaserPackageTemplate.findById(tplId).lean()
-      if (!tpl || tpl.active === false) {
-        res.status(400).json({ error: 'قالب الباكج غير موجود أو موقوف' })
-        return
-      }
-      laserPackageTemplateId = String(tpl._id)
-      procedureOptionIdsSnap = Array.isArray(tpl.procedureOptionIds) ? tpl.procedureOptionIds.map(String) : []
-      areaCountSnap = Math.max(1, Math.trunc(Number(tpl.areaCount) || procedureOptionIdsSnap.length))
-      if (!title) title = String(tpl.name || '').trim().slice(0, 160)
+    if (!mongoose.isValidObjectId(tplId)) {
+      res.status(400).json({ error: 'يجب اختيار قالب باكج ليزر من القائمة المعرفة في النظام' })
+      return
     }
+    const tpl = await LaserPackageTemplate.findById(tplId).lean()
+    if (!tpl || tpl.active === false) {
+      res.status(400).json({ error: 'قالب الباكج غير موجود أو موقوف' })
+      return
+    }
+    const laserPackageTemplateId = String(tpl._id)
+    const procedureOptionIdsSnap = Array.isArray(tpl.procedureOptionIds) ? tpl.procedureOptionIds.map(String) : []
+    const areaCountSnap = Math.max(1, Math.trunc(Number(tpl.areaCount) || procedureOptionIdsSnap.length))
+    let title = String(req.body?.title || '').trim().slice(0, 160)
+    if (!title) title = String(tpl.name || '').trim().slice(0, 160)
     if (!title) title = `باكج ليزر (${sessionsCount} جلسة)`
     const notes = String(req.body?.notes || '').trim().slice(0, 1200)
     const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
