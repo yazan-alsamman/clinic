@@ -17,6 +17,7 @@ type SlotRow = {
   roomNumber?: number | null
   arrivedAt?: string | null
   assignedSpecialistName?: string
+  laserPackageBookingMode?: '' | 'use_package' | 'outside_package'
 }
 
 function todayYmd() {
@@ -122,7 +123,9 @@ export function LaserCreateSessionPage() {
                       navigate(
                         `/patients/${s.patientId}?tab=laser&laserProc=${encodeURIComponent(
                           String(s.procedureType || '').trim(),
-                        )}&laserSlotId=${encodeURIComponent(String(s.id))}&laserRoom=${encodeURIComponent(String(s.roomNumber || ''))}`,
+                        )}&laserSlotId=${encodeURIComponent(String(s.id))}&laserRoom=${encodeURIComponent(String(s.roomNumber || ''))}&laserSlotPkgMode=${encodeURIComponent(
+                          String(s.laserPackageBookingMode || ''),
+                        )}`,
                       )
                     }
                     style={{ cursor: 'pointer' }}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
@@ -637,12 +637,16 @@ export function PatientRecord() {
   const [selectedLaserAddonItemIds, setSelectedLaserAddonItemIds] = useState<string[]>([])
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
+  /** من جدول المواعيد — يحدد إن كان الحجز كجلسة ضمن الباكج */
+  const bookedLaserSlotPkgMode = (searchParams.get('laserSlotPkgMode') || '').trim()
   const bookedDermProcedureText = (searchParams.get('dermProc') || '').trim()
   const bookedDermSlotId = (searchParams.get('dermSlotId') || '').trim()
   const roomFromQuery = String(searchParams.get('laserRoom') || '').trim()
   const room: '1' | '2' = roomFromQuery === '2' ? '2' : '1'
   const [laserAreaModalOpen, setLaserAreaModalOpen] = useState(false)
   const [laserLineItems, setLaserLineItems] = useState<LaserSessionLineInput[]>([])
+  /** يمنع إعادة تعبئة أسطر الباكج تلقائياً بعد حفظ جلسة لنفس الموعد */
+  const laserPkgPrefillBlockedKeyRef = useRef('')
   const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
   /** سعر «كفر ليزر» كما يحدده المدير في إعدادات الليزر */
   const [laserCoverPriceSyp, setLaserCoverPriceSyp] = useState(0)
@@ -1594,6 +1598,44 @@ export function PatientRecord() {
     selectedLaserTotalSyp,
     laserCoverSelected,
     laserCoverPriceSyp,
+  ])
+
+  useEffect(() => {
+    laserPkgPrefillBlockedKeyRef.current = ''
+  }, [id, bookedLaserSlotId])
+
+  useEffect(() => {
+    if (tab !== 'laser' || !id) return
+    if (laserProcedureLoading) return
+    if (!laserProcedureGroups.length) return
+    if (bookedLaserSlotPkgMode === 'outside_package') return
+
+    const wantsPackageLines =
+      bookedLaserSlotPkgMode === 'use_package' ||
+      (!bookedLaserSlotPkgMode && bookedLaserProcedureText === 'جلسة ضمن باكج ليزر')
+
+    if (!wantsPackageLines) return
+
+    const pkg = activeLaserPackage
+    const ids = (pkg?.procedureOptionIds || []).filter(Boolean)
+    if (!ids.length) return
+    if (!ids.every((oid) => laserItemById.has(oid))) return
+
+    const blockKey = `${id}|${bookedLaserSlotId || ''}`
+    if (bookedLaserSlotId && laserPkgPrefillBlockedKeyRef.current === blockKey) return
+
+    setSelectedLaserAddonItemIds([])
+    setSelectedLaserItemIds((prev) => (prev.length > 0 ? prev : [...ids]))
+  }, [
+    tab,
+    id,
+    laserProcedureLoading,
+    laserProcedureGroups,
+    bookedLaserSlotPkgMode,
+    bookedLaserProcedureText,
+    bookedLaserSlotId,
+    activeLaserPackage?.id,
+    (activeLaserPackage?.procedureOptionIds || []).join(','),
   ])
 
   useEffect(() => {
@@ -3753,6 +3795,9 @@ export function PatientRecord() {
                   setSelectedLaserItemIds([])
                   setSelectedLaserAddonItemIds([])
                   setLaserLineItems([])
+                  if (id && bookedLaserSlotId) {
+                    laserPkgPrefillBlockedKeyRef.current = `${id}|${bookedLaserSlotId}`
+                  }
                   const data = await api<{ sessions: { treatmentNumber: number }[] }>(
                     `/api/laser/sessions?patientId=${encodeURIComponent(id)}`,
                   )
