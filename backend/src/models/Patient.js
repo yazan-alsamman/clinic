@@ -22,6 +22,10 @@ const packageSessionSchema = new mongoose.Schema(
     completedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     linkedLaserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null },
     linkedBillingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+    /** إنقاص مناطق فقط (بدون إنقاص جلسة) — تسوية من الاستقبال */
+    areasAdjustedOnly: { type: Boolean, default: false },
+    /** ملاحظة عند حذف منطقة من باكج أو إضافة من خارج الباكج */
+    receptionNote: { type: String, default: '', trim: true, maxlength: 500 },
   },
   { _id: true },
 )
@@ -29,6 +33,13 @@ const packageSessionSchema = new mongoose.Schema(
 const patientPackageSchema = new mongoose.Schema(
   {
     department: { type: String, enum: ['laser', 'solarium'], default: 'laser' },
+    /** مرجع قالب الباكج من لوحة المدير (اختياري) */
+    laserPackageTemplateId: { type: String, default: '', trim: true },
+    /** نسخة المناطق وقت البيع — لا تتغير عند تعديل القالب لاحقاً */
+    procedureOptionIds: [{ type: String, trim: true }],
+    areaCount: { type: Number, default: 0, min: 0 },
+    /** إيقاف مؤقت — لا يُستخدم في الحجز أو جلسات الباكج */
+    suspended: { type: Boolean, default: false },
     title: { type: String, default: '' },
     sessionsCount: { type: Number, default: 0, min: 1 },
     packageTotalSyp: { type: Number, default: 0, min: 0 },

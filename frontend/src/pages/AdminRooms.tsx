@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../api/client'
 
 type RoomRow = {
@@ -27,6 +27,15 @@ type LaserProcedureItem = {
   sortOrder: number
 }
 type LaserProcedureGroup = { id: string; title: string; items: LaserProcedureItem[] }
+type LaserPackageTemplateRow = {
+  id: string
+  name: string
+  procedureOptionIds: string[]
+  areaCount: number
+  listPriceSyp: number
+  active: boolean
+  sortOrder: number
+}
 type DermatologyBoard = {
   id: string
   index: number
@@ -96,6 +105,49 @@ export function AdminRooms() {
   const [secretaryShifts, setSecretaryShifts] = useState<SecretaryShiftPayload | null>(null)
   const [secSaving, setSecSaving] = useState(false)
   const [secMsg, setSecMsg] = useState('')
+  const [pkgTemplates, setPkgTemplates] = useState<LaserPackageTemplateRow[]>([])
+  const [pkgTplLoading, setPkgTplLoading] = useState(false)
+  const [pkgTplErr, setPkgTplErr] = useState('')
+  const [pkgTplNewName, setPkgTplNewName] = useState('')
+  const [pkgTplNewSel, setPkgTplNewSel] = useState<string[]>([])
+  const [pkgTplNewPrice, setPkgTplNewPrice] = useState('')
+  const [pkgTplNewSort, setPkgTplNewSort] = useState('0')
+  const [pkgTplSaving, setPkgTplSaving] = useState(false)
+  const [pkgTplEdit, setPkgTplEdit] = useState<LaserPackageTemplateRow | null>(null)
+  const [pkgTplEditName, setPkgTplEditName] = useState('')
+  const [pkgTplEditSel, setPkgTplEditSel] = useState<string[]>([])
+  const [pkgTplEditPrice, setPkgTplEditPrice] = useState('')
+  const [pkgTplEditSort, setPkgTplEditSort] = useState('0')
+
+  const laserGroupsOrdered = useMemo(() => {
+    const rest = groups.filter((g) => g.id !== 'offers')
+    const off = groups.filter((g) => g.id === 'offers')
+    return [...rest, ...off]
+  }, [groups])
+
+  const laserProcById = useMemo(() => {
+    const m = new Map<string, LaserProcedureItem>()
+    for (const g of groups) {
+      for (const it of g.items || []) {
+        m.set(it.id, it)
+      }
+    }
+    return m
+  }, [groups])
+
+  async function loadPackageTemplates() {
+    setPkgTplLoading(true)
+    setPkgTplErr('')
+    try {
+      const data = await api<{ templates: LaserPackageTemplateRow[] }>('/api/laser/package-templates?includeInactive=1')
+      setPkgTemplates(data.templates || [])
+    } catch {
+      setPkgTemplates([])
+      setPkgTplErr('تعذر تحميل قوالب باكجات الليزر')
+    } finally {
+      setPkgTplLoading(false)
+    }
+  }
 
   async function loadProcedureOptions() {
     setProcLoading(true)
@@ -163,6 +215,7 @@ export function AdminRooms() {
   useEffect(() => {
     void load()
     void loadProcedureOptions()
+    void loadPackageTemplates()
   }, [])
 
   return (
@@ -645,7 +698,7 @@ export function AdminRooms() {
           <p style={{ color: 'var(--text-muted)' }}>جاري التحميل…</p>
         ) : (
           <div style={{ display: 'grid', gap: '0.75rem', marginTop: '0.9rem' }}>
-            {groups.map((g) => (
+            {laserGroupsOrdered.map((g) => (
               <div key={g.id} className="table-wrap">
                 <h3 style={{ margin: '0 0 0.45rem' }}>{g.title}</h3>
                 <table className="data-table">
@@ -716,9 +769,333 @@ export function AdminRooms() {
                 </table>
               </div>
             ))}
+            <div
+              style={{
+                marginTop: '1.1rem',
+                paddingTop: '1rem',
+                borderTop: '1px solid var(--border)',
+              }}
+            >
+              <h3 style={{ margin: '0 0 0.35rem' }}>باكجات الليزر (قوالب)</h3>
+              <p style={{ margin: '0 0 0.65rem', fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                يُعرَّف الباكج هنا بالاسم والمناطق المشمولة وسعر القائمة. عند بيعه من ملف المريض يُنسخ إلى ملفه مع
+                عدد الجلسات والسعر الفعلي الذي يحدده الاستقبال.
+              </p>
+              {pkgTplErr ? <p style={{ color: 'var(--danger)', marginBottom: '0.5rem' }}>{pkgTplErr}</p> : null}
+              <div style={{ display: 'grid', gap: '0.55rem', marginBottom: '0.75rem' }}>
+                <input
+                  className="input"
+                  placeholder="اسم الباكج"
+                  value={pkgTplNewName}
+                  onChange={(e) => setPkgTplNewName(e.target.value)}
+                />
+                <div>
+                  <p style={{ margin: '0 0 0.35rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    المناطق/العروض المشمولة (اختر من القائمة — العدد يجب أن يطابق «عدد المناطق» المرسل للخادم)
+                  </p>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem',
+                      maxHeight: 160,
+                      overflow: 'auto',
+                      padding: '0.45rem',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      background: 'var(--surface-1)',
+                    }}
+                  >
+                    {groups.flatMap((gr) =>
+                      (gr.items || []).filter((it) => it.active).map((it) => {
+                        const on = pkgTplNewSel.includes(it.id)
+                        return (
+                          <button
+                            key={it.id}
+                            type="button"
+                            className={`btn ${on ? 'btn-primary' : 'btn-secondary'}`}
+                            style={{ fontSize: '0.78rem', padding: '0.28rem 0.5rem' }}
+                            onClick={() =>
+                              setPkgTplNewSel((prev) =>
+                                prev.includes(it.id) ? prev.filter((x) => x !== it.id) : [...prev, it.id],
+                              )
+                            }
+                          >
+                            {it.name}
+                          </button>
+                        )
+                      }),
+                    )}
+                  </div>
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    المختار: <strong>{pkgTplNewSel.length}</strong> عنصر
+                  </p>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
+                  <input
+                    className="input"
+                    placeholder="سعر الباكج (ل.س)"
+                    inputMode="numeric"
+                    value={pkgTplNewPrice}
+                    onChange={(e) => setPkgTplNewPrice(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    placeholder="ترتيب العرض"
+                    value={pkgTplNewSort}
+                    onChange={(e) => setPkgTplNewSort(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ justifySelf: 'start' }}
+                  disabled={pkgTplSaving}
+                  onClick={async () => {
+                    const name = pkgTplNewName.trim()
+                    if (!name) {
+                      setPkgTplErr('أدخل اسماً للباكج')
+                      return
+                    }
+                    if (pkgTplNewSel.length < 1) {
+                      setPkgTplErr('اختر منطقة أو أكثر من القائمة')
+                      return
+                    }
+                    setPkgTplSaving(true)
+                    setPkgTplErr('')
+                    try {
+                      await api('/api/laser/package-templates', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          name,
+                          procedureOptionIds: pkgTplNewSel,
+                          areaCount: pkgTplNewSel.length,
+                          listPriceSyp: Math.max(0, Math.round(parseFloat(pkgTplNewPrice.replace(/,/g, '')) || 0)),
+                          sortOrder: Math.trunc(Number(pkgTplNewSort) || 0),
+                        }),
+                      })
+                      setPkgTplNewName('')
+                      setPkgTplNewSel([])
+                      setPkgTplNewPrice('')
+                      setPkgTplNewSort('0')
+                      await loadPackageTemplates()
+                    } catch (e) {
+                      setPkgTplErr(e instanceof ApiError ? e.message : 'تعذر إنشاء الباكج')
+                    } finally {
+                      setPkgTplSaving(false)
+                    }
+                  }}
+                >
+                  {pkgTplSaving ? 'جاري الإضافة…' : 'إضافة باكج'}
+                </button>
+              </div>
+              {pkgTplLoading ? (
+                <p style={{ color: 'var(--text-muted)', margin: 0 }}>جاري تحميل القوالب…</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>الاسم</th>
+                        <th>المناطق</th>
+                        <th>العدد</th>
+                        <th>سعر القائمة</th>
+                        <th>الحالة</th>
+                        <th>إجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pkgTemplates.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.name}</td>
+                          <td style={{ fontSize: '0.82rem', maxWidth: 280 }}>
+                            {row.procedureOptionIds
+                              .map((oid) => laserProcById.get(oid)?.name || oid)
+                              .join('، ')}
+                          </td>
+                          <td>{row.areaCount}</td>
+                          <td>{Number(row.listPriceSyp || 0).toLocaleString('en-US')}</td>
+                          <td>{row.active ? 'مفعّل' : 'موقوف'}</td>
+                          <td style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.78rem' }}
+                              onClick={() => {
+                                setPkgTplEdit(row)
+                                setPkgTplEditName(row.name)
+                                setPkgTplEditSel([...row.procedureOptionIds])
+                                setPkgTplEditPrice(String(row.listPriceSyp))
+                                setPkgTplEditSort(String(row.sortOrder ?? 0))
+                              }}
+                            >
+                              تعديل
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.78rem' }}
+                              onClick={async () => {
+                                try {
+                                  await api(`/api/laser/package-templates/${encodeURIComponent(row.id)}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ active: !row.active }),
+                                  })
+                                  await loadPackageTemplates()
+                                } catch (e) {
+                                  setPkgTplErr(e instanceof ApiError ? e.message : 'تعذر تحديث الحالة')
+                                }
+                              }}
+                            >
+                              {row.active ? 'إيقاف' : 'تفعيل'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '0.78rem' }}
+                              onClick={async () => {
+                                if (!window.confirm('حذف هذا القالب؟')) return
+                                try {
+                                  await api(`/api/laser/package-templates/${encodeURIComponent(row.id)}`, {
+                                    method: 'DELETE',
+                                  })
+                                  await loadPackageTemplates()
+                                } catch (e) {
+                                  setPkgTplErr(e instanceof ApiError ? e.message : 'تعذر الحذف')
+                                }
+                              }}
+                            >
+                              حذف
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {pkgTemplates.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginTop: '0.5rem' }}>
+                      لا توجد قوالب بعد.
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      {pkgTplEdit ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setPkgTplEdit(null)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>تعديل باكج الليزر</h3>
+            <div style={{ display: 'grid', gap: '0.55rem' }}>
+              <input
+                className="input"
+                placeholder="اسم الباكج"
+                value={pkgTplEditName}
+                onChange={(e) => setPkgTplEditName(e.target.value)}
+              />
+              <div>
+                <p style={{ margin: '0 0 0.35rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>المناطق المشمولة</p>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.4rem',
+                    maxHeight: 160,
+                    overflow: 'auto',
+                    padding: '0.45rem',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                  }}
+                >
+                  {groups.flatMap((gr) =>
+                    (gr.items || []).filter((it) => it.active || pkgTplEditSel.includes(it.id)).map((it) => {
+                      const on = pkgTplEditSel.includes(it.id)
+                      return (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className={`btn ${on ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ fontSize: '0.78rem', padding: '0.28rem 0.5rem' }}
+                          onClick={() =>
+                            setPkgTplEditSel((prev) =>
+                              prev.includes(it.id) ? prev.filter((x) => x !== it.id) : [...prev, it.id],
+                            )
+                          }
+                        >
+                          {it.name}
+                        </button>
+                      )
+                    }),
+                  )}
+                </div>
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  المختار: <strong>{pkgTplEditSel.length}</strong>
+                </p>
+              </div>
+              <input
+                className="input"
+                placeholder="سعر القائمة (ل.س)"
+                inputMode="numeric"
+                value={pkgTplEditPrice}
+                onChange={(e) => setPkgTplEditPrice(e.target.value)}
+              />
+              <input
+                className="input"
+                placeholder="الترتيب"
+                value={pkgTplEditSort}
+                onChange={(e) => setPkgTplEditSort(e.target.value)}
+              />
+            </div>
+            {pkgTplErr ? <p style={{ color: 'var(--danger)', marginTop: '0.5rem' }}>{pkgTplErr}</p> : null}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.85rem' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setPkgTplEdit(null)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={pkgTplSaving}
+                onClick={async () => {
+                  if (!pkgTplEdit) return
+                  const name = pkgTplEditName.trim()
+                  if (!name) {
+                    setPkgTplErr('أدخل اسماً للباكج')
+                    return
+                  }
+                  if (pkgTplEditSel.length < 1) {
+                    setPkgTplErr('اختر منطقة أو أكثر')
+                    return
+                  }
+                  setPkgTplSaving(true)
+                  setPkgTplErr('')
+                  try {
+                    await api(`/api/laser/package-templates/${encodeURIComponent(pkgTplEdit.id)}`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({
+                        name,
+                        procedureOptionIds: pkgTplEditSel,
+                        areaCount: pkgTplEditSel.length,
+                        listPriceSyp: Math.max(0, Math.round(parseFloat(pkgTplEditPrice.replace(/,/g, '')) || 0)),
+                        sortOrder: Math.trunc(Number(pkgTplEditSort) || 0),
+                      }),
+                    })
+                    setPkgTplEdit(null)
+                    await loadPackageTemplates()
+                  } catch (e) {
+                    setPkgTplErr(e instanceof ApiError ? e.message : 'تعذر الحفظ')
+                  } finally {
+                    setPkgTplSaving(false)
+                  }
+                }}
+              >
+                {pkgTplSaving ? 'جاري الحفظ…' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {editingId ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true">

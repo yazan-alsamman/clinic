@@ -11,6 +11,7 @@ import { BusinessDay } from '../models/BusinessDay.js'
 import { Room } from '../models/Room.js'
 import { LaserMonthlyExpenses } from '../models/LaserMonthlyExpenses.js'
 import { LaserSettings } from '../models/LaserSettings.js'
+import { LaserPackageTemplate } from '../models/LaserPackageTemplate.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
@@ -30,6 +31,7 @@ const LASER_TODAY_PAGE = ['super_admin', 'laser']
 const LASER_SESSION_CREATE = ['super_admin', 'laser', 'reception']
 const LASER_STATUS_VALUES = ['scheduled', 'in_progress', 'completed_pending_collection', 'completed']
 const LASER_PROCEDURE_READ = ['super_admin', 'reception', 'laser']
+const LASER_PACKAGE_TEMPLATE_READ = ['super_admin', 'reception', 'laser']
 const LASER_PROCEDURE_GROUPS = {
   face: 'الوجه',
   upper: 'الجزء العلوي',
@@ -345,10 +347,35 @@ async function getOrCreateLaserSettings() {
   return doc
 }
 
+function packageTemplateToDto(d) {
+  const o = d.toObject ? d.toObject() : d
+  return {
+    id: String(o._id),
+    name: String(o.name || '').trim(),
+    procedureOptionIds: Array.isArray(o.procedureOptionIds) ? o.procedureOptionIds.map(String) : [],
+    areaCount: Math.max(1, Math.trunc(Number(o.areaCount) || 0)),
+    listPriceSyp: Math.round(Number(o.listPriceSyp) || 0),
+    active: o.active !== false,
+    sortOrder: Number(o.sortOrder) || 0,
+    createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : null,
+    updatedAt: o.updatedAt ? new Date(o.updatedAt).toISOString() : null,
+  }
+}
+
+async function assertProcedureOptionIdsValid(optionIds) {
+  const ids = [...new Set(optionIds.map(String).filter(Boolean))]
+  if (ids.length === 0) throw new Error('اختر منطقة واحدة على الأقل للباكج')
+  const found = await LaserProcedureOption.find({ _id: { $in: ids } }).select('_id').lean()
+  if (found.length !== ids.length) throw new Error('بعض معرفات المناطق غير موجودة في النظام')
+  return ids
+}
+
+/** أول باكج ليزر غير موقوف وفيه جلسة متاحة (بدون جلسة ليزر مربوطة) */
 function findActiveLaserPackage(patientLike) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
     if (String(pkg?.department || '') !== 'laser') continue
+    if (pkg.suspended === true) continue
     const sessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
     const available = sessions.find((s) => !s?.linkedLaserSessionId)
     if (available) {
@@ -357,6 +384,145 @@ function findActiveLaserPackage(patientLike) {
   }
   return null
 }
+
+laserRouter.get('/package-templates', async (req, res) => {
+  try {
+    if (!LASER_PACKAGE_TEMPLATE_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const includeInactive = req.user.role === 'super_admin' && String(req.query.includeInactive || '') === '1'
+    const filter = includeInactive ? {} : { active: true }
+    const rows = await LaserPackageTemplate.find(filter).sort({ sortOrder: 1, name: 1 }).lean()
+    res.json({ templates: rows.map((r) => packageTemplateToDto(r)) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.post('/package-templates', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const body = req.body ?? {}
+    const name = String(body.name || '').trim().slice(0, 160)
+    if (!name) {
+      res.status(400).json({ error: 'اسم الباكج مطلوب' })
+      return
+    }
+    const rawIds = Array.isArray(body.procedureOptionIds) ? body.procedureOptionIds : []
+    const areaCount = Math.max(1, Math.min(40, Math.trunc(Number(body.areaCount) || rawIds.length || 0)))
+    let procedureOptionIds
+    try {
+      procedureOptionIds = await assertProcedureOptionIdsValid(rawIds.map(String))
+    } catch (err) {
+      res.status(400).json({ error: String(err?.message || err) })
+      return
+    }
+    if (procedureOptionIds.length !== areaCount) {
+      res.status(400).json({ error: 'عدد المناطق يجب أن يطابق عدد العناصر المختارة من القائمة' })
+      return
+    }
+    const listPriceSyp = Math.max(0, Math.round(Number(body.listPriceSyp) || 0))
+    const sortOrder = Math.trunc(Number(body.sortOrder) || 0)
+    const doc = await LaserPackageTemplate.create({
+      name,
+      procedureOptionIds,
+      areaCount,
+      listPriceSyp,
+      active: body.active === false ? false : true,
+      sortOrder,
+    })
+    await writeAudit({
+      user: req.user,
+      action: 'إنشاء قالب باكج ليزر',
+      entityType: 'LaserPackageTemplate',
+      entityId: doc._id,
+      details: { name, areaCount, listPriceSyp },
+    })
+    res.status(201).json({ template: packageTemplateToDto(doc) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.patch('/package-templates/:id', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    const doc = await LaserPackageTemplate.findById(id)
+    if (!doc) {
+      res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    const body = req.body ?? {}
+    if (body.name != null) doc.name = String(body.name).trim().slice(0, 160) || doc.name
+    if (body.listPriceSyp != null) doc.listPriceSyp = Math.max(0, Math.round(Number(body.listPriceSyp) || 0))
+    if (body.sortOrder != null) doc.sortOrder = Math.trunc(Number(body.sortOrder) || 0)
+    if (body.active != null) doc.active = Boolean(body.active)
+    if (body.procedureOptionIds != null || body.areaCount != null) {
+      const rawIds = Array.isArray(body.procedureOptionIds) ? body.procedureOptionIds : doc.procedureOptionIds
+      const areaCount = Math.max(
+        1,
+        Math.min(40, Math.trunc(Number(body.areaCount != null ? body.areaCount : doc.areaCount) || 0)),
+      )
+      let procedureOptionIds
+      try {
+        procedureOptionIds = await assertProcedureOptionIdsValid(rawIds.map(String))
+      } catch (err) {
+        res.status(400).json({ error: String(err?.message || err) })
+        return
+      }
+      if (procedureOptionIds.length !== areaCount) {
+        res.status(400).json({ error: 'عدد المناطق يجب أن يطابق عدد العناصر المختارة' })
+        return
+      }
+      doc.procedureOptionIds = procedureOptionIds
+      doc.areaCount = areaCount
+    }
+    await doc.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تحديث قالب باكج ليزر',
+      entityType: 'LaserPackageTemplate',
+      entityId: doc._id,
+      details: { name: doc.name },
+    })
+    res.json({ template: packageTemplateToDto(doc) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+laserRouter.delete('/package-templates/:id', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    const doc = await LaserPackageTemplate.findById(id)
+    if (!doc) {
+      res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    const inUse = await Patient.countDocuments({
+      sessionPackages: { $elemMatch: { laserPackageTemplateId: String(id), department: 'laser' } },
+    })
+    if (inUse > 0) {
+      res.status(400).json({ error: 'لا يمكن حذف الباكج لأنه مربوط بملفات مرضى — عطّله مؤقتاً بدلاً من ذلك' })
+      return
+    }
+    await LaserPackageTemplate.deleteOne({ _id: doc._id })
+    await writeAudit({
+      user: req.user,
+      action: 'حذف قالب باكج ليزر',
+      entityType: 'LaserPackageTemplate',
+      entityId: doc._id,
+      details: { name: doc.name },
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
 
 laserRouter.get('/catalog', async (req, res) => {
   try {
@@ -1162,16 +1328,31 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       return
     }
 
-    const packageMatch = findActiveLaserPackage(patient)
+    const scheduleSlotIdEarly = String(body.scheduleSlotId || '').trim()
+    let slotPackageMode = ''
+    if (scheduleSlotIdEarly) {
+      const slotLean = await ScheduleSlot.findById(scheduleSlotIdEarly).select('laserPackageBookingMode').lean()
+      if (slotLean) slotPackageMode = String(slotLean.laserPackageBookingMode || '').trim()
+    }
+    const skipLaserPackage =
+      body.skipLaserPackage === true ||
+      body.forceOutsidePackage === true ||
+      slotPackageMode === 'outside_package'
+
+    const packageMatch = skipLaserPackage ? null : findActiveLaserPackage(patient)
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
     const patientGender = normalizePatientGender(patient.gender)
 
-    const procedureOptionIds = parseUniqueStringIds(body.procedureOptionIds)
+    let effectiveMainOptionIds = parseUniqueStringIds(body.procedureOptionIds)
+    if (isPackageSession && effectiveMainOptionIds.length === 0) {
+      const snap = Array.isArray(packageMatch?.pkg?.procedureOptionIds) ? packageMatch.pkg.procedureOptionIds : []
+      effectiveMainOptionIds = parseUniqueStringIds(snap)
+    }
     const addonProcedureOptionIds = parseUniqueStringIds(body.addonProcedureOptionIds).filter(
-      (id) => !procedureOptionIds.includes(id),
+      (id) => !effectiveMainOptionIds.includes(id),
     )
-    const allProcedureOptionIds = [...new Set([...procedureOptionIds, ...addonProcedureOptionIds])]
+    const allProcedureOptionIds = [...new Set([...effectiveMainOptionIds, ...addonProcedureOptionIds])]
     const procedureOptionsById = new Map()
     if (allProcedureOptionIds.length > 0) {
       const optionRows = await LaserProcedureOption.find({
@@ -1185,13 +1366,24 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         return
       }
     }
-    const selectedMainOptions = procedureOptionIds
+    const selectedMainOptions = effectiveMainOptionIds
       .map((id) => procedureOptionsById.get(id))
       .filter(Boolean)
     const selectedAddonOptions = addonProcedureOptionIds
       .map((id) => procedureOptionsById.get(id))
       .filter(Boolean)
-    const rawLineItems = parseLaserSessionLineItems(body.laserLineItems)
+    let rawLineItems = parseLaserSessionLineItems(body.laserLineItems)
+    if (isPackageSession && rawLineItems.length === 0 && effectiveMainOptionIds.length > 0) {
+      rawLineItems = effectiveMainOptionIds.map((procedureOptionId) => ({
+        procedureOptionId,
+        areaLabel: '',
+        pw: '',
+        pulse: '',
+        shotCount: '',
+        chargeByPulseCount: false,
+        isAddon: false,
+      }))
+    }
     const settings = await getOrCreateLaserSettings()
     const ppuSyp = Math.max(0, Math.round(Number(settings.pricePerPulseSyp) || 0))
     const distributedAreaPriceByIndex = new Map()

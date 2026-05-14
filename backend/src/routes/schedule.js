@@ -549,6 +549,9 @@ function slotToDto(s) {
     status: busy ? 'busy' : 'free',
     patientId: o.patientId ? String(o.patientId) : null,
     patientName: o.patientName || '',
+    laserPackageBookingMode: ['use_package', 'outside_package'].includes(String(o.laserPackageBookingMode || '').trim())
+      ? String(o.laserPackageBookingMode).trim()
+      : '',
   }
 }
 
@@ -592,6 +595,11 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     const procedureType = String(body.procedureType || '')
       .trim()
       .slice(0, 200)
+    const laserPkgRaw = String(body.laserPackageBookingMode || '').trim()
+    const laserPackageBookingMode =
+      serviceType === 'laser' && (laserPkgRaw === 'use_package' || laserPkgRaw === 'outside_package')
+        ? laserPkgRaw
+        : ''
     const patientId = body.patientId
     if (!time || !endTime || !providerName || !patientId) {
       res.status(400).json({ error: 'وقت البداية ووقت النهاية والمقدّم والمريض مطلوبان' })
@@ -712,6 +720,7 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
           arrivedByUserId: null,
           arrivedByName: '',
           laserSessionId: null,
+          laserPackageBookingMode: serviceType === 'laser' ? laserPackageBookingMode : '',
         },
       },
       { new: true, upsert: !existing },

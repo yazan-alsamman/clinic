@@ -12,6 +12,18 @@ import {
 } from '../utils/scheduleTime'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
 
+function patientHasOpenLaserPackage(patient: Patient | null): boolean {
+  const pkgs = patient?.sessionPackages
+  if (!Array.isArray(pkgs) || pkgs.length === 0) return false
+  for (const pkg of pkgs) {
+    if (pkg.department !== 'laser') continue
+    if ('suspended' in pkg && (pkg as { suspended?: boolean }).suspended) continue
+    const sessions = pkg.sessions || []
+    if (sessions.some((s) => !s.linkedLaserSessionId)) return true
+  }
+  return false
+}
+
 const SERVICE_OPTIONS = [
   { value: 'laser', label: 'ليزر' },
   { value: 'dental', label: 'أسنان' },
@@ -287,6 +299,8 @@ export function ReceptionAppointmentPage() {
   const [formErr, setFormErr] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
   const [bookingOpen, setBookingOpen] = useState(false)
+  const [laserPackageBookingIntent, setLaserPackageBookingIntent] = useState<'use_package' | 'outside_package' | ''>('')
+  const [laserPkgGateOpen, setLaserPkgGateOpen] = useState(false)
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
@@ -441,6 +455,8 @@ export function ReceptionAppointmentPage() {
     if (!bookingOpen) {
       setNewPatientGenderPending('')
       setNewPatientPhoneForCreate('')
+      setLaserPackageBookingIntent('')
+      setLaserPkgGateOpen(false)
     }
   }, [bookingOpen])
 
@@ -658,11 +674,16 @@ export function ReceptionAppointmentPage() {
     }
   }
 
-  async function submit(): Promise<boolean> {
+  async function submit(laserIntentArg?: 'use_package' | 'outside_package' | ''): Promise<boolean> {
     setFormErr('')
     setSuccessMsg('')
     if (!picked) {
       setFormErr('اختر المريض من نتائج البحث')
+      return false
+    }
+    const laserIntent = laserIntentArg ?? laserPackageBookingIntent
+    if (selectedService === 'laser' && patientHasOpenLaserPackage(picked) && !laserIntent) {
+      setLaserPkgGateOpen(true)
       return false
     }
     if (assignBlocked) {
@@ -700,12 +721,21 @@ export function ReceptionAppointmentPage() {
       setFormErr('رقم غرفة الليزر غير صالح')
       return false
     }
+    const usePackageSlot = selectedService === 'laser' && laserIntent === 'use_package'
     const proc =
       selectedService === 'laser'
-        ? selectedLaserItems.map((item) => item.name).join(' + ').trim()
+        ? usePackageSlot
+          ? 'جلسة ضمن باكج ليزر'
+          : selectedLaserItems.map((item) => item.name).join(' + ').trim()
         : procedureType.trim()
     if (!proc) {
-      setFormErr(selectedService === 'laser' ? 'اختر منطقة أو أكثر لليزر' : 'اختر نوع الإجراء من القائمة')
+      setFormErr(
+        selectedService === 'laser'
+          ? usePackageSlot
+            ? 'تعذر تحديد نوع الجلسة'
+            : 'اختر منطقة أو أكثر لليزر'
+          : 'اختر نوع الإجراء من القائمة',
+      )
       return false
     }
     if (intervalOverlapsBookedSlots(slots, providerName, sm, em)) {
@@ -728,6 +758,9 @@ export function ReceptionAppointmentPage() {
           roomNumber,
           procedureType: proc.slice(0, 200),
           patientId: picked.id,
+          ...(selectedService === 'laser' && laserIntent
+            ? { laserPackageBookingMode: laserIntent }
+            : {}),
         }),
       })
       const specialistPart = data?.slot?.assignedSpecialistName
@@ -748,6 +781,8 @@ export function ReceptionAppointmentPage() {
       setPatientQ('')
       setPatientHits([])
       setSelectedLaserItemIds([])
+      setLaserPackageBookingIntent('')
+      setLaserPkgGateOpen(false)
       await loadSlots()
       return true
     } catch (e) {
@@ -916,6 +951,8 @@ export function ReceptionAppointmentPage() {
                                     setDeclinedNewPatientForName(null)
                                     setNewPatientGenderPending('')
                                     setNewPatientPhoneForCreate('')
+                                    setLaserPackageBookingIntent('')
+                                    setLaserPkgGateOpen(false)
                                     setBookingOpen(true)
                                   }}
                                 >
@@ -983,6 +1020,8 @@ export function ReceptionAppointmentPage() {
                             setDeclinedNewPatientForName(null)
                             setNewPatientGenderPending('')
                             setNewPatientPhoneForCreate('')
+                            setLaserPackageBookingIntent('')
+                            setLaserPkgGateOpen(false)
                             setBookingOpen(true)
                           }}
                         >
@@ -1058,7 +1097,11 @@ export function ReceptionAppointmentPage() {
                 value={patientQ}
                 onChange={(e) => {
                   setPatientQ(e.target.value)
-                  if (picked) setPicked(null)
+                  if (picked) {
+                    setPicked(null)
+                    setLaserPackageBookingIntent('')
+                    setLaserPkgGateOpen(false)
+                  }
                   setNewPatientGenderPending('')
                   setNewPatientPhoneForCreate('')
                 }}
@@ -1074,6 +1117,8 @@ export function ReceptionAppointmentPage() {
                       setPicked(null)
                       setNewPatientGenderPending('')
                       setNewPatientPhoneForCreate('')
+                      setLaserPackageBookingIntent('')
+                      setLaserPkgGateOpen(false)
                     }}
                   >
                     إلغاء الاختيار
@@ -1095,6 +1140,8 @@ export function ReceptionAppointmentPage() {
                           setPicked(p)
                           setPatientQ(p.name)
                           setPatientHits([])
+                          setLaserPackageBookingIntent('')
+                          setLaserPkgGateOpen(false)
                           setNewPatientGenderPending(
                             p.gender === 'male' || p.gender === 'female' ? p.gender : '',
                           )
@@ -1197,63 +1244,96 @@ export function ReceptionAppointmentPage() {
               <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>
                 {selectedService === 'laser' ? 'منطقة / عرض الليزر' : 'نوع الإجراء'}
               </h4>
+              {selectedService === 'laser' &&
+              picked &&
+              patientHasOpenLaserPackage(picked) &&
+              laserPackageBookingIntent === 'use_package' ? (
+                <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                  تم اختيار تسجيل هذا الموعد كـ <strong>جلسة ضمن باكج الليزر</strong>. لا حاجة لاختيار المناطق هنا؛
+                  ستُعرض مناطق الباكج عند إنشاء الجلسة في قسم الليزر.
+                </p>
+              ) : null}
+              {selectedService === 'laser' &&
+              picked &&
+              patientHasOpenLaserPackage(picked) &&
+              laserPackageBookingIntent === 'outside_package' ? (
+                <p
+                  style={{
+                    margin: '0 0 0.65rem',
+                    padding: '0.55rem 0.65rem',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--warning-dim)',
+                    color: 'var(--amber)',
+                    fontSize: '0.86rem',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  تم اختيار الحجز <strong>من خارج الباكج</strong> — اختر المناطق أو العروض أدناه كالمعتاد.
+                </p>
+              ) : null}
               {selectedService === 'laser' ? (
                 <>
-                  {laserProcedureErr ? (
-                    <p style={{ marginTop: 0, color: 'var(--danger)' }}>{laserProcedureErr}</p>
-                  ) : null}
-                  {laserProcedureLoading ? (
-                    <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>جاري تحميل المناطق…</p>
-                  ) : (
+                  {laserPackageBookingIntent === 'use_package' &&
+                  picked &&
+                  patientHasOpenLaserPackage(picked) ? null : (
                     <>
-                      <div style={{ display: 'grid', gap: '0.75rem' }}>
-                        {laserProcedureGroups.map((g) => (
-                          <div key={g.id}>
-                            <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
-                            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                              {g.items.map((item) => {
-                                const selected = selectedLaserItemIds.includes(item.id)
-                                return (
-                                  <button
-                                    key={item.id}
-                                    type="button"
-                                    className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
-                                    style={{
-                                      fontSize: '0.82rem',
-                                      padding: '0.38rem 0.58rem',
-                                      borderRadius: 999,
-                                      borderColor: selected ? 'var(--cyan)' : 'var(--border)',
-                                    }}
-                                    onClick={() =>
-                                      setSelectedLaserItemIds((prev) =>
-                                        prev.includes(item.id)
-                                          ? prev.filter((x) => x !== item.id)
-                                          : [...prev, item.id],
-                                      )
-                                    }
-                                  >
-                                    {item.name} —{' '}
-                                    {resolveLaserItemPriceByGender(
-                                      item,
-                                      selectedGenderForLaserPricing,
-                                    ).toLocaleString('en-US')}{' '}
-                                    ل.س
-                                  </button>
-                                )
-                              })}
-                            </div>
+                      {laserProcedureErr ? (
+                        <p style={{ marginTop: 0, color: 'var(--danger)' }}>{laserProcedureErr}</p>
+                      ) : null}
+                      {laserProcedureLoading ? (
+                        <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>جاري تحميل المناطق…</p>
+                      ) : (
+                        <>
+                          <div style={{ display: 'grid', gap: '0.75rem' }}>
+                            {laserProcedureGroups.map((g) => (
+                              <div key={g.id}>
+                                <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
+                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                  {g.items.map((item) => {
+                                    const selected = selectedLaserItemIds.includes(item.id)
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        type="button"
+                                        className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
+                                        style={{
+                                          fontSize: '0.82rem',
+                                          padding: '0.38rem 0.58rem',
+                                          borderRadius: 999,
+                                          borderColor: selected ? 'var(--cyan)' : 'var(--border)',
+                                        }}
+                                        onClick={() =>
+                                          setSelectedLaserItemIds((prev) =>
+                                            prev.includes(item.id)
+                                              ? prev.filter((x) => x !== item.id)
+                                              : [...prev, item.id],
+                                          )
+                                        }
+                                      >
+                                        {item.name} —{' '}
+                                        {resolveLaserItemPriceByGender(
+                                          item,
+                                          selectedGenderForLaserPricing,
+                                        ).toLocaleString('en-US')}{' '}
+                                        ل.س
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                      <p style={{ margin: '0.65rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-                        تم اختيار <strong>{selectedLaserItems.length}</strong> منطقة/عرض
-                        {selectedLaserItems.length > 0
-                          ? ` — المجموع التقريبي: ${selectedLaserTotalSyp.toLocaleString('en-US')} ل.س`
-                          : ''}
-                        {selectedGenderForLaserPricing
-                          ? ` — بحسب ${selectedGenderForLaserPricing === 'male' ? 'سعر الذكور' : 'سعر الإناث'}`
-                          : ''}
-                      </p>
+                          <p style={{ margin: '0.65rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                            تم اختيار <strong>{selectedLaserItems.length}</strong> منطقة/عرض
+                            {selectedLaserItems.length > 0
+                              ? ` — المجموع التقريبي: ${selectedLaserTotalSyp.toLocaleString('en-US')} ل.س`
+                              : ''}
+                            {selectedGenderForLaserPricing
+                              ? ` — بحسب ${selectedGenderForLaserPricing === 'male' ? 'سعر الذكور' : 'سعر الإناث'}`
+                              : ''}
+                          </p>
+                        </>
+                      )}
                     </>
                   )}
                 </>
@@ -1295,6 +1375,58 @@ export function ReceptionAppointmentPage() {
                 }}
               >
                 {saving ? 'جاري الحفظ…' : 'تأكيد حجز الموعد'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {laserPkgGateOpen && bookingOpen ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          style={{ zIndex: 2000 }}
+          onClick={() => setLaserPkgGateOpen(false)}
+        >
+          <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>باكج ليزر</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.55, marginBottom: '1rem' }}>
+              هذا المريض لديه باكج ليزر فعّال مع جلسات غير مكتملة. هل تريد حجز هذا الموعد كجلسة من جلسات الباكج، أم
+              كمناطق/عرض من خارج الباكج؟
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={saving}
+                onClick={async () => {
+                  setLaserPackageBookingIntent('use_package')
+                  setLaserPkgGateOpen(false)
+                  const ok = await submit('use_package')
+                  if (ok) setBookingOpen(false)
+                }}
+              >
+                جلسة من جلسات الباكج
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={saving}
+                onClick={() => {
+                  setLaserPackageBookingIntent('outside_package')
+                  setLaserPkgGateOpen(false)
+                }}
+              >
+                مناطق من خارج الباكج
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={saving}
+                onClick={() => setLaserPkgGateOpen(false)}
+              >
+                إلغاء
               </button>
             </div>
           </div>

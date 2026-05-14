@@ -196,6 +196,8 @@ type PatientPackageSession = {
   completedByUserId: string | null
   linkedLaserSessionId: string | null
   linkedBillingItemId: string | null
+  areasAdjustedOnly?: boolean
+  receptionNote?: string
 }
 
 type PatientPackage = {
@@ -209,6 +211,19 @@ type PatientPackage = {
   notes: string
   createdAt: string | null
   sessions: PatientPackageSession[]
+  laserPackageTemplateId?: string
+  procedureOptionIds?: string[]
+  areaCount?: number
+  suspended?: boolean
+}
+
+type LaserPackageTemplateListItem = {
+  id: string
+  name: string
+  procedureOptionIds: string[]
+  areaCount: number
+  listPriceSyp: number
+  active: boolean
 }
 
 function clinicalDeptLabelAr(d: string) {
@@ -725,6 +740,9 @@ export function PatientRecord() {
   const [packageTotalSyp, setPackageTotalSyp] = useState('')
   const [packagePaidSyp, setPackagePaidSyp] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
+  const [laserPkgTemplates, setLaserPkgTemplates] = useState<LaserPackageTemplateListItem[]>([])
+  const [laserPkgTplLoading, setLaserPkgTplLoading] = useState(false)
+  const [laserTplPickId, setLaserTplPickId] = useState('')
   const [solariumPkgSessions, setSolariumPkgSessions] = useState('10')
   const [solariumPkgAmount, setSolariumPkgAmount] = useState('')
   const [solariumPkgNotes, setSolariumPkgNotes] = useState('')
@@ -1107,6 +1125,25 @@ export function PatientRecord() {
   }, [id])
 
   useEffect(() => {
+    if (!id || tab !== 'packages') return
+    let cancelled = false
+    setLaserPkgTplLoading(true)
+    ;(async () => {
+      try {
+        const data = await api<{ templates: LaserPackageTemplateListItem[] }>('/api/laser/package-templates')
+        if (!cancelled) setLaserPkgTemplates(data.templates || [])
+      } catch {
+        if (!cancelled) setLaserPkgTemplates([])
+      } finally {
+        if (!cancelled) setLaserPkgTplLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id, tab])
+
+  useEffect(() => {
     if (!id) return
     let cancelled = false
     ;(async () => {
@@ -1465,6 +1502,10 @@ export function PatientRecord() {
         settlementDeltaSyp: Number(x.settlementDeltaSyp) || 0,
         notes: String(x.notes || ''),
         createdAt: x.createdAt ?? null,
+        laserPackageTemplateId: x.laserPackageTemplateId ? String(x.laserPackageTemplateId) : undefined,
+        procedureOptionIds: Array.isArray(x.procedureOptionIds) ? x.procedureOptionIds.map(String) : undefined,
+        areaCount: typeof x.areaCount === 'number' ? x.areaCount : undefined,
+        suspended: (x as { suspended?: boolean }).suspended === true,
         sessions: Array.isArray(x.sessions)
           ? x.sessions.map((s) => ({
               id: String(s.id),
@@ -1474,6 +1515,8 @@ export function PatientRecord() {
               completedByUserId: s.completedByUserId ?? null,
               linkedLaserSessionId: s.linkedLaserSessionId ?? null,
               linkedBillingItemId: s.linkedBillingItemId ?? null,
+              areasAdjustedOnly: (s as { areasAdjustedOnly?: boolean }).areasAdjustedOnly === true,
+              receptionNote: String((s as { receptionNote?: string }).receptionNote || ''),
             }))
           : [],
       }))
@@ -1481,7 +1524,10 @@ export function PatientRecord() {
 
   const activeLaserPackage = useMemo(() => {
     return patientPackages.find(
-      (pkg) => pkg.department === 'laser' && pkg.sessions.some((s) => !s.linkedLaserSessionId),
+      (pkg) =>
+        pkg.department === 'laser' &&
+        !pkg.suspended &&
+        pkg.sessions.some((s) => !s.linkedLaserSessionId),
     )
   }, [patientPackages])
 
@@ -2502,9 +2548,41 @@ export function PatientRecord() {
         <div className="card">
           <h2 className="card-title">باكج جلسات الليزر</h2>
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-            يقوم الاستقبال بتحديد عدد الجلسات وسعر الباكج والمبلغ المدفوع. عند دفع أقل من إجمالي الباكج يتم إضافة
-            الفرق إلى ذمم المريض تلقائياً.
+            اختر قالب باكج من النظام (من صفحة الغرف) أو أدخل البيانات يدوياً. يحدد الاستقبال عدد الجلسات والسعر
+            الفعلي والمبلغ المدفوع؛ عند وجود دفعة نقدية يُسجَّل المبلغ في الجرد اليومي فوراً. عند دفع أقل من
+            إجمالي الباكج يُضاف الفرق إلى ذمم المريض تلقائياً.
           </p>
+          <div style={{ marginTop: '0.75rem' }}>
+            <label className="form-label" htmlFor="laser-pkg-template-pick">
+              قالب من باكجات النظام (اختياري)
+            </label>
+            <select
+              id="laser-pkg-template-pick"
+              className="select"
+              style={{ width: '100%', maxWidth: 480 }}
+              disabled={packageBusy || solariumPkgBusy || laserPkgTplLoading}
+              value={laserTplPickId}
+              onChange={(e) => {
+                const v = e.target.value
+                setLaserTplPickId(v)
+                const t = laserPkgTemplates.find((x) => x.id === v)
+                if (t) {
+                  setPackageTitle(t.name)
+                  setPackageTotalSyp(String(Math.max(0, Math.round(Number(t.listPriceSyp) || 0))))
+                }
+              }}
+            >
+              <option value="">— باكج يدوي (بدون قالب من القائمة) —</option>
+              {laserPkgTemplates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} — {Number(t.listPriceSyp || 0).toLocaleString('ar-SY')} ل.س — {t.areaCount} منطقة
+                </option>
+              ))}
+            </select>
+            {laserPkgTplLoading ? (
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>جاري تحميل القوالب…</p>
+            ) : null}
+          </div>
           <div className="grid-2" style={{ marginTop: '0.75rem' }}>
             <div>
               <label className="form-label">اسم الباكج (اختياري)</label>
@@ -2601,6 +2679,7 @@ export function PatientRecord() {
                     packageTotalSyp: totalSyp,
                     paidAmountSyp: paidSyp,
                     notes: packageNotes.trim(),
+                    ...(laserTplPickId.trim() ? { laserPackageTemplateId: laserTplPickId.trim() } : {}),
                   }),
                 })
                 setPatient((prev) =>
@@ -2619,6 +2698,7 @@ export function PatientRecord() {
                 setPackageTotalSyp('')
                 setPackagePaidSyp('')
                 setPackageNotes('')
+                setLaserTplPickId('')
               } catch (e) {
                 setPackageErr(e instanceof ApiError ? e.message : 'تعذر حفظ الباكج')
               } finally {
@@ -2774,6 +2854,69 @@ export function PatientRecord() {
                       {pkg.createdAt ? formatClinicDate(pkg.createdAt) : '—'}
                     </span>
                   </div>
+                  {pkg.department === 'laser' ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '0.45rem',
+                        alignItems: 'center',
+                        marginBottom: '0.35rem',
+                      }}
+                    >
+                      {pkg.suspended ? (
+                        <span
+                          className="chip"
+                          style={{ fontSize: '0.72rem', background: 'var(--warning-dim)', color: 'var(--amber)' }}
+                        >
+                          موقوف مؤقتاً
+                        </span>
+                      ) : null}
+                      {pkg.areaCount ? (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          مناطق ضمن الباكج: <strong>{pkg.areaCount}</strong>
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.78rem' }}
+                        disabled={packageBusy || solariumPkgBusy}
+                        onClick={async () => {
+                          if (!id) return
+                          setPackageErr('')
+                          setPackageOk('')
+                          setPackageBusy(true)
+                          try {
+                            const data = await api<{ package: PatientPackage }>(
+                              `/api/patients/${encodeURIComponent(id)}/packages/${encodeURIComponent(pkg.id)}`,
+                              {
+                                method: 'PATCH',
+                                body: JSON.stringify({ suspended: !pkg.suspended }),
+                              },
+                            )
+                            setPatient((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    sessionPackages: (prev.sessionPackages || []).map((x) =>
+                                      String(x.id) === String(pkg.id) ? data.package : x,
+                                    ),
+                                  }
+                                : prev,
+                            )
+                            setPackageOk(pkg.suspended ? 'تم تفعيل الباكج.' : 'تم إيقاف الباكج مؤقتاً.')
+                          } catch (e) {
+                            setPackageErr(e instanceof ApiError ? e.message : 'تعذر تحديث الباكج')
+                          } finally {
+                            setPackageBusy(false)
+                          }
+                        }}
+                      >
+                        {pkg.suspended ? 'تفعيل الباكج' : 'إيقاف مؤقت'}
+                      </button>
+                    </div>
+                  ) : null}
                   <p style={{ margin: '0.45rem 0', fontSize: '0.88rem' }}>
                     إجمالي الباكج: <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
                     <strong>{renderMoneySyp(pkg.paidAmountSyp)}</strong>

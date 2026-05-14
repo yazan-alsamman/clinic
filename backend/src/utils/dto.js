@@ -34,6 +34,10 @@ export function patientToDto(p) {
           paidAmountSyp: Number(pkg?.paidAmountSyp) || 0,
           settlementDeltaSyp: Number(pkg?.settlementDeltaSyp) || 0,
           notes: String(pkg?.notes || ''),
+          laserPackageTemplateId: String(pkg?.laserPackageTemplateId || ''),
+          procedureOptionIds: Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : [],
+          areaCount: Number(pkg?.areaCount) || 0,
+          suspended: pkg?.suspended === true,
           createdAt: pkg?.createdAt ? new Date(pkg.createdAt).toISOString() : null,
           sessions: Array.isArray(pkg?.sessions)
             ? pkg.sessions.map((s) => ({
@@ -44,6 +48,8 @@ export function patientToDto(p) {
                 completedByUserId: s?.completedByUserId ? String(s.completedByUserId) : null,
                 linkedLaserSessionId: s?.linkedLaserSessionId ? String(s.linkedLaserSessionId) : null,
                 linkedBillingItemId: s?.linkedBillingItemId ? String(s.linkedBillingItemId) : null,
+                areasAdjustedOnly: s?.areasAdjustedOnly === true,
+                receptionNote: String(s?.receptionNote || ''),
               }))
             : [],
         }))

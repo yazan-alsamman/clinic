@@ -77,6 +77,10 @@ export interface Patient {
     settlementDeltaSyp: number
     notes: string
     createdAt: string | null
+    laserPackageTemplateId?: string
+    procedureOptionIds?: string[]
+    areaCount?: number
+    suspended?: boolean
     sessions: Array<{
       id: string
       label: string
@@ -85,6 +89,8 @@ export interface Patient {
       completedByUserId: string | null
       linkedLaserSessionId: string | null
       linkedBillingItemId: string | null
+      areasAdjustedOnly?: boolean
+      receptionNote?: string
     }>
   }>
 }

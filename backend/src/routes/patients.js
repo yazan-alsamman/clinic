@@ -6,6 +6,7 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
+import { LaserPackageTemplate } from '../models/LaserPackageTemplate.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { authMiddleware, requireActiveDay } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
@@ -183,8 +184,14 @@ function serializePackage(pkg) {
           completedByUserId: s?.completedByUserId ? String(s.completedByUserId) : null,
           linkedLaserSessionId: s?.linkedLaserSessionId ? String(s.linkedLaserSessionId) : null,
           linkedBillingItemId: s?.linkedBillingItemId ? String(s.linkedBillingItemId) : null,
+          areasAdjustedOnly: s?.areasAdjustedOnly === true,
+          receptionNote: String(s?.receptionNote || ''),
         }))
       : [],
+    laserPackageTemplateId: String(pkg?.laserPackageTemplateId || ''),
+    procedureOptionIds: Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : [],
+    areaCount: Number(pkg?.areaCount) || 0,
+    suspended: pkg?.suspended === true,
   }
 }
 
@@ -1024,29 +1031,46 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
     const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
     const settlementDeltaSyp = paidAmountSyp - packageTotalSyp
-    let debtAfter = debtBefore
-    let creditAfter = creditBefore
-    if (settlementDeltaSyp < 0) {
-      debtAfter += Math.abs(settlementDeltaSyp)
-    } else if (settlementDeltaSyp > 0) {
-      creditAfter += settlementDeltaSyp
-    }
+    const debtAfter = debtBefore + Math.max(0, packageTotalSyp - paidAmountSyp)
+    const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
 
     const packageId = new mongoose.Types.ObjectId()
-    const title = String(req.body?.title || '').trim().slice(0, 160) || `باكج ليزر (${sessionsCount} جلسة)`
+    let laserPackageTemplateId = ''
+    let procedureOptionIdsSnap = []
+    let areaCountSnap = 0
+    let title = String(req.body?.title || '').trim().slice(0, 160)
+    const tplId = String(req.body?.laserPackageTemplateId || '').trim()
+    if (tplId) {
+      const tpl = await LaserPackageTemplate.findById(tplId).lean()
+      if (!tpl || tpl.active === false) {
+        res.status(400).json({ error: 'قالب الباكج غير موجود أو موقوف' })
+        return
+      }
+      laserPackageTemplateId = String(tpl._id)
+      procedureOptionIdsSnap = Array.isArray(tpl.procedureOptionIds) ? tpl.procedureOptionIds.map(String) : []
+      areaCountSnap = Math.max(1, Math.trunc(Number(tpl.areaCount) || procedureOptionIdsSnap.length))
+      if (!title) title = String(tpl.name || '').trim().slice(0, 160)
+    }
+    if (!title) title = `باكج ليزر (${sessionsCount} جلسة)`
     const notes = String(req.body?.notes || '').trim().slice(0, 1200)
     const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
       _id: new mongoose.Types.ObjectId(),
-      label: `جلسة ${idx + 1}`,
+      label: sessionLabelAr(idx + 1),
       completedByReception: false,
       completedAt: null,
       completedByUserId: null,
       linkedLaserSessionId: null,
       linkedBillingItemId: null,
+      areasAdjustedOnly: false,
+      receptionNote: '',
     }))
     const packageDoc = {
       _id: packageId,
       department: 'laser',
+      laserPackageTemplateId,
+      procedureOptionIds: procedureOptionIdsSnap,
+      areaCount: areaCountSnap,
+      suspended: false,
       title,
       sessionsCount,
       packageTotalSyp,
@@ -1059,39 +1083,156 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       updatedAt: new Date(),
     }
 
+    const businessDate = String(req.body?.businessDate || '').trim() || req.businessDate || todayBusinessDate()
+    let purchaseCs = null
+    let purchaseBi = null
+    let billingPaid = false
+    try {
+      if (paidAmountSyp > 0) {
+        const patientName = String(p.name || '').trim()
+        const procedureDescription = `ليزر — باكج مسبق الدفع (${sessionsCount} جلسة)${title ? ` — ${title}` : ''}${
+          patientName ? ` — ${patientName}` : ''
+        }`
+        purchaseCs = await ClinicalSession.create({
+          patientId: p._id,
+          providerUserId: req.user._id,
+          department: 'laser',
+          procedureDescription: procedureDescription.slice(0, 500),
+          sessionFeeSyp: paidAmountSyp,
+          businessDate,
+          notes: notes ? notes.slice(0, 500) : '',
+          materials: [],
+          materialCostSypTotal: 0,
+          materialChargeSypTotal: 0,
+          createdByReceptionUserId: req.user._id,
+        })
+        purchaseBi = await BillingItem.create({
+          clinicalSessionId: purchaseCs._id,
+          patientId: p._id,
+          providerUserId: req.user._id,
+          department: 'laser',
+          procedureLabel: procedureDescription.slice(0, 200),
+          listAmountDueSyp: paidAmountSyp,
+          discountPercent: 0,
+          effectiveAmountDueSyp: paidAmountSyp,
+          amountDueSyp: paidAmountSyp,
+          currency: 'SYP',
+          businessDate,
+          status: 'pending_payment',
+        })
+        purchaseCs.billingItemId = purchaseBi._id
+        await purchaseCs.save()
+        await recordBillingStraightCashSyp({ billingItemId: purchaseBi._id, receivedByUser: req.user })
+        billingPaid = true
+      }
+
+      await Patient.updateOne(
+        { _id: p._id },
+        {
+          $push: { sessionPackages: packageDoc },
+          $set: {
+            outstandingDebtSyp: debtAfter,
+            prepaidCreditSyp: creditAfter,
+          },
+          $addToSet: { departments: 'laser' },
+        },
+      )
+
+      const fresh = await Patient.findById(p._id).select('outstandingDebtSyp prepaidCreditSyp').lean()
+
+      await writeAudit({
+        user: req.user,
+        action: 'إنشاء باكج جلسات لمريض',
+        entityType: 'Patient',
+        entityId: p._id,
+        details: {
+          packageId: String(packageId),
+          department: 'laser',
+          sessionsCount,
+          packageTotalSyp,
+          paidAmountSyp,
+          settlementDeltaSyp,
+          laserPackageTemplateId: laserPackageTemplateId || undefined,
+          purchaseClinicalSessionId: purchaseCs?._id ? String(purchaseCs._id) : undefined,
+          purchaseBillingItemId: purchaseBi?._id ? String(purchaseBi._id) : undefined,
+        },
+      })
+
+      res.status(201).json({
+        package: serializePackage(packageDoc),
+        summary: {
+          outstandingDebtSyp: Math.round(Number(fresh?.outstandingDebtSyp) || 0),
+          prepaidCreditSyp: Math.round(Number(fresh?.prepaidCreditSyp) || 0),
+        },
+      })
+    } catch (inner) {
+      if (purchaseCs?._id && !billingPaid) {
+        try {
+          const biRows = await BillingItem.find({ clinicalSessionId: purchaseCs._id }).select('_id').lean()
+          for (const row of biRows) {
+            await BillingPayment.deleteMany({ billingItemId: row._id })
+          }
+          await BillingItem.deleteMany({ clinicalSessionId: purchaseCs._id })
+          await ClinicalSession.findByIdAndDelete(purchaseCs._id)
+        } catch (cleanErr) {
+          console.error('laser package purchase rollback:', cleanErr)
+        }
+      } else if (purchaseCs?._id && billingPaid) {
+        console.error('Laser package: cash collected but patient package save failed', inner)
+      }
+      console.error(inner)
+      res.status(500).json({ error: String(inner?.message || inner) || 'تعذر إنشاء باكج الليزر' })
+    }
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+patientsRouter.patch('/:id/packages/:packageId', requireActiveDay, async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const patientId = String(req.params.id || '').trim()
+    const packageId = String(req.params.packageId || '').trim()
+    if (!mongoose.isValidObjectId(patientId) || !mongoose.isValidObjectId(packageId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const p = await Patient.findById(patientId)
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const rows = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
+    const pkgIndex = rows.findIndex((x) => String(x?._id) === packageId)
+    if (pkgIndex < 0) {
+      res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    if (String(rows[pkgIndex]?.department || '') !== 'laser') {
+      res.status(400).json({ error: 'إيقاف الباكج يخص باكج الليزر فقط من هذا المسار' })
+      return
+    }
+    const suspended = req.body?.suspended === true
     await Patient.updateOne(
       { _id: p._id },
-      {
-        $push: { sessionPackages: packageDoc },
-        $set: {
-          outstandingDebtSyp: debtAfter,
-          prepaidCreditSyp: creditAfter,
-        },
-      },
+      { $set: { [`sessionPackages.${pkgIndex}.suspended`]: suspended } },
     )
-
+    const fresh = await Patient.findById(p._id).lean()
+    const pkg = Array.isArray(fresh?.sessionPackages)
+      ? fresh.sessionPackages.find((x) => String(x?._id) === packageId)
+      : null
     await writeAudit({
       user: req.user,
-      action: 'إنشاء باكج جلسات لمريض',
+      action: suspended ? 'إيقاف باكج ليزر لمريض' : 'تفعيل باكج ليزر لمريض',
       entityType: 'Patient',
       entityId: p._id,
-      details: {
-        packageId: String(packageId),
-        department: 'laser',
-        sessionsCount,
-        packageTotalSyp,
-        paidAmountSyp,
-        settlementDeltaSyp,
-      },
+      details: { packageId, suspended },
     })
-
-    res.status(201).json({
-      package: serializePackage(packageDoc),
-      summary: {
-        outstandingDebtSyp: debtAfter,
-        prepaidCreditSyp: creditAfter,
-      },
-    })
+    res.json({ package: pkg ? serializePackage(pkg) : null })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
