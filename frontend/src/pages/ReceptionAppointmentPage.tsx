@@ -1044,7 +1044,9 @@ export function ReceptionAppointmentPage() {
                 <option value="30">30 دقيقة</option>
                 <option value="45">45 دقيقة</option>
                 <option value="60">60 دقيقة</option>
+                <option value="75">75 دقيقة</option>
                 <option value="90">90 دقيقة</option>
+                <option value="105">105 دقيقة</option>
                 <option value="120">120 دقيقة</option>
               </select>
             </div>

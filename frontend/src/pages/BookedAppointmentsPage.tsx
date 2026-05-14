@@ -9,6 +9,7 @@ import {
   PROCEDURE_FILTER_LABELS,
   type ProcedureCategoryFilter,
 } from '../utils/procedureCategory'
+import { slotIntervalFromRow } from '../utils/scheduleTime'
 
 type SlotRow = {
   id: string
@@ -66,6 +67,21 @@ const canOpenPage = (role: string | undefined) =>
 
 function fullScheduleRoles(role: string | undefined) {
   return role === 'super_admin' || role === 'reception' || role === 'dermatology_manager'
+}
+
+const RESCHEDULE_DURATION_OPTIONS = [30, 45, 60, 75, 90, 105, 120] as const
+
+function nearestRescheduleDurationMinutes(actual: number): number {
+  if (!Number.isFinite(actual) || actual < 1) return 60
+  const opts = RESCHEDULE_DURATION_OPTIONS as readonly number[]
+  if (opts.includes(actual as (typeof RESCHEDULE_DURATION_OPTIONS)[number])) return actual
+  return opts.reduce((best, d) => (Math.abs(d - actual) < Math.abs(best - actual) ? d : best), 60)
+}
+
+function durationMinutesFromSlot(slot: SlotRow): number {
+  const iv = slotIntervalFromRow(slot.time, slot.endTime)
+  if (!iv || iv.end <= iv.start) return 60
+  return iv.end - iv.start
 }
 
 function parseRoomNumber(slot: SlotRow) {
@@ -337,7 +353,7 @@ export function BookedAppointmentsPage() {
     setActionMode('menu')
     setResDate(slot.businessDate || viewDate)
     setResTime(slot.time || '09:00')
-    setResDuration(60)
+    setResDuration(nearestRescheduleDurationMinutes(durationMinutesFromSlot(slot)))
     setResProcedure(slot.procedureType || '')
     const svc = normalizeService(slot)
     setProvService(svc)
@@ -846,7 +862,9 @@ export function BookedAppointmentsPage() {
                   <option value="30">30 دقيقة</option>
                   <option value="45">45 دقيقة</option>
                   <option value="60">60 دقيقة</option>
+                  <option value="75">75 دقيقة</option>
                   <option value="90">90 دقيقة</option>
+                  <option value="105">105 دقيقة</option>
                   <option value="120">120 دقيقة</option>
                 </select>
                 <input
