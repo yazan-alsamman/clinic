@@ -6,10 +6,11 @@ import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
 import { InventoryItem } from '../models/InventoryItem.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
+import { LaserSession } from '../models/LaserSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { writeAudit } from '../utils/audit.js'
-import { todayBusinessDate } from '../utils/date.js'
+import { todayBusinessDate, isValidYmd } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
 
 export const clinicalRouter = Router()
@@ -572,6 +573,83 @@ clinicalRouter.post(
     }
   },
 )
+
+const DAY_OVERVIEW_DEPARTMENTS = ['laser', 'dental', 'dermatology', 'skin', 'solarium']
+
+const DEPARTMENT_LABEL_AR = {
+  laser: 'ليزر',
+  dental: 'أسنان',
+  dermatology: 'جلدية',
+  skin: 'بشرة',
+  solarium: 'سولاريوم',
+}
+
+function formatDurationFromMs(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  const minutes = Math.floor(ms / 60000)
+  if (minutes < 1) return 'أقل من دقيقة'
+  if (minutes === 1) return '1 دقيقة'
+  return `${minutes} دقيقة`
+}
+
+function formatSessionTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleTimeString('ar-SY', { hour: 'numeric', minute: '2-digit', hour12: true })
+}
+
+/** ملخص جلسات يوم عمل واحد — جميع الأقسام (لمدير النظام فقط) */
+clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const qDate = String(req.query.date || '').trim()
+    const businessDate = isValidYmd(qDate) ? qDate : req.businessDate || todayBusinessDate()
+    const rows = await ClinicalSession.find({
+      businessDate,
+      department: { $in: DAY_OVERVIEW_DEPARTMENTS },
+    })
+      .sort({ createdAt: 1 })
+      .populate('patientId', 'name')
+      .populate('providerUserId', 'name')
+      .lean()
+
+    const laserSessionIds = [...new Set(rows.map((r) => r.laserSessionId).filter(Boolean).map(String))]
+    const laserById = new Map()
+    if (laserSessionIds.length > 0) {
+      const lasers = await LaserSession.find({ _id: { $in: laserSessionIds } })
+        .select('createdAt updatedAt notes')
+        .lean()
+      for (const l of lasers) laserById.set(String(l._id), l)
+    }
+
+    const sessions = rows.map((r) => {
+      const laser = r.laserSessionId ? laserById.get(String(r.laserSessionId)) : null
+      let durationMs = 0
+      if (laser) {
+        durationMs = new Date(laser.updatedAt).getTime() - new Date(laser.createdAt).getTime()
+      } else {
+        durationMs = new Date(r.updatedAt).getTime() - new Date(r.createdAt).getTime()
+      }
+      const cn = String(r.notes || '').trim()
+      const ln = laser ? String(laser.notes || '').trim() : ''
+      const notesCombined = [cn, ln].filter(Boolean).join(' — ') || '—'
+      return {
+        id: String(r._id),
+        sessionType: DEPARTMENT_LABEL_AR[r.department] || String(r.department || '—'),
+        patientName: r.patientId?.name || '—',
+        providerName: r.providerUserId?.name || '—',
+        timeLabel: formatSessionTime(r.createdAt),
+        durationLabel: formatDurationFromMs(durationMs),
+        notes: notesCombined,
+      }
+    })
+
+    res.json({ businessDate, sessions })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
 
 /** قائمة جلساتي (مقدّم الخدمة) أو الكل للمدير */
 clinicalRouter.get('/sessions/mine', requireRoles(...CLINICAL_ROLES), async (req, res) => {

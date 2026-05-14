@@ -45,6 +45,7 @@ const DermatologyCreateSessionPage = lazyPage(
 )
 const DermatologyFinancePage = lazyPage(() => import('./pages/DermatologyFinancePage'), 'DermatologyFinancePage')
 const AdminSkinProceduresPage = lazyPage(() => import('./pages/AdminSkinProceduresPage'), 'AdminSkinProceduresPage')
+const AdminClinicSessionsPage = lazyPage(() => import('./pages/AdminClinicSessionsPage'), 'AdminClinicSessionsPage')
 
 const PatientPortalDashboard    = lazyPage(() => import('./pages/patient-portal/PatientPortalDashboard'), 'PatientPortalDashboard')
 const PatientPortalProfile      = lazyPage(() => import('./pages/patient-portal/PatientPortalProfile'), 'PatientPortalProfile')
@@ -109,6 +110,7 @@ export default function App() {
                 <Route path="/reports/daily" element={<Navigate to="/reception/daily-inventory" replace />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />
+                <Route path="/admin/clinic-sessions" element={<AdminClinicSessionsPage />} />
                 <Route path="/admin/send-notifications" element={<AdminSendNotificationsPage />} />
                 <Route path="/admin/audit" element={<AdminAudit />} />
                 <Route path="/admin/rooms" element={<AdminRooms />} />

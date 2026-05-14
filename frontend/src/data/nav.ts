@@ -18,6 +18,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'inventory', path: '/inventory', label: 'المستودع' },
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
   { key: 'admin_skin_procedures', path: '/admin/skin-procedures', label: 'إجراءات البشرة' },
+  { key: 'admin_clinic_sessions', path: '/admin/clinic-sessions', label: 'جلسات العيادة' },
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
   { key: 'admin_laser', path: '/admin/laser', label: 'ليزر' },
