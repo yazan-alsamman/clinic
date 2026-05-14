@@ -144,8 +144,8 @@ function canManagePackages(role) {
   return role === 'super_admin' || role === 'reception'
 }
 
-/** تسمية جلسات باكج السولاريوم للعرض في الملف (مذكر أنثوي مع العدد للجلسات بعد العاشرة) */
-function solariumPackageSessionLabelAr(zeroBasedIndex) {
+/** تسمية جلسات الباكج (ليزر / سولاريوم) للعرض في الملف */
+function packageSessionLabelAr(zeroBasedIndex) {
   const n = zeroBasedIndex + 1
   const ord = [
     '',
@@ -913,7 +913,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         const packageId = new mongoose.Types.ObjectId()
         const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
           _id: new mongoose.Types.ObjectId(),
-          label: solariumPackageSessionLabelAr(idx),
+          label: packageSessionLabelAr(idx),
           completedByReception: false,
           completedAt: null,
           completedByUserId: null,
@@ -1054,7 +1054,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     const notes = String(req.body?.notes || '').trim().slice(0, 1200)
     const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
       _id: new mongoose.Types.ObjectId(),
-      label: sessionLabelAr(idx + 1),
+      label: packageSessionLabelAr(idx),
       completedByReception: false,
       completedAt: null,
       completedByUserId: null,
