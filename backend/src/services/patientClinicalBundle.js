@@ -69,6 +69,8 @@ export async function getClinicalBundleForPatientId(pid) {
     } else if (s.status === 'completed' && bi?.status === 'pending_payment') {
       effectiveStatus = 'completed_pending_collection'
     }
+    const lineItemsRaw = Array.isArray(s.lineItems) ? s.lineItems : []
+    const packageNonAddonLineCount = lineItemsRaw.filter((r) => !r.isAddon).length
     return {
       id: String(s._id),
       treatmentNumber: s.treatmentNumber,
@@ -96,6 +98,16 @@ export async function getClinicalBundleForPatientId(pid) {
       patientPackageSessionId: String(s.patientPackageSessionId || ''),
       laserCoverApplied: s.laserCoverApplied === true,
       laserCoverSyp: Math.max(0, Math.round(Number(s.laserCoverSyp) || 0)),
+      packageNonAddonLineCount,
+      lineItems: lineItemsRaw.map((row) => ({
+        procedureOptionId: String(row.procedureOptionId || ''),
+        areaLabel: String(row.areaLabel || ''),
+        pw: String(row.pw || ''),
+        pulse: String(row.pulse || ''),
+        shotCount: String(row.shotCount || ''),
+        chargeByPulseCount: row.chargeByPulseCount === true,
+        isAddon: row.isAddon === true,
+      })),
     }
   })
 

@@ -390,11 +390,41 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
     const br = Number(bdDay?.usdSypRate)
     const usdSypBusinessDayRate = Number.isFinite(br) && br > 0 ? br : null
 
+    const itemsOut = await Promise.all(
+      items.map(async (b) => {
+        const dto = billingItemDto(b, b.patientId?.name, b.providerUserId?.name, usdSypBusinessDayRate)
+        if (
+          b.isPackagePrepaid === true &&
+          b.department === 'laser' &&
+          b.patientPackageSessionId &&
+          b.patientPackageId
+        ) {
+          const pidRaw = b.patientId?._id || b.patientId
+          const pid = pidRaw ? String(pidRaw) : ''
+          if (pid && mongoose.isValidObjectId(pid)) {
+            const [ls, p] = await Promise.all([
+              LaserSession.findOne({ billingItemId: b._id }).select('lineItems').lean(),
+              Patient.findById(pid).select('sessionPackages').lean(),
+            ])
+            const recorded = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
+            const pkgRows = Array.isArray(p?.sessionPackages) ? p.sessionPackages : []
+            const pkg = pkgRows.find((x) => String(x._id) === String(b.patientPackageId))
+            const expected = Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0))
+            const pkgSessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
+            const pSess = pkgSessions.find((s) => String(s._id) === String(b.patientPackageSessionId))
+            const ack = Math.max(0, Math.trunc(Number(pSess?.packagePartialAreasAcknowledgedByReception) || 0))
+            dto.packageExpectedAreaCount = expected
+            dto.laserRecordedPackageAreaCount = recorded
+            dto.packagePartialAreasAcknowledgedByReception = ack
+          }
+        }
+        return dto
+      }),
+    )
+
     res.json({
       date,
-      items: items.map((b) =>
-        billingItemDto(b, b.patientId?.name, b.providerUserId?.name, usdSypBusinessDayRate),
-      ),
+      items: itemsOut,
     })
   } catch (e) {
     console.error(e)

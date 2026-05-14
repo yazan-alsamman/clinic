@@ -370,16 +370,31 @@ async function assertProcedureOptionIdsValid(optionIds) {
   return ids
 }
 
-/** أول باكج ليزر غير موقوف وفيه جلسة متاحة (بدون جلسة ليزر مربوطة) */
-function findActiveLaserPackage(patientLike) {
+/**
+ * أول باكج ليزر غير موقوف: إمّا جلسة باكج بلا ربط ليزر، أو جلسة مربوطة بجلسة ليزر ما زالت
+ * مناطقها المسجّلة أقل من `areaCount` وبند التحصيل معلّق (استكمال بعد «إنقاص منطقة»).
+ */
+async function resolveLaserPackageSession(patientLike) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
     if (String(pkg?.department || '') !== 'laser') continue
     if (pkg.suspended === true) continue
     const sessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
-    const available = sessions.find((s) => !s?.linkedLaserSessionId)
-    if (available) {
-      return { pkg, session: available }
+    const expectedAreas = Math.max(1, Math.trunc(Number(pkg.areaCount) || 0))
+    for (const session of sessions) {
+      if (session?.completedByReception === true) continue
+      if (session?.linkedLaserSessionId) {
+        const ls = await LaserSession.findById(session.linkedLaserSessionId).lean()
+        const bi = session.linkedBillingItemId
+          ? await BillingItem.findById(String(session.linkedBillingItemId)).lean()
+          : null
+        const recorded = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
+        if (ls && bi?.status === 'pending_payment' && recorded < expectedAreas) {
+          return { pkg, session, mode: 'continue', expectedAreas, existingLaserSession: ls, billingItem: bi }
+        }
+        continue
+      }
+      return { pkg, session, mode: 'fresh', expectedAreas }
     }
   }
   return null
@@ -1339,7 +1354,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       body.forceOutsidePackage === true ||
       slotPackageMode === 'outside_package'
 
-    const packageMatch = skipLaserPackage ? null : findActiveLaserPackage(patient)
+    const packageMatch = skipLaserPackage ? null : await resolveLaserPackageSession(patient)
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
     const patientGender = normalizePatientGender(patient.gender)
@@ -1665,6 +1680,103 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       }
     }
 
+    if (isPackageSession && packageMatch?.mode === 'continue') {
+      const existingLs = await LaserSession.findById(packageMatch.existingLaserSession._id)
+      if (!existingLs) {
+        res.status(404).json({ error: 'جلسة الليزر المرتبطة بالباكج غير موجودة.' })
+        return
+      }
+      const oldRecorded = (Array.isArray(existingLs.lineItems) ? existingLs.lineItems : []).filter((r) => !r.isAddon)
+        .length
+      const newRecorded = normalizedLineItems.filter((r) => !r.isAddon).length
+      if (newRecorded <= oldRecorded) {
+        res.status(400).json({
+          error: 'أضف منطقة واحدة على الأقل من مناطق الباكج المتبقية ثم احفظ (عدد أسطر المناطق أكبر من السابق).',
+        })
+        return
+      }
+      if (newRecorded > packageMatch.expectedAreas) {
+        res.status(400).json({
+          error: `لا يمكن تجاوز عدد مناطق الباكج (${packageMatch.expectedAreas} منطقة/ات).`,
+        })
+        return
+      }
+
+      const csExisting = existingLs.clinicalSessionId
+        ? await ClinicalSession.findById(existingLs.clinicalSessionId)
+        : null
+      const biExisting = existingLs.billingItemId ? await BillingItem.findById(existingLs.billingItemId) : null
+      if (!csExisting || !biExisting) {
+        res.status(500).json({ error: 'بيانات الجلسة السريرية أو الفوترة غير مكتملة.' })
+        return
+      }
+
+      existingLs.room = resolvedRoom
+      existingLs.laserType = laserType
+      existingLs.pw = mergedPw
+      existingLs.pulse = mergedPulse
+      existingLs.shotCount = mergedShotCount
+      existingLs.chargeByPulseCount =
+        normalizedLineItems.length > 0
+          ? normalizedLineItems.some((row) => row.chargeByPulseCount)
+          : Boolean(chargeByPulseCount)
+      existingLs.notes = body.notes ?? ''
+      existingLs.areaIds = areaIds
+      existingLs.manualAreaLabels = manualAreaLabels
+      existingLs.lineItems = normalizedLineItems
+      existingLs.costSyp = costGrossSyp
+      existingLs.laserCoverApplied = laserCoverAppliedSyp > 0
+      existingLs.laserCoverSyp = laserCoverAppliedSyp
+      existingLs.status = 'completed_pending_collection'
+      await existingLs.save()
+
+      csExisting.procedureDescription = procedureDescription
+      csExisting.sessionFeeSyp = amountDueSyp
+      csExisting.notes = String(body.notes ?? '').trim().slice(0, 2000)
+      await csExisting.save()
+
+      biExisting.procedureLabel = procedureLabel || 'ليزر'
+      biExisting.amountDueSyp = amountDueSyp
+      biExisting.listAmountDueSyp = amountDueSyp
+      biExisting.effectiveAmountDueSyp = amountDueSyp
+      await biExisting.save()
+
+      const packageVisitIncomplete = newRecorded < packageMatch.expectedAreas
+
+      try {
+        await writeAudit({
+          user: req.user,
+          action: 'تحديث جلسة ليزر باكج (استكمال مناطق)',
+          entityType: 'LaserSession',
+          entityId: String(existingLs._id),
+          details: {
+            billingItemId: String(biExisting._id),
+            newRecorded,
+            expectedAreas: packageMatch.expectedAreas,
+          },
+        })
+      } catch (auditErr) {
+        console.error(auditErr)
+      }
+
+      res.status(200).json({
+        session: typeof existingLs.toJSON === 'function' ? existingLs.toJSON() : existingLs,
+        billingItem: {
+          id: String(biExisting._id),
+          status: biExisting.status,
+          amountDueSyp: biExisting.amountDueSyp,
+          isPackagePrepaid: biExisting.isPackagePrepaid === true,
+        },
+        packageInfo: {
+          packageId: String(packageMatch.pkg._id || ''),
+          packageSessionId: String(packageMatch.session._id || ''),
+          label: String(packageMatch.session.label || ''),
+        },
+        packageVisitIncomplete,
+      })
+      return
+    }
+
     const treatmentNumber = await nextSequence('laserTreatment')
 
     let s = null
@@ -1801,6 +1913,10 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
             label: String(packageMatch?.session?.label || ''),
           }
         : null,
+      packageVisitIncomplete:
+        isPackageSession &&
+        Boolean(packageMatch) &&
+        normalizedLineItems.filter((r) => !r.isAddon).length < (packageMatch.expectedAreas || 1),
     })
   } catch (e) {
     console.error(e)

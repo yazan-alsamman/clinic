@@ -48,6 +48,10 @@ export function patientToDto(p) {
                 completedByUserId: s?.completedByUserId ? String(s.completedByUserId) : null,
                 linkedLaserSessionId: s?.linkedLaserSessionId ? String(s.linkedLaserSessionId) : null,
                 linkedBillingItemId: s?.linkedBillingItemId ? String(s.linkedBillingItemId) : null,
+                packagePartialAreasAcknowledgedByReception: Math.max(
+                  0,
+                  Math.trunc(Number(s?.packagePartialAreasAcknowledgedByReception) || 0),
+                ),
                 areasAdjustedOnly: s?.areasAdjustedOnly === true,
                 receptionNote: String(s?.receptionNote || ''),
               }))

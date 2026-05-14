@@ -60,6 +60,17 @@ type ClinicalLaserRow = {
   patientPackageSessionId?: string
   laserCoverApplied?: boolean
   laserCoverSyp?: number
+  /** مناطق الباكج غير الإضافات — لاستكمال جلسة باكج جزئية */
+  packageNonAddonLineCount?: number
+  lineItems?: Array<{
+    procedureOptionId: string
+    areaLabel: string
+    pw: string
+    pulse: string
+    shotCount: string
+    chargeByPulseCount: boolean
+    isAddon: boolean
+  }>
 }
 
 type ClinicalDermRow = {
@@ -198,6 +209,7 @@ type PatientPackageSession = {
   linkedBillingItemId: string | null
   areasAdjustedOnly?: boolean
   receptionNote?: string
+  packagePartialAreasAcknowledgedByReception?: number
 }
 
 type PatientPackage = {
@@ -647,6 +659,10 @@ export function PatientRecord() {
   const [laserLineItems, setLaserLineItems] = useState<LaserSessionLineInput[]>([])
   /** يمنع إعادة تعبئة أسطر الباكج تلقائياً بعد حفظ جلسة لنفس الموعد */
   const laserPkgPrefillBlockedKeyRef = useRef('')
+  /** يتخطى مزامنة أسطر الجدول مرة واحدة بعد تحميل جلسة باكج جزئية من الخادم */
+  const laserPackageSkipLineAutosyncOnceRef = useRef(false)
+  /** يمنع تكرار تعبئة جلسة الباكج الجزئية عند نفس نسخة البيانات */
+  const laserPartialPrefillKeyRef = useRef('')
   const [laserPricePerPulseSyp, setLaserPricePerPulseSyp] = useState(0)
   /** سعر «كفر ليزر» كما يحدده المدير في إعدادات الليزر */
   const [laserCoverPriceSyp, setLaserCoverPriceSyp] = useState(0)
@@ -1019,6 +1035,10 @@ export function PatientRecord() {
   )
 
   useEffect(() => {
+    if (laserPackageSkipLineAutosyncOnceRef.current) {
+      laserPackageSkipLineAutosyncOnceRef.current = false
+      return
+    }
     setLaserLineItems((prev) => {
       const mappedPrev = new Map<string, LaserSessionLineInput>(
         prev
@@ -1521,19 +1541,82 @@ export function PatientRecord() {
               linkedBillingItemId: s.linkedBillingItemId ?? null,
               areasAdjustedOnly: (s as { areasAdjustedOnly?: boolean }).areasAdjustedOnly === true,
               receptionNote: String((s as { receptionNote?: string }).receptionNote || ''),
+              packagePartialAreasAcknowledgedByReception: Math.max(
+                0,
+                Math.trunc(
+                  Number((s as { packagePartialAreasAcknowledgedByReception?: number }).packagePartialAreasAcknowledgedByReception) ||
+                    0,
+                ),
+              ),
             }))
           : [],
       }))
   }, [patient])
 
   const activeLaserPackage = useMemo(() => {
-    return patientPackages.find(
-      (pkg) =>
-        pkg.department === 'laser' &&
-        !pkg.suspended &&
-        pkg.sessions.some((s) => !s.linkedLaserSessionId),
+    for (const pkg of patientPackages) {
+      if (pkg.department !== 'laser' || pkg.suspended) continue
+      const expected = Math.max(
+        1,
+        typeof pkg.areaCount === 'number' && pkg.areaCount > 0
+          ? pkg.areaCount
+          : pkg.procedureOptionIds?.length || 1,
+      )
+      const unlinked = pkg.sessions.find((s) => !s.completedByReception && !s.linkedLaserSessionId)
+      if (unlinked) return pkg
+      const partialOpen = pkg.sessions.some((s) => {
+        if (s.completedByReception || !s.linkedLaserSessionId || !clinicalHistory) return false
+        const ls = clinicalHistory.laserSessions.find((x) => x.id === s.linkedLaserSessionId)
+        if (!ls?.isPackageSession || ls.billingItemStatus !== 'pending_payment') return false
+        const n = ls.packageNonAddonLineCount ?? 0
+        return n < expected
+      })
+      if (partialOpen) return pkg
+    }
+    return undefined
+  }, [patientPackages, clinicalHistory])
+
+  useEffect(() => {
+    if (tab !== 'laser' || !activeLaserPackage || !clinicalHistory || laserProcedureLoading || !id) return
+    const expected = Math.max(
+      1,
+      typeof activeLaserPackage.areaCount === 'number' && activeLaserPackage.areaCount > 0
+        ? activeLaserPackage.areaCount
+        : activeLaserPackage.procedureOptionIds?.length || 1,
     )
-  }, [patientPackages])
+    const sess = activeLaserPackage.sessions.find((s) => {
+      if (s.completedByReception || !s.linkedLaserSessionId) return false
+      const row = clinicalHistory.laserSessions.find((x) => x.id === s.linkedLaserSessionId)
+      if (!row?.lineItems?.length) return false
+      if (!row.isPackageSession || row.billingItemStatus !== 'pending_payment') return false
+      return (row.packageNonAddonLineCount ?? 0) < expected
+    })
+    if (!sess?.linkedLaserSessionId) return
+    const ls = clinicalHistory.laserSessions.find((x) => x.id === sess.linkedLaserSessionId)
+    if (!ls?.lineItems?.length) return
+    const mergeKey = `${id}|${ls.id}|${String(ls.lineItems.length)}|${String(ls.updatedAt || ls.createdAt || '')}`
+    if (laserPartialPrefillKeyRef.current === mergeKey) return
+    laserPartialPrefillKeyRef.current = mergeKey
+    laserPackageSkipLineAutosyncOnceRef.current = true
+    const mains = ls.lineItems.filter((r) => !r.isAddon)
+    const addons = ls.lineItems.filter((r) => r.isAddon)
+    setSelectedLaserItemIds([...new Set(mains.map((m) => m.procedureOptionId).filter(Boolean))])
+    setSelectedLaserAddonItemIds([...new Set(addons.map((m) => m.procedureOptionId).filter(Boolean))])
+    setLaserLineItems(
+      ls.lineItems.map((li) =>
+        createLaserLineRow({
+          procedureOptionId: String(li.procedureOptionId || ''),
+          areaLabel: String(li.areaLabel || ''),
+          pw: String(li.pw || ''),
+          pulse: String(li.pulse || ''),
+          shotCount: String(li.shotCount || ''),
+          chargeByPulseCount: Boolean(li.chargeByPulseCount),
+          isAddon: Boolean(li.isAddon),
+        }),
+      ),
+    )
+    setLaserNotes(String(ls.notes || ''))
+  }, [tab, id, activeLaserPackage, clinicalHistory, laserProcedureLoading])
 
   const laserLineItemsWithPricing = useMemo(
     () => {
@@ -1602,6 +1685,7 @@ export function PatientRecord() {
 
   useEffect(() => {
     laserPkgPrefillBlockedKeyRef.current = ''
+    laserPartialPrefillKeyRef.current = ''
   }, [id, bookedLaserSlotId])
 
   useEffect(() => {
@@ -1617,6 +1701,22 @@ export function PatientRecord() {
     if (!wantsPackageLines) return
 
     const pkg = activeLaserPackage
+    if (pkg && clinicalHistory) {
+      const exp = Math.max(
+        1,
+        typeof pkg.areaCount === 'number' && pkg.areaCount > 0
+          ? pkg.areaCount
+          : pkg.procedureOptionIds?.length || 1,
+      )
+      const partialOpen = pkg.sessions.some((s) => {
+        if (s.completedByReception || !s.linkedLaserSessionId) return false
+        const row = clinicalHistory.laserSessions.find((x) => x.id === s.linkedLaserSessionId)
+        if (!row?.isPackageSession || row.billingItemStatus !== 'pending_payment') return false
+        return (row.packageNonAddonLineCount ?? 0) < exp
+      })
+      if (partialOpen) return
+    }
+
     const ids = (pkg?.procedureOptionIds || []).filter(Boolean)
     if (!ids.length) return
     if (!ids.every((oid) => laserItemById.has(oid))) return
@@ -1636,6 +1736,7 @@ export function PatientRecord() {
     bookedLaserSlotId,
     activeLaserPackage?.id,
     (activeLaserPackage?.procedureOptionIds || []).join(','),
+    clinicalHistory,
   ])
 
   useEffect(() => {
@@ -3747,6 +3848,7 @@ export function PatientRecord() {
                 try {
                   const created = await api<{
                     billingItem: { amountDueSyp: number; isPackagePrepaid?: boolean }
+                    packageVisitIncomplete?: boolean
                   }>('/api/laser/sessions', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -3783,20 +3885,40 @@ export function PatientRecord() {
                   })
                   const due = Number(created.billingItem?.amountDueSyp || 0)
                   const dueFmt = due.toLocaleString('ar-SY')
-                  setLaserSessionOk(
-                    created.billingItem?.isPackagePrepaid
-                      ? due > 0.0001
-                        ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع».`
-                        : 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة» عند عدم وجود إضافات.'
-                      : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`,
-                  )
-                  setLaserNotes('')
-                  setLaserCoverSelected(false)
-                  setSelectedLaserItemIds([])
-                  setSelectedLaserAddonItemIds([])
-                  setLaserLineItems([])
-                  if (id && bookedLaserSlotId) {
-                    laserPkgPrefillBlockedKeyRef.current = `${id}|${bookedLaserSlotId}`
+                  const incompleteVisit =
+                    created.packageVisitIncomplete === true && created.billingItem?.isPackagePrepaid === true
+
+                  if (incompleteVisit) {
+                    setLaserSessionOk(
+                      due > 0.0001
+                        ? `تم حفظ المناطق مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع»، ويظهر «إنقاص منطقة» لكل منطقة من الباكج حتى اكتمال العدد ثم «إنقاص جلسة».`
+                        : 'تم حفظ المناطق ضمن الباكج. عدد المناطق المدخلة أقل من عدد مناطق جلسة الباكج — في التحصيل استخدم «إنقاص منطقة» لكل منطقة أُنجِزت، ثم يُكمِل الأخصائي المناطق المتبقية في الملف حتى يظهر «إنقاص جلسة».',
+                    )
+                    try {
+                      const ch = await api<ClinicalHistorySnapshot>(
+                        `/api/patients/${encodeURIComponent(id)}/clinical-history`,
+                      )
+                      setClinicalHistory(ch)
+                    } catch {
+                      /* ignore */
+                    }
+                    laserPartialPrefillKeyRef.current = ''
+                  } else {
+                    setLaserSessionOk(
+                      created.billingItem?.isPackagePrepaid
+                        ? due > 0.0001
+                          ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع».`
+                          : 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة» عند عدم وجود إضافات.'
+                        : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`,
+                    )
+                    setLaserNotes('')
+                    setLaserCoverSelected(false)
+                    setSelectedLaserItemIds([])
+                    setSelectedLaserAddonItemIds([])
+                    setLaserLineItems([])
+                    if (id && bookedLaserSlotId) {
+                      laserPkgPrefillBlockedKeyRef.current = `${id}|${bookedLaserSlotId}`
+                    }
                   }
                   const data = await api<{ sessions: { treatmentNumber: number }[] }>(
                     `/api/laser/sessions?patientId=${encodeURIComponent(id)}`,

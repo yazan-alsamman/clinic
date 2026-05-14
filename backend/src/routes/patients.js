@@ -184,6 +184,10 @@ function serializePackage(pkg) {
           completedByUserId: s?.completedByUserId ? String(s.completedByUserId) : null,
           linkedLaserSessionId: s?.linkedLaserSessionId ? String(s.linkedLaserSessionId) : null,
           linkedBillingItemId: s?.linkedBillingItemId ? String(s.linkedBillingItemId) : null,
+          packagePartialAreasAcknowledgedByReception: Math.max(
+            0,
+            Math.trunc(Number(s?.packagePartialAreasAcknowledgedByReception) || 0),
+          ),
           areasAdjustedOnly: s?.areasAdjustedOnly === true,
           receptionNote: String(s?.receptionNote || ''),
         }))
@@ -1268,6 +1272,63 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
     const sess = sessIndex >= 0 ? packageSessions[sessIndex] : null
     if (!sess) {
       res.status(404).json({ error: 'جلسة الباكج غير موجودة' })
+      return
+    }
+
+    if (req.body?.acknowledgePartialPackageArea === true) {
+      if (sess.completedByReception === true) {
+        res.status(400).json({ error: 'جلسة الباكج مُثبَّتة مسبقاً.' })
+        return
+      }
+      if (!sess.linkedLaserSessionId || !mongoose.isValidObjectId(sess.linkedLaserSessionId)) {
+        res.status(400).json({ error: 'لا توجد جلسة ليزر مرتبطة بهذا البند.' })
+        return
+      }
+      const ls = await LaserSession.findById(sess.linkedLaserSessionId).lean()
+      if (!ls) {
+        res.status(400).json({ error: 'جلسة الليزر المرتبطة غير موجودة.' })
+        return
+      }
+      const recorded = (Array.isArray(ls.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
+      const expected = Math.max(1, Math.trunc(Number(pkg.areaCount) || 0))
+      const currentAck = Math.max(0, Math.trunc(Number(sess.packagePartialAreasAcknowledgedByReception) || 0))
+      if (!(recorded < expected)) {
+        res.status(400).json({
+          error: 'عند إكمال كل مناطق الباكج لهذه الزيارة استخدم «إنقاص جلسة» من التحصيل.',
+        })
+        return
+      }
+      if (currentAck >= recorded) {
+        res.status(400).json({
+          error:
+            'تم إنقاص كل المناطق المسجّلة حالياً. يُكمِل الأخصائي المناطق المتبقية في ملف المريض ثم يُعاد الحفظ.',
+        })
+        return
+      }
+      await Patient.updateOne(
+        { _id: p._id },
+        {
+          $set: {
+            [`sessionPackages.${pkgIndex}.sessions.${sessIndex}.packagePartialAreasAcknowledgedByReception`]:
+              currentAck + 1,
+            [`sessionPackages.${pkgIndex}.sessions.${sessIndex}.areasAdjustedOnly`]: true,
+          },
+        },
+      )
+      await writeAudit({
+        user: req.user,
+        action: 'إنقاص منطقة من جلسة باكج ليزر (استقبال)',
+        entityType: 'Patient',
+        entityId: p._id,
+        details: { packageId: String(pkg._id), sessionId: String(sess._id), nextAck: currentAck + 1 },
+      })
+      const freshPartial = await Patient.findById(p._id).select('sessionPackages').lean()
+      const freshPkgPartial = (Array.isArray(freshPartial?.sessionPackages) ? freshPartial.sessionPackages : []).find(
+        (x) => String(x?._id) === String(pkg._id),
+      )
+      res.json({
+        package: freshPkgPartial ? serializePackage(freshPkgPartial) : serializePackage(pkg),
+      })
       return
     }
 

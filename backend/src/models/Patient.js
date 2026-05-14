@@ -22,6 +22,8 @@ const packageSessionSchema = new mongoose.Schema(
     completedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     linkedLaserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null },
     linkedBillingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+    /** عدد مرات «إنقاص منطقة» من الاستقبال لهذه جلسة الباكج (مناطق مُثبَّتة دون إغلاق الجلسة) */
+    packagePartialAreasAcknowledgedByReception: { type: Number, default: 0, min: 0 },
     /** إنقاص مناطق فقط (بدون إنقاص جلسة) — تسوية من الاستقبال */
     areasAdjustedOnly: { type: Boolean, default: false },
     /** ملاحظة عند حذف منطقة من باكج أو إضافة من خارج الباكج */

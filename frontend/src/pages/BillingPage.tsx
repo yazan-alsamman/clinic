@@ -27,6 +27,10 @@ type Item = {
   isPackagePrepaid?: boolean
   patientPackageId?: string
   patientPackageSessionId?: string
+  /** من باكج ليزر — لمنطق «إنقاص منطقة» مقابل «إنقاص جلسة» */
+  packageExpectedAreaCount?: number
+  laserRecordedPackageAreaCount?: number
+  packagePartialAreasAcknowledgedByReception?: number
 }
 
 const BILLING_ROLES = ['super_admin', 'reception'] as const
@@ -65,6 +69,39 @@ function itemEffectiveDueSyp(item: Item | null): number {
   return Math.round(Number(item.effectiveAmountDueSyp ?? item.amountDueSyp) || 0)
 }
 
+function hasLaserPackageAreaMetrics(item: Item): boolean {
+  return (
+    item.isPackagePrepaid === true &&
+    item.department === 'laser' &&
+    item.packageExpectedAreaCount != null &&
+    item.laserRecordedPackageAreaCount != null
+  )
+}
+
+function itemPackageNeedsPartialAreaSettle(item: Item): boolean {
+  if (!hasLaserPackageAreaMetrics(item)) return false
+  const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
+  const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
+  const ack = Math.trunc(Number(item.packagePartialAreasAcknowledgedByReception) || 0)
+  return rec < exp && ack < rec
+}
+
+function itemPackageWaitingForMoreAreas(item: Item): boolean {
+  if (!hasLaserPackageAreaMetrics(item)) return false
+  const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
+  const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
+  const ack = Math.trunc(Number(item.packagePartialAreasAcknowledgedByReception) || 0)
+  return rec < exp && ack >= rec
+}
+
+function itemPackageReadyForSessionDecrement(item: Item): boolean {
+  if (!item.isPackagePrepaid) return false
+  if (!hasLaserPackageAreaMetrics(item)) return true
+  const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
+  const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
+  return rec >= exp
+}
+
 export function BillingPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
@@ -78,6 +115,7 @@ export function BillingPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
+  const [partialPackageBusyId, setPartialPackageBusyId] = useState<string | null>(null)
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
   const [paySyp, setPaySyp] = useState('')
@@ -468,6 +506,31 @@ export function BillingPage() {
     }
   }
 
+  async function acknowledgePartialPackageArea(item: Item) {
+    if (!item.patientId || !item.patientPackageId || !item.patientPackageSessionId) {
+      setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
+      return
+    }
+    setPartialPackageBusyId(item.id)
+    setErr('')
+    try {
+      await api(
+        `/api/patients/${encodeURIComponent(item.patientId)}/packages/${encodeURIComponent(
+          item.patientPackageId,
+        )}/sessions/${encodeURIComponent(item.patientPackageSessionId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ acknowledgePartialPackageArea: true }),
+        },
+      )
+      await load()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'تعذر إنقاص منطقة الباكج')
+    } finally {
+      setPartialPackageBusyId(null)
+    }
+  }
+
   async function deletePendingItem(item: Item) {
     if (user?.role !== 'super_admin') return
     const ok = window.confirm(
@@ -589,7 +652,12 @@ export function BillingPage() {
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      disabled={deleteBusyId === b.id || busyId === b.id || packageBusyId === b.id}
+                      disabled={
+                        deleteBusyId === b.id ||
+                        busyId === b.id ||
+                        packageBusyId === b.id ||
+                        partialPackageBusyId === b.id
+                      }
                       onClick={() => void deletePendingItem(b)}
                       style={{ color: 'var(--danger)' }}
                     >
@@ -619,14 +687,32 @@ export function BillingPage() {
                     </button>
                   ) : null}
                   {b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={packageBusyId === b.id}
-                      onClick={() => void consumePackageSession(b)}
-                    >
-                      {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
-                    </button>
+                    <>
+                      {itemPackageNeedsPartialAreaSettle(b) ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={
+                            packageBusyId === b.id || partialPackageBusyId === b.id || busyId === b.id
+                          }
+                          onClick={() => void acknowledgePartialPackageArea(b)}
+                        >
+                          {partialPackageBusyId === b.id ? 'جاري المعالجة…' : 'إنقاص منطقة'}
+                        </button>
+                      ) : null}
+                      {itemPackageReadyForSessionDecrement(b) ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={
+                            packageBusyId === b.id || partialPackageBusyId === b.id || busyId === b.id
+                          }
+                          onClick={() => void consumePackageSession(b)}
+                        >
+                          {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                   {!b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
                     <button
@@ -660,10 +746,27 @@ export function BillingPage() {
                     جلسة باكج مع مناطق إضافية خارج الباكج — استخدم «إنقاص جلسة و دفع» لتسجيل الدفعة ثم خصم جلسة من
                     الباكج.
                   </p>
-                ) : b.isPackagePrepaid ? (
-                  <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                    هذه الجلسة مدفوعة مسبقاً — تأكد من إتمام جلسة من ضمن الباكج لهذا المريض.
-                  </p>
+                ) : b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
+                  itemPackageWaitingForMoreAreas(b) ? (
+                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                      تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية في ملف المريض ثم
+                      يُعاد «إنقاص منطقة» حتى اكتمال العدد، وبعدها يظهر «إنقاص جلسة».
+                    </p>
+                  ) : itemPackageNeedsPartialAreaSettle(b) ? (
+                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                      باكج ليزر — عدد المناطق المسجّل أصغر من عدد مناطق الباكج. استخدم «إنقاص منطقة» لكل منطقة أنجزها
+                      الأخصائي ضمن المدخلات الحالية قبل إكمال باقي المناطق في الملف.
+                    </p>
+                  ) : !hasLaserPackageAreaMetrics(b) ? (
+                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                      هذه الجلسة مدفوعة مسبقاً — تأكد من إتمام جلسة من ضمن الباكج لهذا المريض.
+                    </p>
+                  ) : (
+                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                      هذه الجلسة مدفوعة مسبقاً — عند اكتمال كل مناطق الباكج استخدم «إنقاص جلسة» لتثبيت الخصم من
+                      الباكج.
+                    </p>
+                  )
                 ) : null}
               </div>
             </li>

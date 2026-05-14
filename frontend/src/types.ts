@@ -91,6 +91,7 @@ export interface Patient {
       linkedBillingItemId: string | null
       areasAdjustedOnly?: boolean
       receptionNote?: string
+      packagePartialAreasAcknowledgedByReception?: number
     }>
   }>
 }
