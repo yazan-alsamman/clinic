@@ -300,7 +300,6 @@ export function ReceptionAppointmentPage() {
   const [successMsg, setSuccessMsg] = useState('')
   const [bookingOpen, setBookingOpen] = useState(false)
   const [laserPackageBookingIntent, setLaserPackageBookingIntent] = useState<'use_package' | 'outside_package' | ''>('')
-  const [laserPkgGateOpen, setLaserPkgGateOpen] = useState(false)
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
   const [laserProcedureLoading, setLaserProcedureLoading] = useState(false)
   const [laserProcedureErr, setLaserProcedureErr] = useState('')
@@ -456,7 +455,6 @@ export function ReceptionAppointmentPage() {
       setNewPatientGenderPending('')
       setNewPatientPhoneForCreate('')
       setLaserPackageBookingIntent('')
-      setLaserPkgGateOpen(false)
     }
   }, [bookingOpen])
 
@@ -683,7 +681,7 @@ export function ReceptionAppointmentPage() {
     }
     const laserIntent = laserIntentArg ?? laserPackageBookingIntent
     if (selectedService === 'laser' && patientHasOpenLaserPackage(picked) && !laserIntent) {
-      setLaserPkgGateOpen(true)
+      setFormErr('اختر نوع حجز الباكج: «حجز لمناطق الباكج» أو «حجز مناطق خارج الباكج» من الخيارات أعلاه.')
       return false
     }
     if (assignBlocked) {
@@ -782,7 +780,6 @@ export function ReceptionAppointmentPage() {
       setPatientHits([])
       setSelectedLaserItemIds([])
       setLaserPackageBookingIntent('')
-      setLaserPkgGateOpen(false)
       await loadSlots()
       return true
     } catch (e) {
@@ -952,7 +949,6 @@ export function ReceptionAppointmentPage() {
                                     setNewPatientGenderPending('')
                                     setNewPatientPhoneForCreate('')
                                     setLaserPackageBookingIntent('')
-                                    setLaserPkgGateOpen(false)
                                     setBookingOpen(true)
                                   }}
                                 >
@@ -1021,7 +1017,6 @@ export function ReceptionAppointmentPage() {
                             setNewPatientGenderPending('')
                             setNewPatientPhoneForCreate('')
                             setLaserPackageBookingIntent('')
-                            setLaserPkgGateOpen(false)
                             setBookingOpen(true)
                           }}
                         >
@@ -1100,7 +1095,6 @@ export function ReceptionAppointmentPage() {
                   if (picked) {
                     setPicked(null)
                     setLaserPackageBookingIntent('')
-                    setLaserPkgGateOpen(false)
                   }
                   setNewPatientGenderPending('')
                   setNewPatientPhoneForCreate('')
@@ -1118,7 +1112,6 @@ export function ReceptionAppointmentPage() {
                       setNewPatientGenderPending('')
                       setNewPatientPhoneForCreate('')
                       setLaserPackageBookingIntent('')
-                      setLaserPkgGateOpen(false)
                     }}
                   >
                     إلغاء الاختيار
@@ -1141,7 +1134,6 @@ export function ReceptionAppointmentPage() {
                           setPatientQ(p.name)
                           setPatientHits([])
                           setLaserPackageBookingIntent('')
-                          setLaserPkgGateOpen(false)
                           setNewPatientGenderPending(
                             p.gender === 'male' || p.gender === 'female' ? p.gender : '',
                           )
@@ -1240,10 +1232,70 @@ export function ReceptionAppointmentPage() {
                 </div>
               ) : null}
             </div>
+            {selectedService === 'laser' && picked && patientHasOpenLaserPackage(picked) && !laserPackageBookingIntent ? (
+              <div
+                className="card"
+                style={{
+                  marginBottom: '0.85rem',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-1)',
+                }}
+              >
+                <h4 style={{ marginTop: 0, marginBottom: '0.45rem' }}>نوع حجز الباكج</h4>
+                <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                  المريض لديه باكج ليزر فعّال. اختر كيف تريدين تسجيل هذا الموعد:
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={assignBlocked}
+                    onClick={() => {
+                      setFormErr('')
+                      setLaserPackageBookingIntent('use_package')
+                      setSelectedLaserItemIds([])
+                    }}
+                  >
+                    حجز لمناطق الباكج
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={assignBlocked}
+                    onClick={() => {
+                      setFormErr('')
+                      setLaserPackageBookingIntent('outside_package')
+                    }}
+                  >
+                    حجز مناطق خارج الباكج
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="card">
               <h4 style={{ marginTop: 0, marginBottom: '0.55rem' }}>
                 {selectedService === 'laser' ? 'منطقة / عرض الليزر' : 'نوع الإجراء'}
               </h4>
+              {selectedService === 'laser' &&
+              picked &&
+              patientHasOpenLaserPackage(picked) &&
+              laserPackageBookingIntent ? (
+                <p style={{ margin: '0 0 0.65rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '0.82rem', padding: '0.25rem 0.5rem' }}
+                    disabled={assignBlocked}
+                    onClick={() => {
+                      setLaserPackageBookingIntent('')
+                      setSelectedLaserItemIds([])
+                      setFormErr('')
+                    }}
+                  >
+                    تغيير نوع حجز الباكج
+                  </button>
+                </p>
+              ) : null}
               {selectedService === 'laser' &&
               picked &&
               patientHasOpenLaserPackage(picked) &&
@@ -1273,9 +1325,9 @@ export function ReceptionAppointmentPage() {
               ) : null}
               {selectedService === 'laser' ? (
                 <>
-                  {laserPackageBookingIntent === 'use_package' &&
-                  picked &&
-                  patientHasOpenLaserPackage(picked) ? null : (
+                  {picked &&
+                  patientHasOpenLaserPackage(picked) &&
+                  (laserPackageBookingIntent === 'use_package' || !laserPackageBookingIntent) ? null : (
                     <>
                       {laserProcedureErr ? (
                         <p style={{ marginTop: 0, color: 'var(--danger)' }}>{laserProcedureErr}</p>
@@ -1368,65 +1420,20 @@ export function ReceptionAppointmentPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={saving || assignBlocked}
+                disabled={
+                  saving ||
+                  assignBlocked ||
+                  (selectedService === 'laser' &&
+                    !!picked &&
+                    patientHasOpenLaserPackage(picked) &&
+                    !laserPackageBookingIntent)
+                }
                 onClick={async () => {
                   const ok = await submit()
                   if (ok) setBookingOpen(false)
                 }}
               >
                 {saving ? 'جاري الحفظ…' : 'تأكيد حجز الموعد'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {laserPkgGateOpen && bookingOpen ? (
-        <div
-          className="modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          style={{ zIndex: 2000 }}
-          onClick={() => setLaserPkgGateOpen(false)}
-        >
-          <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>باكج ليزر</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.55, marginBottom: '1rem' }}>
-              هذا المريض لديه باكج ليزر فعّال مع جلسات غير مكتملة. هل تريد حجز هذا الموعد كجلسة من جلسات الباكج، أم
-              كمناطق/عرض من خارج الباكج؟
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={saving}
-                onClick={async () => {
-                  setLaserPackageBookingIntent('use_package')
-                  setLaserPkgGateOpen(false)
-                  const ok = await submit('use_package')
-                  if (ok) setBookingOpen(false)
-                }}
-              >
-                جلسة من جلسات الباكج
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={saving}
-                onClick={() => {
-                  setLaserPackageBookingIntent('outside_package')
-                  setLaserPkgGateOpen(false)
-                }}
-              >
-                مناطق من خارج الباكج
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={saving}
-                onClick={() => setLaserPkgGateOpen(false)}
-              >
-                إلغاء
               </button>
             </div>
           </div>
