@@ -4,7 +4,42 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { DentalMasterPlan } from '../models/DentalMasterPlan.js'
+import { Patient } from '../models/Patient.js'
+import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { normalizeHm, hmToMinutes } from '../utils/scheduleTime.js'
+
+function buildLaserPackageAreaBreakdown(sessionRow, packagesById, nameByOptionId) {
+  if (sessionRow?.isPackageSession !== true) return null
+  const pkg = packagesById.get(String(sessionRow.patientPackageId || ''))
+  if (!pkg) return null
+  const packageIds = (Array.isArray(pkg.procedureOptionIds) ? pkg.procedureOptionIds : [])
+    .map(String)
+    .filter(Boolean)
+  if (!packageIds.length) return null
+
+  const doneItems = (Array.isArray(sessionRow.lineItems) ? sessionRow.lineItems : []).filter((r) => !r.isAddon)
+  const doneAreas = []
+  const idsRemaining = [...packageIds]
+  for (const li of doneItems) {
+    const oid = String(li.procedureOptionId || '')
+    const label =
+      String(li.areaLabel || '').trim() ||
+      (oid ? nameByOptionId.get(oid) : '') ||
+      ''
+    if (label) doneAreas.push(label)
+    if (oid) {
+      const idx = idsRemaining.indexOf(oid)
+      if (idx >= 0) idsRemaining.splice(idx, 1)
+    }
+  }
+  const remainingAreas = idsRemaining.map((id) => nameByOptionId.get(id) || id).filter(Boolean)
+  const expected = Math.max(1, Math.trunc(Number(pkg.areaCount) || 0), packageIds.length)
+  return {
+    doneAreas,
+    remainingAreas,
+    isPartial: doneAreas.length < expected,
+  }
+}
 
 function slotEndDisplay(doc) {
   const startNorm = normalizeHm(doc.time)
@@ -24,7 +59,7 @@ function slotEndDisplay(doc) {
  * @param {import('mongoose').Types.ObjectId} pid
  */
 export async function getClinicalBundleForPatientId(pid) {
-  const [laserRows, dermRows, apptRows, planDoc] = await Promise.all([
+  const [laserRows, dermRows, apptRows, planDoc, patientDoc] = await Promise.all([
     LaserSession.find({ patientId: pid })
       .sort({ createdAt: -1 })
       .populate('operatorUserId', 'name')
@@ -37,7 +72,33 @@ export async function getClinicalBundleForPatientId(pid) {
       .lean(),
     ScheduleSlot.find({ patientId: pid }).sort({ businessDate: -1, time: -1 }).limit(150).lean(),
     DentalMasterPlan.findOne({ patientId: pid }).lean(),
+    Patient.findById(pid).select('sessionPackages').lean(),
   ])
+
+  const packagesById = new Map(
+    (Array.isArray(patientDoc?.sessionPackages) ? patientDoc.sessionPackages : []).map((p) => [
+      String(p._id),
+      p,
+    ]),
+  )
+  const optionIds = new Set()
+  for (const s of laserRows) {
+    if (s.isPackageSession !== true) continue
+    const pkg = packagesById.get(String(s.patientPackageId || ''))
+    if (pkg) {
+      for (const id of pkg.procedureOptionIds || []) optionIds.add(String(id))
+    }
+    for (const li of s.lineItems || []) {
+      if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+    }
+  }
+  const nameRows =
+    optionIds.size > 0
+      ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+          .select('name')
+          .lean()
+      : []
+  const nameByOptionId = new Map(nameRows.map((r) => [String(r._id), String(r.name || '').trim()]))
 
   const billingIds = laserRows.map((s) => s.billingItemId).filter(Boolean)
   const billingItems = billingIds.length
@@ -108,6 +169,7 @@ export async function getClinicalBundleForPatientId(pid) {
         chargeByPulseCount: row.chargeByPulseCount === true,
         isAddon: row.isAddon === true,
       })),
+      packageAreaBreakdown: buildLaserPackageAreaBreakdown(s, packagesById, nameByOptionId),
     }
   })
 

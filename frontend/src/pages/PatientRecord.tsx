@@ -71,6 +71,44 @@ type ClinicalLaserRow = {
     chargeByPulseCount: boolean
     isAddon: boolean
   }>
+  packageAreaBreakdown?: {
+    doneAreas: string[]
+    remainingAreas: string[]
+    isPartial: boolean
+  } | null
+}
+
+function formatPackageAreaList(labels: string[]): string {
+  if (!labels.length) return '—'
+  return labels.join('، ')
+}
+
+function PackageSessionAreasBreakdownView({
+  breakdown,
+  compact,
+}: {
+  breakdown: NonNullable<ClinicalLaserRow['packageAreaBreakdown']>
+  compact?: boolean
+}) {
+  const fontSize = compact ? '0.8rem' : '0.88rem'
+  return (
+    <div style={{ display: 'grid', gap: compact ? '0.2rem' : '0.35rem', fontSize, lineHeight: 1.45 }}>
+      <div>
+        <span style={{ color: 'var(--success)', fontWeight: 600 }}>تمّت في هذه الجلسة: </span>
+        <span>{formatPackageAreaList(breakdown.doneAreas)}</span>
+      </div>
+      {breakdown.remainingAreas.length > 0 ? (
+        <div>
+          <span style={{ color: 'var(--amber)', fontWeight: 600 }}>متبقية من الباكج: </span>
+          <span>{formatPackageAreaList(breakdown.remainingAreas)}</span>
+        </div>
+      ) : breakdown.isPartial ? null : (
+        <div style={{ color: 'var(--text-muted)', fontSize: compact ? '0.75rem' : '0.82rem' }}>
+          اكتملت كل مناطق الباكج في هذه الجلسة.
+        </div>
+      )}
+    </div>
+  )
 }
 
 type ClinicalDermRow = {
@@ -507,11 +545,13 @@ function buildPatientRecordPrintHtml(opts: {
           ? '<tr><td colspan="8" class="muted">لا جلسات ليزر مسجّلة.</td></tr>'
           : clinicalHistory.laserSessions
               .map((s) => {
-                const areas = resolveLaserAreasDisplay(
-                  s.areaIds ?? [],
-                  s.manualAreaLabels,
-                  laserCatalog,
-                )
+                const areas = s.packageAreaBreakdown
+                  ? `تمّت: ${s.packageAreaBreakdown.doneAreas.join('، ') || '—'} — متبقية: ${s.packageAreaBreakdown.remainingAreas.join('، ') || '—'}`
+                  : resolveLaserAreasDisplay(
+                      s.areaIds ?? [],
+                      s.manualAreaLabels,
+                      laserCatalog,
+                    )
                 return `<tr>
                   <td>${s.treatmentNumber}</td>
                   <td>${escapeHtmlPdf(formatClinicDate(s.createdAt))}</td>
@@ -1189,7 +1229,7 @@ export function PatientRecord() {
   }, [id])
 
   useEffect(() => {
-    if (!id || tab !== 'overview') return
+    if (!id || (tab !== 'overview' && tab !== 'packages' && tab !== 'laser')) return
     let cancelled = false
     setClinicalHistoryLoading(true)
     setClinicalHistoryErr('')
@@ -1575,6 +1615,17 @@ export function PatientRecord() {
     }
     return undefined
   }, [patientPackages, clinicalHistory])
+
+  const partialPackageLaserSession = useMemo(() => {
+    if (!activeLaserPackage || !clinicalHistory) return null
+    const sess = activeLaserPackage.sessions.find(
+      (s) => !s.completedByReception && s.linkedLaserSessionId,
+    )
+    if (!sess?.linkedLaserSessionId) return null
+    const ls = clinicalHistory.laserSessions.find((x) => x.id === sess.linkedLaserSessionId)
+    if (!ls?.packageAreaBreakdown?.isPartial) return null
+    return ls
+  }, [activeLaserPackage, clinicalHistory])
 
   useEffect(() => {
     if (tab !== 'laser' || !activeLaserPackage || !clinicalHistory || laserProcedureLoading || !id) return
@@ -2437,10 +2488,28 @@ export function PatientRecord() {
                               </td>
                               <td>{laserStatusAr[s.status] ?? s.status}</td>
                               <td>{s.operatorName}</td>
-                              <td style={{ fontSize: '0.85rem', maxWidth: 200 }}>
-                                {s.areaIds?.length
-                                  ? `${s.areaIds.length} منطقة: ${s.areaIds.join('، ')}`
-                                  : '—'}
+                              <td style={{ fontSize: '0.85rem', maxWidth: 280, verticalAlign: 'top' }}>
+                                {s.packageAreaBreakdown ? (
+                                  <PackageSessionAreasBreakdownView
+                                    breakdown={s.packageAreaBreakdown}
+                                    compact
+                                  />
+                                ) : s.lineItems?.some((li) => !li.isAddon && (li.areaLabel || li.procedureOptionId)) ? (
+                                  <span>
+                                    {formatPackageAreaList(
+                                      s.lineItems
+                                        .filter((li) => !li.isAddon)
+                                        .map((li) => li.areaLabel.trim())
+                                        .filter(Boolean),
+                                    )}
+                                  </span>
+                                ) : (
+                                  resolveLaserAreasDisplay(
+                                    s.areaIds || [],
+                                    s.manualAreaLabels,
+                                    laserCatalog,
+                                  )
+                                )}
                               </td>
                               <td style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
                                 {formatLaserCollectedSyp(s.collectedAmountSyp ?? null)}
@@ -3154,7 +3223,29 @@ export function PatientRecord() {
                               — {s.completedByReception ? 'تم استهلاك الجلسة' : 'لم تُستهلك بعد — انقر لتسجيل الزيارة'}
                             </span>
                           ) : s.linkedLaserSessionId ? (
-                            <span style={{ color: 'var(--text-muted)' }}> — مرتبطة بجلسة ليزر</span>
+                            <>
+                              <span style={{ color: 'var(--text-muted)' }}> — مرتبطة بجلسة ليزر</span>
+                              {(() => {
+                                const ls = clinicalHistory?.laserSessions.find(
+                                  (x) => x.id === s.linkedLaserSessionId,
+                                )
+                                if (!ls?.packageAreaBreakdown) return null
+                                return (
+                                  <span
+                                    style={{
+                                      display: 'block',
+                                      marginTop: '0.35rem',
+                                      paddingRight: '0.15rem',
+                                    }}
+                                  >
+                                    <PackageSessionAreasBreakdownView
+                                      breakdown={ls.packageAreaBreakdown}
+                                      compact
+                                    />
+                                  </span>
+                                )
+                              })()}
+                            </>
                           ) : (
                             <span style={{ color: 'var(--text-muted)' }}> — بانتظار تسجيل الجلسة</span>
                           )}
@@ -3520,6 +3611,25 @@ export function PatientRecord() {
                   مدفوع مسبقاً. يمكنك إضافة مناطق أو عروض <strong>خارج الباكج</strong> من نافذة الاختيار؛ يُعرض سعر
                   الإضافات فقط ويُحصّلها الاستقبال عند «إنقاص جلسة و دفع».
                 </p>
+              ) : null}
+              {partialPackageLaserSession?.packageAreaBreakdown ? (
+                <div
+                  style={{
+                    marginTop: '0.55rem',
+                    padding: '0.55rem 0.65rem',
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface-solid)',
+                  }}
+                >
+                  <p style={{ margin: '0 0 0.35rem', fontSize: '0.86rem', fontWeight: 600 }}>
+                    جلسة باكج قيد الإكمال (معالجة رقم {partialPackageLaserSession.treatmentNumber})
+                  </p>
+                  <PackageSessionAreasBreakdownView
+                    breakdown={partialPackageLaserSession.packageAreaBreakdown}
+                    compact
+                  />
+                </div>
               ) : null}
             </header>
 
@@ -4953,16 +5063,40 @@ export function PatientRecord() {
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {formatLaserCollectedSyp(laserSessionDetail.collectedAmountSyp ?? null)}
               </span>
-              <span className="form-label" style={{ margin: 0, alignSelf: 'start' }}>
-                المناطق المعالجة
-              </span>
-              <span style={{ lineHeight: 1.5, wordBreak: 'break-word' }}>
-                {resolveLaserAreasDisplay(
-                  laserSessionDetail.areaIds || [],
-                  laserSessionDetail.manualAreaLabels,
-                  laserCatalog,
-                )}
-              </span>
+              {laserSessionDetail.packageAreaBreakdown ? (
+                <>
+                  <span className="form-label" style={{ margin: 0, alignSelf: 'start' }}>
+                    مناطق الباكج
+                  </span>
+                  <div style={{ lineHeight: 1.5, wordBreak: 'break-word' }}>
+                    <PackageSessionAreasBreakdownView breakdown={laserSessionDetail.packageAreaBreakdown} />
+                    {laserSessionDetail.lineItems?.some((li) => li.isAddon) ? (
+                      <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        إضافات خارج الباكج:{' '}
+                        {formatPackageAreaList(
+                          laserSessionDetail.lineItems
+                            .filter((li) => li.isAddon)
+                            .map((li) => li.areaLabel.trim())
+                            .filter(Boolean),
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="form-label" style={{ margin: 0, alignSelf: 'start' }}>
+                    المناطق المعالجة
+                  </span>
+                  <span style={{ lineHeight: 1.5, wordBreak: 'break-word' }}>
+                    {resolveLaserAreasDisplay(
+                      laserSessionDetail.areaIds || [],
+                      laserSessionDetail.manualAreaLabels,
+                      laserCatalog,
+                    )}
+                  </span>
+                </>
+              )}
               <span className="form-label" style={{ margin: 0, alignSelf: 'start' }}>
                 ملاحظات
               </span>
