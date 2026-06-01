@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { api, ApiError } from '../api/client'
+import {
+  PaymentChannelFields,
+  usePaymentBankOptions,
+  validatePaymentChannelBeforeSubmit,
+  type PaymentChannel,
+} from '../components/PaymentChannelFields'
 import type { Role } from '../types'
 
 type SolariumRegisterRow = {
@@ -57,6 +63,9 @@ export function ReceptionSolariumPage() {
   const [registerRows, setRegisterRows] = useState<SolariumRegisterRow[]>([])
   const [registerLoading, setRegisterLoading] = useState(false)
   const [registerErr, setRegisterErr] = useState('')
+  const [payChannel, setPayChannel] = useState<PaymentChannel>('cash')
+  const [payBankName, setPayBankName] = useState('')
+  const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(allowed)
 
   const loadRegister = useCallback(async () => {
     if (role !== 'super_admin' || !registerDate.trim()) return
@@ -139,22 +148,37 @@ export function ReceptionSolariumPage() {
       setErr('أدخل اسم المريض')
       return
     }
+    const chErr = validatePaymentChannelBeforeSubmit(payChannel, payBankName)
+    if (chErr) {
+      setErr(chErr)
+      return
+    }
     setSaving(true)
     setErr('')
     setOk('')
     try {
-      const body: { displayName: string; sessionMinutes: number; businessDate?: string } = {
+      const body: {
+        displayName: string
+        sessionMinutes: number
+        businessDate?: string
+        paymentChannel: PaymentChannel
+        bankName?: string
+      } = {
         displayName: name,
         sessionMinutes,
+        paymentChannel: payChannel,
       }
+      if (payChannel === 'bank') body.bankName = payBankName.trim()
       const bd = businessDate?.trim()
       if (bd) body.businessDate = bd
       await api('/api/solarium/sessions/confirm', {
         method: 'POST',
         body: JSON.stringify(body),
       })
-      setOk('تم تسجيل الجلسة والتحصيل النقدي — يظهر المبلغ في الجرد المالي اليومي.')
+      setOk('تم تسجيل الجلسة والتحصيل — يظهر المبلغ في الجرد المالي اليومي.')
       setDisplayName('')
+      setPayChannel('cash')
+      setPayBankName('')
       void loadSettings()
       if (role === 'super_admin') void loadRegister()
     } catch (e) {
@@ -180,7 +204,7 @@ export function ReceptionSolariumPage() {
     <>
       <h1 className="page-title">سولاريوم</h1>
       <p className="page-desc">
-        حقل الاسم للعرض في السجل فقط — غير مرتبط ببحث المرضى أو ملفاتهم. عند التأكيد يُحصّل المبلغ نقداً باسم
+        حقل الاسم للعرض في السجل فقط — غير مرتبط ببحث المرضى أو ملفاتهم. عند التأكيد يُحصّل المبلغ (كاش أو بنك) باسم
         المستخدم الذي يؤكد، ويُدمج مع الجرد المالي اليومي.
       </p>
 
@@ -324,6 +348,16 @@ export function ReceptionSolariumPage() {
             <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
               المستحق للتحصيل: <strong>{currentPrice.toLocaleString('ar-SY')} ل.س</strong>
             </p>
+            <PaymentChannelFields
+              channel={payChannel}
+              bankName={payBankName}
+              onChannelChange={setPayChannel}
+              onBankNameChange={setPayBankName}
+              disabled={confirmBlocked}
+              namePrefix="sol-walkin"
+              banks={paymentBanks}
+              banksLoading={paymentBanksLoading}
+            />
             <button
               type="button"
               className="btn btn-primary"

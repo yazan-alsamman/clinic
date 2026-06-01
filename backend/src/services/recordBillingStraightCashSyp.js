@@ -7,12 +7,22 @@ import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 
 /**
- * تأكيد تحصيل نقدي بالليرة بالكامل لبند معلّق (بدون خصم، بدون دولار).
- * يُستخدم لتدفّق السولاريوم المستقل وغيره عند الحاجة.
+ * تأكيد تحصيل بالليرة بالكامل لبند معلّق (بدون خصم، بدون دولار).
+ * يُستخدم لتدفّق السولاريوم والباكجات وغيرها عند الحاجة.
  *
- * @param {{ billingItemId: string | import('mongoose').Types.ObjectId, receivedByUser: import('mongoose').Document }} opts
+ * @param {{
+ *   billingItemId: string | import('mongoose').Types.ObjectId
+ *   receivedByUser: import('mongoose').Document
+ *   paymentChannel?: 'cash' | 'bank'
+ *   bankName?: string
+ * }} opts
  */
-export async function recordBillingStraightCashSyp({ billingItemId, receivedByUser }) {
+export async function recordBillingStraightCashSyp({
+  billingItemId,
+  receivedByUser,
+  paymentChannel = 'cash',
+  bankName = '',
+}) {
   const id = billingItemId
   if (!mongoose.isValidObjectId(id)) {
     throw new Error('معرّف بند الفوترة غير صالح')
@@ -43,9 +53,9 @@ export async function recordBillingStraightCashSyp({ billingItemId, receivedByUs
     receivedAmountUsd: 0,
     patientRefundSyp: 0,
     patientRefundUsd: 0,
-    paymentChannel: 'cash',
-    bankName: '',
-    method: 'cash',
+    paymentChannel: paymentChannel === 'bank' ? 'bank' : 'cash',
+    bankName: paymentChannel === 'bank' ? String(bankName || '').trim() : '',
+    method: paymentChannel === 'bank' ? 'bank' : 'cash',
     receivedBy: receivedByUser._id,
     discountPercent: 0,
     listAmountDueSyp: savedListDueSyp,
@@ -125,7 +135,8 @@ export async function recordBillingStraightCashSyp({ billingItemId, receivedByUs
         payCurrency: 'SYP',
         appliedAmountSyp,
         settlementDeltaSyp,
-        paymentChannel: 'cash',
+        paymentChannel: paymentChannel === 'bank' ? 'bank' : 'cash',
+        bankName: paymentChannel === 'bank' ? String(bankName || '').trim() : undefined,
         accountingSkipped: posting.skipped,
       },
     })

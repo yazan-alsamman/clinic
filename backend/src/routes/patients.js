@@ -19,6 +19,7 @@ import { getLaserBookingContextForPatient } from '../services/laserPackageBookin
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
+import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
 
 const CLINICAL_ROLES = [
   'super_admin',
@@ -707,6 +708,14 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       res.status(400).json({ error: 'أدخل مبلغاً بالليرة أكبر من الصفر' })
       return
     }
+    let paymentChannel = 'cash'
+    let bankName = ''
+    try {
+      ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+    } catch (chErr) {
+      res.status(400).json({ error: String(chErr?.message || chErr) })
+      return
+    }
 
     const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
     const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
@@ -735,6 +744,8 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       extraToCreditSyp,
       debtBefore,
       debtAfter,
+      paymentChannel,
+      bankName,
       receivedBy: req.user._id,
       receivedAt,
     })
@@ -949,9 +960,19 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         cs.billingItemId = bi._id
         await cs.save()
 
+        let paymentChannel = 'cash'
+        let bankName = ''
+        try {
+          ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+        } catch (chErr) {
+          res.status(400).json({ error: String(chErr?.message || chErr) })
+          return
+        }
         const payResult = await recordBillingStraightCashSyp({
           billingItemId: bi._id,
           receivedByUser: req.user,
+          paymentChannel,
+          bankName,
         })
         billingPaid = true
 
@@ -1166,7 +1187,20 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         })
         purchaseCs.billingItemId = purchaseBi._id
         await purchaseCs.save()
-        await recordBillingStraightCashSyp({ billingItemId: purchaseBi._id, receivedByUser: req.user })
+        let paymentChannel = 'cash'
+        let bankName = ''
+        try {
+          ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+        } catch (chErr) {
+          res.status(400).json({ error: String(chErr?.message || chErr) })
+          return
+        }
+        await recordBillingStraightCashSyp({
+          billingItemId: purchaseBi._id,
+          receivedByUser: req.user,
+          paymentChannel,
+          bankName,
+        })
         billingPaid = true
       }
 

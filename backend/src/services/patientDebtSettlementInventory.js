@@ -23,7 +23,17 @@ export function mergeDebtSettlementsIntoRollup(rollup, settlements) {
     const extraToCreditSyp = Math.round(Number(ds.extraToCreditSyp) || 0)
     const debtBefore = Math.round(Number(ds.debtBefore) || 0)
 
-    rollup.cash.totalSyp += enteredSyp
+    const channel = ds.paymentChannel === 'bank' ? 'bank' : 'cash'
+    const bankLabel = String(ds.bankName || '').trim() || 'بنك'
+
+    if (channel === 'cash') {
+      rollup.cash.totalSyp += enteredSyp
+    } else {
+      if (!rollup.bankMap) rollup.bankMap = new Map()
+      const cur = rollup.bankMap.get(bankLabel) || { bankName: bankLabel, totalSyp: 0, totalUsd: 0 }
+      cur.totalSyp += enteredSyp
+      rollup.bankMap.set(bankLabel, cur)
+    }
 
     const deptKey = DEBT_SETTLEMENT_DEPT_KEY
     if (!rollup.byDept[deptKey]) {
@@ -38,7 +48,11 @@ export function mergeDebtSettlementsIntoRollup(rollup, settlements) {
       }
     }
     rollup.byDept[deptKey].transactionCount += 1
-    rollup.byDept[deptKey].cashSyp += enteredSyp
+    if (channel === 'cash') {
+      rollup.byDept[deptKey].cashSyp += enteredSyp
+    } else {
+      rollup.byDept[deptKey].bankSyp += enteredSyp
+    }
 
     const patientName =
       ds.patientId && typeof ds.patientId === 'object' && 'name' in ds.patientId
@@ -72,8 +86,8 @@ export function mergeDebtSettlementsIntoRollup(rollup, settlements) {
       department: deptKey,
       departmentLabel: DEBT_SETTLEMENT_DEPT_LABEL,
       procedureLabel: procedureParts.join(' · '),
-      paymentChannel: 'cash',
-      bankName: '',
+      paymentChannel: channel,
+      bankName: channel === 'bank' ? bankLabel : '',
       payCurrency: 'SYP',
       receivedAmountSyp: enteredSyp,
       receivedAmountUsd: 0,

@@ -10,6 +10,7 @@ import { SolariumSettings } from '../models/SolariumSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { recordBillingStraightCashSyp } from '../services/recordBillingStraightCashSyp.js'
+import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
 
 export const solariumRouter = Router()
 
@@ -235,9 +236,19 @@ solariumRouter.post(
       cs.billingItemId = bi._id
       await cs.save()
 
+      let paymentChannel = 'cash'
+      let bankName = ''
+      try {
+        ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(body))
+      } catch (chErr) {
+        res.status(400).json({ error: String(chErr?.message || chErr) })
+        return
+      }
       const payResult = await recordBillingStraightCashSyp({
         billingItemId: bi._id,
         receivedByUser: req.user,
+        paymentChannel,
+        bankName,
       })
 
       await writeAudit({

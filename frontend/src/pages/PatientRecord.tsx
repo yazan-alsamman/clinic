@@ -5,6 +5,12 @@ import { useClinic } from '../context/ClinicContext'
 import { canAccessSkinCareTab, canAccessTab } from '../data/nav'
 import { api, ApiError } from '../api/client'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
+import {
+  PaymentChannelFields,
+  usePaymentBankOptions,
+  validatePaymentChannelBeforeSubmit,
+  type PaymentChannel,
+} from '../components/PaymentChannelFields'
 import type { LaserCategory, Patient, Role } from '../types'
 
 type Tab =
@@ -722,6 +728,8 @@ export function PatientRecord() {
   const { user } = useAuth()
   const { businessDate: clinicBusinessDate, dayActive: clinicDayActive } = useClinic()
   const role = user?.role as Role | undefined
+  const canUsePaymentChannels = role === 'super_admin' || role === 'reception'
+  const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(canUsePaymentChannels)
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
   const [tab, setTab] = useState<Tab>('overview')
@@ -858,9 +866,13 @@ export function PatientRecord() {
   const [financialErr, setFinancialErr] = useState('')
   const [financialSettleOpen, setFinancialSettleOpen] = useState(false)
   const [financialSettleSyp, setFinancialSettleSyp] = useState('')
+  const [financialSettleChannel, setFinancialSettleChannel] = useState<PaymentChannel>('cash')
+  const [financialSettleBankName, setFinancialSettleBankName] = useState('')
   const [financialSettleBusy, setFinancialSettleBusy] = useState(false)
   const [financialSettleErr, setFinancialSettleErr] = useState('')
   const [debtPayAmount, setDebtPayAmount] = useState('')
+  const [debtPayChannel, setDebtPayChannel] = useState<PaymentChannel>('cash')
+  const [debtPayBankName, setDebtPayBankName] = useState('')
   const [debtPayBusy, setDebtPayBusy] = useState(false)
   const [debtPayErr, setDebtPayErr] = useState('')
   const [debtPayOk, setDebtPayOk] = useState('')
@@ -871,12 +883,16 @@ export function PatientRecord() {
   const [packageSessionsCount, setPackageSessionsCount] = useState('6')
   const [packageTotalSyp, setPackageTotalSyp] = useState('')
   const [packagePaidSyp, setPackagePaidSyp] = useState('')
+  const [packagePayChannel, setPackagePayChannel] = useState<PaymentChannel>('cash')
+  const [packagePayBankName, setPackagePayBankName] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
   const [laserPkgTemplates, setLaserPkgTemplates] = useState<LaserPackageTemplateListItem[]>([])
   const [laserPkgTplLoading, setLaserPkgTplLoading] = useState(false)
   const [laserTplPickId, setLaserTplPickId] = useState('')
   const [solariumPkgSessions, setSolariumPkgSessions] = useState('10')
   const [solariumPkgAmount, setSolariumPkgAmount] = useState('')
+  const [solariumPkgChannel, setSolariumPkgChannel] = useState<PaymentChannel>('cash')
+  const [solariumPkgBankName, setSolariumPkgBankName] = useState('')
   const [solariumPkgNotes, setSolariumPkgNotes] = useState('')
   const [solariumPkgBusy, setSolariumPkgBusy] = useState(false)
   const [solariumPkgErr, setSolariumPkgErr] = useState('')
@@ -2949,6 +2965,18 @@ export function PatientRecord() {
               placeholder="ملاحظات إضافية على الباكج..."
             />
           </div>
+          {canUsePaymentChannels && Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0)) > 0 ? (
+            <PaymentChannelFields
+              channel={packagePayChannel}
+              bankName={packagePayBankName}
+              onChannelChange={setPackagePayChannel}
+              onBankNameChange={setPackagePayBankName}
+              disabled={packageBusy || solariumPkgBusy}
+              namePrefix="laser-pkg"
+              banks={paymentBanks}
+              banksLoading={paymentBanksLoading}
+            />
+          ) : null}
           {packageErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{packageErr}</p> : null}
           {packageOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{packageOk}</p> : null}
           <button
@@ -2981,22 +3009,34 @@ export function PatientRecord() {
                 setPackageErr('المبلغ المدفوع يجب أن يكون بين 0 وإجمالي الباكج.')
                 return
               }
+              if (paidSyp > 0 && canUsePaymentChannels) {
+                const chErr = validatePaymentChannelBeforeSubmit(packagePayChannel, packagePayBankName)
+                if (chErr) {
+                  setPackageErr(chErr)
+                  return
+                }
+              }
               setPackageBusy(true)
               try {
+                const body: Record<string, unknown> = {
+                  department: 'laser',
+                  title: packageTitle.trim() || undefined,
+                  sessionsCount,
+                  packageTotalSyp: totalSyp,
+                  paidAmountSyp: paidSyp,
+                  notes: packageNotes.trim(),
+                  laserPackageTemplateId: laserTplPickId.trim(),
+                }
+                if (paidSyp > 0 && canUsePaymentChannels) {
+                  body.paymentChannel = packagePayChannel
+                  if (packagePayChannel === 'bank') body.bankName = packagePayBankName.trim()
+                }
                 const data = await api<{
                   package: PatientPackage
                   summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
                 }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
                   method: 'POST',
-                  body: JSON.stringify({
-                    department: 'laser',
-                    title: packageTitle.trim() || undefined,
-                    sessionsCount,
-                    packageTotalSyp: totalSyp,
-                    paidAmountSyp: paidSyp,
-                    notes: packageNotes.trim(),
-                    laserPackageTemplateId: laserTplPickId.trim(),
-                  }),
+                  body: JSON.stringify(body),
                 })
                 setPatient((prev) =>
                   prev
@@ -3015,6 +3055,8 @@ export function PatientRecord() {
                 setPackagePaidSyp('')
                 setPackageNotes('')
                 setLaserTplPickId('')
+                setPackagePayChannel('cash')
+                setPackagePayBankName('')
               } catch (e) {
                 setPackageErr(e instanceof ApiError ? e.message : 'تعذر حفظ الباكج')
               } finally {
@@ -3067,6 +3109,18 @@ export function PatientRecord() {
               placeholder="ملاحظات على الباكج…"
             />
           </div>
+          {canUsePaymentChannels ? (
+            <PaymentChannelFields
+              channel={solariumPkgChannel}
+              bankName={solariumPkgBankName}
+              onChannelChange={setSolariumPkgChannel}
+              onBankNameChange={setSolariumPkgBankName}
+              disabled={packageBusy || solariumPkgBusy}
+              namePrefix="sol-pkg"
+              banks={paymentBanks}
+              banksLoading={paymentBanksLoading}
+            />
+          ) : null}
           {solariumPkgErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{solariumPkgErr}</p> : null}
           {solariumPkgOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{solariumPkgOk}</p> : null}
           <button
@@ -3088,19 +3142,31 @@ export function PatientRecord() {
                 setSolariumPkgErr('أدخل المبلغ المحصّل بالليرة.')
                 return
               }
+              if (canUsePaymentChannels) {
+                const chErr = validatePaymentChannelBeforeSubmit(solariumPkgChannel, solariumPkgBankName)
+                if (chErr) {
+                  setSolariumPkgErr(chErr)
+                  return
+                }
+              }
               setSolariumPkgBusy(true)
               try {
+                const body: Record<string, unknown> = {
+                  department: 'solarium',
+                  sessionsCount,
+                  collectedAmountSyp: collected,
+                  notes: solariumPkgNotes.trim(),
+                }
+                if (canUsePaymentChannels) {
+                  body.paymentChannel = solariumPkgChannel
+                  if (solariumPkgChannel === 'bank') body.bankName = solariumPkgBankName.trim()
+                }
                 const data = await api<{
                   package: PatientPackage
                   summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
                 }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
                   method: 'POST',
-                  body: JSON.stringify({
-                    department: 'solarium',
-                    sessionsCount,
-                    collectedAmountSyp: collected,
-                    notes: solariumPkgNotes.trim(),
-                  }),
+                  body: JSON.stringify(body),
                 })
                 setPatient((prev) =>
                   prev
@@ -3119,6 +3185,8 @@ export function PatientRecord() {
                 setSolariumPkgSessions('10')
                 setSolariumPkgAmount('')
                 setSolariumPkgNotes('')
+                setSolariumPkgChannel('cash')
+                setSolariumPkgBankName('')
               } catch (e) {
                 setSolariumPkgErr(e instanceof ApiError ? e.message : 'تعذر إنشاء الباكج')
               } finally {
@@ -3387,6 +3455,18 @@ export function PatientRecord() {
             </p>
           ) : (
             <>
+              {canUsePaymentChannels ? (
+                <PaymentChannelFields
+                  channel={debtPayChannel}
+                  bankName={debtPayBankName}
+                  onChannelChange={setDebtPayChannel}
+                  onBankNameChange={setDebtPayBankName}
+                  disabled={debtPayBusy}
+                  namePrefix="debt-pay"
+                  banks={paymentBanks}
+                  banksLoading={paymentBanksLoading}
+                />
+              ) : null}
               <div style={{ marginTop: '1rem', maxWidth: 360 }}>
                 <label className="form-label">المبلغ المدفوع (ل.س)</label>
                 <input
@@ -3442,6 +3522,11 @@ export function PatientRecord() {
                     setDebtPayErr('أدخل مبلغاً بالليرة أكبر من صفر.')
                     return
                   }
+                  const chErr = validatePaymentChannelBeforeSubmit(debtPayChannel, debtPayBankName)
+                  if (chErr) {
+                    setDebtPayErr(chErr)
+                    return
+                  }
                   setDebtPayBusy(true)
                   try {
                     const result = await api<{
@@ -3454,7 +3539,11 @@ export function PatientRecord() {
                       summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
                     }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
                       method: 'POST',
-                      body: JSON.stringify({ amountSyp: syp }),
+                      body: JSON.stringify({
+                        amountSyp: syp,
+                        paymentChannel: debtPayChannel,
+                        bankName: debtPayChannel === 'bank' ? debtPayBankName.trim() : undefined,
+                      }),
                     })
                     setPatient((prev) =>
                       prev
@@ -3474,6 +3563,8 @@ export function PatientRecord() {
                         : `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س. يظهر المبلغ في الجرد المالي اليومي.`,
                     )
                     setDebtPayAmount('')
+                    setDebtPayChannel('cash')
+                    setDebtPayBankName('')
                   } catch (e) {
                     setDebtPayErr(e instanceof ApiError ? e.message : 'تعذر تسجيل التسديد')
                   } finally {
@@ -3585,6 +3676,16 @@ export function PatientRecord() {
               يتم مقارنة المبلغ المُدخل مع إجمالي الذمة الحالية ومعالجته تلقائياً (جزئي/مطابق/فائض).
             </p>
 
+            <PaymentChannelFields
+              channel={financialSettleChannel}
+              bankName={financialSettleBankName}
+              onChannelChange={setFinancialSettleChannel}
+              onBankNameChange={setFinancialSettleBankName}
+              disabled={financialSettleBusy}
+              namePrefix="fin-settle"
+              banks={paymentBanks}
+              banksLoading={paymentBanksLoading}
+            />
             <div style={{ marginTop: '0.5rem' }}>
               <label className="form-label">المبلغ المدخل (ل.س)</label>
               <input
@@ -3638,6 +3739,11 @@ export function PatientRecord() {
                     setFinancialSettleErr('أدخل مبلغاً بالليرة.')
                     return
                   }
+                  const chErr = validatePaymentChannelBeforeSubmit(financialSettleChannel, financialSettleBankName)
+                  if (chErr) {
+                    setFinancialSettleErr(chErr)
+                    return
+                  }
                   setFinancialSettleBusy(true)
                   try {
                     const result = await api<{
@@ -3646,6 +3752,8 @@ export function PatientRecord() {
                       method: 'POST',
                       body: JSON.stringify({
                         amountSyp: syp,
+                        paymentChannel: financialSettleChannel,
+                        bankName: financialSettleChannel === 'bank' ? financialSettleBankName.trim() : undefined,
                       }),
                     })
                     setPatient((prev) =>
@@ -3659,6 +3767,9 @@ export function PatientRecord() {
                     )
                     await refreshFinancialLedger()
                     setFinancialSettleOpen(false)
+                    setFinancialSettleSyp('')
+                    setFinancialSettleChannel('cash')
+                    setFinancialSettleBankName('')
                   } catch (e) {
                     setFinancialSettleErr(e instanceof ApiError ? e.message : 'تعذر تنفيذ التسوية')
                   } finally {

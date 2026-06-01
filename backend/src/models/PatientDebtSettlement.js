@@ -10,6 +10,8 @@ const patientDebtSettlementSchema = new mongoose.Schema(
     extraToCreditSyp: { type: Number, default: 0, min: 0 },
     debtBefore: { type: Number, default: 0, min: 0 },
     debtAfter: { type: Number, default: 0, min: 0 },
+    paymentChannel: { type: String, enum: ['cash', 'bank'], default: 'cash' },
+    bankName: { type: String, default: '', trim: true },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     receivedAt: { type: Date, default: () => new Date(), index: true },
   },
