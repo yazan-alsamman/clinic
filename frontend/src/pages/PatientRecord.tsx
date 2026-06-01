@@ -249,6 +249,50 @@ type DermatologySessionRow = {
   }>
 }
 
+function ClinicalSessionNotesBlock({ notes, label = 'ملاحظات الأخصائي' }: { notes?: string; label?: string }) {
+  const text = String(notes || '').trim()
+  if (!text) return null
+  return (
+    <div style={{ marginTop: '0.55rem' }}>
+      <p style={{ margin: '0 0 0.3rem', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+        {label}
+      </p>
+      <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+        {text}
+      </p>
+    </div>
+  )
+}
+
+function ClinicalSessionDetailExtras({
+  session,
+  showMaterials = true,
+}: {
+  session: DermatologySessionRow
+  showMaterials?: boolean
+}) {
+  const hasMaterials = showMaterials && (session.materials?.length ?? 0) > 0
+  const hasNotes = Boolean(String(session.notes || '').trim())
+  if (!hasMaterials && !hasNotes) return null
+  return (
+    <div
+      style={{
+        marginTop: '0.65rem',
+        paddingTop: '0.65rem',
+        borderTop: '1px dashed var(--border)',
+      }}
+    >
+      {hasMaterials ? (
+        <DermatologySessionMaterialsDetail
+          materials={session.materials}
+          materialCostSypTotal={session.materialCostSypTotal}
+        />
+      ) : null}
+      <ClinicalSessionNotesBlock notes={session.notes} />
+    </div>
+  )
+}
+
 function DermatologySessionMaterialsDetail({
   materials,
   materialCostSypTotal,
@@ -804,6 +848,8 @@ export function PatientRecord() {
   )
   const [approvingPlan, setApprovingPlan] = useState(false)
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
+  const [dermSessionNotes, setDermSessionNotes] = useState('')
+  const [clinicalSessionDetail, setClinicalSessionDetail] = useState<DermatologySessionRow | null>(null)
   const [dermFeeCurrency, setDermFeeCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
   const [dermSessionFeeUsd, setDermSessionFeeUsd] = useState('')
@@ -4645,31 +4691,56 @@ export function PatientRecord() {
                         </tr>
                       </thead>
                       <tbody>
-                        {laserClinSessions.map((s) => (
-                          <tr key={s.id}>
-                            <td>{s.businessDate}</td>
-                            <td>{s.procedureDescription || '—'}</td>
-                            <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
-                            <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
-                            <td>
-                              {canEditClinicalSessionRow(
-                                { id: user?.id, role },
-                                s,
-                              ) ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary"
-                                  style={{ fontSize: '0.8rem' }}
-                                  onClick={() => void openSessionEdit(s)}
-                                >
-                                  تكميل
-                                </button>
-                              ) : (
-                                '—'
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {laserClinSessions.flatMap((s) => {
+                          const hasDetail =
+                            Boolean(String(s.notes || '').trim()) || (s.materials?.length ?? 0) > 0
+                          const rows = [
+                            <tr key={s.id}>
+                              <td>{s.businessDate}</td>
+                              <td>{s.procedureDescription || '—'}</td>
+                              <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
+                              <td>
+                                {s.isPackagePrepaid
+                                  ? 'مدفوعة مسبقاً (باكج)'
+                                  : s.billingStatus === 'paid'
+                                    ? 'مدفوع'
+                                    : 'معلّق'}
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost"
+                                    style={{ fontSize: '0.78rem' }}
+                                    onClick={() => setClinicalSessionDetail(s)}
+                                  >
+                                    تفاصيل
+                                  </button>
+                                  {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary"
+                                      style={{ fontSize: '0.78rem' }}
+                                      onClick={() => void openSessionEdit(s)}
+                                    >
+                                      تكميل
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>,
+                          ]
+                          if (hasDetail) {
+                            rows.push(
+                              <tr key={`${s.id}-detail`}>
+                                <td colSpan={5} style={{ background: 'var(--surface-2)', padding: '0.65rem 0.75rem' }}>
+                                  <ClinicalSessionDetailExtras session={s} showMaterials={false} />
+                                </td>
+                              </tr>,
+                            )
+                          }
+                          return rows
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -4700,6 +4771,16 @@ export function PatientRecord() {
                 value={dermProcedureDescription}
                 onChange={(e) => setDermProcedureDescription(e.target.value)}
                 placeholder="مثال: حقن تجميلي للوجه"
+              />
+            </div>
+            <div style={{ marginTop: '0.65rem' }}>
+              <label className="form-label">ملاحظات الأخصائي (اختياري)</label>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={dermSessionNotes}
+                onChange={(e) => setDermSessionNotes(e.target.value)}
+                placeholder="تنبيهات أو ملاحظات تظهر مع تفاصيل الجلسة في الملف…"
               />
             </div>
             <h3 className="card-title" style={{ marginTop: '1rem', fontSize: '0.95rem' }}>
@@ -4900,7 +4981,7 @@ export function PatientRecord() {
                       sessionFeeUsd: dermFeeCurrency === 'USD' ? feeUsd : undefined,
                       discountPercent,
                       procedureDescription: dermProcedureDescription.trim(),
-                      notes: '',
+                      notes: dermSessionNotes.trim(),
                       materials: payloadMaterials,
                       businessDate: clinicBusinessDate ?? undefined,
                       ...(dermScheduleSlotId ? { scheduleSlotId: dermScheduleSlotId } : {}),
@@ -4915,6 +4996,7 @@ export function PatientRecord() {
                   )
                   setDermMaterialsCatalog(itemsData.items)
                   setDermProcedureDescription('')
+                  setDermSessionNotes('')
                   setDermFeeCurrency('SYP')
                   setDermSessionFeeSyp('')
                   setDermSessionFeeUsd('')
@@ -4994,22 +5076,16 @@ export function PatientRecord() {
                         ) : null}
                       </div>
                     </div>
-                    <div
-                      style={{
-                        marginTop: '0.75rem',
-                        paddingTop: '0.65rem',
-                        borderTop: '1px dashed var(--border)',
-                      }}
-                    >
-                      <DermatologySessionMaterialsDetail
-                        materials={s.materials}
-                        materialCostSypTotal={s.materialCostSypTotal}
-                      />
-                      {s.notes?.trim() ? (
-                        <p style={{ margin: '0.65rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                          ملاحظات: <span style={{ color: 'var(--text)' }}>{s.notes.trim()}</span>
-                        </p>
-                      ) : null}
+                    <ClinicalSessionDetailExtras session={s} />
+                    <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem' }}
+                        onClick={() => setClinicalSessionDetail(s)}
+                      >
+                        تفاصيل الجلسة
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -5178,29 +5254,57 @@ export function PatientRecord() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dentalClinSessions.map((s) => (
-                      <tr key={s.id}>
-                        <td>{s.businessDate}</td>
-                        <td>{s.procedureDescription || '—'}</td>
-                        <td>{s.providerName}</td>
-                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
-                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
-                        <td>
-                          {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ fontSize: '0.8rem' }}
-                              onClick={() => void openSessionEdit(s)}
-                            >
-                              تكميل
-                            </button>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {dentalClinSessions.flatMap((s) => {
+                      const hasDetail =
+                        Boolean(String(s.notes || '').trim()) || (s.materials?.length ?? 0) > 0
+                      const rows = [
+                        <tr key={s.id}>
+                          <td>{s.businessDate}</td>
+                          <td>{s.procedureDescription || '—'}</td>
+                          <td>{s.providerName}</td>
+                          <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
+                          <td>
+                            {s.isPackagePrepaid
+                              ? 'مدفوعة مسبقاً (باكج)'
+                              : s.billingStatus === 'paid'
+                                ? 'مدفوع'
+                                : 'معلّق'}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ fontSize: '0.78rem' }}
+                                onClick={() => setClinicalSessionDetail(s)}
+                              >
+                                تفاصيل
+                              </button>
+                              {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: '0.78rem' }}
+                                  onClick={() => void openSessionEdit(s)}
+                                >
+                                  تكميل
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>,
+                      ]
+                      if (hasDetail) {
+                        rows.push(
+                          <tr key={`${s.id}-detail`}>
+                            <td colSpan={6} style={{ background: 'var(--surface-2)', padding: '0.65rem 0.75rem' }}>
+                              <ClinicalSessionDetailExtras session={s} />
+                            </td>
+                          </tr>,
+                        )
+                      }
+                      return rows
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -5239,30 +5343,58 @@ export function PatientRecord() {
                     </tr>
                   </thead>
                   <tbody>
-                    {solSessions.map((s) => (
-                      <tr key={s.id}>
-                        <td>{s.businessDate}</td>
-                        <td>{clinicalDeptLabelAr(s.department)}</td>
-                        <td>{s.procedureDescription || '—'}</td>
-                        <td>{s.providerName}</td>
-                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
-                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
-                        <td>
-                          {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ fontSize: '0.8rem' }}
-                              onClick={() => void openSessionEdit(s)}
-                            >
-                              تكميل
-                            </button>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {solSessions.flatMap((s) => {
+                      const hasDetail =
+                        Boolean(String(s.notes || '').trim()) || (s.materials?.length ?? 0) > 0
+                      const rows = [
+                        <tr key={s.id}>
+                          <td>{s.businessDate}</td>
+                          <td>{clinicalDeptLabelAr(s.department)}</td>
+                          <td>{s.procedureDescription || '—'}</td>
+                          <td>{s.providerName}</td>
+                          <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
+                          <td>
+                            {s.isPackagePrepaid
+                              ? 'مدفوعة مسبقاً (باكج)'
+                              : s.billingStatus === 'paid'
+                                ? 'مدفوع'
+                                : 'معلّق'}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ fontSize: '0.78rem' }}
+                                onClick={() => setClinicalSessionDetail(s)}
+                              >
+                                تفاصيل
+                              </button>
+                              {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: '0.78rem' }}
+                                  onClick={() => void openSessionEdit(s)}
+                                >
+                                  تكميل
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>,
+                      ]
+                      if (hasDetail) {
+                        rows.push(
+                          <tr key={`${s.id}-detail`}>
+                            <td colSpan={7} style={{ background: 'var(--surface-2)', padding: '0.65rem 0.75rem' }}>
+                              <ClinicalSessionDetailExtras session={s} />
+                            </td>
+                          </tr>,
+                        )
+                      }
+                      return rows
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -5273,6 +5405,57 @@ export function PatientRecord() {
             <strong>لا تملك صلاحية عرض جلسات البشرة</strong>
           </div>
         ))}
+
+      {clinicalSessionDetail ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setClinicalSessionDetail(null)}
+        >
+          <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>تفاصيل الجلسة</h3>
+            <p style={{ margin: '0 0 0.5rem', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+              {clinicalDeptLabelAr(clinicalSessionDetail.department)} — {clinicalSessionDetail.businessDate} —{' '}
+              {clinicalSessionDetail.providerName}
+            </p>
+            <p style={{ margin: '0 0 0.75rem', fontWeight: 700 }}>{clinicalSessionDetail.procedureDescription || '—'}</p>
+            <div style={{ fontSize: '0.88rem', display: 'grid', gap: '0.35rem' }}>
+              <div>
+                المستحق:{' '}
+                <strong>{Number(clinicalSessionDetail.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</strong>
+              </div>
+              <div style={{ color: 'var(--text-muted)' }}>
+                التحصيل:{' '}
+                {clinicalSessionDetail.isPackagePrepaid
+                  ? 'مدفوعة مسبقاً (باكج)'
+                  : clinicalSessionDetail.billingStatus === 'paid'
+                    ? 'مدفوع'
+                    : 'معلّق'}
+              </div>
+            </div>
+            <ClinicalSessionDetailExtras session={clinicalSessionDetail} />
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              {canEditClinicalSessionRow({ id: user?.id, role }, clinicalSessionDetail) ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const row = clinicalSessionDetail
+                    setClinicalSessionDetail(null)
+                    void openSessionEdit(row)
+                  }}
+                >
+                  تكميل الجلسة
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-primary" onClick={() => setClinicalSessionDetail(null)}>
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {sessionEditOpen && sessionEditId ? (
         <div
@@ -5298,12 +5481,13 @@ export function PatientRecord() {
               />
             </div>
             <div style={{ marginTop: '0.65rem' }}>
-              <label className="form-label">ملاحظات</label>
+              <label className="form-label">ملاحظات الأخصائي</label>
               <textarea
                 className="textarea"
                 rows={3}
                 value={sessionEditNotes}
                 onChange={(e) => setSessionEditNotes(e.target.value)}
+                placeholder="تظهر في تفاصيل الجلسة لجميع من يطلع على الملف"
               />
             </div>
             {sessionEditDept === 'dermatology' && sessionEditExistingMaterials.length > 0 ? (

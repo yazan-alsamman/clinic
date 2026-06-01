@@ -138,12 +138,22 @@ async function formatSessionMaterials(materials) {
   })
 }
 
-async function sessionToPatientRow(r) {
+function mergeSessionNotes(clinicalNotes, laserNotes) {
+  const parts = [String(clinicalNotes || '').trim(), String(laserNotes || '').trim()].filter(Boolean)
+  return [...new Set(parts)].join(' — ')
+}
+
+async function sessionToPatientRow(r, laserNotesById = null) {
   const listAmountDueSyp = Math.round(Number(r.billingItemId?.listAmountDueSyp || r.billingItemId?.amountDueSyp || r.sessionFeeSyp || 0))
   const discountPercent = Number(r.billingItemId?.discountPercent) || 0
   const effectiveAmountDueSyp = Math.round(
     Number(r.billingItemId?.effectiveAmountDueSyp || r.billingItemId?.amountDueSyp || r.sessionFeeSyp || 0),
   )
+  let notes = String(r.notes || '').trim()
+  if (r.laserSessionId && laserNotesById) {
+    const ln = laserNotesById.get(String(r.laserSessionId)) || ''
+    notes = mergeSessionNotes(notes, ln)
+  }
   return {
     id: String(r._id),
     businessDate: r.businessDate,
@@ -160,7 +170,7 @@ async function sessionToPatientRow(r) {
     isPackagePrepaid: r.billingItemId?.isPackagePrepaid === true,
     providerName: r.providerUserId?.name || '—',
     providerUserId: r.providerUserId?._id ? String(r.providerUserId._id) : String(r.providerUserId || ''),
-    notes: r.notes || '',
+    notes,
     materials: await formatSessionMaterials(r.materials),
     createdAt: r.createdAt,
     createdByReceptionUserId: r.createdByReceptionUserId ? String(r.createdByReceptionUserId) : null,
@@ -168,7 +178,25 @@ async function sessionToPatientRow(r) {
 }
 
 async function mapSessionsToPatientRows(rows) {
-  return Promise.all((rows || []).map((r) => sessionToPatientRow(r)))
+  const list = rows || []
+  const laserIds = [
+    ...new Set(
+      list
+        .map((r) => r.laserSessionId)
+        .filter(Boolean)
+        .map(String),
+    ),
+  ]
+  const laserNotesById = new Map()
+  if (laserIds.length > 0) {
+    const lasers = await LaserSession.find({ _id: { $in: laserIds } })
+      .select('notes')
+      .lean()
+    for (const l of lasers) {
+      laserNotesById.set(String(l._id), String(l.notes || '').trim())
+    }
+  }
+  return Promise.all(list.map((r) => sessionToPatientRow(r, laserNotesById)))
 }
 
 /**

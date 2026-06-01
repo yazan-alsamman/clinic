@@ -1,6 +1,7 @@
 import { LaserSession } from '../models/LaserSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
+import { ClinicalSession } from '../models/ClinicalSession.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { DentalMasterPlan } from '../models/DentalMasterPlan.js'
@@ -59,7 +60,7 @@ function slotEndDisplay(doc) {
  * @param {import('mongoose').Types.ObjectId} pid
  */
 export async function getClinicalBundleForPatientId(pid) {
-  const [laserRows, dermRows, apptRows, planDoc, patientDoc] = await Promise.all([
+  const [laserRows, dermRows, apptRows, planDoc, patientDoc, clinicalLaserNotesRows] = await Promise.all([
     LaserSession.find({ patientId: pid })
       .sort({ createdAt: -1 })
       .populate('operatorUserId', 'name')
@@ -73,7 +74,14 @@ export async function getClinicalBundleForPatientId(pid) {
     ScheduleSlot.find({ patientId: pid }).sort({ businessDate: -1, time: -1 }).limit(150).lean(),
     DentalMasterPlan.findOne({ patientId: pid }).lean(),
     Patient.findById(pid).select('sessionPackages').lean(),
+    ClinicalSession.find({ patientId: pid, laserSessionId: { $ne: null } })
+      .select('laserSessionId notes')
+      .lean(),
   ])
+
+  const clinicalNotesByLaserId = new Map(
+    (clinicalLaserNotesRows || []).map((r) => [String(r.laserSessionId), String(r.notes || '').trim()]),
+  )
 
   const packagesById = new Map(
     (Array.isArray(patientDoc?.sessionPackages) ? patientDoc.sessionPackages : []).map((p) => [
@@ -132,6 +140,10 @@ export async function getClinicalBundleForPatientId(pid) {
     }
     const lineItemsRaw = Array.isArray(s.lineItems) ? s.lineItems : []
     const packageNonAddonLineCount = lineItemsRaw.filter((r) => !r.isAddon).length
+    const laserNotes = String(s.notes || '').trim()
+    const clinicalNotes = clinicalNotesByLaserId.get(String(s._id)) || ''
+    const notesMerged = [laserNotes, clinicalNotes].filter(Boolean)
+    const notes = [...new Set(notesMerged)].join(' — ')
     return {
       id: String(s._id),
       treatmentNumber: s.treatmentNumber,
@@ -142,7 +154,7 @@ export async function getClinicalBundleForPatientId(pid) {
       status: effectiveStatus,
       operatorName: s.operatorUserId?.name || '—',
       areaIds: Array.isArray(s.areaIds) ? s.areaIds : [],
-      notes: s.notes || '',
+      notes,
       pw: s.pw || '',
       pulse: s.pulse || '',
       shotCount: s.shotCount || '',
