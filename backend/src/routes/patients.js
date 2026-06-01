@@ -150,6 +150,21 @@ function canManagePackages(role) {
   return role === 'super_admin' || role === 'reception'
 }
 
+/** جلسة باكج مُستهلكة أو مربوطة بعلاج/تحصيل */
+function packageSessionWasUsed(sess) {
+  if (!sess) return false
+  if (sess.completedByReception === true) return true
+  if (sess.linkedLaserSessionId) return true
+  if (sess.linkedBillingItemId) return true
+  if (sess.areasAdjustedOnly === true) return true
+  if (Math.max(0, Math.trunc(Number(sess.packagePartialAreasAcknowledgedByReception) || 0)) > 0) return true
+  return false
+}
+
+function packageHasAnyUsedSession(pkg) {
+  return (Array.isArray(pkg?.sessions) ? pkg.sessions : []).some(packageSessionWasUsed)
+}
+
 /** تسمية جلسات الباكج (ليزر / سولاريوم) للعرض في الملف */
 function packageSessionLabelAr(zeroBasedIndex) {
   const n = zeroBasedIndex + 1
@@ -1388,6 +1403,87 @@ patientsRouter.patch('/:id/packages/:packageId', requireActiveDay, async (req, r
       details: { packageId, suspended },
     })
     res.json({ package: pkg ? serializePackage(pkg) : null })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** حذف باكج لم يُستهلك منه أي جلسة — مدير النظام فقط */
+patientsRouter.delete('/:id/packages/:packageId', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'حذف الباكج متاح لمدير النظام فقط' })
+      return
+    }
+    const patientId = String(req.params.id || '').trim()
+    const packageId = String(req.params.packageId || '').trim()
+    if (!mongoose.isValidObjectId(patientId) || !mongoose.isValidObjectId(packageId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const p = await Patient.findById(patientId)
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const rows = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
+    const pkg = rows.find((x) => String(x?._id) === packageId)
+    if (!pkg) {
+      res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    if (packageHasAnyUsedSession(pkg)) {
+      res.status(400).json({
+        error:
+          'لا يمكن حذف الباكج: وُجدت جلسة مُستهلكة أو مرتبطة بجلسة علاجية. أوقف الباكج مؤقتاً إن لزم.',
+      })
+      return
+    }
+
+    const packageTotalSyp = Math.max(0, Math.round(Number(pkg.packageTotalSyp) || 0))
+    const paidAmountSyp = Math.max(0, Math.round(Number(pkg.paidAmountSyp) || 0))
+    const debtNow = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const creditNow = Math.round(Number(p.prepaidCreditSyp) || 0)
+    const newDebt = Math.max(0, debtNow - Math.max(0, packageTotalSyp - paidAmountSyp))
+    const newCredit = Math.max(0, creditNow - Math.max(0, paidAmountSyp - packageTotalSyp))
+
+    await Patient.updateOne(
+      { _id: p._id },
+      {
+        $pull: { sessionPackages: { _id: pkg._id } },
+        $set: {
+          outstandingDebtSyp: newDebt,
+          prepaidCreditSyp: newCredit,
+        },
+      },
+    )
+
+    const fresh = await Patient.findById(p._id).select('outstandingDebtSyp prepaidCreditSyp').lean()
+
+    await writeAudit({
+      user: req.user,
+      action: 'حذف باكج جلسات لمريض',
+      entityType: 'Patient',
+      entityId: p._id,
+      details: {
+        packageId,
+        department: String(pkg.department || ''),
+        title: String(pkg.title || ''),
+        packageTotalSyp,
+        paidAmountSyp,
+        debtAfter: Math.round(Number(fresh?.outstandingDebtSyp) || 0),
+        creditAfter: Math.round(Number(fresh?.prepaidCreditSyp) || 0),
+      },
+    })
+
+    res.json({
+      ok: true,
+      summary: {
+        outstandingDebtSyp: Math.round(Number(fresh?.outstandingDebtSyp) || 0),
+        prepaidCreditSyp: Math.round(Number(fresh?.prepaidCreditSyp) || 0),
+      },
+    })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

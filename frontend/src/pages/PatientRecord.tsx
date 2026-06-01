@@ -349,6 +349,16 @@ type LaserPackageTemplateListItem = {
   active: boolean
 }
 
+function patientPackageHasUsedSession(pkg: PatientPackage): boolean {
+  return (pkg.sessions || []).some(
+    (s) =>
+      s.completedByReception ||
+      Boolean(s.linkedLaserSessionId) ||
+      Boolean(s.areasAdjustedOnly) ||
+      (s.packagePartialAreasAcknowledgedByReception ?? 0) > 0,
+  )
+}
+
 function clinicalDeptLabelAr(d: string) {
   const m: Record<string, string> = {
     laser: 'ليزر',
@@ -3268,7 +3278,10 @@ export function PatientRecord() {
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد باكجات مسجلة لهذا المريض.</p>
           ) : (
             <div style={{ display: 'grid', gap: '0.8rem' }}>
-              {patientPackages.map((pkg) => (
+              {patientPackages.map((pkg) => {
+                const pkgUsed = patientPackageHasUsedSession(pkg)
+                const canDeletePkg = role === 'super_admin' && !pkgUsed
+                return (
                 <div key={pkg.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.8rem' }}>
                   {(() => {
                     const remainingSessions = pkg.sessions.filter((s) => !s.completedByReception).length
@@ -3364,6 +3377,64 @@ export function PatientRecord() {
                         {pkg.suspended ? 'تفعيل الباكج' : 'إيقاف مؤقت'}
                       </button>
                     </div>
+                  ) : null}
+                  {canDeletePkg ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.78rem', marginBottom: '0.35rem', color: 'var(--danger)' }}
+                      disabled={packageBusy || solariumPkgBusy}
+                      onClick={async () => {
+                        if (!id) return
+                        const label =
+                          pkg.title ||
+                          (pkg.department === 'solarium'
+                            ? `باكج سولاريوم (${pkg.sessionsCount} جلسة)`
+                            : `باكج ليزر (${pkg.sessionsCount} جلسة)`)
+                        if (
+                          !window.confirm(
+                            `حذف «${label}» من ملف المريض؟\n\nيُسمح فقط لأن لم تُستهلك أي جلسة. سيُعاد تعديل الذمة/الرصيد الإضافي الناتج عن هذا الباكج. سجلات التحصيل المالية السابقة تبقى في النظام.`,
+                          )
+                        ) {
+                          return
+                        }
+                        setPackageErr('')
+                        setPackageOk('')
+                        setPackageBusy(true)
+                        try {
+                          const data = await api<{
+                            ok: boolean
+                            summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+                          }>(
+                            `/api/patients/${encodeURIComponent(id)}/packages/${encodeURIComponent(pkg.id)}`,
+                            { method: 'DELETE' },
+                          )
+                          setPatient((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
+                                  prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
+                                  sessionPackages: (prev.sessionPackages || []).filter(
+                                    (x) => String(x.id) !== String(pkg.id),
+                                  ),
+                                }
+                              : prev,
+                          )
+                          setPackageOk('تم حذف الباكج وتحديث رصيد المريض.')
+                        } catch (e) {
+                          setPackageErr(e instanceof ApiError ? e.message : 'تعذر حذف الباكج')
+                        } finally {
+                          setPackageBusy(false)
+                        }
+                      }}
+                    >
+                      حذف الباكج
+                    </button>
+                  ) : role === 'super_admin' && pkgUsed ? (
+                    <p style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      لا يمكن حذف الباكج بعد استهلاك جلسة أو ربطها بجلسة علاجية.
+                    </p>
                   ) : null}
                   <p style={{ margin: '0.45rem 0', fontSize: '0.88rem' }}>
                     إجمالي الباكج: <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
@@ -3482,7 +3553,8 @@ export function PatientRecord() {
                     </p>
                   ) : null}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
