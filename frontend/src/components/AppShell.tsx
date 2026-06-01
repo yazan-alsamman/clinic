@@ -21,6 +21,7 @@ export function AppShell() {
   const [laserMismatchDateLabel, setLaserMismatchDateLabel] = useState('')
   const [navOpen, setNavOpen] = useState(false)
   const [pendingBillingCount, setPendingBillingCount] = useState(0)
+  const [halfDayModalDismissed, setHalfDayModalDismissed] = useState(false)
   const role = user?.role
   const nav = role ? visibleNavForRole(role) : []
   const canSeeBillingCount = role === 'super_admin' || role === 'reception'
@@ -33,6 +34,14 @@ export function AppShell() {
           ? 2
           : null
       : null
+
+  useEffect(() => {
+    setHalfDayModalDismissed(false)
+  }, [laserHalfDayTargetRoom])
+
+  const halfDayModalOpen =
+    laserHalfDayTargetRoom != null && !(role === 'super_admin' && halfDayModalDismissed)
+
   useEffect(() => {
     setNavOpen(false)
   }, [location.pathname])
@@ -215,8 +224,10 @@ export function AppShell() {
       />
 
       <LaserHalfDayMeterModal
-        open={laserHalfDayTargetRoom != null}
+        open={halfDayModalOpen}
         room={laserHalfDayTargetRoom ?? 1}
+        allowDismiss={role === 'super_admin'}
+        onDismiss={() => setHalfDayModalDismissed(true)}
         onRecorded={() => void refreshSystem()}
       />
     </div>

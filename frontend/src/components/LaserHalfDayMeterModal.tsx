@@ -5,10 +5,15 @@ import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 export function LaserHalfDayMeterModal({
   open,
   room,
+  allowDismiss = false,
+  onDismiss,
   onRecorded,
 }: {
   open: boolean
   room: 1 | 2
+  /** مدير النظام يمكنه الخروج؛ الاستقبال لا */
+  allowDismiss?: boolean
+  onDismiss?: () => void
   onRecorded: () => void
 }) {
   const [value, setValue] = useState('')
@@ -28,18 +33,20 @@ export function LaserHalfDayMeterModal({
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKeyDown = (e: KeyboardEvent) => {
-      // Half-day meter entry is mandatory: block Escape-based dismiss patterns.
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
+      if (e.key !== 'Escape') return
+      if (allowDismiss) {
+        onDismiss?.()
+        return
       }
+      e.preventDefault()
+      e.stopPropagation()
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => {
       window.removeEventListener('keydown', onKeyDown, true)
       document.body.style.overflow = prev
     }
-  }, [open])
+  }, [open, allowDismiss, onDismiss])
 
   if (!open) return null
 
@@ -47,7 +54,17 @@ export function LaserHalfDayMeterModal({
   const ok = Number.isFinite(n) && n >= 0 && !busy
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={`half-day-title-r${room}`} style={{ zIndex: 1200 }}>
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`half-day-title-r${room}`}
+      style={{ zIndex: 1200 }}
+      onMouseDown={(e) => {
+        if (!allowDismiss) return
+        if (e.target === e.currentTarget) onDismiss?.()
+      }}
+    >
       <div className="modal" style={{ maxWidth: 420 }}>
         <h3 id={`half-day-title-r${room}`} style={{ color: 'var(--danger)', marginTop: 0 }}>
           قراءة عدّاد نصف اليوم — غرفة {room}
@@ -74,7 +91,12 @@ export function LaserHalfDayMeterModal({
         {err ? (
           <p style={{ color: 'var(--danger)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>{err}</p>
         ) : null}
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          {allowDismiss ? (
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => onDismiss?.()}>
+              إغلاق
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn-primary"
