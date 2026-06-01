@@ -32,6 +32,9 @@ const CLINICAL_ROLES = [
 
 const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']
 
+/** إنشاء ملف مريض جديد — استقبال، مدير النظام، مدير قسم الجلدية */
+const PATIENT_CREATE_ROLES = ['super_admin', 'reception', 'dermatology_manager']
+
 function parseFinancialBalanceDept(raw) {
   const v = String(raw || '').trim()
   return FIN_BALANCE_FILTER_DEPTS.includes(v) ? v : null
@@ -1500,8 +1503,8 @@ patientsRouter.delete('/:id', async (req, res) => {
 
 patientsRouter.post('/', requireActiveDay, async (req, res) => {
   try {
-    if (!['super_admin', 'reception'].includes(req.user.role)) {
-      res.status(403).json({ error: 'لا صلاحية' })
+    if (!PATIENT_CREATE_ROLES.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية لإنشاء مريض جديد' })
       return
     }
     const body = req.body ?? {}
@@ -1522,10 +1525,14 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
         return
       }
       try {
+        let departments = Array.isArray(body.departments) ? body.departments : []
+        if (req.user.role === 'dermatology_manager' && !departments.includes('dermatology')) {
+          departments = [...departments, 'dermatology']
+        }
         p = await Patient.create({
           fileNumber: currentFileNumber,
           ...normalized,
-          departments: Array.isArray(body.departments) ? body.departments : [],
+          departments,
           paperLaserEntries,
           lastVisit: new Date(),
         })
@@ -1550,7 +1557,10 @@ patientsRouter.post('/', requireActiveDay, async (req, res) => {
     }
     await writeAudit({
       user: req.user,
-      action: 'إنشاء مريض وحساب بوابة',
+      action:
+        req.user.role === 'dermatology_manager'
+          ? 'إنشاء مريض جديد (مدير جلدية) وحساب بوابة'
+          : 'إنشاء مريض وحساب بوابة',
       entityType: 'Patient',
       entityId: p._id,
       details: { portalUsername: portalCredentials.username },
