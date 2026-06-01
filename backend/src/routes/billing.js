@@ -15,6 +15,10 @@ import { todayBusinessDate } from '../utils/date.js'
 import { round2, round6 } from '../utils/money.js'
 import { normalizeHm, hmToMinutes } from '../utils/scheduleTime.js'
 import { wallMinutesAsiaDamascus } from '../utils/shiftTime.js'
+import {
+  fetchPatientDebtSettlementsForDate,
+  mergeDebtSettlementsIntoRollup,
+} from '../services/patientDebtSettlementInventory.js'
 
 /** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
 function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
@@ -262,6 +266,24 @@ function filterMovementsByShiftKind(movementRows, cfg, kind) {
   })
 }
 
+function debtSettlementWallMinutes(ds) {
+  const inst = ds?.receivedAt ? new Date(ds.receivedAt) : ds?.createdAt ? new Date(ds.createdAt) : null
+  if (!inst || Number.isNaN(inst.getTime())) return null
+  return wallMinutesAsiaDamascus(inst)
+}
+
+function filterDebtSettlementsByShiftKind(settlementRows, cfg, kind) {
+  return settlementRows.filter((ds) => {
+    const mins = debtSettlementWallMinutes(ds)
+    return shiftKindFromMinutes(mins, cfg) === kind
+  })
+}
+
+async function buildReceptionRollupWithDebtSettlements(items, payById, settlementRows) {
+  const rollup = aggregateReceptionPaidItems(items, payById)
+  return mergeDebtSettlementsIntoRollup(rollup, settlementRows)
+}
+
 function composeReceptionInventoryPayload(rollup, movementRowsFiltered, pendingCount, meta) {
   const { businessDate, dayActive, usdSypRate } = meta
   const { cash, bankMap, refundsRecordedSyp, refundsRecordedUsd, byDept, transactions } = rollup
@@ -320,8 +342,11 @@ function composeReceptionInventoryPayload(rollup, movementRowsFiltered, pendingC
 }
 
 async function buildReceptionPaidDayRollup(businessDate) {
-  const { items, payById } = await fetchPaidBillingItemsWithPayments(businessDate)
-  return aggregateReceptionPaidItems(items, payById)
+  const [{ items, payById }, settlementRows] = await Promise.all([
+    fetchPaidBillingItemsWithPayments(businessDate),
+    fetchPatientDebtSettlementsForDate(businessDate),
+  ])
+  return buildReceptionRollupWithDebtSettlements(items, payById, settlementRows)
 }
 
 async function getOrCreatePaymentSettings() {
@@ -637,8 +662,11 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
         ? Number(ybd.usdSypRate)
         : null
 
-    const { items, payById } = await fetchPaidBillingItemsWithPayments(businessDate)
-    const movementRows = await CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean()
+    const [{ items, payById }, movementRows, settlementRows] = await Promise.all([
+      fetchPaidBillingItemsWithPayments(businessDate),
+      CashMovement.find({ businessDate }).sort({ createdAt: -1 }).lean(),
+      fetchPatientDebtSettlementsForDate(businessDate),
+    ])
     const pendingCount = await BillingItem.countDocuments({ businessDate, status: 'pending_payment' })
     const shiftCfg = await loadSecretaryShiftBounds()
 
@@ -646,9 +674,21 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
     const userId = String(req.user._id)
 
     if (role === 'super_admin') {
-      const rollupM = aggregateReceptionPaidItems(filterItemsByShiftKind(items, payById, shiftCfg, 'morning'), payById)
-      const rollupE = aggregateReceptionPaidItems(filterItemsByShiftKind(items, payById, shiftCfg, 'evening'), payById)
-      const rollupO = aggregateReceptionPaidItems(filterItemsByShiftKind(items, payById, shiftCfg, 'outside'), payById)
+      const rollupM = await buildReceptionRollupWithDebtSettlements(
+        filterItemsByShiftKind(items, payById, shiftCfg, 'morning'),
+        payById,
+        filterDebtSettlementsByShiftKind(settlementRows, shiftCfg, 'morning'),
+      )
+      const rollupE = await buildReceptionRollupWithDebtSettlements(
+        filterItemsByShiftKind(items, payById, shiftCfg, 'evening'),
+        payById,
+        filterDebtSettlementsByShiftKind(settlementRows, shiftCfg, 'evening'),
+      )
+      const rollupO = await buildReceptionRollupWithDebtSettlements(
+        filterItemsByShiftKind(items, payById, shiftCfg, 'outside'),
+        payById,
+        filterDebtSettlementsByShiftKind(settlementRows, shiftCfg, 'outside'),
+      )
       const movM = filterMovementsByShiftKind(movementRows, shiftCfg, 'morning')
       const movE = filterMovementsByShiftKind(movementRows, shiftCfg, 'evening')
       const movO = filterMovementsByShiftKind(movementRows, shiftCfg, 'outside')
@@ -683,7 +723,7 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
     else if (shiftCfg.eveningUserId === userId) assignedKind = 'evening'
 
     if (!assignedKind) {
-      const emptyRollup = aggregateReceptionPaidItems([], payById)
+      const emptyRollup = await buildReceptionRollupWithDebtSettlements([], payById, [])
       const body = composeReceptionInventoryPayload(emptyRollup, [], pendingCount, {
         businessDate,
         dayActive,
@@ -706,7 +746,11 @@ billingRouter.get('/reception-daily-inventory', requireRoles('reception', 'super
     }
 
     const filteredItems = filterItemsByShiftKind(items, payById, shiftCfg, assignedKind)
-    const rollup = aggregateReceptionPaidItems(filteredItems, payById)
+    const rollup = await buildReceptionRollupWithDebtSettlements(
+      filteredItems,
+      payById,
+      filterDebtSettlementsByShiftKind(settlementRows, shiftCfg, assignedKind),
+    )
     const movFiltered = filterMovementsByShiftKind(movementRows, shiftCfg, assignedKind)
     const body = composeReceptionInventoryPayload(rollup, movFiltered, pendingCount, {
       businessDate,
@@ -769,7 +813,12 @@ billingRouter.get('/reception-collection-log', requireRoles('reception', 'super_
       return
     }
     const filtered = filterItemsByShiftKind(items, payById, shiftCfg, assignedKind)
-    const rollup = aggregateReceptionPaidItems(filtered, payById)
+    const settlementRows = await fetchPatientDebtSettlementsForDate(businessDate)
+    const rollup = await buildReceptionRollupWithDebtSettlements(
+      filtered,
+      payById,
+      filterDebtSettlementsByShiftKind(settlementRows, shiftCfg, assignedKind),
+    )
     res.setHeader('Cache-Control', 'private, no-store')
     res.json({ businessDate, transactions: rollup.transactions })
   } catch (e) {

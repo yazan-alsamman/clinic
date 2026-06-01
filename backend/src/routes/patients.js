@@ -18,6 +18,7 @@ import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle
 import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
+import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 
 const CLINICAL_ROLES = [
   'super_admin',
@@ -721,6 +722,20 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       },
     )
 
+    const businessDate = todayBusinessDate()
+    const receivedAt = new Date()
+    const debtSettlement = await PatientDebtSettlement.create({
+      patientId: p._id,
+      businessDate,
+      enteredSyp,
+      appliedToDebtSyp,
+      extraToCreditSyp,
+      debtBefore,
+      debtAfter,
+      receivedBy: req.user._id,
+      receivedAt,
+    })
+
     const outcome =
       debtBefore <= 0
         ? 'credit_only'
@@ -749,6 +764,7 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
 
     res.status(201).json({
       settlement: {
+        id: String(debtSettlement._id),
         enteredSyp,
         debtBefore,
         debtAfter,
@@ -757,6 +773,7 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         appliedToDebtSyp,
         extraToCreditSyp,
         outcome,
+        businessDate,
       },
       summary: {
         outstandingDebtSyp: debtAfter,

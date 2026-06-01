@@ -162,14 +162,19 @@ export function ReceptionInventoryDetailBody({
                   </tr>
                 ) : (
                   opsRows.map((t, idx) => {
+                    const debtRow = t.transactionKind === 'debt_settlement'
                     const cashRow = t.paymentChannel === 'cash'
-                    const bg = cashRow
+                    const bg = debtRow
                       ? idx % 2 === 0
-                        ? 'rgba(22,163,74,0.06)'
-                        : 'rgba(22,163,74,0.1)'
-                      : idx % 2 === 0
-                        ? 'rgba(99,102,241,0.06)'
-                        : 'rgba(99,102,241,0.1)'
+                        ? 'rgba(217,119,6,0.08)'
+                        : 'rgba(217,119,6,0.12)'
+                      : cashRow
+                        ? idx % 2 === 0
+                          ? 'rgba(22,163,74,0.06)'
+                          : 'rgba(22,163,74,0.1)'
+                        : idx % 2 === 0
+                          ? 'rgba(99,102,241,0.06)'
+                          : 'rgba(99,102,241,0.1)'
                     return (
                       <tr key={`hist-${t.paymentId}`} style={{ background: bg }}>
                         <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>{formatTime(t.paidAt)}</td>
@@ -611,14 +616,19 @@ export function ReceptionInventoryDetailBody({
                   </tr>
                 ) : (
                   opsRows.map((t, idx) => {
+                    const debtRow = t.transactionKind === 'debt_settlement'
                     const cashRow = t.paymentChannel === 'cash'
-                    const bg = cashRow
+                    const bg = debtRow
                       ? idx % 2 === 0
-                        ? 'rgba(22,163,74,0.06)'
-                        : 'rgba(22,163,74,0.1)'
-                      : idx % 2 === 0
-                        ? 'rgba(99,102,241,0.06)'
-                        : 'rgba(99,102,241,0.1)'
+                        ? 'rgba(217,119,6,0.08)'
+                        : 'rgba(217,119,6,0.12)'
+                      : cashRow
+                        ? idx % 2 === 0
+                          ? 'rgba(22,163,74,0.06)'
+                          : 'rgba(22,163,74,0.1)'
+                        : idx % 2 === 0
+                          ? 'rgba(99,102,241,0.06)'
+                          : 'rgba(99,102,241,0.1)'
                     return (
                       <tr key={`${sectionKey}-${t.paymentId}`} style={{ background: bg }}>
                         <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>{formatTime(t.paidAt)}</td>

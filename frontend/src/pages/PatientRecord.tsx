@@ -3293,7 +3293,8 @@ export function PatientRecord() {
         <div className="card">
           <h2 className="card-title">تسديد ذمم</h2>
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: 1.55 }}>
-            تسجيل مبلغ دفعّه المريض ليُخصم من إجمالي الذمة المفتوحة على ملفه.
+            تسجيل مبلغ دفعّه المريض ليُخصم من إجمالي الذمة المفتوحة على ملفه. يُضاف المبلغ فوراً إلى{' '}
+            <strong>الجرد المالي اليومي</strong> ضمن قسم «تسديد ذمم» مع تفاصيل العملية.
           </p>
           <div
             style={{
@@ -3398,12 +3399,12 @@ export function PatientRecord() {
                         : prev,
                     )
                     const applied = Math.round(Number(result.settlement?.appliedToDebtSyp) || 0)
-                    const after = Math.round(Number(result.settlement?.debtAfter) || 0)
+                    const after = Math.round(Number(result.summary?.outstandingDebtSyp) || 0)
                     const extra = Math.round(Number(result.settlement?.extraToCreditSyp) || 0)
                     setDebtPayOk(
                       extra > 0
-                        ? `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي.`
-                        : `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س.`,
+                        ? `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي. يظهر المبلغ في الجرد المالي اليومي.`
+                        : `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س. يظهر المبلغ في الجرد المالي اليومي.`,
                     )
                     setDebtPayAmount('')
                   } catch (e) {

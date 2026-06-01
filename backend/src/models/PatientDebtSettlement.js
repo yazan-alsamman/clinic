@@ -1,0 +1,21 @@
+import mongoose from 'mongoose'
+
+const patientDebtSettlementSchema = new mongoose.Schema(
+  {
+    patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true, index: true },
+    businessDate: { type: String, required: true, trim: true, index: true },
+    /** المبلغ المستلم نقداً من المريض */
+    enteredSyp: { type: Number, required: true, min: 0 },
+    appliedToDebtSyp: { type: Number, required: true, min: 0 },
+    extraToCreditSyp: { type: Number, default: 0, min: 0 },
+    debtBefore: { type: Number, default: 0, min: 0 },
+    debtAfter: { type: Number, default: 0, min: 0 },
+    receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    receivedAt: { type: Date, default: () => new Date(), index: true },
+  },
+  { timestamps: true },
+)
+
+patientDebtSettlementSchema.index({ businessDate: 1, receivedAt: 1 })
+
+export const PatientDebtSettlement = mongoose.model('PatientDebtSettlement', patientDebtSettlementSchema)

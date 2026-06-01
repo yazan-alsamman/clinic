@@ -13,6 +13,7 @@ export type DeptRow = {
 export type TxRow = {
   billingItemId: string
   paymentId: string
+  transactionKind?: 'billing' | 'debt_settlement'
   paidAt: string | null
   patientName: string
   providerName: string
