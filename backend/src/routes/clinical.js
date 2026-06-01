@@ -108,7 +108,37 @@ function defaultProcedurePlaceholder(department) {
   return m[department] || 'جلسة — بانتظار التفاصيل'
 }
 
-function sessionToPatientRow(r) {
+async function formatSessionMaterials(materials) {
+  if (!Array.isArray(materials) || materials.length === 0) return []
+  const ids = [
+    ...new Set(
+      materials
+        .map((m) => String(m.inventoryItemId || ''))
+        .filter((id) => mongoose.isValidObjectId(id)),
+    ),
+  ]
+  const invRows = ids.length
+    ? await InventoryItem.find({ _id: { $in: ids } }).select('unit sku name').lean()
+    : []
+  const byId = new Map(invRows.map((i) => [String(i._id), i]))
+  return materials.map((m) => {
+    const inv = m.inventoryItemId ? byId.get(String(m.inventoryItemId)) : null
+    const qty = Number(m.quantity) || 0
+    return {
+      inventoryItemId: m.inventoryItemId ? String(m.inventoryItemId) : '',
+      sku: String(m.sku || inv?.sku || '').trim(),
+      name: String(m.name || inv?.name || '').trim() || '—',
+      quantity: qty,
+      unit: String(m.unit || inv?.unit || 'وحدة').trim() || 'وحدة',
+      unitCostSyp: Math.round(Number(m.unitCostSyp) || 0),
+      lineCostSyp: Math.round(Number(m.lineCostSyp) || 0),
+      chargedUnitPriceSyp: Math.round(Number(m.chargedUnitPriceSyp) || 0),
+      lineChargeSyp: Math.round(Number(m.lineChargeSyp) || 0),
+    }
+  })
+}
+
+async function sessionToPatientRow(r) {
   const listAmountDueSyp = Math.round(Number(r.billingItemId?.listAmountDueSyp || r.billingItemId?.amountDueSyp || r.sessionFeeSyp || 0))
   const discountPercent = Number(r.billingItemId?.discountPercent) || 0
   const effectiveAmountDueSyp = Math.round(
@@ -131,10 +161,14 @@ function sessionToPatientRow(r) {
     providerName: r.providerUserId?.name || '—',
     providerUserId: r.providerUserId?._id ? String(r.providerUserId._id) : String(r.providerUserId || ''),
     notes: r.notes || '',
-    materials: Array.isArray(r.materials) ? r.materials : [],
+    materials: await formatSessionMaterials(r.materials),
     createdAt: r.createdAt,
     createdByReceptionUserId: r.createdByReceptionUserId ? String(r.createdByReceptionUserId) : null,
   }
+}
+
+async function mapSessionsToPatientRows(rows) {
+  return Promise.all((rows || []).map((r) => sessionToPatientRow(r)))
 }
 
 /**
@@ -176,6 +210,7 @@ async function consumeMaterials(rawLines, opts = {}) {
         inventoryItemId: item._id,
         sku: item.sku,
         name: item.name,
+        unit: String(item.unit || 'وحدة').trim() || 'وحدة',
         quantity: qty,
         unitCostSyp,
         lineCostSyp: Math.round(unitCostSyp * qty),
@@ -696,7 +731,7 @@ clinicalRouter.get('/sessions/patient/:patientId', requireRoles(...PATIENT_SESSI
       .populate('billingItemId', 'status amountDueSyp listAmountDueSyp discountPercent effectiveAmountDueSyp isPackagePrepaid')
       .lean()
     res.json({
-      sessions: rows.map((r) => sessionToPatientRow(r)),
+      sessions: await mapSessionsToPatientRows(rows),
     })
   } catch (e) {
     console.error(e)
@@ -724,7 +759,7 @@ clinicalRouter.get('/sessions/:sessionId', requireRoles(...SESSION_EDIT_ROLES), 
       res.status(403).json({ error: 'لا صلاحية لعرض هذه الجلسة' })
       return
     }
-    res.json({ session: sessionToPatientRow(r) })
+    res.json({ session: await sessionToPatientRow(r) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -808,7 +843,7 @@ clinicalRouter.patch(
           .populate('billingItemId', 'status amountDueSyp listAmountDueSyp discountPercent effectiveAmountDueSyp isPackagePrepaid')
           .lean()
 
-        res.json({ session: sessionToPatientRow(populated) })
+        res.json({ session: await sessionToPatientRow(populated) })
       } catch (saveErr) {
         await restoreMaterialsFromSnapshot(newLines)
         console.error(saveErr)

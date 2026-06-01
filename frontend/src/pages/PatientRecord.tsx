@@ -231,11 +231,76 @@ type DermatologySessionRow = {
   createdByReceptionUserId?: string | null
   isPackagePrepaid?: boolean
   materials: Array<{
+    inventoryItemId?: string
+    sku?: string
     name: string
     quantity: number
+    unit?: string
+    unitCostSyp?: number
+    lineCostSyp?: number
     chargedUnitPriceSyp?: number
     lineChargeSyp?: number
   }>
+}
+
+function DermatologySessionMaterialsDetail({
+  materials,
+  materialCostSypTotal,
+}: {
+  materials: DermatologySessionRow['materials']
+  materialCostSypTotal?: number
+}) {
+  if (!materials?.length) {
+    return (
+      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>لا توجد مواد مستخدمة مسجّلة في هذه الجلسة.</p>
+    )
+  }
+  return (
+    <div>
+      <p style={{ margin: '0 0 0.45rem', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+        المواد والعيارات المستخدمة
+      </p>
+      <div className="table-wrap">
+        <table className="data-table" style={{ fontSize: '0.84rem' }}>
+          <thead>
+            <tr>
+              <th>المادة</th>
+              <th>الكمية / العيار</th>
+              <th>الوحدة</th>
+              <th>تكلفة السطر (ل.س)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {materials.map((m, idx) => (
+              <tr key={`${m.inventoryItemId || m.name}-${idx}`}>
+                <td>
+                  <strong>{m.name || '—'}</strong>
+                  {m.sku ? (
+                    <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)' }} dir="ltr">
+                      {m.sku}
+                    </span>
+                  ) : null}
+                </td>
+                <td style={{ fontVariantNumeric: 'tabular-nums' }}>{m.quantity}</td>
+                <td>{m.unit || 'وحدة'}</td>
+                <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(Number(m.lineCostSyp) || 0).toLocaleString('ar-SY')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {materialCostSypTotal != null && materialCostSypTotal > 0 ? (
+        <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+          إجمالي تكلفة المواد:{' '}
+          <strong style={{ color: 'var(--text)' }}>
+            {Math.round(materialCostSypTotal).toLocaleString('ar-SY')} ل.س
+          </strong>
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 type PatientPackageSession = {
@@ -749,6 +814,7 @@ export function PatientRecord() {
   const [sessionEditNotes, setSessionEditNotes] = useState('')
   const [sessionEditCatalog, setSessionEditCatalog] = useState<DermatologyMaterialOption[]>([])
   const [sessionEditSelected, setSessionEditSelected] = useState<DermatologySelectedMaterial[]>([])
+  const [sessionEditExistingMaterials, setSessionEditExistingMaterials] = useState<DermatologySessionRow['materials']>([])
   const [sessionEditSaving, setSessionEditSaving] = useState(false)
   const [sessionEditErr, setSessionEditErr] = useState('')
   const [clinicalHistory, setClinicalHistory] = useState<{
@@ -852,6 +918,7 @@ export function PatientRecord() {
     setSessionEditDept(row.department)
     setSessionEditProc(row.procedureDescription || '')
     setSessionEditNotes(row.notes || '')
+    setSessionEditExistingMaterials(Array.isArray(row.materials) ? row.materials : [])
     setSessionEditSelected([])
     try {
       const q = inventoryDepartmentsQueryForClinicalDept(row.department)
@@ -4628,50 +4695,77 @@ export function PatientRecord() {
             ) : dermSessions.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات جلدية مسجلة حتى الآن.</p>
             ) : (
-              <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>التاريخ</th>
-                      <th>الوصف</th>
-                      <th>المعالج</th>
-                      <th>الإجمالي (ل.س)</th>
-                      <th>حالة التحصيل</th>
-                      <th>إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dermSessions.map((s) => (
-                      <tr key={s.id}>
-                        <td>{s.businessDate}</td>
-                        <td>{s.procedureDescription || '—'}</td>
-                        <td>{s.providerName}</td>
-                        <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
-                        <td>
+              <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.75rem' }}>
+                {dermSessions.map((s) => (
+                  <div
+                    key={s.id}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 10,
+                      padding: '0.75rem 0.85rem',
+                      background: 'var(--surface-solid)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '0.65rem 1.25rem',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div style={{ flex: '1 1 200px' }}>
+                        <p style={{ margin: 0, fontWeight: 700 }}>{s.procedureDescription || '—'}</p>
+                        <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                          {s.businessDate} · {s.providerName}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: 'left' as const, fontSize: '0.88rem' }}>
+                        <div>
+                          الإجمالي:{' '}
+                          <strong>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</strong>
+                        </div>
+                        <div style={{ marginTop: '0.2rem', color: 'var(--text-muted)' }}>
                           {s.isPackagePrepaid
                             ? 'مدفوعة مسبقاً (باكج)'
                             : s.billingStatus === 'paid'
                               ? 'مدفوع'
                               : 'بانتظار التحصيل'}
-                        </td>
-                        <td>
-                          {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ fontSize: '0.8rem' }}
-                              onClick={() => void openSessionEdit(s)}
-                            >
-                              تكميل
-                            </button>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      </div>
+                      <div>
+                        {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem' }}
+                            onClick={() => void openSessionEdit(s)}
+                          >
+                            تكميل
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        marginTop: '0.75rem',
+                        paddingTop: '0.65rem',
+                        borderTop: '1px dashed var(--border)',
+                      }}
+                    >
+                      <DermatologySessionMaterialsDetail
+                        materials={s.materials}
+                        materialCostSypTotal={s.materialCostSypTotal}
+                      />
+                      {s.notes?.trim() ? (
+                        <p style={{ margin: '0.65rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                          ملاحظات: <span style={{ color: 'var(--text)' }}>{s.notes.trim()}</span>
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -4965,6 +5059,11 @@ export function PatientRecord() {
                 onChange={(e) => setSessionEditNotes(e.target.value)}
               />
             </div>
+            {sessionEditDept === 'dermatology' && sessionEditExistingMaterials.length > 0 ? (
+              <div style={{ marginTop: '0.85rem' }}>
+                <DermatologySessionMaterialsDetail materials={sessionEditExistingMaterials} />
+              </div>
+            ) : null}
             <h4 style={{ margin: '1rem 0 0.35rem', fontSize: '0.95rem' }}>إضافة مواد (خصم مخزون)</h4>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
               حدّد المواد الجديدة فقط؛ تُضاف إلى السجل دون تعديل المبلغ على المريض.

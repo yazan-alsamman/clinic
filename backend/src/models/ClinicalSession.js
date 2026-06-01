@@ -5,6 +5,7 @@ const materialLineSchema = new mongoose.Schema(
     inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
     sku: { type: String, default: '' },
     name: { type: String, default: '' },
+    unit: { type: String, default: '' },
     quantity: { type: Number, required: true, min: 0 },
     unitCostSyp: { type: Number, default: 0 },
     lineCostSyp: { type: Number, default: 0 },
