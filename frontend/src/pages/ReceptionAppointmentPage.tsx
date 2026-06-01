@@ -9,6 +9,12 @@ import {
   hmToMinutes,
   slotIntervalFromRow,
   intervalsOverlapHalfOpen,
+  APPOINTMENT_GRID_START_MIN,
+  APPOINTMENT_GRID_END_MIN,
+  APPOINTMENT_GRID_STEP_MIN,
+  APPOINTMENT_MIDNIGHT_START_MIN,
+  appointmentGridSortKey,
+  minutesToHmGrid,
 } from '../utils/scheduleTime'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
 
@@ -117,15 +123,12 @@ type LaserProcedureGroup = {
   items: LaserProcedureItem[]
 }
 
-const DAY_START_MIN = 9 * 60
-const DAY_END_MIN = 21 * 60
-/** الفرق بين أوقات البداية المعروضة في الجدول (دقائق)؛ يُضاف وقت بداية إضافي عند نهاية حجز لا يقع على حدّ الشبكة */
-const BOOKING_DISPLAY_GRID_STEP_MIN = 15
+const DAY_START_MIN = APPOINTMENT_GRID_START_MIN
+const DAY_END_MIN = APPOINTMENT_GRID_END_MIN
+const BOOKING_DISPLAY_GRID_STEP_MIN = APPOINTMENT_GRID_STEP_MIN
 
 function toHm(min: number) {
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  return minutesToHmGrid(min)
 }
 
 /** عرض الوقت بصيغة 12 ساعة بدون AM/PM (مثال: 13:00 => 1:00) */
@@ -570,8 +573,11 @@ export function ReceptionAppointmentPage() {
           times.add(toHm(m))
         }
       }
+      if (bookingDurationMinutes > 0 && bookingDurationMinutes <= DAY_END_MIN) {
+        times.add(toHm(APPOINTMENT_MIDNIGHT_START_MIN))
+      }
       return [...times]
-        .sort((a, b) => (hmToMinutes(a) || 0) - (hmToMinutes(b) || 0))
+        .sort((a, b) => appointmentGridSortKey(hmToMinutes(a) || 0) - appointmentGridSortKey(hmToMinutes(b) || 0))
         .map((time) => {
           const busy = bookedMap.get(time)
           if (busy) {
@@ -647,11 +653,17 @@ export function ReceptionAppointmentPage() {
       return
     }
     const em = sm + dur
-    if (em > DAY_END_MIN || em <= sm) {
-      setFormErr('لا يمكنك حجز هذا الموعد: يتجاوز نهاية الدوام.')
+    if (sm === APPOINTMENT_MIDNIGHT_START_MIN) {
+      if (dur < 1 || dur > DAY_END_MIN) {
+        setFormErr('لا يمكنك حجز هذا الموعد: المدة غير صالحة لوقت 12 ليلاً.')
+        return
+      }
+    } else if (em > DAY_END_MIN) {
+      setFormErr('لا يمكنك حجز هذا الموعد: يتجاوز نهاية الدوام (12 ليلاً).')
       return
     }
-    if (intervalOverlapsBookedSlots(slots, ch, sm, em)) {
+    const overlapEnd = em <= sm ? em + DAY_END_MIN : em
+    if (intervalOverlapsBookedSlots(slots, ch, sm, overlapEnd)) {
       setFormErr('لا يمكنك حجز هذا الموعد: الوقت يتداخل مع موعد آخر.')
       return
     }
@@ -749,11 +761,16 @@ export function ReceptionAppointmentPage() {
       setFormErr('الوقت المختار غير صالح')
       return false
     }
-    if (em > DAY_END_MIN) {
-      setFormErr('الموعد يتجاوز نهاية الدوام (9:00 مساءً)')
+    if (sm === APPOINTMENT_MIDNIGHT_START_MIN) {
+      if (bookingDurationMinutes < 1 || bookingDurationMinutes > DAY_END_MIN) {
+        setFormErr('المدة غير صالحة لموعد يبدأ 12 ليلاً')
+        return false
+      }
+    } else if (em > DAY_END_MIN) {
+      setFormErr('الموعد يتجاوز نهاية الدوام (12 ليلاً)')
       return false
     }
-    if (sm == null || em == null || em <= sm) {
+    if (sm == null || em == null || (em <= sm && sm !== APPOINTMENT_MIDNIGHT_START_MIN)) {
       setFormErr('وقت نهاية الموعد يجب أن يكون بعد وقت البداية')
       return false
     }
@@ -788,7 +805,8 @@ export function ReceptionAppointmentPage() {
       )
       return false
     }
-    if (intervalOverlapsBookedSlots(slots, providerName, sm, em)) {
+    const overlapEnd = em <= sm ? em + DAY_END_MIN : em
+    if (intervalOverlapsBookedSlots(slots, providerName, sm, overlapEnd)) {
       setFormErr(
         'فترة الموعد (البداية–النهاية) تتداخل مع موعد آخر لنفس المقدّم — اختر أوقاتاً لا تغطي جزءاً من فترة محجوزة',
       )
@@ -1088,7 +1106,7 @@ export function ReceptionAppointmentPage() {
           </div>
         )}
         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.75rem 0 0' }}>
-          بداية الدوام 09:00 ونهايته 21:00. عرض الأوقات الفارغة بفاصل ساعة؛ أول وقت بداية بعد حجز قد يظهر على
+          بداية الدوام 09:00 ونهايته 12 ليلاً (00:00). عرض الأوقات الفارغة كل 15 دقيقة حتى 12 ليلاً؛ أول وقت بداية بعد حجز قد يظهر على
           الدقائق إذا انتهى الحجز بين ساعتين.
         </p>
       </div>

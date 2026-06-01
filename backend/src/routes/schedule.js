@@ -19,6 +19,7 @@ import {
   minutesToHm,
   slotIntervalMinutes,
   intervalsOverlapHalfOpen,
+  APPOINTMENT_GRID_END_MIN,
 } from '../utils/scheduleTime.js'
 
 export const scheduleRouter = Router()
@@ -226,11 +227,12 @@ async function ensureDermatologyBoards() {
 }
 
 async function assertNoOverlapForProvider({ businessDate, providerName, startTime, endTime, ignoreId = null }) {
-  const startMin = hmToMinutes(startTime)
-  const endMin = hmToMinutes(endTime)
-  if (startMin == null || endMin == null || endMin <= startMin) {
-    return { error: 'وقت النهاية يجب أن يكون بعد وقت البداية' }
-  }
+    const startMin = hmToMinutes(startTime)
+    let endMin = hmToMinutes(endTime)
+    if (startMin == null || endMin == null) {
+      return { error: 'وقت النهاية يجب أن يكون بعد وقت البداية' }
+    }
+    if (endMin <= startMin) endMin += APPOINTMENT_GRID_END_MIN
   const sameProvSlots = await ScheduleSlot.find({ businessDate, providerName }).lean()
   for (const o of sameProvSlots) {
     if (!o.patientId) continue
@@ -616,11 +618,12 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
       return
     }
     const startMin = hmToMinutes(time)
-    const endMin = hmToMinutes(endTime)
-    if (startMin == null || endMin == null || endMin <= startMin) {
+    let endMin = hmToMinutes(endTime)
+    if (startMin == null || endMin == null) {
       res.status(400).json({ error: 'وقت النهاية يجب أن يكون بعد وقت البداية' })
       return
     }
+    if (endMin <= startMin) endMin += APPOINTMENT_GRID_END_MIN
     const patient = await Patient.findById(patientId)
     if (!patient) {
       res.status(404).json({ error: 'المريض غير موجود' })
@@ -675,7 +678,7 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     const findExistingAt = (tStr) => sameProvSlots.find((o) => normalizeHm(o.time) === normalizeHm(tStr)) ?? null
 
     let assignTime = time
-    let assignEndTime = endTime
+    let assignEndTime = minutesToHm(endMin)
     let startMinCur = startMin
     let endMinCur = endMin
     let existing = findExistingAt(assignTime)
@@ -686,7 +689,7 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
         return
       }
       const duration = endMinCur - startMinCur
-      const dayEndMin = 21 * 60
+      const dayEndMin = APPOINTMENT_GRID_END_MIN
       let shifted = false
       for (let m = startMinCur; m + duration <= dayEndMin; m += 1) {
         const tStr = minutesToHm(m)

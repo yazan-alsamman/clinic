@@ -15,11 +15,16 @@ export function hmToMinutes(hhmm) {
   return h * 60 + min
 }
 
-/** دقائق منذ منتصف الليل → HH:mm (مقيّد بيوم واحد) */
+/** نهاية شبكة الحجز — 12 ليلاً */
+export const APPOINTMENT_GRID_END_MIN = 24 * 60
+
+/** دقائق منذ منتصف الليل → HH:mm (نهاية اليوم عند 12 ليلاً تُخزَّن 00:00) */
 export function minutesToHm(totalMin) {
-  const m = Math.max(0, Math.min(Math.floor(Number(totalMin) || 0), 23 * 60 + 59))
-  const h = Math.floor(m / 60)
-  const min = m % 60
+  const m = Math.max(0, Math.floor(Number(totalMin) || 0))
+  if (m >= APPOINTMENT_GRID_END_MIN) return '00:00'
+  const capped = Math.min(m, 23 * 60 + 59)
+  const h = Math.floor(capped / 60)
+  const min = capped % 60
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
 }
 
@@ -28,7 +33,8 @@ export function slotIntervalMinutes(doc) {
   const s = hmToMinutes(doc.time)
   if (s == null) return null
   let e = doc.endTime ? hmToMinutes(doc.endTime) : null
-  if (e == null || e <= s) e = s + 30
+  if (e == null) e = s + 30
+  else if (e <= s) e += APPOINTMENT_GRID_END_MIN
   return { start: s, end: e }
 }
 

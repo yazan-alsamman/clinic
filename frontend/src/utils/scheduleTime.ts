@@ -16,6 +16,27 @@ export function hmToMinutes(hhmm: string): number | null {
   return h * 60 + min
 }
 
+/** بداية عرض شبكة الحجز (09:00) */
+export const APPOINTMENT_GRID_START_MIN = 9 * 60
+/** نهاية يوم الحجز — 12 ليلاً (00:00)؛ المواعيد التي تبدأ قبلها وتنتهي عندها مسموحة */
+export const APPOINTMENT_GRID_END_MIN = 24 * 60
+export const APPOINTMENT_GRID_STEP_MIN = 15
+/** 00:00 — يُعرض في الجدول بعد 23:45 */
+export const APPOINTMENT_MIDNIGHT_START_MIN = 0
+
+export function appointmentGridSortKey(minutes: number): number {
+  if (minutes === APPOINTMENT_MIDNIGHT_START_MIN) return APPOINTMENT_GRID_END_MIN
+  return minutes
+}
+
+export function minutesToHmGrid(totalMin: number): string {
+  const m = Math.max(0, Math.floor(totalMin))
+  if (m >= APPOINTMENT_GRID_END_MIN) return '00:00'
+  const h = Math.floor(m / 60)
+  const min = m % 60
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+
 export function defaultEndFromStart(startNorm: string): string {
   const s = hmToMinutes(startNorm)
   if (s == null) return '10:00'
@@ -30,7 +51,8 @@ export function slotIntervalFromRow(time: string, endTime?: string | null): { st
   const start = hmToMinutes(time)
   if (start == null) return null
   let end = endTime ? hmToMinutes(endTime) : null
-  if (end == null || end <= start) end = start + 30
+  if (end == null) end = start + 30
+  else if (end <= start) end += APPOINTMENT_GRID_END_MIN
   return { start, end }
 }
 

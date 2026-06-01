@@ -6,8 +6,10 @@ import { useClinic } from '../context/ClinicContext'
 import type { Patient } from '../types'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
 
-const DAY_START_MIN = 9 * 60
-const DAY_END_MIN = 21 * 60
+import { APPOINTMENT_GRID_START_MIN, APPOINTMENT_GRID_END_MIN } from '../utils/scheduleTime'
+
+const DAY_START_MIN = APPOINTMENT_GRID_START_MIN
+const DAY_END_MIN = APPOINTMENT_GRID_END_MIN
 const WALK_IN_DURATION_MIN = 30
 
 const DERMATOLOGY_PROCEDURE_OPTIONS = [
