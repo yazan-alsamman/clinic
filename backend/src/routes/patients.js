@@ -15,6 +15,7 @@ import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { recordBillingStraightCashSyp } from '../services/recordBillingStraightCashSyp.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
+import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
 
@@ -297,6 +298,26 @@ patientsRouter.get('/next-file-number', async (req, res) => {
     }
     const nextFileNumber = await nextSequentialFileNumber()
     res.json({ nextFileNumber })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** سياق حجز ليزر للاستقبال — باكج فعّال، جلسة جزئية، مناطق متبقية */
+patientsRouter.get('/:id/laser-booking-context', async (req, res) => {
+  try {
+    if (!['super_admin', 'reception'].includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).select('sessionPackages').lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const ctx = await getLaserBookingContextForPatient(p)
+    res.json(ctx)
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

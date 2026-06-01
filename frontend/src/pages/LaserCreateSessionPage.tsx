@@ -17,7 +17,7 @@ type SlotRow = {
   roomNumber?: number | null
   arrivedAt?: string | null
   assignedSpecialistName?: string
-  laserPackageBookingMode?: '' | 'use_package' | 'outside_package'
+  laserPackageBookingMode?: '' | 'use_package' | 'outside_package' | 'continue_package'
 }
 
 function todayYmd() {

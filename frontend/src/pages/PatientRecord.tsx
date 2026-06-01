@@ -1745,14 +1745,17 @@ export function PatientRecord() {
     if (!laserProcedureGroups.length) return
     if (bookedLaserSlotPkgMode === 'outside_package') return
 
-    const wantsPackageLines =
+    const wantsContinueOnly =
+      bookedLaserSlotPkgMode === 'continue_package' ||
+      (!bookedLaserSlotPkgMode && bookedLaserProcedureText.startsWith('استكمال باكج'))
+    const wantsFullPackage =
       bookedLaserSlotPkgMode === 'use_package' ||
       (!bookedLaserSlotPkgMode && bookedLaserProcedureText === 'جلسة ضمن باكج ليزر')
 
-    if (!wantsPackageLines) return
+    if (!wantsContinueOnly && !wantsFullPackage) return
 
     const pkg = activeLaserPackage
-    if (pkg && clinicalHistory) {
+    if (wantsFullPackage && pkg && clinicalHistory) {
       const exp = Math.max(
         1,
         typeof pkg.areaCount === 'number' && pkg.areaCount > 0
@@ -1768,7 +1771,15 @@ export function PatientRecord() {
       if (partialOpen) return
     }
 
-    const ids = (pkg?.procedureOptionIds || []).filter(Boolean)
+    let ids = (pkg?.procedureOptionIds || []).filter(Boolean)
+    if (wantsContinueOnly && partialPackageLaserSession) {
+      const doneIds = new Set(
+        (partialPackageLaserSession.lineItems || [])
+          .filter((li) => !li.isAddon && li.procedureOptionId)
+          .map((li) => li.procedureOptionId),
+      )
+      ids = ids.filter((oid) => !doneIds.has(oid))
+    }
     if (!ids.length) return
     if (!ids.every((oid) => laserItemById.has(oid))) return
 
@@ -1788,6 +1799,7 @@ export function PatientRecord() {
     activeLaserPackage?.id,
     (activeLaserPackage?.procedureOptionIds || []).join(','),
     clinicalHistory,
+    partialPackageLaserSession?.id,
   ])
 
   useEffect(() => {

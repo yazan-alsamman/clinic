@@ -18,6 +18,7 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
 import { writeAudit } from '../utils/audit.js'
 import { postLaserSessionIfCompleted } from '../services/postingService.js'
+import { resolveLaserPackageSessionForBooking } from '../services/laserPackageBooking.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
 
@@ -368,36 +369,6 @@ async function assertProcedureOptionIdsValid(optionIds) {
   const found = await LaserProcedureOption.find({ _id: { $in: ids } }).select('_id').lean()
   if (found.length !== ids.length) throw new Error('بعض معرفات المناطق غير موجودة في النظام')
   return ids
-}
-
-/**
- * أول باكج ليزر غير موقوف: إمّا جلسة باكج بلا ربط ليزر، أو جلسة مربوطة بجلسة ليزر ما زالت
- * مناطقها المسجّلة أقل من `areaCount` وبند التحصيل معلّق (استكمال بعد «إنقاص منطقة»).
- */
-async function resolveLaserPackageSession(patientLike) {
-  const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
-  for (const pkg of packages) {
-    if (String(pkg?.department || '') !== 'laser') continue
-    if (pkg.suspended === true) continue
-    const sessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
-    const expectedAreas = Math.max(1, Math.trunc(Number(pkg.areaCount) || 0))
-    for (const session of sessions) {
-      if (session?.completedByReception === true) continue
-      if (session?.linkedLaserSessionId) {
-        const ls = await LaserSession.findById(session.linkedLaserSessionId).lean()
-        const bi = session.linkedBillingItemId
-          ? await BillingItem.findById(String(session.linkedBillingItemId)).lean()
-          : null
-        const recorded = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
-        if (ls && bi?.status === 'pending_payment' && recorded < expectedAreas) {
-          return { pkg, session, mode: 'continue', expectedAreas, existingLaserSession: ls, billingItem: bi }
-        }
-        continue
-      }
-      return { pkg, session, mode: 'fresh', expectedAreas }
-    }
-  }
-  return null
 }
 
 laserRouter.get('/package-templates', async (req, res) => {
@@ -1354,7 +1325,9 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       body.forceOutsidePackage === true ||
       slotPackageMode === 'outside_package'
 
-    const packageMatch = skipLaserPackage ? null : await resolveLaserPackageSession(patient)
+    const packageMatch = skipLaserPackage
+      ? null
+      : await resolveLaserPackageSessionForBooking(patient, slotPackageMode)
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
     const patientGender = normalizePatientGender(patient.gender)

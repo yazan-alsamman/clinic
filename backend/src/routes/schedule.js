@@ -12,6 +12,7 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { todayBusinessDate, addCalendarDaysYmd, isValidYmd } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
 import { notifyAppointmentCancelled } from '../services/scheduleCancelNotify.js'
+import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
 import {
   normalizeHm,
   hmToMinutes,
@@ -549,7 +550,9 @@ function slotToDto(s) {
     status: busy ? 'busy' : 'free',
     patientId: o.patientId ? String(o.patientId) : null,
     patientName: o.patientName || '',
-    laserPackageBookingMode: ['use_package', 'outside_package'].includes(String(o.laserPackageBookingMode || '').trim())
+    laserPackageBookingMode: ['use_package', 'outside_package', 'continue_package'].includes(
+      String(o.laserPackageBookingMode || '').trim(),
+    )
       ? String(o.laserPackageBookingMode).trim()
       : '',
   }
@@ -597,7 +600,10 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
       .slice(0, 200)
     const laserPkgRaw = String(body.laserPackageBookingMode || '').trim()
     const laserPackageBookingMode =
-      serviceType === 'laser' && (laserPkgRaw === 'use_package' || laserPkgRaw === 'outside_package')
+      serviceType === 'laser' &&
+      (laserPkgRaw === 'use_package' ||
+        laserPkgRaw === 'outside_package' ||
+        laserPkgRaw === 'continue_package')
         ? laserPkgRaw
         : ''
     const patientId = body.patientId
@@ -619,6 +625,24 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     if (!patient) {
       res.status(404).json({ error: 'المريض غير موجود' })
       return
+    }
+    if (serviceType === 'laser' && laserPackageBookingMode) {
+      const bookingCtx = await getLaserBookingContextForPatient(patient)
+      if (laserPackageBookingMode === 'continue_package') {
+        if (!bookingCtx.partialVisit) {
+          res.status(400).json({
+            error: 'لا توجد جلسة باكج قيد الإكمال لهذا المريض — اختر «جلسة جديدة ضمن الباكج» أو «خارج الباكج».',
+          })
+          return
+        }
+      }
+      if (laserPackageBookingMode === 'use_package' && !bookingCtx.hasFreshPackageSession) {
+        res.status(400).json({
+          error:
+            'لا توجد جلسة باكج جديدة متاحة — استخدم «إكمال المنطقة المتبقية» إن وُجدت جلسة ناقصة، أو «خارج الباكج».',
+        })
+        return
+      }
     }
     const resolved = await resolveProviderAssignment({
       serviceType,

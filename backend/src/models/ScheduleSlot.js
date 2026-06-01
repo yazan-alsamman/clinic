@@ -27,7 +27,7 @@ const scheduleSlotSchema = new mongoose.Schema(
     /** وضع حجز ليزر: جلسة ضمن الباكج أو من خارج الباكج */
     laserPackageBookingMode: {
       type: String,
-      enum: ['', 'use_package', 'outside_package'],
+      enum: ['', 'use_package', 'outside_package', 'continue_package'],
       default: '',
       trim: true,
     },
