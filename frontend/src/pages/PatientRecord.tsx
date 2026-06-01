@@ -11,6 +11,7 @@ type Tab =
   | 'overview'
   | 'account'
   | 'packages'
+  | 'debt_settlement'
   | 'financial'
   | 'sessions'
   | 'laser'
@@ -654,7 +655,7 @@ export function PatientRecord() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
-  const { businessDate: clinicBusinessDate } = useClinic()
+  const { businessDate: clinicBusinessDate, dayActive: clinicDayActive } = useClinic()
   const role = user?.role as Role | undefined
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
@@ -667,6 +668,7 @@ export function PatientRecord() {
       'overview',
       'account',
       'packages',
+      'debt_settlement',
       'financial',
       'sessions',
       'laser',
@@ -792,6 +794,10 @@ export function PatientRecord() {
   const [financialSettleSyp, setFinancialSettleSyp] = useState('')
   const [financialSettleBusy, setFinancialSettleBusy] = useState(false)
   const [financialSettleErr, setFinancialSettleErr] = useState('')
+  const [debtPayAmount, setDebtPayAmount] = useState('')
+  const [debtPayBusy, setDebtPayBusy] = useState(false)
+  const [debtPayErr, setDebtPayErr] = useState('')
+  const [debtPayOk, setDebtPayOk] = useState('')
   const [packageBusy, setPackageBusy] = useState(false)
   const [packageErr, setPackageErr] = useState('')
   const [packageOk, setPackageOk] = useState('')
@@ -1512,6 +1518,7 @@ export function PatientRecord() {
       { key: 'overview', label: 'نظرة عامة' },
       { key: 'account', label: 'الحساب' },
       { key: 'packages', label: 'باكج' },
+      { key: 'debt_settlement', label: 'تسديد ذمم' },
       { key: 'financial', label: 'مالية' },
       { key: 'sessions', label: 'جلسات / تحصيل' },
       { key: 'laser', label: 'الليزر' },
@@ -1529,6 +1536,7 @@ export function PatientRecord() {
         t.key === 'overview' ||
         (t.key === 'account' && showAccount) ||
         (t.key === 'packages' && showAccount) ||
+        (t.key === 'debt_settlement' && showAccount) ||
         (t.key === 'sessions' && showSessionsTab) ||
         (t.key === 'financial' && showAccount) ||
         (t.key === 'laser' && canAccessTab(role, 'laser')) ||
@@ -1942,6 +1950,10 @@ export function PatientRecord() {
   }
 
   const debtNow = Math.round(Number(patient.outstandingDebtSyp) || 0)
+  const debtPayPreviewSyp = Math.max(0, Math.round(parseFloat(normalizeDecimalDigits(debtPayAmount)) || 0))
+  const debtPayWillApplySyp = Math.min(debtNow, debtPayPreviewSyp)
+  const debtPayWillRemainSyp = Math.max(0, debtNow - debtPayPreviewSyp)
+  const debtPayWillCreditSyp = Math.max(0, debtPayPreviewSyp - debtNow)
   const settlePreviewSyp = Math.max(0, Math.round(parseFloat(financialSettleSyp) || 0))
   const settleEnteredSyp = settlePreviewSyp
   const settleWillCoverSyp = Math.min(debtNow, settleEnteredSyp)
@@ -3273,6 +3285,137 @@ export function PatientRecord() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'debt_settlement' && (role === 'super_admin' || role === 'reception') && (
+        <div className="card">
+          <h2 className="card-title">تسديد ذمم</h2>
+          <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: 1.55 }}>
+            تسجيل مبلغ دفعّه المريض ليُخصم من إجمالي الذمة المفتوحة على ملفه.
+          </p>
+          <div
+            style={{
+              marginTop: '0.75rem',
+              padding: '0.65rem 0.75rem',
+              borderRadius: 10,
+              border: '1px solid var(--border)',
+              background: 'var(--surface-solid)',
+            }}
+          >
+            <span className="form-label">إجمالي الذمة الحالية</span>
+            <div style={{ marginTop: '0.2rem', fontWeight: 700, fontSize: '1.15rem' }}>
+              {renderMoneySyp(debtNow)}
+            </div>
+          </div>
+          {!clinicDayActive ? (
+            <p style={{ color: 'var(--warning)', marginTop: '0.85rem', fontSize: '0.88rem' }}>
+              يوم العمل غير مفعّل — لا يمكن تسجيل تسديد الذمة حتى يفعّل المدير اليوم.
+            </p>
+          ) : debtNow <= 0 ? (
+            <p style={{ color: 'var(--success)', marginTop: '0.85rem', marginBottom: 0 }}>
+              لا توجد ذمة مفتوحة على هذا المريض حالياً.
+            </p>
+          ) : (
+            <>
+              <div style={{ marginTop: '1rem', maxWidth: 360 }}>
+                <label className="form-label">المبلغ المدفوع (ل.س)</label>
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  value={debtPayAmount}
+                  onChange={(e) => {
+                    setDebtPayErr('')
+                    setDebtPayOk('')
+                    setDebtPayAmount(e.target.value)
+                  }}
+                  placeholder="0"
+                  disabled={debtPayBusy}
+                  style={{ marginTop: '0.25rem' }}
+                />
+              </div>
+              <div
+                style={{
+                  marginTop: '0.75rem',
+                  display: 'grid',
+                  gap: '0.35rem',
+                  fontSize: '0.88rem',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <div>
+                  يُخصم من الذمة: <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(debtPayWillApplySyp)}</strong>
+                </div>
+                <div>
+                  الذمة المتبقية بعد التسديد:{' '}
+                  <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(debtPayWillRemainSyp)}</strong>
+                </div>
+                {debtPayWillCreditSyp > 0 ? (
+                  <div>
+                    فائض يُضاف للرصيد الإضافي:{' '}
+                    <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(debtPayWillCreditSyp)}</strong>
+                  </div>
+                ) : null}
+              </div>
+              {debtPayErr ? <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{debtPayErr}</p> : null}
+              {debtPayOk ? <p style={{ color: 'var(--success)', marginTop: '0.75rem' }}>{debtPayOk}</p> : null}
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ marginTop: '1rem' }}
+                disabled={debtPayBusy}
+                onClick={async () => {
+                  if (!id) return
+                  setDebtPayErr('')
+                  setDebtPayOk('')
+                  const syp = Math.max(0, Math.round(parseFloat(normalizeDecimalDigits(debtPayAmount)) || 0))
+                  if (!(syp > 0)) {
+                    setDebtPayErr('أدخل مبلغاً بالليرة أكبر من صفر.')
+                    return
+                  }
+                  setDebtPayBusy(true)
+                  try {
+                    const result = await api<{
+                      settlement: {
+                        enteredSyp: number
+                        appliedToDebtSyp: number
+                        debtAfter: number
+                        extraToCreditSyp: number
+                      }
+                      summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+                    }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
+                      method: 'POST',
+                      body: JSON.stringify({ amountSyp: syp }),
+                    })
+                    setPatient((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            outstandingDebtSyp: Number(result.summary?.outstandingDebtSyp) || 0,
+                            prepaidCreditSyp: Number(result.summary?.prepaidCreditSyp) || 0,
+                          }
+                        : prev,
+                    )
+                    const applied = Math.round(Number(result.settlement?.appliedToDebtSyp) || 0)
+                    const after = Math.round(Number(result.settlement?.debtAfter) || 0)
+                    const extra = Math.round(Number(result.settlement?.extraToCreditSyp) || 0)
+                    setDebtPayOk(
+                      extra > 0
+                        ? `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي.`
+                        : `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س.`,
+                    )
+                    setDebtPayAmount('')
+                  } catch (e) {
+                    setDebtPayErr(e instanceof ApiError ? e.message : 'تعذر تسجيل التسديد')
+                  } finally {
+                    setDebtPayBusy(false)
+                  }
+                }}
+              >
+                {debtPayBusy ? 'جاري الحفظ…' : 'تأكيد تسديد الذمة'}
+              </button>
+            </>
           )}
         </div>
       )}
