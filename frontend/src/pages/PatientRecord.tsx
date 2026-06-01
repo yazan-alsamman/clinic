@@ -973,7 +973,8 @@ export function PatientRecord() {
     [selectedLaserTemplates],
   )
   const [solariumPkgSessions, setSolariumPkgSessions] = useState('10')
-  const [solariumPkgAmount, setSolariumPkgAmount] = useState('')
+  const [solariumPkgTotal, setSolariumPkgTotal] = useState('')
+  const [solariumPkgPaid, setSolariumPkgPaid] = useState('')
   const [solariumPkgChannel, setSolariumPkgChannel] = useState<PaymentChannel>('cash')
   const [solariumPkgBankName, setSolariumPkgBankName] = useState('')
   const [solariumPkgNotes, setSolariumPkgNotes] = useState('')
@@ -3188,11 +3189,11 @@ export function PatientRecord() {
           </button>
 
           <h2 className="card-title" style={{ marginTop: '1.75rem' }}>
-            باكج سولاريوم (تحصيل فوري)
+            باكج سولاريوم
           </h2>
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-            يُدخل الاستقبال عدد جلسات الباكج والمبلغ النقدي المأخوذ من المريض. عند الضغط على «إنشاء الباكج وتحصيل» يُسجَّل
-            المبلغ في الجرد المالي كتحصيل سولاريوم، وتظهر الجلسات في الملف لاستهلاكها واحدةً تلو الأخرى.
+            أدخل إجمالي سعر الباكج والمبلغ المدفوع حالياً. الفرق يُسجَّل ذمةً على المريض. إن وُجد دفع الآن يُحصَّل في
+            الجرد المالي ضمن السولاريوم، وتظهر الجلسات في الملف لاستهلاكها واحدةً تلو الأخرى.
           </p>
           <div className="grid-2" style={{ marginTop: '0.75rem' }}>
             <div>
@@ -3207,13 +3208,24 @@ export function PatientRecord() {
               />
             </div>
             <div>
-              <label className="form-label">المبلغ المحصّل (ل.س)</label>
+              <label className="form-label">إجمالي سعر الباكج (ل.س)</label>
               <input
                 className="input"
                 inputMode="decimal"
                 disabled={packageBusy || solariumPkgBusy}
-                value={solariumPkgAmount}
-                onChange={(e) => setSolariumPkgAmount(e.target.value)}
+                value={solariumPkgTotal}
+                onChange={(e) => setSolariumPkgTotal(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="form-label">المدفوع حالياً (ل.س)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                disabled={packageBusy || solariumPkgBusy}
+                value={solariumPkgPaid}
+                onChange={(e) => setSolariumPkgPaid(e.target.value)}
                 placeholder="0"
               />
             </div>
@@ -3229,7 +3241,7 @@ export function PatientRecord() {
               placeholder="ملاحظات على الباكج…"
             />
           </div>
-          {canUsePaymentChannels ? (
+          {canUsePaymentChannels && Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0)) > 0 ? (
             <PaymentChannelFields
               channel={solariumPkgChannel}
               bankName={solariumPkgBankName}
@@ -3257,12 +3269,17 @@ export function PatientRecord() {
                 setSolariumPkgErr('حدد عدد جلسات بين 1 و 200.')
                 return
               }
-              const collected = Math.max(0, Math.round(parseFloat(solariumPkgAmount) || 0))
-              if (!(collected > 0)) {
-                setSolariumPkgErr('أدخل المبلغ المحصّل بالليرة.')
+              const totalSyp = Math.max(0, Math.round(parseFloat(solariumPkgTotal) || 0))
+              const paidSyp = Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0))
+              if (!(totalSyp > 0)) {
+                setSolariumPkgErr('أدخل إجمالي سعر الباكج بالليرة.')
                 return
               }
-              if (canUsePaymentChannels) {
+              if (paidSyp < 0 || paidSyp > totalSyp) {
+                setSolariumPkgErr('المبلغ المدفوع يجب أن يكون بين 0 وإجمالي الباكج.')
+                return
+              }
+              if (paidSyp > 0 && canUsePaymentChannels) {
                 const chErr = validatePaymentChannelBeforeSubmit(solariumPkgChannel, solariumPkgBankName)
                 if (chErr) {
                   setSolariumPkgErr(chErr)
@@ -3274,10 +3291,11 @@ export function PatientRecord() {
                 const body: Record<string, unknown> = {
                   department: 'solarium',
                   sessionsCount,
-                  collectedAmountSyp: collected,
+                  packageTotalSyp: totalSyp,
+                  paidAmountSyp: paidSyp,
                   notes: solariumPkgNotes.trim(),
                 }
-                if (canUsePaymentChannels) {
+                if (paidSyp > 0 && canUsePaymentChannels) {
                   body.paymentChannel = solariumPkgChannel
                   if (solariumPkgChannel === 'bank') body.bankName = solariumPkgBankName.trim()
                 }
@@ -3301,9 +3319,12 @@ export function PatientRecord() {
                       }
                     : prev,
                 )
-                setSolariumPkgOk('تم إنشاء باكج السولاريوم والتحصيل بنجاح.')
+                setSolariumPkgOk(
+                  paidSyp > 0 ? 'تم إنشاء باكج السولاريوم والتحصيل بنجاح.' : 'تم إنشاء باكج السولاريوم (ذمة على المريض).',
+                )
                 setSolariumPkgSessions('10')
-                setSolariumPkgAmount('')
+                setSolariumPkgTotal('')
+                setSolariumPkgPaid('')
                 setSolariumPkgNotes('')
                 setSolariumPkgChannel('cash')
                 setSolariumPkgBankName('')
@@ -3314,7 +3335,7 @@ export function PatientRecord() {
               }
             }}
           >
-            {solariumPkgBusy ? 'جاري التحصيل…' : 'إنشاء الباكج وتحصيل'}
+            {solariumPkgBusy ? 'جاري الحفظ…' : 'حفظ باكج السولاريوم'}
           </button>
 
           <h3 className="card-title" style={{ marginTop: '1.35rem', fontSize: '0.95rem' }}>
@@ -3486,20 +3507,17 @@ export function PatientRecord() {
                     إجمالي الباكج: <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
                     <strong>{renderMoneySyp(pkg.paidAmountSyp)}</strong>
                   </p>
-                  {pkg.department === 'solarium' ? (
-                    <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                      تم تحصيل المبلغ نقداً عند إنشاء الباكج ويظهر في الجرد المالي ضمن السولاريوم.
-                    </p>
-                  ) : (
-                    <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                      حالة التسوية:{' '}
-                      {pkg.settlementDeltaSyp < 0
-                        ? `ذمة ${Math.abs(pkg.settlementDeltaSyp).toLocaleString('ar-SY')} ل.س`
-                        : pkg.settlementDeltaSyp > 0
-                          ? `رصيد إضافي ${pkg.settlementDeltaSyp.toLocaleString('ar-SY')} ل.س`
-                          : 'متوازن'}
-                    </p>
-                  )}
+                  <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                    حالة التسوية:{' '}
+                    {pkg.settlementDeltaSyp < 0
+                      ? `ذمة ${Math.abs(pkg.settlementDeltaSyp).toLocaleString('ar-SY')} ل.س`
+                      : pkg.settlementDeltaSyp > 0
+                        ? `رصيد إضافي ${pkg.settlementDeltaSyp.toLocaleString('ar-SY')} ل.س`
+                        : 'متوازن'}
+                    {pkg.department === 'solarium' && pkg.paidAmountSyp > 0 ? (
+                      <> — المدفوع عند الإنشاء يظهر في الجرد المالي ضمن السولاريوم.</>
+                    ) : null}
+                  </p>
                   <div style={{ display: 'grid', gap: '0.4rem' }}>
                     {pkg.sessions.map((s) => (
                       <label

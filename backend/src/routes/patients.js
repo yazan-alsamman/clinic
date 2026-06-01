@@ -1001,99 +1001,127 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     }
 
     if (department === 'solarium') {
-      const collectedSyp = parsePositiveSypInteger(
-        req.body?.collectedAmountSyp ?? req.body?.paidAmountSyp ?? req.body?.amountSyp,
+      let packageTotalSyp = parsePositiveSypInteger(req.body?.packageTotalSyp)
+      let paidAmountSyp = parseNonNegativeSypInteger(
+        req.body?.paidAmountSyp ?? req.body?.collectedAmountSyp ?? req.body?.amountSyp,
       )
-      if (collectedSyp == null) {
-        res.status(400).json({ error: 'أدخل المبلغ المحصّل بالليرة (أكبر من صفر)' })
+      if (packageTotalSyp == null) {
+        const legacyCollected = parsePositiveSypInteger(
+          req.body?.collectedAmountSyp ?? req.body?.paidAmountSyp ?? req.body?.amountSyp,
+        )
+        if (legacyCollected != null) {
+          packageTotalSyp = legacyCollected
+          if (paidAmountSyp == null) paidAmountSyp = legacyCollected
+        }
+      }
+      if (packageTotalSyp == null) {
+        res.status(400).json({ error: 'أدخل إجمالي سعر الباكج بالليرة' })
         return
       }
+      if (paidAmountSyp == null) {
+        res.status(400).json({ error: 'مبلغ المدفوع غير صالح' })
+        return
+      }
+
+      const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+      const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
+      const settlementDeltaSyp = paidAmountSyp - packageTotalSyp
+      const debtAfter = debtBefore + Math.max(0, packageTotalSyp - paidAmountSyp)
+      const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
+
       const title =
         String(req.body?.title || '').trim().slice(0, 160) || `باكج سولاريوم (${sessionsCount} جلسة)`
       const notes = String(req.body?.notes || '').trim().slice(0, 1200)
       const businessDate = String(req.body?.businessDate || '').trim() || req.businessDate || todayBusinessDate()
       const patientName = String(p.name || '').trim()
+      const packageId = new mongoose.Types.ObjectId()
+      const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
+        _id: new mongoose.Types.ObjectId(),
+        label: packageSessionLabelAr(idx),
+        completedByReception: false,
+        completedAt: null,
+        completedByUserId: null,
+        linkedLaserSessionId: null,
+        linkedBillingItemId: null,
+      }))
+      const packageDoc = {
+        _id: packageId,
+        department: 'solarium',
+        title,
+        sessionsCount,
+        packageTotalSyp,
+        paidAmountSyp,
+        settlementDeltaSyp,
+        notes,
+        createdByUserId: req.user._id,
+        sessions,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
 
       let cs = null
+      let bi = null
       let billingPaid = false
+      let payResult = null
       try {
-        const procedureDescription = `سولاريوم — باكج مسبق الدفع (${sessionsCount} جلسة)${patientName ? ` — ${patientName}` : ''}`
-        cs = await ClinicalSession.create({
-          patientId: p._id,
-          providerUserId: req.user._id,
-          department: 'solarium',
-          procedureDescription,
-          sessionFeeSyp: collectedSyp,
-          businessDate,
-          notes: notes ? notes.slice(0, 500) : '',
-          materials: [],
-          materialCostSypTotal: 0,
-          materialChargeSypTotal: 0,
-          createdByReceptionUserId: req.user._id,
-        })
+        if (paidAmountSyp > 0) {
+          const procedureDescription = `سولاريوم — باكج مسبق الدفع (${sessionsCount} جلسة)${patientName ? ` — ${patientName}` : ''}`
+          cs = await ClinicalSession.create({
+            patientId: p._id,
+            providerUserId: req.user._id,
+            department: 'solarium',
+            procedureDescription,
+            sessionFeeSyp: paidAmountSyp,
+            businessDate,
+            notes: notes ? notes.slice(0, 500) : '',
+            materials: [],
+            materialCostSypTotal: 0,
+            materialChargeSypTotal: 0,
+            createdByReceptionUserId: req.user._id,
+          })
 
-        const bi = await BillingItem.create({
-          clinicalSessionId: cs._id,
-          patientId: p._id,
-          providerUserId: req.user._id,
-          department: 'solarium',
-          procedureLabel: procedureDescription,
-          listAmountDueSyp: collectedSyp,
-          discountPercent: 0,
-          effectiveAmountDueSyp: collectedSyp,
-          amountDueSyp: collectedSyp,
-          currency: 'SYP',
-          businessDate,
-          status: 'pending_payment',
-        })
-        cs.billingItemId = bi._id
-        await cs.save()
+          bi = await BillingItem.create({
+            clinicalSessionId: cs._id,
+            patientId: p._id,
+            providerUserId: req.user._id,
+            department: 'solarium',
+            procedureLabel: procedureDescription,
+            listAmountDueSyp: paidAmountSyp,
+            discountPercent: 0,
+            effectiveAmountDueSyp: paidAmountSyp,
+            amountDueSyp: paidAmountSyp,
+            currency: 'SYP',
+            businessDate,
+            status: 'pending_payment',
+          })
+          cs.billingItemId = bi._id
+          await cs.save()
 
-        let paymentChannel = 'cash'
-        let bankName = ''
-        try {
-          ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
-        } catch (chErr) {
-          res.status(400).json({ error: String(chErr?.message || chErr) })
-          return
-        }
-        const payResult = await recordBillingStraightCashSyp({
-          billingItemId: bi._id,
-          receivedByUser: req.user,
-          paymentChannel,
-          bankName,
-        })
-        billingPaid = true
-
-        const packageId = new mongoose.Types.ObjectId()
-        const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
-          _id: new mongoose.Types.ObjectId(),
-          label: packageSessionLabelAr(idx),
-          completedByReception: false,
-          completedAt: null,
-          completedByUserId: null,
-          linkedLaserSessionId: null,
-          linkedBillingItemId: null,
-        }))
-        const packageDoc = {
-          _id: packageId,
-          department: 'solarium',
-          title,
-          sessionsCount,
-          packageTotalSyp: collectedSyp,
-          paidAmountSyp: collectedSyp,
-          settlementDeltaSyp: 0,
-          notes,
-          createdByUserId: req.user._id,
-          sessions,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          let paymentChannel = 'cash'
+          let bankName = ''
+          try {
+            ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+          } catch (chErr) {
+            res.status(400).json({ error: String(chErr?.message || chErr) })
+            return
+          }
+          payResult = await recordBillingStraightCashSyp({
+            billingItemId: bi._id,
+            receivedByUser: req.user,
+            paymentChannel,
+            bankName,
+          })
+          billingPaid = true
         }
 
         await Patient.updateOne(
           { _id: p._id },
           {
             $push: { sessionPackages: packageDoc },
+            $set: {
+              outstandingDebtSyp: debtAfter,
+              prepaidCreditSyp: creditAfter,
+            },
             $addToSet: { departments: 'solarium' },
           },
         )
@@ -1102,17 +1130,19 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
 
         await writeAudit({
           user: req.user,
-          action: 'إنشاء باكج سولاريوم وتحصيل',
+          action: paidAmountSyp > 0 ? 'إنشاء باكج سولاريوم وتحصيل' : 'إنشاء باكج سولاريوم',
           entityType: 'Patient',
           entityId: p._id,
           details: {
             packageId: String(packageId),
             department: 'solarium',
             sessionsCount,
-            collectedSyp,
-            clinicalSessionId: String(cs._id),
-            billingItemId: String(bi._id),
-            paymentId: payResult.paymentId,
+            packageTotalSyp,
+            paidAmountSyp,
+            settlementDeltaSyp,
+            clinicalSessionId: cs?._id ? String(cs._id) : undefined,
+            billingItemId: bi?._id ? String(bi._id) : undefined,
+            paymentId: payResult?.paymentId,
           },
         })
 
