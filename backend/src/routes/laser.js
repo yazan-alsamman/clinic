@@ -489,7 +489,12 @@ laserRouter.delete('/package-templates/:id', requireRoles('super_admin'), async 
       return
     }
     const inUse = await Patient.countDocuments({
-      sessionPackages: { $elemMatch: { laserPackageTemplateId: String(id), department: 'laser' } },
+      sessionPackages: {
+        $elemMatch: {
+          department: 'laser',
+          $or: [{ laserPackageTemplateId: String(id) }, { laserPackageTemplateIds: String(id) }],
+        },
+      },
     })
     if (inUse > 0) {
       res.status(400).json({ error: 'لا يمكن حذف الباكج لأنه مربوط بملفات مرضى — عطّله مؤقتاً بدلاً من ذلك' })

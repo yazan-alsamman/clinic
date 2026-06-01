@@ -35,6 +35,11 @@ export function patientToDto(p) {
           settlementDeltaSyp: Number(pkg?.settlementDeltaSyp) || 0,
           notes: String(pkg?.notes || ''),
           laserPackageTemplateId: String(pkg?.laserPackageTemplateId || ''),
+          laserPackageTemplateIds: Array.isArray(pkg?.laserPackageTemplateIds)
+            ? pkg.laserPackageTemplateIds.map(String).filter(Boolean)
+            : pkg?.laserPackageTemplateId
+              ? [String(pkg.laserPackageTemplateId)]
+              : [],
           procedureOptionIds: Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : [],
           areaCount: Number(pkg?.areaCount) || 0,
           suspended: pkg?.suspended === true,

@@ -35,8 +35,10 @@ const packageSessionSchema = new mongoose.Schema(
 const patientPackageSchema = new mongoose.Schema(
   {
     department: { type: String, enum: ['laser', 'solarium'], default: 'laser' },
-    /** مرجع قالب الباكج من لوحة المدير (اختياري) */
+    /** مرجع قالب الباكج من لوحة المدير (اختياري — أول قالب عند اختيار عدة قوالب) */
     laserPackageTemplateId: { type: String, default: '', trim: true },
+    /** قوالب باكج ليزر المدمجة عند البيع (واحد أو أكثر) */
+    laserPackageTemplateIds: [{ type: String, trim: true }],
     /** نسخة المناطق وقت البيع — لا تتغير عند تعديل القالب لاحقاً */
     procedureOptionIds: [{ type: String, trim: true }],
     areaCount: { type: Number, default: 0, min: 0 },

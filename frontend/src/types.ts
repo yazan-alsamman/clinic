@@ -78,6 +78,7 @@ export interface Patient {
     notes: string
     createdAt: string | null
     laserPackageTemplateId?: string
+    laserPackageTemplateIds?: string[]
     procedureOptionIds?: string[]
     areaCount?: number
     suspended?: boolean

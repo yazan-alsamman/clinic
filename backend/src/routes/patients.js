@@ -170,6 +170,75 @@ function packageSessionLabelAr(zeroBasedIndex) {
   return `الجلسة ${n.toLocaleString('ar-SY')}`
 }
 
+/** دمج قالب أو أكثر لباكج ليزر واحد (مناطق + أسعار قائمة) */
+async function resolveLaserPackageTemplatesFromBody(body) {
+  const rawIds = Array.isArray(body?.laserPackageTemplateIds)
+    ? body.laserPackageTemplateIds
+    : body?.laserPackageTemplateId
+      ? [body.laserPackageTemplateId]
+      : []
+  const tplIds = [
+    ...new Set(
+      rawIds
+        .map((x) => String(x || '').trim())
+        .filter((id) => mongoose.isValidObjectId(id)),
+    ),
+  ]
+  if (!tplIds.length) {
+    const err = new Error('يجب اختيار قالب باكج ليزر واحد على الأقل من القائمة المعرفة في النظام')
+    err.status = 400
+    throw err
+  }
+  const tplRows = await LaserPackageTemplate.find({ _id: { $in: tplIds } }).lean()
+  const byId = new Map(tplRows.map((t) => [String(t._id), t]))
+  if (byId.size !== tplIds.length) {
+    const err = new Error('أحد قوالب الباكج غير موجود')
+    err.status = 400
+    throw err
+  }
+  const ordered = tplIds.map((id) => byId.get(id)).filter(Boolean)
+  const inactive = ordered.find((t) => t.active === false)
+  if (inactive) {
+    const err = new Error(`قالب الباكج موقوف: ${String(inactive.name || '').trim() || '—'}`)
+    err.status = 400
+    throw err
+  }
+
+  const procedureOptionIdsSnap = []
+  const seenOption = new Set()
+  let areaCountSnap = 0
+  let listPriceSum = 0
+  const names = []
+  for (const tpl of ordered) {
+    const nm = String(tpl.name || '').trim()
+    if (nm) names.push(nm)
+    listPriceSum += Math.max(0, Math.round(Number(tpl.listPriceSyp) || 0))
+    const tplAreas = Math.max(
+      1,
+      Math.trunc(Number(tpl.areaCount) || 0),
+      Array.isArray(tpl.procedureOptionIds) ? tpl.procedureOptionIds.length : 0,
+    )
+    areaCountSnap += tplAreas
+    for (const oid of Array.isArray(tpl.procedureOptionIds) ? tpl.procedureOptionIds : []) {
+      const s = String(oid || '').trim()
+      if (s && !seenOption.has(s)) {
+        seenOption.add(s)
+        procedureOptionIdsSnap.push(s)
+      }
+    }
+  }
+  areaCountSnap = Math.max(areaCountSnap, procedureOptionIdsSnap.length, 1)
+
+  return {
+    laserPackageTemplateIds: tplIds,
+    laserPackageTemplateId: tplIds[0],
+    procedureOptionIdsSnap,
+    areaCountSnap,
+    defaultTitle: names.join(' + '),
+    listPriceSum,
+  }
+}
+
 function serializePackage(pkg) {
   return {
     id: String(pkg?._id || ''),
@@ -199,6 +268,11 @@ function serializePackage(pkg) {
         }))
       : [],
     laserPackageTemplateId: String(pkg?.laserPackageTemplateId || ''),
+    laserPackageTemplateIds: Array.isArray(pkg?.laserPackageTemplateIds)
+      ? pkg.laserPackageTemplateIds.map(String).filter(Boolean)
+      : pkg?.laserPackageTemplateId
+        ? [String(pkg.laserPackageTemplateId)]
+        : [],
     procedureOptionIds: Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : [],
     areaCount: Number(pkg?.areaCount) || 0,
     suspended: pkg?.suspended === true,
@@ -1101,21 +1175,22 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
 
     const packageId = new mongoose.Types.ObjectId()
-    const tplId = String(req.body?.laserPackageTemplateId || '').trim()
-    if (!mongoose.isValidObjectId(tplId)) {
-      res.status(400).json({ error: 'يجب اختيار قالب باكج ليزر من القائمة المعرفة في النظام' })
+    let laserTplResolved
+    try {
+      laserTplResolved = await resolveLaserPackageTemplatesFromBody(req.body)
+    } catch (tplErr) {
+      res.status(tplErr.status || 400).json({ error: String(tplErr.message || tplErr) })
       return
     }
-    const tpl = await LaserPackageTemplate.findById(tplId).lean()
-    if (!tpl || tpl.active === false) {
-      res.status(400).json({ error: 'قالب الباكج غير موجود أو موقوف' })
-      return
-    }
-    const laserPackageTemplateId = String(tpl._id)
-    const procedureOptionIdsSnap = Array.isArray(tpl.procedureOptionIds) ? tpl.procedureOptionIds.map(String) : []
-    const areaCountSnap = Math.max(1, Math.trunc(Number(tpl.areaCount) || procedureOptionIdsSnap.length))
+    const {
+      laserPackageTemplateIds,
+      laserPackageTemplateId,
+      procedureOptionIdsSnap,
+      areaCountSnap,
+      defaultTitle,
+    } = laserTplResolved
     let title = String(req.body?.title || '').trim().slice(0, 160)
-    if (!title) title = String(tpl.name || '').trim().slice(0, 160)
+    if (!title) title = String(defaultTitle || '').trim().slice(0, 160)
     if (!title) title = `باكج ليزر (${sessionsCount} جلسة)`
     const notes = String(req.body?.notes || '').trim().slice(0, 1200)
     const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
@@ -1133,6 +1208,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       _id: packageId,
       department: 'laser',
       laserPackageTemplateId,
+      laserPackageTemplateIds,
       procedureOptionIds: procedureOptionIdsSnap,
       areaCount: areaCountSnap,
       suspended: false,
@@ -1231,6 +1307,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
           paidAmountSyp,
           settlementDeltaSyp,
           laserPackageTemplateId: laserPackageTemplateId || undefined,
+          laserPackageTemplateIds: laserPackageTemplateIds.length ? laserPackageTemplateIds : undefined,
           purchaseClinicalSessionId: purchaseCs?._id ? String(purchaseCs._id) : undefined,
           purchaseBillingItemId: purchaseBi?._id ? String(purchaseBi._id) : undefined,
         },

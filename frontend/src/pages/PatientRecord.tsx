@@ -334,6 +334,7 @@ type PatientPackage = {
   createdAt: string | null
   sessions: PatientPackageSession[]
   laserPackageTemplateId?: string
+  laserPackageTemplateIds?: string[]
   procedureOptionIds?: string[]
   areaCount?: number
   suspended?: boolean
@@ -888,7 +889,33 @@ export function PatientRecord() {
   const [packageNotes, setPackageNotes] = useState('')
   const [laserPkgTemplates, setLaserPkgTemplates] = useState<LaserPackageTemplateListItem[]>([])
   const [laserPkgTplLoading, setLaserPkgTplLoading] = useState(false)
-  const [laserTplPickId, setLaserTplPickId] = useState('')
+  const [laserTplPickIds, setLaserTplPickIds] = useState<string[]>([])
+  const applyLaserTemplateSelection = useCallback(
+    (ids: string[]) => {
+      const selected = laserPkgTemplates.filter((t) => ids.includes(t.id))
+      setPackageTitle(selected.map((t) => t.name).join(' + '))
+      const sum = selected.reduce((s, t) => s + Math.max(0, Math.round(Number(t.listPriceSyp) || 0)), 0)
+      setPackageTotalSyp(sum > 0 ? String(sum) : '')
+    },
+    [laserPkgTemplates],
+  )
+  const selectedLaserTemplates = useMemo(
+    () => laserPkgTemplates.filter((t) => laserTplPickIds.includes(t.id)),
+    [laserPkgTemplates, laserTplPickIds],
+  )
+  const laserTplCombinedListPrice = useMemo(
+    () => selectedLaserTemplates.reduce((s, t) => s + Math.max(0, Math.round(Number(t.listPriceSyp) || 0)), 0),
+    [selectedLaserTemplates],
+  )
+  const laserTplCombinedAreaCount = useMemo(
+    () =>
+      selectedLaserTemplates.reduce(
+        (s, t) =>
+          s + Math.max(1, Math.round(Number(t.areaCount) || 0), t.procedureOptionIds?.length || 0),
+        0,
+      ),
+    [selectedLaserTemplates],
+  )
   const [solariumPkgSessions, setSolariumPkgSessions] = useState('10')
   const [solariumPkgAmount, setSolariumPkgAmount] = useState('')
   const [solariumPkgChannel, setSolariumPkgChannel] = useState<PaymentChannel>('cash')
@@ -1658,6 +1685,11 @@ export function PatientRecord() {
         notes: String(x.notes || ''),
         createdAt: x.createdAt ?? null,
         laserPackageTemplateId: x.laserPackageTemplateId ? String(x.laserPackageTemplateId) : undefined,
+        laserPackageTemplateIds: Array.isArray(x.laserPackageTemplateIds)
+          ? x.laserPackageTemplateIds.map(String).filter(Boolean)
+          : x.laserPackageTemplateId
+            ? [String(x.laserPackageTemplateId)]
+            : undefined,
         procedureOptionIds: Array.isArray(x.procedureOptionIds) ? x.procedureOptionIds.map(String) : undefined,
         areaCount: typeof x.areaCount === 'number' ? x.areaCount : undefined,
         suspended: (x as { suspended?: boolean }).suspended === true,
@@ -2867,45 +2899,77 @@ export function PatientRecord() {
         <div className="card">
           <h2 className="card-title">باكج جلسات الليزر</h2>
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-            يُسجَّل باكج الليزر فقط من <strong>قوالب الباكج</strong> المعرفة في النظام (صفحة الغرف والتخصيص). يحدد
-            الاستقبال عدد الجلسات والسعر الفعلي والمبلغ المدفوع؛ عند وجود دفعة نقدية يُسجَّل المبلغ في الجرد اليومي
-            فوراً. عند دفع أقل من إجمالي الباكج يُضاف الفرق إلى ذمم المريض تلقائياً.
+            يُسجَّل باكج الليزر من <strong>قوالب الباكج</strong> المعرفة في النظام. يمكن اختيار{' '}
+            <strong>أكثر من قالب معاً</strong>؛ يُجمع النظام تلقائياً أسعار القوالب ومناطقها في باكج واحد. يحدد
+            الاستقبال عدد الجلسات والسعر الفعلي والمبلغ المدفوع؛ عند وجود دفعة يُسجَّل في الجرد اليومي فوراً. عند دفع
+            أقل من الإجمالي يُضاف الفرق إلى ذمم المريض.
           </p>
           <div style={{ marginTop: '0.75rem' }}>
-            <label className="form-label" htmlFor="laser-pkg-template-pick">
-              قالب الباكج (من القائمة)
-            </label>
-            <select
-              id="laser-pkg-template-pick"
-              className="select"
-              style={{ width: '100%', maxWidth: 480 }}
-              disabled={packageBusy || solariumPkgBusy || laserPkgTplLoading || laserPkgTemplates.length === 0}
-              value={laserTplPickId}
-              onChange={(e) => {
-                const v = e.target.value
-                setLaserTplPickId(v)
-                const t = laserPkgTemplates.find((x) => x.id === v)
-                if (t) {
-                  setPackageTitle(t.name)
-                  setPackageTotalSyp(String(Math.max(0, Math.round(Number(t.listPriceSyp) || 0))))
-                } else {
-                  setPackageTitle('')
-                  setPackageTotalSyp('')
-                }
-              }}
-            >
-              <option value="">— اختر باكجاً من القائمة —</option>
-              {laserPkgTemplates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} — {Number(t.listPriceSyp || 0).toLocaleString('ar-SY')} ل.س — {t.areaCount} منطقة
-                </option>
-              ))}
-            </select>
+            <span className="form-label" style={{ display: 'block' }}>
+              قوالب الباكج (اختر واحداً أو أكثر)
+            </span>
             {laserPkgTplLoading ? (
               <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.35rem 0 0' }}>جاري تحميل القوالب…</p>
             ) : !laserPkgTplLoading && laserPkgTemplates.length === 0 ? (
               <p style={{ fontSize: '0.82rem', color: 'var(--amber)', margin: '0.35rem 0 0' }}>
                 لا توجد قوالب باكج ليزر في النظام. أضف قالباً من صفحة الغرف والتخصيص أولاً.
+              </p>
+            ) : (
+              <div
+                style={{
+                  marginTop: '0.35rem',
+                  maxWidth: 560,
+                  maxHeight: 220,
+                  overflowY: 'auto',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '0.5rem 0.65rem',
+                  display: 'grid',
+                  gap: '0.35rem',
+                }}
+              >
+                {laserPkgTemplates.map((t) => {
+                  const checked = laserTplPickIds.includes(t.id)
+                  return (
+                    <label
+                      key={t.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '0.45rem',
+                        cursor: packageBusy || solariumPkgBusy ? 'default' : 'pointer',
+                        opacity: packageBusy || solariumPkgBusy ? 0.65 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={packageBusy || solariumPkgBusy}
+                        onChange={() => {
+                          setLaserTplPickIds((prev) => {
+                            const next = checked ? prev.filter((x) => x !== t.id) : [...prev, t.id]
+                            applyLaserTemplateSelection(next)
+                            return next
+                          })
+                        }}
+                      />
+                      <span style={{ fontSize: '0.88rem', lineHeight: 1.45 }}>
+                        <strong>{t.name}</strong>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {' '}
+                          — {Number(t.listPriceSyp || 0).toLocaleString('ar-SY')} ل.س — {t.areaCount} منطقة
+                        </span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+            {selectedLaserTemplates.length > 0 ? (
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: '0.45rem 0 0' }}>
+                المختار: <strong>{selectedLaserTemplates.length}</strong> باكج — إجمالي القوالب:{' '}
+                <strong>{laserTplCombinedListPrice.toLocaleString('ar-SY')} ل.س</strong> — مجموع المناطق:{' '}
+                <strong>{laserTplCombinedAreaCount}</strong>
               </p>
             ) : null}
           </div>
@@ -2915,9 +2979,9 @@ export function PatientRecord() {
               <input
                 className="input"
                 value={packageTitle}
-                disabled={packageBusy || solariumPkgBusy || Boolean(laserTplPickId)}
+                disabled={packageBusy || solariumPkgBusy || laserTplPickIds.length > 0}
                 onChange={(e) => setPackageTitle(e.target.value)}
-                placeholder={laserTplPickId ? 'يُملأ من القالب' : 'اختر قالب الباكج أولاً'}
+                placeholder={laserTplPickIds.length > 0 ? 'يُملأ من القوالب المختارة' : 'اختر قالباً واحداً على الأقل'}
               />
             </div>
             <div>
@@ -2984,14 +3048,14 @@ export function PatientRecord() {
             className="btn btn-primary"
             style={{ marginTop: '0.9rem' }}
             disabled={
-              packageBusy || solariumPkgBusy || !laserTplPickId.trim() || laserPkgTemplates.length === 0
+              packageBusy || solariumPkgBusy || laserTplPickIds.length === 0 || laserPkgTemplates.length === 0
             }
             onClick={async () => {
               if (!id) return
               setPackageErr('')
               setPackageOk('')
-              if (!laserTplPickId.trim()) {
-                setPackageErr('اختر قالب باكج ليزر من القائمة.')
+              if (laserTplPickIds.length === 0) {
+                setPackageErr('اختر قالب باكج ليزر واحداً على الأقل من القائمة.')
                 return
               }
               const sessionsCount = Math.max(1, parseInt(packageSessionsCount || '0', 10) || 0)
@@ -3025,7 +3089,7 @@ export function PatientRecord() {
                   packageTotalSyp: totalSyp,
                   paidAmountSyp: paidSyp,
                   notes: packageNotes.trim(),
-                  laserPackageTemplateId: laserTplPickId.trim(),
+                  laserPackageTemplateIds: laserTplPickIds,
                 }
                 if (paidSyp > 0 && canUsePaymentChannels) {
                   body.paymentChannel = packagePayChannel
@@ -3054,7 +3118,7 @@ export function PatientRecord() {
                 setPackageTotalSyp('')
                 setPackagePaidSyp('')
                 setPackageNotes('')
-                setLaserTplPickId('')
+                setLaserTplPickIds([])
                 setPackagePayChannel('cash')
                 setPackagePayBankName('')
               } catch (e) {
