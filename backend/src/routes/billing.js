@@ -1325,6 +1325,32 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
   }
 })
 
+/** تفاصيل بند تحصيل للتعديل الكامل — مدير النظام فقط */
+billingRouter.get('/:id/admin-detail', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const { loadBillingItemAdminDetail } = await import('../services/billingItemAdminEdit.js')
+    const detail = await loadBillingItemAdminDetail(req.params.id)
+    res.json(detail)
+  } catch (e) {
+    const status = Number(e?.status) || 500
+    if (status >= 500) console.error(e)
+    res.status(status).json({ error: String(e?.message || e) || 'خطأ في الخادم' })
+  }
+})
+
+/** تعديل كامل لبند تحصيل معلّق — مدير النظام فقط */
+billingRouter.patch('/:id/admin-full-edit', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const { applyBillingItemAdminFullEdit } = await import('../services/billingItemAdminEdit.js')
+    const detail = await applyBillingItemAdminFullEdit(req.params.id, req.body ?? {}, req.user)
+    res.json({ ok: true, ...detail })
+  } catch (e) {
+    const status = Number(e?.status) || 500
+    if (status >= 500) console.error(e)
+    res.status(status).json({ error: String(e?.message || e) || 'خطأ في الخادم' })
+  }
+})
+
 /** إلغاء بند تحصيل معلّق (مدير النظام فقط) — يُخفى من جدول التحصيل */
 billingRouter.delete('/:id', requireRoles('super_admin'), async (req, res) => {
   try {

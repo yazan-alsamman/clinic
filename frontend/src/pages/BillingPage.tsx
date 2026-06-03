@@ -8,6 +8,7 @@ import {
   settlementDeltaAfterUsdCashNetAbsorb,
   usdRoundedUpCashOffer,
 } from '../utils/usdExactDue'
+import { BillingItemAdminEditModal } from '../components/BillingItemAdminEditModal'
 
 type Item = {
   id: string
@@ -118,6 +119,7 @@ export function BillingPage() {
   const [partialPackageBusyId, setPartialPackageBusyId] = useState<string | null>(null)
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
+  const [adminEditItem, setAdminEditItem] = useState<Item | null>(null)
   const [paySyp, setPaySyp] = useState('')
   const [payUsd, setPayUsd] = useState('')
   const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>('SYP')
@@ -649,20 +651,35 @@ export function BillingPage() {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {user?.role === 'super_admin' ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={
-                        deleteBusyId === b.id ||
-                        busyId === b.id ||
-                        packageBusyId === b.id ||
-                        partialPackageBusyId === b.id
-                      }
-                      onClick={() => void deletePendingItem(b)}
-                      style={{ color: 'var(--danger)' }}
-                    >
-                      {deleteBusyId === b.id ? 'جاري الحذف…' : 'حذف البند'}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={
+                          deleteBusyId === b.id ||
+                          busyId === b.id ||
+                          packageBusyId === b.id ||
+                          partialPackageBusyId === b.id
+                        }
+                        onClick={() => setAdminEditItem(b)}
+                      >
+                        تعديل كامل
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={
+                          deleteBusyId === b.id ||
+                          busyId === b.id ||
+                          packageBusyId === b.id ||
+                          partialPackageBusyId === b.id
+                        }
+                        onClick={() => void deletePendingItem(b)}
+                        style={{ color: 'var(--danger)' }}
+                      >
+                        {deleteBusyId === b.id ? 'جاري الحذف…' : 'حذف البند'}
+                      </button>
+                    </>
                   ) : null}
                   {b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
                     <button
@@ -1246,6 +1263,14 @@ export function BillingPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {adminEditItem && user?.role === 'super_admin' ? (
+        <BillingItemAdminEditModal
+          billingItemId={adminEditItem.id}
+          onClose={() => setAdminEditItem(null)}
+          onSaved={() => void load()}
+        />
       ) : null}
     </>
   )
