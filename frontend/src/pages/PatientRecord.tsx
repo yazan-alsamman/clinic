@@ -821,6 +821,10 @@ export function PatientRecord() {
   /** مناطق/عروض خارج الباكج — تُحسب على المريض فقط */
   const [selectedLaserAddonItemIds, setSelectedLaserAddonItemIds] = useState<string[]>([])
   const bookedLaserProcedureText = (searchParams.get('laserProc') || '').trim()
+  const bookedLaserIsFullBody = useMemo(
+    () => isFullBodyLaserBookingText(bookedLaserProcedureText),
+    [bookedLaserProcedureText],
+  )
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
   /** من جدول المواعيد — يحدد إن كان الحجز كجلسة ضمن الباكج */
   const bookedLaserSlotPkgMode = (searchParams.get('laserSlotPkgMode') || '').trim()
@@ -1808,7 +1812,15 @@ export function PatientRecord() {
     return undefined
   }, [patientPackages, clinicalHistory])
 
+  /** جلسة ضمن باكج — لا تُطبَّق عند موعد «جسم كامل» (يُعامل كخارج الباكج) */
+  const sessionInPackageMode = useMemo(() => {
+    if (bookedLaserIsFullBody) return false
+    if (bookedLaserSlotPkgMode === 'outside_package') return false
+    return Boolean(activeLaserPackage)
+  }, [bookedLaserIsFullBody, bookedLaserSlotPkgMode, activeLaserPackage])
+
   const partialPackageLaserSession = useMemo(() => {
+    if (bookedLaserIsFullBody) return null
     if (!activeLaserPackage || !clinicalHistory) return null
     const sess = activeLaserPackage.sessions.find(
       (s) => !s.completedByReception && s.linkedLaserSessionId,
@@ -1817,9 +1829,10 @@ export function PatientRecord() {
     const ls = clinicalHistory.laserSessions.find((x) => x.id === sess.linkedLaserSessionId)
     if (!ls?.packageAreaBreakdown?.isPartial) return null
     return ls
-  }, [activeLaserPackage, clinicalHistory])
+  }, [bookedLaserIsFullBody, activeLaserPackage, clinicalHistory])
 
   useEffect(() => {
+    if (bookedLaserIsFullBody) return
     if (tab !== 'laser' || !activeLaserPackage || !clinicalHistory || laserProcedureLoading || !id) return
     const expected = Math.max(
       1,
@@ -1859,7 +1872,17 @@ export function PatientRecord() {
       ),
     )
     setLaserNotes(String(ls.notes || ''))
-  }, [tab, id, activeLaserPackage, clinicalHistory, laserProcedureLoading])
+  }, [tab, id, bookedLaserIsFullBody, activeLaserPackage, clinicalHistory, laserProcedureLoading])
+
+  useEffect(() => {
+    if (tab !== 'laser' || !bookedLaserIsFullBody || laserProcedureLoading) return
+    const fullBodyId = laserProcedureGroups
+      .flatMap((g) => g.items)
+      .find((item) => isFullBodyLaserBookingText(item.name))?.id
+    if (!fullBodyId) return
+    setSelectedLaserItemIds([fullBodyId])
+    setSelectedLaserAddonItemIds([])
+  }, [tab, bookedLaserIsFullBody, laserProcedureLoading, laserProcedureGroups])
 
   const laserLineItemsWithPricing = useMemo(
     () => {
@@ -1916,10 +1939,10 @@ export function PatientRecord() {
 
   const laserInvoicePreviewSyp = useMemo(() => {
     const extra = laserCoverSelected ? laserCoverPriceSyp : 0
-    if (activeLaserPackage) return laserAddonLinesTotalSyp + extra
+    if (sessionInPackageMode) return laserAddonLinesTotalSyp + extra
     return selectedLaserTotalSyp + extra
   }, [
-    activeLaserPackage,
+    sessionInPackageMode,
     laserAddonLinesTotalSyp,
     selectedLaserTotalSyp,
     laserCoverSelected,
@@ -1935,6 +1958,7 @@ export function PatientRecord() {
     if (tab !== 'laser' || !id) return
     if (laserProcedureLoading) return
     if (!laserProcedureGroups.length) return
+    if (bookedLaserIsFullBody) return
     if (bookedLaserSlotPkgMode === 'outside_package') return
 
     const wantsContinueOnly =
@@ -1985,6 +2009,7 @@ export function PatientRecord() {
     id,
     laserProcedureLoading,
     laserProcedureGroups,
+    bookedLaserIsFullBody,
     bookedLaserSlotPkgMode,
     bookedLaserProcedureText,
     bookedLaserSlotId,
@@ -1995,8 +2020,8 @@ export function PatientRecord() {
   ])
 
   useEffect(() => {
-    if (!activeLaserPackage) setSelectedLaserAddonItemIds([])
-  }, [activeLaserPackage])
+    if (!sessionInPackageMode) setSelectedLaserAddonItemIds([])
+  }, [sessionInPackageMode])
 
   const dentalPlanApproved = dentalPlan?.status === 'approved'
   const dentalPlanSummary =
@@ -4197,7 +4222,7 @@ export function PatientRecord() {
                   </>
                 ) : null}
               </p>
-              {activeLaserPackage ? (
+              {sessionInPackageMode && activeLaserPackage ? (
                 <p style={{ margin: '0.45rem 0 0', color: 'var(--success)', fontSize: '0.86rem' }}>
                   هذه الجلسة تُسجّل ضمن الباكج: <strong>{activeLaserPackage.title || 'باكج ليزر'}</strong> — سعر الجلسة الأساسية
                   مدفوع مسبقاً. يمكنك إضافة مناطق أو عروض <strong>خارج الباكج</strong> من نافذة الاختيار؛ يُعرض سعر
@@ -4440,7 +4465,7 @@ export function PatientRecord() {
                     </span>
                   </label>
                 </div>
-                {activeLaserPackage ? (
+                {sessionInPackageMode ? (
                   <div style={{ marginTop: '0.8rem', fontSize: '0.9rem' }}>
                     <p style={{ margin: '0 0 0.35rem', color: 'var(--success)' }}>
                       <strong>جلسة ضمن باكج مدفوع مسبقاً</strong> — لا يُحسب سعر المناطق ضمن الباكج على هذه الجلسة.
@@ -4523,7 +4548,7 @@ export function PatientRecord() {
                   setLaserSessionErr('تعذر تفعيل كفر ليزر قبل أن يحدد المدير سعره في إعدادات الليزر.')
                   return
                 }
-                if (!activeLaserPackage) {
+                if (!sessionInPackageMode) {
                   const pulseRows = laserLineItemsWithPricing.filter((row) => row.chargeByPulseCount)
                   if (pulseRows.length > 0) {
                     const ppuSyp = Math.max(0, Math.round(Number(laserPricePerPulseSyp) || 0))
@@ -4564,7 +4589,8 @@ export function PatientRecord() {
                       notes: laserNotes,
                       areaIds: [],
                       procedureOptionIds: selectedLaserItemIds,
-                      addonProcedureOptionIds: activeLaserPackage ? selectedLaserAddonItemIds : undefined,
+                      forceOutsidePackage: bookedLaserIsFullBody || undefined,
+                      addonProcedureOptionIds: sessionInPackageMode ? selectedLaserAddonItemIds : undefined,
                       laserLineItems: laserLineItemsWithPricing.map((row) => ({
                         procedureOptionId: row.procedureOptionId || undefined,
                         areaLabel: row.areaLabel,
@@ -4575,11 +4601,12 @@ export function PatientRecord() {
                         isAddon: row.isAddon,
                       })),
                       manualAreaLabels: combinedLaserSaveItems.map((x) => x.name),
-                      addonManualLabels: activeLaserPackage ? selectedLaserAddonItems.map((x) => x.name) : undefined,
-                      additionalCostSyp: activeLaserPackage ? laserAddonTotalSyp : undefined,
-                      status: activeLaserPackage ? 'completed_pending_collection' : 'in_progress',
+                      addonManualLabels: sessionInPackageMode ? selectedLaserAddonItems.map((x) => x.name) : undefined,
+                      additionalCostSyp: sessionInPackageMode ? laserAddonTotalSyp : undefined,
+                      status: sessionInPackageMode ? 'completed_pending_collection' : 'in_progress',
                       costSyp: selectedLaserTotalSyp,
-                      chargeByPulseCount: !activeLaserPackage && laserLineItemsWithPricing.some((x) => x.chargeByPulseCount),
+                      chargeByPulseCount:
+                        !sessionInPackageMode && laserLineItemsWithPricing.some((x) => x.chargeByPulseCount),
                       discountPercent: 0,
                       businessDate: clinicBusinessDate ?? undefined,
                       includeLaserCover: laserCoverSelected,
@@ -4645,7 +4672,7 @@ export function PatientRecord() {
                 }
               }}
             >
-              {savingLaser ? 'جاري الحفظ…' : activeLaserPackage ? 'حفظ الجلسة (ضمن الباكج)' : 'حفظ الجلسة والفوترة'}
+              {savingLaser ? 'جاري الحفظ…' : sessionInPackageMode ? 'حفظ الجلسة (ضمن الباكج)' : 'حفظ الجلسة والفوترة'}
             </button>
               </section>
 
@@ -4658,7 +4685,7 @@ export function PatientRecord() {
                     ) : (
                       <div style={{ display: 'grid', gap: '0.75rem' }}>
                         <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                          {activeLaserPackage
+                          {sessionInPackageMode
                             ? 'المناطق التالية تُسجّل ضمن الجلسة (ضمن الباكج أو كجلسة واحدة). لإضافة سعر اختر قسم «خارج الباكج» أدناه.'
                             : 'اختر المناطق أو العروض المطلوبة.'}
                         </p>
@@ -4682,7 +4709,7 @@ export function PatientRecord() {
                                     onClick={() => toggleLaserMainArea(item.id)}
                                   >
                                     {item.name}
-                                    {activeLaserPackage ? null : (
+                                    {sessionInPackageMode ? null : (
                                       <span style={{ opacity: 0.85 }}>
                                         {' '}
                                         —{' '}
@@ -4696,7 +4723,7 @@ export function PatientRecord() {
                             </div>
                           </div>
                         ))}
-                        {activeLaserPackage ? (
+                        {sessionInPackageMode ? (
                           <>
                             <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '0.25rem 0' }} />
                             <p style={{ margin: 0, fontSize: '0.88rem', fontWeight: 700, color: 'var(--amber)' }}>

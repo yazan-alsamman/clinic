@@ -44,6 +44,18 @@ const LASER_PROCEDURE_GROUP_ORDER = ['face', 'upper', 'lower', 'offers']
 /** أسطر جلسة «جسم كامل» عند إنشاء الجلسة من موعد بهذا العرض */
 const FULL_BODY_SESSION_AREA_COUNT = 11
 
+function normalizeLaserProcedureText(text) {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+}
+
+function isFullBodyProcedureType(text) {
+  const n = normalizeLaserProcedureText(text)
+  return n === 'جسم كامل' || n === 'full body' || n === 'fullbody'
+}
+
 const defaultProcedureOptions = [
   ['face', 'area', 'الوجه', 55000],
   ['face', 'area', 'الجبين', 55000],
@@ -1335,8 +1347,15 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const scheduleSlotIdEarly = String(body.scheduleSlotId || '').trim()
     let slotPackageMode = ''
     if (scheduleSlotIdEarly) {
-      const slotLean = await ScheduleSlot.findById(scheduleSlotIdEarly).select('laserPackageBookingMode').lean()
-      if (slotLean) slotPackageMode = String(slotLean.laserPackageBookingMode || '').trim()
+      const slotLean = await ScheduleSlot.findById(scheduleSlotIdEarly)
+        .select('laserPackageBookingMode procedureType')
+        .lean()
+      if (slotLean) {
+        slotPackageMode = String(slotLean.laserPackageBookingMode || '').trim()
+        if (!slotPackageMode && isFullBodyProcedureType(slotLean.procedureType)) {
+          slotPackageMode = 'outside_package'
+        }
+      }
     }
     const skipLaserPackage =
       body.skipLaserPackage === true ||

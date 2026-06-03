@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
+import { isFullBodyLaserBookingText } from '../data/laserFullBody'
 
 type SlotRow = {
   id: string
@@ -116,15 +117,20 @@ export function LaserCreateSessionPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((s) => (
+                {rows.map((s) => {
+                  const proc = String(s.procedureType || '').trim()
+                  const pkgMode = isFullBodyLaserBookingText(proc)
+                    ? 'outside_package'
+                    : String(s.laserPackageBookingMode || '')
+                  return (
                   <tr
                     key={s.id}
                     onClick={() =>
                       navigate(
                         `/patients/${s.patientId}?tab=laser&laserProc=${encodeURIComponent(
-                          String(s.procedureType || '').trim(),
+                          proc,
                         )}&laserSlotId=${encodeURIComponent(String(s.id))}&laserRoom=${encodeURIComponent(String(s.roomNumber || ''))}&laserSlotPkgMode=${encodeURIComponent(
-                          String(s.laserPackageBookingMode || ''),
+                          pkgMode,
                         )}`,
                       )
                     }
@@ -147,7 +153,8 @@ export function LaserCreateSessionPage() {
                         : '—'}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

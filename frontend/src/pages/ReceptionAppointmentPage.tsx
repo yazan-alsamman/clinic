@@ -17,6 +17,7 @@ import {
   minutesToHmGrid,
 } from '../utils/scheduleTime'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
+import { isFullBodyLaserBookingText } from '../data/laserFullBody'
 
 function patientHasOpenLaserPackage(patient: Patient | null): boolean {
   const pkgs = patient?.sessionPackages
@@ -736,7 +737,13 @@ export function ReceptionAppointmentPage() {
       setFormErr('اختر المريض من نتائج البحث')
       return false
     }
-    const laserIntent = laserIntentArg ?? laserPackageBookingIntent
+    let laserIntent = laserIntentArg ?? laserPackageBookingIntent
+    if (
+      selectedService === 'laser' &&
+      selectedLaserItems.some((item) => isFullBodyLaserBookingText(item.name))
+    ) {
+      laserIntent = 'outside_package'
+    }
     const needsPackageChoice =
       selectedService === 'laser' &&
       (laserBookingContext?.hasOpenPackage || patientHasOpenLaserPackage(picked))
@@ -1515,13 +1522,16 @@ export function ReceptionAppointmentPage() {
                                           borderRadius: 999,
                                           borderColor: selected ? 'var(--cyan)' : 'var(--border)',
                                         }}
-                                        onClick={() =>
+                                        onClick={() => {
+                                          const willSelect = !selectedLaserItemIds.includes(item.id)
                                           setSelectedLaserItemIds((prev) =>
-                                            prev.includes(item.id)
-                                              ? prev.filter((x) => x !== item.id)
-                                              : [...prev, item.id],
+                                            willSelect ? [...prev, item.id] : prev.filter((x) => x !== item.id),
                                           )
-                                        }
+                                          if (willSelect && isFullBodyLaserBookingText(item.name)) {
+                                            setLaserPackageBookingIntent('outside_package')
+                                            setFormErr('')
+                                          }
+                                        }}
                                       >
                                         {item.name} —{' '}
                                         {resolveLaserItemPriceByGender(
