@@ -17,6 +17,13 @@ import {
   validatePackageCollectionBeforeSubmit,
   type PayCurrency,
 } from '../components/PackageCollectionFields'
+import {
+  FULL_BODY_BOOKING_LABEL,
+  FULL_BODY_SESSION_AREA_COUNT,
+  isFullBodyLaserBookingText,
+  normalizeLaserBookingText,
+  splitLaserOfferAreaLabels,
+} from '../data/laserFullBody'
 import type { LaserCategory, Patient, Role } from '../types'
 
 type Tab =
@@ -211,16 +218,6 @@ function createLaserLineRow(partial?: Partial<LaserSessionLineInput>): LaserSess
     isAddon: false,
     ...partial,
   }
-}
-
-function splitOfferAreaLabels(offerName: string) {
-  const raw = String(offerName || '').trim()
-  if (!raw) return []
-  return raw
-    .replace(/\s+و\s+/g, '|')
-    .split(/\s*(?:\||\+|،|,|\/|\\)\s*/g)
-    .map((x) => x.trim())
-    .filter(Boolean)
 }
 
 type DermatologySessionRow = {
@@ -1273,8 +1270,13 @@ export function PatientRecord() {
       )
       const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
         const isAddon = selectedLaserAddonItemIds.includes(item.id)
-        const neededRows = item.kind === 'offer' ? Math.max(1, Math.trunc(Number(item.areaCount) || 1)) : 1
-        const parsedNames = item.kind === 'offer' ? splitOfferAreaLabels(item.name) : []
+        const parsedNames = item.kind === 'offer' ? splitLaserOfferAreaLabels(item.name) : []
+        const neededRowsFromOffer =
+          item.kind === 'offer' && isFullBodyLaserBookingText(item.name)
+            ? FULL_BODY_SESSION_AREA_COUNT
+            : Math.max(1, Math.trunc(Number(item.areaCount) || 1))
+        const neededRows =
+          item.kind === 'offer' ? Math.max(neededRowsFromOffer, parsedNames.length || 1) : 1
         return Array.from({ length: neededRows }, (_, idx) => {
           const optionInstance = idx + 1
           const key = `${item.id}|${isAddon ? 1 : 0}|${optionInstance}`
@@ -1476,21 +1478,21 @@ export function PatientRecord() {
                 byName.set(String(item.name || '').trim().toLowerCase(), String(item.id))
               }
             }
-            const normalize = (x: string) =>
-              x
-                .trim()
-                .toLowerCase()
-                .replace(/\s+/g, ' ')
-            const fullRaw = normalize(bookedLaserProcedureText)
+            const fullRaw = normalizeLaserBookingText(bookedLaserProcedureText)
 
             // 1) Try exact full-string match first (important when offer names themselves include "+")
             const exactFullId = byName.get(fullRaw)
             if (exactFullId) return [exactFullId]
 
+            if (isFullBodyLaserBookingText(bookedLaserProcedureText)) {
+              const fullBodyId = byName.get(normalizeLaserBookingText(FULL_BODY_BOOKING_LABEL))
+              if (fullBodyId) return [fullBodyId]
+            }
+
             // 2) Fallback: split by common separators used in booking summaries
             const parsedNames = bookedLaserProcedureText
               .split(/\s*(?:\+|،|,|\/|\\|\||-)\s*/g)
-              .map((x) => normalize(x))
+              .map((x) => normalizeLaserBookingText(x))
               .filter(Boolean)
             const matchedIds = parsedNames
               .map((name) => byName.get(name))

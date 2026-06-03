@@ -41,6 +41,9 @@ const LASER_PROCEDURE_GROUPS = {
 }
 const LASER_PROCEDURE_GROUP_ORDER = ['face', 'upper', 'lower', 'offers']
 
+/** أسطر جلسة «جسم كامل» عند إنشاء الجلسة من موعد بهذا العرض */
+const FULL_BODY_SESSION_AREA_COUNT = 11
+
 const defaultProcedureOptions = [
   ['face', 'area', 'الوجه', 55000],
   ['face', 'area', 'الجبين', 55000],
@@ -106,6 +109,13 @@ function optionToDto(row) {
   }
 }
 
+async function syncFullBodyOfferAreaCount() {
+  await LaserProcedureOption.updateMany(
+    { name: 'جسم كامل', kind: 'offer' },
+    { $set: { areaCount: FULL_BODY_SESSION_AREA_COUNT } },
+  )
+}
+
 async function ensureDefaultLaserProcedureOptions() {
   const count = await LaserProcedureOption.estimatedDocumentCount()
   if (count > 0) {
@@ -127,6 +137,7 @@ async function ensureDefaultLaserProcedureOptions() {
         },
       ],
     )
+    await syncFullBodyOfferAreaCount()
     return
   }
   const rows = defaultProcedureOptions.map(([groupId, kind, name, priceSyp], idx) => ({
@@ -138,10 +149,12 @@ async function ensureDefaultLaserProcedureOptions() {
     priceSyp,
     priceMaleSyp: priceSyp,
     priceFemaleSyp: priceSyp,
+    areaCount: name === 'جسم كامل' && kind === 'offer' ? FULL_BODY_SESSION_AREA_COUNT : 1,
     active: true,
     sortOrder: idx + 1,
   }))
   await LaserProcedureOption.insertMany(rows, { ordered: false })
+  await syncFullBodyOfferAreaCount()
 }
 function normalizePatientGender(raw) {
   const v = String(raw || '').trim()
