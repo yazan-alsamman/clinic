@@ -11,6 +11,12 @@ import {
   validatePaymentChannelBeforeSubmit,
   type PaymentChannel,
 } from '../components/PaymentChannelFields'
+import {
+  PackageCollectionFields,
+  packageCollectionBodyExtras,
+  validatePackageCollectionBeforeSubmit,
+  type PayCurrency,
+} from '../components/PackageCollectionFields'
 import type { LaserCategory, Patient, Role } from '../types'
 
 type Tab =
@@ -781,7 +787,7 @@ export function PatientRecord() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
-  const { businessDate: clinicBusinessDate, dayActive: clinicDayActive } = useClinic()
+  const { businessDate: clinicBusinessDate, dayActive: clinicDayActive, usdSypRate } = useClinic()
   const role = user?.role as Role | undefined
   const canUsePaymentChannels = role === 'super_admin' || role === 'reception'
   const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(canUsePaymentChannels)
@@ -942,6 +948,8 @@ export function PatientRecord() {
   const [packagePaidSyp, setPackagePaidSyp] = useState('')
   const [packagePayChannel, setPackagePayChannel] = useState<PaymentChannel>('cash')
   const [packagePayBankName, setPackagePayBankName] = useState('')
+  const [packagePayCurrency, setPackagePayCurrency] = useState<PayCurrency>('SYP')
+  const [packagePayUsd, setPackagePayUsd] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
   const [laserPkgTemplates, setLaserPkgTemplates] = useState<LaserPackageTemplateListItem[]>([])
   const [laserPkgTplLoading, setLaserPkgTplLoading] = useState(false)
@@ -977,6 +985,8 @@ export function PatientRecord() {
   const [solariumPkgPaid, setSolariumPkgPaid] = useState('')
   const [solariumPkgChannel, setSolariumPkgChannel] = useState<PaymentChannel>('cash')
   const [solariumPkgBankName, setSolariumPkgBankName] = useState('')
+  const [solariumPkgPayCurrency, setSolariumPkgPayCurrency] = useState<PayCurrency>('SYP')
+  const [solariumPkgPayUsd, setSolariumPkgPayUsd] = useState('')
   const [solariumPkgNotes, setSolariumPkgNotes] = useState('')
   const [solariumPkgBusy, setSolariumPkgBusy] = useState(false)
   const [solariumPkgErr, setSolariumPkgErr] = useState('')
@@ -3087,11 +3097,17 @@ export function PatientRecord() {
             />
           </div>
           {canUsePaymentChannels && Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0)) > 0 ? (
-            <PaymentChannelFields
+            <PackageCollectionFields
+              dueSyp={Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0))}
+              payCurrency={packagePayCurrency}
+              onPayCurrencyChange={setPackagePayCurrency}
+              amountUsd={packagePayUsd}
+              onAmountUsdChange={setPackagePayUsd}
               channel={packagePayChannel}
               bankName={packagePayBankName}
               onChannelChange={setPackagePayChannel}
               onBankNameChange={setPackagePayBankName}
+              usdSypRate={usdSypRate}
               disabled={packageBusy || solariumPkgBusy}
               namePrefix="laser-pkg"
               banks={paymentBanks}
@@ -3131,9 +3147,16 @@ export function PatientRecord() {
                 return
               }
               if (paidSyp > 0 && canUsePaymentChannels) {
-                const chErr = validatePaymentChannelBeforeSubmit(packagePayChannel, packagePayBankName)
-                if (chErr) {
-                  setPackageErr(chErr)
+                const collectErr = validatePackageCollectionBeforeSubmit({
+                  dueSyp: paidSyp,
+                  payCurrency: packagePayCurrency,
+                  amountUsd: packagePayUsd,
+                  channel: packagePayChannel,
+                  bankName: packagePayBankName,
+                  usdSypRate,
+                })
+                if (collectErr) {
+                  setPackageErr(collectErr)
                   return
                 }
               }
@@ -3149,8 +3172,16 @@ export function PatientRecord() {
                   laserPackageTemplateIds: laserTplPickIds,
                 }
                 if (paidSyp > 0 && canUsePaymentChannels) {
-                  body.paymentChannel = packagePayChannel
-                  if (packagePayChannel === 'bank') body.bankName = packagePayBankName.trim()
+                  Object.assign(
+                    body,
+                    packageCollectionBodyExtras({
+                      dueSyp: paidSyp,
+                      payCurrency: packagePayCurrency,
+                      amountUsd: packagePayUsd,
+                      channel: packagePayChannel,
+                      bankName: packagePayBankName,
+                    }),
+                  )
                 }
                 const data = await api<{
                   package: PatientPackage
@@ -3178,6 +3209,8 @@ export function PatientRecord() {
                 setLaserTplPickIds([])
                 setPackagePayChannel('cash')
                 setPackagePayBankName('')
+                setPackagePayCurrency('SYP')
+                setPackagePayUsd('')
               } catch (e) {
                 setPackageErr(e instanceof ApiError ? e.message : 'تعذر حفظ الباكج')
               } finally {
@@ -3242,11 +3275,17 @@ export function PatientRecord() {
             />
           </div>
           {canUsePaymentChannels && Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0)) > 0 ? (
-            <PaymentChannelFields
+            <PackageCollectionFields
+              dueSyp={Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0))}
+              payCurrency={solariumPkgPayCurrency}
+              onPayCurrencyChange={setSolariumPkgPayCurrency}
+              amountUsd={solariumPkgPayUsd}
+              onAmountUsdChange={setSolariumPkgPayUsd}
               channel={solariumPkgChannel}
               bankName={solariumPkgBankName}
               onChannelChange={setSolariumPkgChannel}
               onBankNameChange={setSolariumPkgBankName}
+              usdSypRate={usdSypRate}
               disabled={packageBusy || solariumPkgBusy}
               namePrefix="sol-pkg"
               banks={paymentBanks}
@@ -3280,9 +3319,16 @@ export function PatientRecord() {
                 return
               }
               if (paidSyp > 0 && canUsePaymentChannels) {
-                const chErr = validatePaymentChannelBeforeSubmit(solariumPkgChannel, solariumPkgBankName)
-                if (chErr) {
-                  setSolariumPkgErr(chErr)
+                const collectErr = validatePackageCollectionBeforeSubmit({
+                  dueSyp: paidSyp,
+                  payCurrency: solariumPkgPayCurrency,
+                  amountUsd: solariumPkgPayUsd,
+                  channel: solariumPkgChannel,
+                  bankName: solariumPkgBankName,
+                  usdSypRate,
+                })
+                if (collectErr) {
+                  setSolariumPkgErr(collectErr)
                   return
                 }
               }
@@ -3296,8 +3342,16 @@ export function PatientRecord() {
                   notes: solariumPkgNotes.trim(),
                 }
                 if (paidSyp > 0 && canUsePaymentChannels) {
-                  body.paymentChannel = solariumPkgChannel
-                  if (solariumPkgChannel === 'bank') body.bankName = solariumPkgBankName.trim()
+                  Object.assign(
+                    body,
+                    packageCollectionBodyExtras({
+                      dueSyp: paidSyp,
+                      payCurrency: solariumPkgPayCurrency,
+                      amountUsd: solariumPkgPayUsd,
+                      channel: solariumPkgChannel,
+                      bankName: solariumPkgBankName,
+                    }),
+                  )
                 }
                 const data = await api<{
                   package: PatientPackage
@@ -3328,6 +3382,8 @@ export function PatientRecord() {
                 setSolariumPkgNotes('')
                 setSolariumPkgChannel('cash')
                 setSolariumPkgBankName('')
+                setSolariumPkgPayCurrency('SYP')
+                setSolariumPkgPayUsd('')
               } catch (e) {
                 setSolariumPkgErr(e instanceof ApiError ? e.message : 'تعذر إنشاء الباكج')
               } finally {

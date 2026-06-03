@@ -13,7 +13,10 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
-import { recordBillingStraightCashSyp } from '../services/recordBillingStraightCashSyp.js'
+import {
+  recordBillingStraightPayment,
+  resolvePackageCollectionFromBody,
+} from '../services/recordBillingStraightCashSyp.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
@@ -1097,19 +1100,25 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
           cs.billingItemId = bi._id
           await cs.save()
 
-          let paymentChannel = 'cash'
-          let bankName = ''
+          let collection
           try {
-            ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+            collection = await resolvePackageCollectionFromBody(req.body, {
+              dueSyp: paidAmountSyp,
+              businessDate,
+            })
           } catch (chErr) {
             res.status(400).json({ error: String(chErr?.message || chErr) })
             return
           }
-          payResult = await recordBillingStraightCashSyp({
+          payResult = await recordBillingStraightPayment({
             billingItemId: bi._id,
             receivedByUser: req.user,
-            paymentChannel,
-            bankName,
+            paymentChannel: collection.paymentChannel,
+            bankName: collection.bankName,
+            payCurrency: collection.payCurrency,
+            amountSyp: collection.amountSyp,
+            amountUsd: collection.amountUsd,
+            skipPatientDebtUpdate: true,
           })
           billingPaid = true
         }
@@ -1308,19 +1317,25 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         })
         purchaseCs.billingItemId = purchaseBi._id
         await purchaseCs.save()
-        let paymentChannel = 'cash'
-        let bankName = ''
+        let collection
         try {
-          ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+          collection = await resolvePackageCollectionFromBody(req.body, {
+            dueSyp: paidAmountSyp,
+            businessDate,
+          })
         } catch (chErr) {
           res.status(400).json({ error: String(chErr?.message || chErr) })
           return
         }
-        await recordBillingStraightCashSyp({
+        await recordBillingStraightPayment({
           billingItemId: purchaseBi._id,
           receivedByUser: req.user,
-          paymentChannel,
-          bankName,
+          paymentChannel: collection.paymentChannel,
+          bankName: collection.bankName,
+          payCurrency: collection.payCurrency,
+          amountSyp: collection.amountSyp,
+          amountUsd: collection.amountUsd,
+          skipPatientDebtUpdate: true,
         })
         billingPaid = true
       }
