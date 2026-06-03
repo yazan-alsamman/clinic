@@ -51,28 +51,46 @@ export function PackageCollectionFields({
     if (offer) onAmountUsdChange(offer.usdFieldValue)
   }, [payCurrency, due, rate, onAmountUsdChange])
 
+  const fieldsDisabled = disabled || !(due > 0)
+
   return (
-    <div style={{ marginTop: '0.75rem' }}>
+    <div
+      style={{
+        marginTop: '0.75rem',
+        padding: '0.75rem',
+        borderRadius: 10,
+        border: '1px solid var(--border)',
+        background: 'var(--surface-solid)',
+      }}
+    >
+      <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 700 }}>
+        طريقة التحصيل (عند وجود مدفوع)
+      </span>
+      {!(due > 0) ? (
+        <p style={{ margin: '0 0 0.5rem', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+          أدخل «المدفوع حالياً» أكبر من صفر لتفعيل خيارات الكاش/البنك والليرة/الدولار.
+        </p>
+      ) : null}
       <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
         عملة التحصيل
       </span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: disabled ? 'default' : 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: fieldsDisabled ? 'default' : 'pointer' }}>
           <input
             type="radio"
             name={`${namePrefix}-currency`}
             checked={payCurrency === 'SYP'}
-            disabled={disabled}
+            disabled={fieldsDisabled}
             onChange={() => onPayCurrencyChange('SYP')}
           />
           ليرة سورية
         </label>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: disabled ? 'default' : 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: fieldsDisabled ? 'default' : 'pointer' }}>
           <input
             type="radio"
             name={`${namePrefix}-currency`}
             checked={payCurrency === 'USD'}
-            disabled={disabled}
+            disabled={fieldsDisabled}
             onChange={() => onPayCurrencyChange('USD')}
           />
           دولار أمريكي (USD)
@@ -84,7 +102,7 @@ export function PackageCollectionFields({
         bankName={bankName}
         onChannelChange={onChannelChange}
         onBankNameChange={onBankNameChange}
-        disabled={disabled}
+        disabled={fieldsDisabled}
         namePrefix={`${namePrefix}-ch`}
         banks={banks}
         banksLoading={banksLoading}
@@ -98,7 +116,7 @@ export function PackageCollectionFields({
             inputMode="decimal"
             dir="ltr"
             step="any"
-            disabled={disabled}
+            disabled={fieldsDisabled}
             value={amountUsd}
             onChange={(e) => onAmountUsdChange(e.target.value)}
             placeholder="0"

@@ -3085,18 +3085,7 @@ export function PatientRecord() {
               />
             </div>
           </div>
-          <div style={{ marginTop: '0.75rem' }}>
-            <label className="form-label">ملاحظات</label>
-            <textarea
-              className="textarea"
-              rows={2}
-              disabled={packageBusy || solariumPkgBusy}
-              value={packageNotes}
-              onChange={(e) => setPackageNotes(e.target.value)}
-              placeholder="ملاحظات إضافية على الباكج..."
-            />
-          </div>
-          {canUsePaymentChannels && Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0)) > 0 ? (
+          {canUsePaymentChannels ? (
             <PackageCollectionFields
               dueSyp={Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0))}
               payCurrency={packagePayCurrency}
@@ -3114,6 +3103,17 @@ export function PatientRecord() {
               banksLoading={paymentBanksLoading}
             />
           ) : null}
+          <div style={{ marginTop: '0.75rem' }}>
+            <label className="form-label">ملاحظات</label>
+            <textarea
+              className="textarea"
+              rows={2}
+              disabled={packageBusy || solariumPkgBusy}
+              value={packageNotes}
+              onChange={(e) => setPackageNotes(e.target.value)}
+              placeholder="ملاحظات إضافية على الباكج..."
+            />
+          </div>
           {packageErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{packageErr}</p> : null}
           {packageOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{packageOk}</p> : null}
           <button
@@ -3263,18 +3263,7 @@ export function PatientRecord() {
               />
             </div>
           </div>
-          <div style={{ marginTop: '0.75rem' }}>
-            <label className="form-label">ملاحظات (اختياري)</label>
-            <textarea
-              className="textarea"
-              rows={2}
-              disabled={packageBusy || solariumPkgBusy}
-              value={solariumPkgNotes}
-              onChange={(e) => setSolariumPkgNotes(e.target.value)}
-              placeholder="ملاحظات على الباكج…"
-            />
-          </div>
-          {canUsePaymentChannels && Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0)) > 0 ? (
+          {canUsePaymentChannels ? (
             <PackageCollectionFields
               dueSyp={Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0))}
               payCurrency={solariumPkgPayCurrency}
@@ -3292,6 +3281,17 @@ export function PatientRecord() {
               banksLoading={paymentBanksLoading}
             />
           ) : null}
+          <div style={{ marginTop: '0.75rem' }}>
+            <label className="form-label">ملاحظات (اختياري)</label>
+            <textarea
+              className="textarea"
+              rows={2}
+              disabled={packageBusy || solariumPkgBusy}
+              value={solariumPkgNotes}
+              onChange={(e) => setSolariumPkgNotes(e.target.value)}
+              placeholder="ملاحظات على الباكج…"
+            />
+          </div>
           {solariumPkgErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{solariumPkgErr}</p> : null}
           {solariumPkgOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{solariumPkgOk}</p> : null}
           <button
