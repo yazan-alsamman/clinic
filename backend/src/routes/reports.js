@@ -4,6 +4,7 @@ import { LaserSession } from '../models/LaserSession.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
 import { LaserAreaCatalog } from '../models/LaserAreaCatalog.js'
 import { FinancialDocument } from '../models/FinancialDocument.js'
+import { resolveDoctorSharePercent } from '../services/postingService.js'
 import { todayBusinessDate } from '../utils/date.js'
 
 export const reportsRouter = Router()
@@ -66,6 +67,22 @@ const REV_DEPT_LABEL = {
   laser: 'الليزر',
   dermatology: 'الجلدية',
   dental: 'الأسنان',
+}
+
+function asOfDateFromBusinessYmd(ymd, fallback = new Date()) {
+  const parsed = parseLocalDay(ymd)
+  return parsed ? parsed.start : fallback
+}
+
+/** يحلّ نسبة الاستحقاق لتاريخ الجلسة (مع تخزين مؤقت) — يطابق منطق الترحيل المحاسبي */
+async function resolveHistoricalSharePercent(cache, userId, role, department, asOf) {
+  if (!userId || !CLINICAL_ROLES.has(role)) return 0
+  const day = toYmdLocal(asOf)
+  const key = `${userId}:${department}:${day}`
+  if (cache.has(key)) return cache.get(key)
+  const pct = await resolveDoctorSharePercent(userId, department, asOf)
+  cache.set(key, pct)
+  return pct
 }
 
 function parseInsightsRange(startStr, endStr) {
@@ -277,19 +294,19 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
 
     /** @type {Map<string, { userId: string, name: string, role: string, department: string, sharePercent: number, lines: object[], totalShareSyp: number }>} */
     const doctorMap = new Map()
+    const sharePercentCache = new Map()
 
     function ensureDoctor(user) {
       if (!user?._id) return null
       const id = String(user._id)
       if (!doctorMap.has(id)) {
         const role = user.role || ''
-        const pct = CLINICAL_ROLES.has(role) ? Number(user.doctorSharePercent) || 0 : 0
         doctorMap.set(id, {
           userId: id,
           name: user.name || '',
           role,
           department: roleToDeptColumn(role),
-          sharePercent: pct,
+          sharePercent: 0,
           lines: [],
           totalShareSyp: 0,
         })
@@ -303,7 +320,14 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
       deptLineCount.laser += 1
       const op = s.operatorUserId
       const entry = ensureDoctor(op)
-      const pct = entry ? entry.sharePercent : 0
+      const asOf = s.createdAt ? new Date(s.createdAt) : new Date()
+      const pct = await resolveHistoricalSharePercent(
+        sharePercentCache,
+        op?._id ? String(op._id) : '',
+        op?.role || '',
+        'laser',
+        asOf,
+      )
       const shareSyp = Math.round(net * (pct / 100))
       const patientName = s.patientId?.name ?? ''
       const sessionType =
@@ -322,11 +346,12 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
         netSyp: net,
         appliedSharePercent: pct,
         shareSyp,
-        explanation: `صافي السطر ${net} ل.س × نسبة الاستحقاق المعرفة للمستخدم (${pct}%)`,
+        explanation: `صافي السطر ${net} ل.س × نسبة الاستحقاق لتاريخ الجلسة (${pct}%)`,
       }
       if (entry) {
         entry.lines.push(line)
         entry.totalShareSyp = Math.round(entry.totalShareSyp + shareSyp)
+        entry.sharePercent = pct
       }
     }
 
@@ -336,7 +361,14 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
       deptLineCount.dermatology += 1
       const prov = v.providerUserId
       const entry = ensureDoctor(prov)
-      const pct = entry ? entry.sharePercent : 0
+      const asOf = asOfDateFromBusinessYmd(v.businessDate, v.createdAt ? new Date(v.createdAt) : new Date())
+      const pct = await resolveHistoricalSharePercent(
+        sharePercentCache,
+        prov?._id ? String(prov._id) : '',
+        prov?.role || '',
+        'dermatology',
+        asOf,
+      )
       const shareSyp = Math.round(net * (pct / 100))
       const patientName = v.patientId?.name ?? ''
       const desc = [v.areaTreatment, v.sessionType].filter(Boolean).join(' — ')
@@ -353,11 +385,12 @@ reportsRouter.get('/insights', requireRoles('super_admin'), async (req, res) => 
         netSyp: net,
         appliedSharePercent: pct,
         shareSyp,
-        explanation: `صافي السطر ${net} ل.س × نسبة الاستحقاق المعرفة للمستخدم (${pct}%)`,
+        explanation: `صافي السطر ${net} ل.س × نسبة الاستحقاق لتاريخ الزيارة (${pct}%)`,
       }
       if (entry) {
         entry.lines.push(line)
         entry.totalShareSyp = Math.round(entry.totalShareSyp + shareSyp)
+        entry.sharePercent = pct
       }
     }
 

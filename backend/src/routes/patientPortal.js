@@ -5,6 +5,7 @@ import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle
 import { todayBusinessDate } from '../utils/date.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
+import { buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
 
 export const patientPortalRouter = Router()
 patientPortalRouter.use(patientAuthMiddleware)
@@ -92,10 +93,9 @@ patientPortalRouter.get('/financial', async (req, res) => {
   try {
     const p = req.patient
     const items = await BillingItem.find({ patientId: p._id })
-      .select('_id amountDueSyp businessDate procedureLabel')
+      .select('_id amountDueSyp effectiveAmountDueSyp businessDate procedureLabel')
       .lean()
-    const byId = new Map(items.map((x) => [String(x._id), x]))
-    const itemIds = [...byId.keys()]
+    const itemIds = items.map((x) => x._id)
     if (itemIds.length === 0) {
       res.json({
         summary: {
@@ -111,26 +111,10 @@ patientPortalRouter.get('/financial', async (req, res) => {
       .sort({ receivedAt: -1, createdAt: -1 })
       .lean()
 
-    const entries = payments.map((pay) => {
-      const key = String(pay.billingItemId)
-      const bi = byId.get(key)
-      const due = Math.round(Number(bi?.amountDueSyp) || 0)
-      const applied = Math.round(Number(pay.amountSyp) || 0)
-      const received = Math.round(Number(pay.receivedAmountSyp ?? pay.amountSyp) || 0)
-      const delta = Math.round(Number(pay.settlementDeltaSyp ?? received - due) || 0)
-      let settlementType = 'exact'
-      if (delta < 0) settlementType = 'debt'
-      else if (delta > 0) settlementType = 'credit'
+    const entries = buildLedgerEntriesFromBilling(items, payments).map((entry, i) => {
+      const pay = payments[i]
       return {
-        id: String(pay._id),
-        billingItemId: key,
-        businessDate: String(bi?.businessDate || '').trim(),
-        procedureLabel: String(bi?.procedureLabel || '').trim(),
-        amountDueSyp: due,
-        appliedAmountSyp: applied,
-        receivedAmountSyp: received,
-        settlementDeltaSyp: delta,
-        settlementType,
+        ...entry,
         method: pay.method,
         receivedAt: pay.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
       }

@@ -8,6 +8,7 @@ import { resolvePaymentChannelFromBody } from './paymentChannelSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { round6 } from '../utils/money.js'
 import { todayBusinessDate } from '../utils/date.js'
+import { BILLING_PAYMENT_DUPLICATE_MSG, isMongoDuplicateKeyError } from '../utils/mongoErrors.js'
 
 /** صافي ل.س بعد دفع USD بلا ترجيع — يطابق billing / frontend usdExactDue */
 function netReceivedSypFromUsd(amountUsd, rate) {
@@ -169,25 +170,33 @@ export async function recordBillingStraightPayment({
   }
 
   const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
-  if (existingPay) throw new Error('تم تسجيل دفعة لهذا البند مسبقاً')
+  if (existingPay) throw new Error(BILLING_PAYMENT_DUPLICATE_MSG)
 
-  const payment = await BillingPayment.create({
-    billingItemId: bi._id,
-    amountSyp: appliedAmountSyp,
-    receivedAmountSyp: receivedSyp,
-    settlementDeltaSyp,
-    payCurrency: payCur,
-    receivedAmountUsd: payCur === 'USD' ? receivedUsd : 0,
-    patientRefundSyp: 0,
-    patientRefundUsd: 0,
-    paymentChannel: paymentChannel === 'bank' ? 'bank' : 'cash',
-    bankName: paymentChannel === 'bank' ? String(bankName || '').trim() : '',
-    method: paymentChannel === 'bank' ? 'bank' : 'cash',
-    receivedBy: receivedByUser._id,
-    discountPercent: 0,
-    listAmountDueSyp: savedListDueSyp,
-    effectiveAmountDueSyp: savedEffectiveDueSyp,
-  })
+  let payment
+  try {
+    payment = await BillingPayment.create({
+      billingItemId: bi._id,
+      amountSyp: appliedAmountSyp,
+      receivedAmountSyp: receivedSyp,
+      settlementDeltaSyp,
+      payCurrency: payCur,
+      receivedAmountUsd: payCur === 'USD' ? receivedUsd : 0,
+      patientRefundSyp: 0,
+      patientRefundUsd: 0,
+      paymentChannel: paymentChannel === 'bank' ? 'bank' : 'cash',
+      bankName: paymentChannel === 'bank' ? String(bankName || '').trim() : '',
+      method: paymentChannel === 'bank' ? 'bank' : 'cash',
+      receivedBy: receivedByUser._id,
+      discountPercent: savedDiscountPercent,
+      listAmountDueSyp: savedListDueSyp,
+      effectiveAmountDueSyp: savedEffectiveDueSyp,
+    })
+  } catch (createErr) {
+    if (isMongoDuplicateKeyError(createErr)) {
+      throw new Error(BILLING_PAYMENT_DUPLICATE_MSG)
+    }
+    throw createErr
+  }
 
   bi.businessDate = todayBusinessDate()
   bi.status = 'paid'

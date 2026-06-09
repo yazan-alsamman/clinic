@@ -11,7 +11,7 @@ import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { postBillingPayment } from '../services/postingService.js'
 import { SecretaryShiftSettings } from '../models/SecretaryShiftSettings.js'
-import { todayBusinessDate } from '../utils/date.js'
+import { addCalendarDaysYmd, localDayRangeBounds, todayBusinessDate } from '../utils/date.js'
 import { round2, round6 } from '../utils/money.js'
 import { normalizeHm, hmToMinutes } from '../utils/scheduleTime.js'
 import { wallMinutesAsiaDamascus } from '../utils/shiftTime.js'
@@ -20,6 +20,7 @@ import {
   mergeDebtSettlementsIntoRollup,
 } from '../services/patientDebtSettlementInventory.js'
 import { resolveBillingPatientDisplayName } from '../services/solariumWalkInDisplay.js'
+import { BILLING_PAYMENT_DUPLICATE_MSG, isMongoDuplicateKeyError } from '../utils/mongoErrors.js'
 
 /** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
 function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
@@ -844,16 +845,18 @@ billingRouter.get('/discounts-report', requireRoles('super_admin'), async (req, 
     const toStr = String(req.query.to || '').trim() || todayBusinessDate()
     let fromStr = String(req.query.from || '').trim()
     if (!fromStr) {
-      const t = new Date(`${toStr}T12:00:00`)
-      t.setUTCDate(t.getUTCDate() - 29)
-      fromStr = t.toISOString().slice(0, 10)
+      fromStr = addCalendarDaysYmd(toStr, -29)
     }
-    const fromStart = new Date(`${fromStr}T00:00:00.000Z`)
-    const toEnd = new Date(`${toStr}T23:59:59.999Z`)
+    const rangeBounds = localDayRangeBounds(fromStr, toStr)
+    if (!rangeBounds) {
+      res.status(400).json({ error: 'نطاق التواريخ غير صالح' })
+      return
+    }
+    const { start: fromStart, endExclusive: toEndExclusive } = rangeBounds
 
     const pays = await BillingPayment.find({
       discountPercent: { $gt: 0 },
-      receivedAt: { $gte: fromStart, $lte: toEnd },
+      receivedAt: { $gte: fromStart, $lt: toEndExclusive },
     })
       .sort({ receivedAt: -1 })
       .limit(500)
@@ -1150,27 +1153,36 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
 
     const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
     if (existingPay) {
-      res.status(400).json({ error: 'تم تسجيل دفعة لهذا البند مسبقاً' })
+      res.status(400).json({ error: BILLING_PAYMENT_DUPLICATE_MSG })
       return
     }
 
-    const payment = await BillingPayment.create({
-      billingItemId: bi._id,
-      amountSyp: appliedAmountSyp,
-      receivedAmountSyp: receivedSyp,
-      settlementDeltaSyp,
-      payCurrency,
-      receivedAmountUsd: payCurrency === 'USD' ? receivedUsd : 0,
-      patientRefundSyp: payCurrency === 'USD' ? patientRefundSyp : 0,
-      patientRefundUsd: payCurrency === 'USD' ? patientRefundUsd : 0,
-      paymentChannel,
-      bankName: paymentChannel === 'bank' ? bankName : '',
-      method,
-      receivedBy: req.user._id,
-      discountPercent: discountMeta.discountPercent,
-      listAmountDueSyp: discountMeta.listAmountDueSyp,
-      effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
-    })
+    let payment
+    try {
+      payment = await BillingPayment.create({
+        billingItemId: bi._id,
+        amountSyp: appliedAmountSyp,
+        receivedAmountSyp: receivedSyp,
+        settlementDeltaSyp,
+        payCurrency,
+        receivedAmountUsd: payCurrency === 'USD' ? receivedUsd : 0,
+        patientRefundSyp: payCurrency === 'USD' ? patientRefundSyp : 0,
+        patientRefundUsd: payCurrency === 'USD' ? patientRefundUsd : 0,
+        paymentChannel,
+        bankName: paymentChannel === 'bank' ? bankName : '',
+        method,
+        receivedBy: req.user._id,
+        discountPercent: discountMeta.discountPercent,
+        listAmountDueSyp: discountMeta.listAmountDueSyp,
+        effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
+      })
+    } catch (createErr) {
+      if (isMongoDuplicateKeyError(createErr)) {
+        res.status(400).json({ error: BILLING_PAYMENT_DUPLICATE_MSG })
+        return
+      }
+      throw createErr
+    }
 
     /** يوم التحصيل في التقارير المالية (مالية الجلدية وغيرها) — لا يُعتمد تاريخ إنشاء الجلسة فقط */
     bi.businessDate = todayBusinessDate()
@@ -1329,6 +1341,10 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     })
   } catch (e) {
     console.error(e)
+    if (isMongoDuplicateKeyError(e)) {
+      res.status(400).json({ error: BILLING_PAYMENT_DUPLICATE_MSG })
+      return
+    }
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })

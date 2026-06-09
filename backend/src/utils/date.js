@@ -24,3 +24,17 @@ export function addCalendarDaysYmd(ymd, deltaDays) {
 export function isValidYmd(s) {
   return YMD_RE.test(String(s || '').trim())
 }
+
+/** بداية ونهاية نطاق أيام تقويم محلي [start, endExclusive) — لاستعلامات receivedAt */
+export function localDayRangeBounds(fromYmd, toYmd) {
+  const from = String(fromYmd || '').trim()
+  const to = String(toYmd || '').trim()
+  if (!isValidYmd(from) || !isValidYmd(to)) return null
+  const [fy, fm, fd] = from.split('-').map((x) => parseInt(x, 10))
+  const [ty, tm, td] = to.split('-').map((x) => parseInt(x, 10))
+  const start = new Date(fy, fm - 1, fd, 0, 0, 0, 0)
+  const endExclusive = new Date(ty, tm - 1, td, 0, 0, 0, 0)
+  endExclusive.setDate(endExclusive.getDate() + 1)
+  if (start > endExclusive) return null
+  return { start, endExclusive }
+}

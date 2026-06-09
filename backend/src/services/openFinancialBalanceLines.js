@@ -5,13 +5,20 @@ function roundMoney(n) {
   return Math.round(Number(n) || 0)
 }
 
+/** المستحق المعروض في دفتر المريض — يفضّل لقطة الدفع (بعد خصم الاستقبال) */
+export function ledgerDueSypForPayment(bi, pay) {
+  const payEff = Number(pay?.effectiveAmountDueSyp)
+  if (Number.isFinite(payEff) && payEff > 0) return roundMoney(payEff)
+  return roundMoney(Number(bi?.effectiveAmountDueSyp ?? bi?.amountDueSyp) || 0)
+}
+
 /** مطابقة لمسار financial-ledger + تبويب المريض المالي */
 export function buildLedgerEntriesFromBilling(items, payments) {
   const byId = new Map(items.map((x) => [String(x._id), x]))
   return payments.map((pay) => {
     const key = String(pay.billingItemId)
     const bi = byId.get(key)
-    const due = roundMoney(Number(bi?.amountDueSyp) || 0)
+    const due = ledgerDueSypForPayment(bi, pay)
     const applied = roundMoney(Number(pay.amountSyp) || 0)
     const received = roundMoney(Number(pay.receivedAmountSyp ?? pay.amountSyp) || 0)
     const delta = roundMoney(Number(pay.settlementDeltaSyp ?? received - due) || 0)
@@ -154,7 +161,7 @@ export function allocatePackageCreditRemainderLines(remainingCredit, sessionPack
 export async function loadBillingItemsAndPaymentsForPatients(patientIds) {
   if (!patientIds.length) return { items: [], payments: [] }
   const items = await BillingItem.find({ patientId: { $in: patientIds } })
-    .select('_id patientId department clinicalSessionId amountDueSyp businessDate procedureLabel')
+    .select('_id patientId department clinicalSessionId amountDueSyp effectiveAmountDueSyp businessDate procedureLabel')
     .lean()
   const itemIds = items.map((i) => i._id)
   const payments =

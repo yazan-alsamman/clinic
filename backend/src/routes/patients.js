@@ -20,7 +20,7 @@ import {
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
-import { buildAdminOpenFinancialLines } from '../services/openFinancialBalanceLines.js'
+import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
 
@@ -608,10 +608,9 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
     }
 
     const items = await BillingItem.find({ patientId: p._id })
-      .select('_id amountDueSyp businessDate procedureLabel')
+      .select('_id amountDueSyp effectiveAmountDueSyp businessDate procedureLabel')
       .lean()
-    const byId = new Map(items.map((x) => [String(x._id), x]))
-    const itemIds = [...byId.keys()]
+    const itemIds = items.map((x) => x._id)
     if (itemIds.length === 0) {
       res.json({
         summary: {
@@ -628,26 +627,10 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
       .populate('receivedBy', 'name')
       .lean()
 
-    const entries = payments.map((pay) => {
-      const key = String(pay.billingItemId)
-      const bi = byId.get(key)
-      const due = Math.round(Number(bi?.amountDueSyp) || 0)
-      const applied = Math.round(Number(pay.amountSyp) || 0)
-      const received = Math.round(Number(pay.receivedAmountSyp ?? pay.amountSyp) || 0)
-      const delta = Math.round(Number(pay.settlementDeltaSyp ?? received - due) || 0)
-      let settlementType = 'exact'
-      if (delta < 0) settlementType = 'debt'
-      else if (delta > 0) settlementType = 'credit'
+    const entries = buildLedgerEntriesFromBilling(items, payments).map((entry, i) => {
+      const pay = payments[i]
       return {
-        id: String(pay._id),
-        billingItemId: key,
-        businessDate: String(bi?.businessDate || '').trim(),
-        procedureLabel: String(bi?.procedureLabel || '').trim(),
-        amountDueSyp: due,
-        appliedAmountSyp: applied,
-        receivedAmountSyp: received,
-        settlementDeltaSyp: delta,
-        settlementType,
+        ...entry,
         method: pay.method,
         paymentChannel: pay.paymentChannel === 'bank' ? 'bank' : 'cash',
         bankName: pay.bankName ? String(pay.bankName) : undefined,
@@ -1396,7 +1379,19 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         console.error('Laser package: cash collected but patient package save failed', inner)
       }
       console.error(inner)
-      res.status(500).json({ error: String(inner?.message || inner) || 'تعذر إنشاء باكج الليزر' })
+      const msg = String(inner?.message || inner)
+      const clientMsg =
+        msg.includes('البند') ||
+        msg.includes('دفعة') ||
+        msg.includes('ملف حساب') ||
+        msg.includes('لا يوجد مبلغ') ||
+        msg.includes('ParseError') ||
+        msg.includes('تعبير')
+      if (clientMsg) {
+        res.status(400).json({ error: msg })
+        return
+      }
+      res.status(500).json({ error: msg.trim() ? msg : 'تعذر إنشاء باكج الليزر' })
     }
   } catch (e) {
     console.error(e)

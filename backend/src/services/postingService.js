@@ -80,15 +80,16 @@ function buildLinesFromSteps(stepResults, revenueGl, patientId, department, mate
 /**
  * @param {import('mongoose').Types.ObjectId|string} providerUserId
  * @param {string} department
+ * @param {Date} [asOf] تاريخ الجلسة/الترحيل لحلّ المعاملات التاريخية
  */
-async function resolveDoctorSharePercent(providerUserId, department) {
+export async function resolveDoctorSharePercent(providerUserId, department, asOf = new Date()) {
   const uid = String(providerUserId)
   const user = await User.findById(uid).lean()
   const base = user && Number.isFinite(user.doctorSharePercent) ? user.doctorSharePercent : 0
   const override = await resolveNumber(
     'doctor_share_percent',
     { department, userId: uid },
-    new Date(),
+    asOf,
   )
   if (override != null && Number.isFinite(override)) return Math.min(100, Math.max(0, override))
   return Math.min(100, Math.max(0, base))

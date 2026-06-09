@@ -1029,9 +1029,16 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
   }
 }
 
+/** المبلغ المُحصَّل فعلياً للبند (بعد خصم الاستقبال) — يطابق finance.js */
+function laserCollectedSypForItem(bi, payById) {
+  const pay = payById.get(String(bi.paymentId))
+  return Math.round(Number(pay?.amountSyp) || 0)
+}
+
 /**
  * صفوف تقرير مالية الليزر: بند مدفوع + جلسة ليزر بحالة completed فقط
  * (لا يُحسب completed_pending_collection ولا غير المحصّل).
+ * الإيراد يُجمع من BillingPayment.amountSyp وليس amountDueSyp.
  * @param {string|RegExp} businessDateFilter
  */
 async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
@@ -1043,7 +1050,7 @@ async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
     status: 'paid',
     businessDate: businessDateFilter,
   })
-    .select('clinicalSessionId providerUserId amountDueSyp')
+    .select('clinicalSessionId providerUserId paymentId')
     .lean()
 
   if (!paidItems.length) {
@@ -1066,13 +1073,18 @@ async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
     .lean()
   const completedClinicalIdSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
 
+  const payIds = [...new Set(paidItems.map((i) => i.paymentId).filter(Boolean).map(String))]
+  const payments =
+    payIds.length > 0 ? await BillingPayment.find({ _id: { $in: payIds } }).select('amountSyp').lean() : []
+  const payById = new Map(payments.map((p) => [String(p._id), p]))
+
   const totals = new Map()
   for (const bi of paidItems) {
     if (!completedClinicalIdSet.has(String(bi.clinicalSessionId || ''))) continue
     const uid = String(bi.providerUserId || '')
     if (!specialistIdSet.has(uid)) continue
     const prev = totals.get(uid) || { totalAmountSyp: 0, sessionsCount: 0 }
-    prev.totalAmountSyp += Number(bi.amountDueSyp) || 0
+    prev.totalAmountSyp += laserCollectedSypForItem(bi, payById)
     prev.sessionsCount += 1
     totals.set(uid, prev)
   }
