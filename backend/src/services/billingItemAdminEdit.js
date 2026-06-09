@@ -15,6 +15,10 @@ async function getOrCreateLaserSettings() {
   return doc
 }
 import { writeAudit } from '../utils/audit.js'
+import {
+  isSolariumWalkInPlaceholderPatient,
+  resolveSolariumPatientDisplayName,
+} from './solariumWalkInDisplay.js'
 
 const LASER_TYPES = ['Mix', 'Yag', 'Alex']
 
@@ -130,13 +134,18 @@ export async function loadBillingItemAdminDetail(billingItemId) {
   }
 
   const patient = await Patient.findById(bi.patientId).select('name fileNumber gender').lean()
+  const walkInPlaceholder = isSolariumWalkInPlaceholderPatient(patient)
+  const patientName =
+    bi.department === 'solarium'
+      ? resolveSolariumPatientDisplayName(patient, bi.procedureLabel)
+      : String(patient?.name || '').trim()
 
   return {
     billingItem: {
       id: String(bi._id),
       patientId: String(bi.patientId),
-      patientName: String(patient?.name || '').trim(),
-      fileNumber: String(patient?.fileNumber || '').trim(),
+      patientName,
+      fileNumber: walkInPlaceholder ? '' : String(patient?.fileNumber || '').trim(),
       department: bi.department,
       procedureLabel: String(bi.procedureLabel || ''),
       listAmountDueSyp: Math.round(Number(bi.listAmountDueSyp || bi.amountDueSyp) || 0),

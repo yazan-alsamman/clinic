@@ -12,6 +12,7 @@ import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate, isValidYmd } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
+import { resolveSolariumPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 
 export const clinicalRouter = Router()
 
@@ -696,10 +697,15 @@ clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async 
       const cn = String(r.notes || '').trim()
       const ln = laser ? String(laser.notes || '').trim() : ''
       const notesCombined = [cn, ln].filter(Boolean).join(' — ') || '—'
+      const proc = String(r.procedureDescription || '').trim()
+      const patientName =
+        r.department === 'solarium'
+          ? resolveSolariumPatientDisplayName(r.patientId, proc)
+          : r.patientId?.name || '—'
       return {
         id: String(r._id),
         sessionType: DEPARTMENT_LABEL_AR[r.department] || String(r.department || '—'),
-        patientName: r.patientId?.name || '—',
+        patientName,
         providerName: r.providerUserId?.name || '—',
         timeLabel: formatSessionTime(r.createdAt),
         durationLabel: formatDurationFromMs(durationMs),
@@ -726,7 +732,10 @@ clinicalRouter.get('/sessions/mine', requireRoles(...CLINICAL_ROLES), async (req
     res.json({
       sessions: rows.map((r) => ({
         id: String(r._id),
-        patientName: r.patientId?.name ?? '',
+        patientName:
+          r.department === 'solarium'
+            ? resolveSolariumPatientDisplayName(r.patientId, r.procedureDescription)
+            : (r.patientId?.name ?? ''),
         department: r.department,
         procedureDescription: r.procedureDescription,
         sessionFeeSyp: r.sessionFeeSyp,

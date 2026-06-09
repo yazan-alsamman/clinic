@@ -11,10 +11,15 @@ import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { recordBillingStraightCashSyp } from '../services/recordBillingStraightCashSyp.js'
 import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
+import {
+  SOLARIUM_WALKIN_FILE_NUMBER,
+  isSolariumWalkInPlaceholderPatient,
+  resolveSolariumPatientDisplayName,
+} from '../services/solariumWalkInDisplay.js'
 
 export const solariumRouter = Router()
 
-const PLACEHOLDER_FILE_NUMBER = 'SYS-SOL-WALKIN'
+const PLACEHOLDER_FILE_NUMBER = SOLARIUM_WALKIN_FILE_NUMBER
 const ACCESS_READ = ['super_admin', 'reception']
 const ACCESS_WRITE = ['super_admin', 'reception']
 
@@ -112,14 +117,15 @@ solariumRouter.get('/daily-register', requireRoles('super_admin'), async (req, r
       const proc = String(cs.procedureDescription || bi?.procedureLabel || '')
       const kind = classifySolariumRow(proc)
       const amountSyp = Math.round(Number(bi?.amountDueSyp ?? bi?.effectiveAmountDueSyp ?? cs.sessionFeeSyp) || 0)
+      const walkInPlaceholder = isSolariumWalkInPlaceholderPatient(patient)
       return {
         id: String(cs._id),
         businessDate: String(cs.businessDate || businessDate),
         createdAt: cs.createdAt ? new Date(cs.createdAt).toISOString() : null,
         kind,
         procedureDescription: proc,
-        patientName: patient?.name ? String(patient.name) : '—',
-        fileNumber: patient?.fileNumber ? String(patient.fileNumber) : '',
+        patientName: resolveSolariumPatientDisplayName(patient, proc),
+        fileNumber: walkInPlaceholder ? '' : patient?.fileNumber ? String(patient.fileNumber) : '',
         amountSyp,
         billingStatus: bi?.status ? String(bi.status) : '',
         receivedByName: receiver?.name ? String(receiver.name).trim() : '—',

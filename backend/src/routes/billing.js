@@ -19,6 +19,7 @@ import {
   fetchPatientDebtSettlementsForDate,
   mergeDebtSettlementsIntoRollup,
 } from '../services/patientDebtSettlementInventory.js'
+import { resolveBillingPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 
 /** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
 function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
@@ -171,10 +172,7 @@ function aggregateReceptionPaidItems(items, payById) {
       bankMap.set(label, cur)
     }
 
-    const patientName =
-      bi.patientId && typeof bi.patientId === 'object' && 'name' in bi.patientId
-        ? String(bi.patientId.name || '').trim()
-        : ''
+    const patientName = resolveBillingPatientDisplayName(bi, bi.procedureLabel, bi.department)
     const providerName =
       bi.providerUserId && typeof bi.providerUserId === 'object' && 'name' in bi.providerUserId
         ? String(bi.providerUserId.name || '').trim()
@@ -417,7 +415,12 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
 
     const itemsOut = await Promise.all(
       items.map(async (b) => {
-        const dto = billingItemDto(b, b.patientId?.name, b.providerUserId?.name, usdSypBusinessDayRate)
+        const dto = billingItemDto(
+          b,
+          resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
+          b.providerUserId?.name,
+          usdSypBusinessDayRate,
+        )
         if (
           b.isPackagePrepaid === true &&
           b.department === 'laser' &&
@@ -501,7 +504,12 @@ billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) 
     )
     res.json({
       items: items.map((b) =>
-        billingItemDto(b, b.patientId?.name, b.providerUserId?.name, rateByDate.get(b.businessDate) ?? null),
+        billingItemDto(
+          b,
+          resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
+          b.providerUserId?.name,
+          rateByDate.get(b.businessDate) ?? null,
+        ),
       ),
     })
   } catch (e) {
@@ -865,10 +873,7 @@ billingRouter.get('/discounts-report', requireRoles('super_admin'), async (req, 
       const eff = Math.round(Number(p.effectiveAmountDueSyp) || 0)
       const discVal = Math.max(0, listV - eff)
       const bd = String(bi.businessDate || (p.receivedAt ? new Date(p.receivedAt).toISOString().slice(0, 10) : ''))
-      const patientName =
-        bi.patientId && typeof bi.patientId === 'object' && bi.patientId.name != null
-          ? String(bi.patientId.name || '').trim()
-          : ''
+      const patientName = resolveBillingPatientDisplayName(bi, bi.procedureLabel, bi.department)
       const row = {
         paymentId: String(p._id),
         billingItemId: String(bi._id),
