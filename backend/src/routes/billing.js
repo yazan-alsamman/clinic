@@ -383,6 +383,9 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
     discountPercent: Number(b.discountPercent) || 0,
     effectiveAmountDueSyp: Math.round(Number(b.effectiveAmountDueSyp || b.amountDueSyp || 0)),
     amountDueSyp: b.amountDueSyp,
+    listAmountDueUsd: round6(Number(b.listAmountDueUsd) || 0),
+    effectiveAmountDueUsd: round6(Number(b.effectiveAmountDueUsd || b.amountDueUsd) || 0),
+    amountDueUsd: round6(Number(b.amountDueUsd) || 0),
     currency: b.currency || 'SYP',
     businessDate: b.businessDate,
     /** سعر الدولار لتاريخ البند (يطابق ما يُستخدم عند complete-payment) */

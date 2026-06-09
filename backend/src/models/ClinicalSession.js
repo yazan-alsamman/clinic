@@ -23,6 +23,9 @@ const clinicalSessionSchema = new mongoose.Schema(
     department: { type: String, enum: ['laser', 'dermatology', 'dental', 'solarium', 'skin'], required: true, index: true },
     procedureDescription: { type: String, default: '', trim: true },
     sessionFeeSyp: { type: Number, required: true, min: 0 },
+    /** سعر الجلسة الأصلي بالدولار (جلدية) */
+    sessionFeeUsd: { type: Number, min: 0, default: 0 },
+    feeCurrency: { type: String, enum: ['SYP', 'USD', ''], default: '' },
     businessDate: { type: String, required: true, index: true },
     notes: { type: String, default: '' },
     materials: { type: [materialLineSchema], default: [] },

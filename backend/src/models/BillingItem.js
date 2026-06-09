@@ -20,6 +20,10 @@ const billingItemSchema = new mongoose.Schema(
     /** السعر بعد الخصم — هو المعتمد للتحصيل */
     effectiveAmountDueSyp: { type: Number, min: 0, default: 0 },
     amountDueSyp: { type: Number, required: true, min: 0 },
+    /** عند تسعير الجلدية بالدولار — المستحق الأصلي والفعّال بالـ USD */
+    listAmountDueUsd: { type: Number, min: 0, default: 0 },
+    effectiveAmountDueUsd: { type: Number, min: 0, default: 0 },
+    amountDueUsd: { type: Number, min: 0, default: 0 },
     currency: { type: String, default: 'SYP' },
     businessDate: { type: String, required: true, index: true },
     status: {

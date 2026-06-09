@@ -21,6 +21,10 @@ type Item = {
   listAmountDueSyp?: number
   discountPercent?: number
   effectiveAmountDueSyp?: number
+  listAmountDueUsd?: number
+  effectiveAmountDueUsd?: number
+  amountDueUsd?: number
+  currency?: 'SYP' | 'USD' | string
   status: string
   businessDate?: string
   /** سعر USD لتاريخ البند من الخادم (يطابق complete-payment) */
@@ -68,6 +72,71 @@ function itemListDueSyp(item: Item | null): number {
 function itemEffectiveDueSyp(item: Item | null): number {
   if (!item) return 0
   return Math.round(Number(item.effectiveAmountDueSyp ?? item.amountDueSyp) || 0)
+}
+
+function itemBillingCurrency(item: Item | null): 'SYP' | 'USD' {
+  return String(item?.currency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
+}
+
+function itemListDueUsd(item: Item | null): number {
+  if (!item) return 0
+  return Number(item.listAmountDueUsd ?? item.amountDueUsd) || 0
+}
+
+function itemEffectiveDueUsd(item: Item | null): number {
+  if (!item) return 0
+  return Number(item.effectiveAmountDueUsd ?? item.amountDueUsd) || 0
+}
+
+function formatUsdAmount(n: number): string {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 6 })
+}
+
+function formatItemDueLabel(item: Item): string {
+  if (itemBillingCurrency(item) === 'USD') {
+    const due = itemEffectiveDueUsd(item)
+    const pct = Number(item.discountPercent) || 0
+    if (pct > 0) {
+      return `السعر الأصلي: ${formatUsdAmount(itemListDueUsd(item))} USD — بعد الخصم (${pct.toLocaleString('ar-SY')}%): ${formatUsdAmount(due)} USD`
+    }
+    return `${formatUsdAmount(due)} USD`
+  }
+  const due = itemEffectiveDueSyp(item)
+  const pct = Number(item.discountPercent) || 0
+  if (pct > 0) {
+    return `السعر الأصلي: ${itemListDueSyp(item).toLocaleString('ar-SY')} ل.س — بعد الخصم (${pct.toLocaleString('ar-SY')}%): ${due.toLocaleString('ar-SY')} ل.س`
+  }
+  return `${due.toLocaleString('ar-SY')} ل.س`
+}
+
+function openPayModalForItem(
+  item: Item,
+  setters: {
+    setPayItem: (v: Item) => void
+    setPaySyp: (v: string) => void
+    setPayUsd: (v: string) => void
+    setPayCurrency: (v: 'SYP' | 'USD') => void
+    setPayChannel: (v: 'cash' | 'bank') => void
+    setPayBankName: (v: string) => void
+    setPayRefundCurrency: (v: 'SYP' | 'USD') => void
+    setPayRefundAmount: (v: string) => void
+    setPayDiscountEnabled: (v: boolean) => void
+    setPayDiscountPercent: (v: string) => void
+    setPayOpen: (v: boolean) => void
+  },
+) {
+  const isUsd = itemBillingCurrency(item) === 'USD'
+  setters.setPayItem(item)
+  setters.setPaySyp(isUsd ? '' : String(itemEffectiveDueSyp(item)))
+  setters.setPayUsd(isUsd ? String(itemEffectiveDueUsd(item)) : '')
+  setters.setPayCurrency(isUsd ? 'USD' : 'SYP')
+  setters.setPayChannel('cash')
+  setters.setPayBankName('')
+  setters.setPayRefundCurrency('SYP')
+  setters.setPayRefundAmount('')
+  setters.setPayDiscountEnabled(false)
+  setters.setPayDiscountPercent('')
+  setters.setPayOpen(true)
 }
 
 function hasLaserPackageAreaMetrics(item: Item): boolean {
@@ -156,9 +225,15 @@ export function BillingPage() {
   }, [payItem, businessDate, usdSypRate])
 
   const usdCashOffer = useMemo(() => {
+    if (!payItem) return null
+    if (itemBillingCurrency(payItem) === 'USD') {
+      const dueUsd = itemEffectiveDueUsd(payItem)
+      if (!(dueUsd > 0)) return null
+      return { usdFieldValue: String(dueUsd), impliedRefundSyp: 0 }
+    }
     if (!payPreviewRate || !(effectiveDueSyp > 0)) return null
     return usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate)
-  }, [payPreviewRate, effectiveDueSyp])
+  }, [payItem, payPreviewRate, effectiveDueSyp])
 
   /** عند الدفع بالدولار: إعادة اقتراح المستلم والترجيع عند تغيّر المستحق (خصم، بند، سعر). */
   useEffect(() => {
@@ -638,16 +713,14 @@ export function BillingPage() {
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     {b.procedureLabel} — المقدّم: {b.providerName || '—'}
                   </p>
-                  {(Number(b.discountPercent) || 0) > 0 ? (
-                    <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>
-                      السعر الأصلي: {itemListDueSyp(b).toLocaleString('ar-SY')} ل.س — بعد الخصم (
-                      {Number(b.discountPercent).toLocaleString('ar-SY')}%): {itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }} dir={itemBillingCurrency(b) === 'USD' ? 'ltr' : undefined}>
+                    {formatItemDueLabel(b)}
+                  </p>
+                  {itemBillingCurrency(b) === 'USD' && itemEffectiveDueSyp(b) > 0 ? (
+                    <p style={{ margin: '0.15rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      يعادل تقريباً {itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س عند سعر اليوم المحفوظ
                     </p>
-                  ) : (
-                    <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }}>
-                      {itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س
-                    </p>
-                  )}
+                  ) : null}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {user?.role === 'super_admin' ? (
@@ -686,19 +759,21 @@ export function BillingPage() {
                       type="button"
                       className="btn btn-primary"
                       disabled={busyId === b.id}
-                      onClick={() => {
-                        setPayItem(b)
-                        setPaySyp(String(itemEffectiveDueSyp(b)))
-                        setPayUsd('')
-                        setPayCurrency('SYP')
-                        setPayChannel('cash')
-                        setPayBankName('')
-                        setPayRefundCurrency('SYP')
-                        setPayRefundAmount('')
-                        setPayDiscountEnabled(false)
-                        setPayDiscountPercent('')
-                        setPayOpen(true)
-                      }}
+                      onClick={() =>
+                        openPayModalForItem(b, {
+                          setPayItem,
+                          setPaySyp,
+                          setPayUsd,
+                          setPayCurrency,
+                          setPayChannel,
+                          setPayBankName,
+                          setPayRefundCurrency,
+                          setPayRefundAmount,
+                          setPayDiscountEnabled,
+                          setPayDiscountPercent,
+                          setPayOpen,
+                        })
+                      }
                     >
                       {busyId === b.id ? 'جاري المعالجة…' : 'إنقاص جلسة و دفع'}
                     </button>
@@ -736,19 +811,21 @@ export function BillingPage() {
                       type="button"
                       className="btn btn-primary"
                       disabled={busyId === b.id}
-                      onClick={() => {
-                        setPayItem(b)
-                        setPaySyp(String(itemEffectiveDueSyp(b)))
-                        setPayUsd('')
-                        setPayCurrency('SYP')
-                        setPayChannel('cash')
-                        setPayBankName('')
-                        setPayRefundCurrency('SYP')
-                        setPayRefundAmount('')
-                        setPayDiscountEnabled(false)
-                        setPayDiscountPercent('')
-                        setPayOpen(true)
-                      }}
+                      onClick={() =>
+                        openPayModalForItem(b, {
+                          setPayItem,
+                          setPaySyp,
+                          setPayUsd,
+                          setPayCurrency,
+                          setPayChannel,
+                          setPayBankName,
+                          setPayRefundCurrency,
+                          setPayRefundAmount,
+                          setPayDiscountEnabled,
+                          setPayDiscountPercent,
+                          setPayOpen,
+                        })
+                      }
                     >
                       {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                     </button>
@@ -812,18 +889,22 @@ export function BillingPage() {
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem' }}>
               {payItem.patientName} — {payItem.procedureLabel}
             </p>
-            <p style={{ margin: '0.35rem 0', fontWeight: 600 }}>
-              {(Number(payItem.discountPercent) || 0) > 0
-                ? `السعر الأصلي: ${itemListDueSyp(payItem).toLocaleString('ar-SY')} ل.س — بعد الخصم (${Number(payItem.discountPercent).toLocaleString('ar-SY')}%): ${itemEffectiveDueSyp(payItem).toLocaleString('ar-SY')} ل.س`
-                : `المستحق: ${itemEffectiveDueSyp(payItem).toLocaleString('ar-SY')} ل.س`}
+            <p style={{ margin: '0.35rem 0', fontWeight: 600 }} dir={itemBillingCurrency(payItem) === 'USD' ? 'ltr' : undefined}>
+              المستحق: {formatItemDueLabel(payItem)}
             </p>
-            {payPreviewRate && itemEffectiveDueSyp(payItem) > 0 ? (
+            {itemBillingCurrency(payItem) === 'SYP' && payPreviewRate && itemEffectiveDueSyp(payItem) > 0 ? (
               <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }} dir="ltr">
                 يعادل المستحق المحفوظ للبند:{' '}
                 {(itemEffectiveDueSyp(payItem) / payPreviewRate).toLocaleString('en-US', {
                   maximumFractionDigits: 6,
                 })}{' '}
                 USD عند سعر {payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD
+              </p>
+            ) : null}
+            {itemBillingCurrency(payItem) === 'USD' && itemEffectiveDueSyp(payItem) > 0 ? (
+              <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                يعادل تقريباً {itemEffectiveDueSyp(payItem).toLocaleString('ar-SY')} ل.س في السجلات الداخلية عند سعر
+                اليوم المحفوظ
               </p>
             ) : null}
             {payPreviewRate != null && usdCashOffer ? (
@@ -958,12 +1039,26 @@ export function BillingPage() {
               <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
                 عملة التحصيل
               </span>
+              {itemBillingCurrency(payItem) === 'USD' ? (
+                <p style={{ margin: '0 0 0.45rem', fontSize: '0.84rem', color: 'var(--amber)' }}>
+                  هذا البند مُسعَّر بالدولار من قسم الجلدية — يُحصَّل بالـ USD.
+                </p>
+              ) : null}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    cursor: itemBillingCurrency(payItem) === 'USD' ? 'not-allowed' : 'pointer',
+                    opacity: itemBillingCurrency(payItem) === 'USD' ? 0.55 : 1,
+                  }}
+                >
                   <input
                     type="radio"
                     name="pay-currency"
                     checked={payCurrency === 'SYP'}
+                    disabled={itemBillingCurrency(payItem) === 'USD'}
                     onChange={() => {
                       setPayCurrency('SYP')
                       setPaySyp(

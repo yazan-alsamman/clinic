@@ -11,7 +11,7 @@ import { BillingItem } from '../models/BillingItem.js'
 import { ScheduleSlot } from '../models/ScheduleSlot.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate, isValidYmd } from '../utils/date.js'
-import { round2 } from '../utils/money.js'
+import { round2, round6 } from '../utils/money.js'
 import { resolveSolariumPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 
 export const clinicalRouter = Router()
@@ -496,6 +496,8 @@ clinicalRouter.post(
       }
 
       let sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      let sessionFeeUsd = 0
+      let billingCurrency = 'SYP'
       const feeCurrency = String(body.feeCurrency || 'SYP').trim().toUpperCase()
       if (department === 'dermatology' && feeCurrency === 'USD') {
         const feeUsd = parsePositiveUsd(body.sessionFeeUsd)
@@ -508,7 +510,9 @@ clinicalRouter.post(
           res.status(400).json({ error: 'لا يوجد سعر صرف لليوم. اطلب من المدير إدخال سعر الدولار أولاً.' })
           return
         }
+        sessionFeeUsd = round6(feeUsd)
         sessionFeeSyp = Math.round(feeUsd * rate)
+        billingCurrency = 'USD'
       }
       if (sessionFeeSyp == null) {
         res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (قيمة أكبر من صفر)' })
@@ -536,6 +540,8 @@ clinicalRouter.post(
           ? 0
           : Math.round(materialLines.reduce((s, m) => s + (m.lineChargeSyp || 0), 0))
       const listAmountDueSyp = sessionFeeSyp + materialChargeSypTotal
+      const listAmountDueUsd =
+        billingCurrency === 'USD' ? round6(sessionFeeUsd) : 0
       const discountPercent = department === 'dermatology' ? parseDiscountPercent(body.discountPercent) : 0
       if (discountPercent == null) {
         await restoreMaterialsFromSnapshot(materialLines)
@@ -543,9 +549,16 @@ clinicalRouter.post(
         return
       }
       const amountDueSyp = Math.round(listAmountDueSyp * (1 - discountPercent / 100))
+      const amountDueUsd =
+        billingCurrency === 'USD' ? round6(listAmountDueUsd * (1 - discountPercent / 100)) : 0
       if (amountDueSyp < 1) {
         await restoreMaterialsFromSnapshot(materialLines)
         res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
+        return
+      }
+      if (billingCurrency === 'USD' && !(amountDueUsd > 0)) {
+        await restoreMaterialsFromSnapshot(materialLines)
+        res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم بالدولار أصبح صفراً.' })
         return
       }
 
@@ -557,6 +570,9 @@ clinicalRouter.post(
           department,
           procedureDescription,
           sessionFeeSyp,
+          ...(billingCurrency === 'USD'
+            ? { sessionFeeUsd, feeCurrency: 'USD' }
+            : { feeCurrency: 'SYP' }),
           businessDate,
           notes,
           materials: materialLines,
@@ -575,7 +591,10 @@ clinicalRouter.post(
           discountPercent,
           effectiveAmountDueSyp: amountDueSyp,
           amountDueSyp,
-          currency: 'SYP',
+          listAmountDueUsd,
+          effectiveAmountDueUsd: amountDueUsd,
+          amountDueUsd,
+          currency: billingCurrency,
           businessDate,
           status: 'pending_payment',
         })
