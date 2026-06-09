@@ -370,8 +370,9 @@ export function AdminRooms() {
               }}
             >
               <p style={{ margin: '0 0 0.35rem', fontWeight: 700 }}>الوردية الصباحية</p>
-              <p style={{ margin: '0 0 0.6rem', fontSize: '0.85rem', color: 'var(--text-muted)' }} dir="ltr">
-                {secretaryShifts?.morningShiftStart ?? '09:00'} – {secretaryShifts?.morningShiftEnd ?? '15:00'}
+              <p style={{ margin: '0 0 0.6rem', fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                تنتهي عند تسجيل خروج السكرتيرة من حسابها — كل التحصيل من حسابها يُحسب صباحياً حتى الخروج (لا يُقفل بوقت
+                محدد).
               </p>
               <label className="form-label" htmlFor="sec-morning-user">
                 السكرتارية

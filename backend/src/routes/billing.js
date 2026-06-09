@@ -237,6 +237,12 @@ function paymentWallMinutes(p, bi) {
   return wallMinutesAsiaDamascus(inst)
 }
 
+function resolveUserIdRef(ref) {
+  if (!ref) return ''
+  if (typeof ref === 'object' && ref._id) return String(ref._id)
+  return String(ref)
+}
+
 function shiftKindFromMinutes(mins, cfg) {
   if (mins == null) return 'outside'
   const ms = hmToMinutes(cfg.morningStart)
@@ -249,20 +255,39 @@ function shiftKindFromMinutes(mins, cfg) {
   return 'outside'
 }
 
+/** الوردية الصباحية: حسب السكرتيرة المُحصِّلة (حتى تسجيل خروجها). المساء: المُحصِّلة أولاً ثم وقت التحصيل. */
+function paymentShiftKind(p, bi, cfg) {
+  const receivedBy = resolveUserIdRef(p?.receivedBy)
+  if (cfg.morningUserId && receivedBy === cfg.morningUserId) return 'morning'
+  if (cfg.eveningUserId && receivedBy === cfg.eveningUserId) return 'evening'
+  return shiftKindFromMinutes(paymentWallMinutes(p, bi), cfg)
+}
+
+function cashMovementShiftKind(m, cfg) {
+  const createdBy = resolveUserIdRef(m?.createdBy)
+  if (cfg.morningUserId && createdBy === cfg.morningUserId) return 'morning'
+  if (cfg.eveningUserId && createdBy === cfg.eveningUserId) return 'evening'
+  const mins = m.createdAt ? wallMinutesAsiaDamascus(new Date(m.createdAt)) : null
+  return shiftKindFromMinutes(mins, cfg)
+}
+
+function debtSettlementShiftKind(ds, cfg) {
+  const receivedBy = resolveUserIdRef(ds?.receivedBy)
+  if (cfg.morningUserId && receivedBy === cfg.morningUserId) return 'morning'
+  if (cfg.eveningUserId && receivedBy === cfg.eveningUserId) return 'evening'
+  return shiftKindFromMinutes(debtSettlementWallMinutes(ds), cfg)
+}
+
 function filterItemsByShiftKind(items, payById, cfg, kind) {
   return items.filter((bi) => {
     const p = payById.get(String(bi.paymentId))
     if (!p) return false
-    const mins = paymentWallMinutes(p, bi)
-    return shiftKindFromMinutes(mins, cfg) === kind
+    return paymentShiftKind(p, bi, cfg) === kind
   })
 }
 
 function filterMovementsByShiftKind(movementRows, cfg, kind) {
-  return movementRows.filter((m) => {
-    const mins = m.createdAt ? wallMinutesAsiaDamascus(new Date(m.createdAt)) : null
-    return shiftKindFromMinutes(mins, cfg) === kind
-  })
+  return movementRows.filter((m) => cashMovementShiftKind(m, cfg) === kind)
 }
 
 function debtSettlementWallMinutes(ds) {
@@ -272,10 +297,7 @@ function debtSettlementWallMinutes(ds) {
 }
 
 function filterDebtSettlementsByShiftKind(settlementRows, cfg, kind) {
-  return settlementRows.filter((ds) => {
-    const mins = debtSettlementWallMinutes(ds)
-    return shiftKindFromMinutes(mins, cfg) === kind
-  })
+  return settlementRows.filter((ds) => debtSettlementShiftKind(ds, cfg) === kind)
 }
 
 async function buildReceptionRollupWithDebtSettlements(items, payById, settlementRows) {

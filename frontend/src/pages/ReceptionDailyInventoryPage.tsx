@@ -329,10 +329,10 @@ export function ReceptionDailyInventoryPage() {
                 }}
               >
                 <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: 1.55 }}>
-                  <strong>مدير النظام:</strong> يعرض أدناه جردان كاملان منفصلان حسب{' '}
-                  <strong>وقت تسجيل التحصيل</strong> (توقيت دمشق): الصباح من {apiData.shiftBounds?.morning?.start} إلى{' '}
-                  {apiData.shiftBounds?.morning?.end}، والمساء من {apiData.shiftBounds?.evening?.start} إلى{' '}
-                  {apiData.shiftBounds?.evening?.end}. أي مبالغ خارج هاتين الفترتين تظهر أدناه إن وُجدت.
+                  <strong>مدير النظام:</strong> الوردية الصباحية = كل ما حصلته السكرتيرة المعيّنة للصباح من حسابها (بغضّ
+                  النظر عن الساعة، حتى تسجيل خروجها). الوردية المسائية = ما حصلته السكرتيرة المسائية من حسابها، أو حسب وقت
+                  التحصيل (توقيت دمشق) من {apiData.shiftBounds?.evening?.start} إلى {apiData.shiftBounds?.evening?.end}{' '}
+                  لغيرهما. أي مبالغ خارج التقسيم تظهر أدناه إن وُجدت.
                 </p>
               </div>
 
@@ -340,7 +340,7 @@ export function ReceptionDailyInventoryPage() {
                 <ReceptionInventoryDetailBody
                   variant="full"
                   inv={apiData.morning}
-                  sectionTitle={`الوردية الصباحية (${apiData.shiftBounds?.morning?.start}–${apiData.shiftBounds?.morning?.end})`}
+                  sectionTitle="الوردية الصباحية (حسب السكرتيرة المُعيَّنة)"
                   opsRows={apiData.morning.transactions}
                   opsLoading={false}
                   opsErr=""
@@ -468,8 +468,8 @@ export function ReceptionDailyInventoryPage() {
                   <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: 1.55 }}>
                     <strong>عرضك:</strong>{' '}
                     {apiData.secretaryShift === 'morning'
-                      ? `وردية الصباح فقط (${apiData.shiftBounds?.morning?.start}–${apiData.shiftBounds?.morning?.end}، توقيت دمشق).`
-                      : `وردية المساء فقط (${apiData.shiftBounds?.evening?.start}–${apiData.shiftBounds?.evening?.end}، توقيت دمشق).`}
+                      ? 'وردية الصباح: كل التحصيلات المسجّلة من حسابك اليوم (حتى تسجيل الخروج)، بغضّ النظر عن الساعة.'
+                      : `وردية المساء: التحصيلات من حسابك، أو حسب وقت التحصيل (${apiData.shiftBounds?.evening?.start}–${apiData.shiftBounds?.evening?.end}، توقيت دمشق).`}
                   </p>
                 </div>
               ) : null}
