@@ -6,6 +6,8 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BusinessDay } from '../models/BusinessDay.js'
+import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
+import { User } from '../models/User.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
@@ -177,6 +179,60 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       })
     }
 
+    const debtSettlements = await PatientDebtSettlement.find({
+      businessDate: { $gte: range.from, $lte: range.to },
+    })
+      .populate('patientId', 'name')
+      .lean()
+
+    const debtProviderIds = new Set()
+    for (const ds of debtSettlements) {
+      for (const alloc of ds.departmentAllocations || []) {
+        if (alloc.department === 'dermatology' && alloc.providerUserId) {
+          debtProviderIds.add(String(alloc.providerUserId))
+        }
+      }
+    }
+    const debtProviders =
+      debtProviderIds.size > 0
+        ? await User.find({ _id: { $in: [...debtProviderIds] } })
+            .select('name')
+            .lean()
+        : []
+    const providerNameById = new Map(debtProviders.map((u) => [String(u._id), String(u.name || '').trim()]))
+
+    for (const ds of debtSettlements) {
+      const patientName = String(ds.patientId?.name || '—').trim()
+      for (const alloc of ds.departmentAllocations || []) {
+        if (alloc.department !== 'dermatology') continue
+        const collected = Math.round(Number(alloc.amountSyp) || 0)
+        if (!(collected > 0)) continue
+        totalCollectedSyp += collected
+        const providerName = alloc.providerUserId
+          ? providerNameById.get(String(alloc.providerUserId)) || '—'
+          : 'تسديد ذمة'
+        if (providerNameMatchesLora(providerName)) {
+          loraRevenueSyp += collected
+        } else if (providerNameMatchesSamer(providerName)) {
+          samerRevenueSyp += collected
+        } else {
+          otherRevenueSyp += collected
+        }
+        rows.push({
+          id: `debt-${String(ds._id)}-${rows.length}`,
+          businessDate: String(ds.businessDate || '').trim(),
+          patientName,
+          providerName,
+          collectedSyp: collected,
+          materialCostSypPriced: 0,
+          materialCostUsdPriced: 0,
+          materialCostSypTotal: 0,
+          isDebtSettlement: true,
+          procedureLabel: String(alloc.procedureLabel || '').trim() || 'تسديد ذمة',
+        })
+      }
+    }
+
     const poolLora = Math.max(0, loraRevenueSyp - loraMaterialSyp)
     const poolSamer = Math.max(0, samerRevenueSyp - samerMaterialSyp)
     const loraPayableSyp = Math.round(poolLora * (sharePercent / 100))
@@ -222,6 +278,7 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       rows,
       notes: [
         'الإيراد = مجموع مبالغ التحصيل (دفعات الاستقبال) لبنود جلدية مسدّدة في النطاق — تاريخ السطر هو يوم التحصيل المخزّن على البند.',
+        'تسديد ذمم مرتبطة بجلدية يُضاف للإيراد حسب الجلسة الأصلية التي سبّبت الذمة.',
         'تكلفة المواد: تُجمع من جلسات الجلدية المرتبطة؛ تُقسَّم للعرض بين مواد بسعر ليرة (unitCost) ومواد بسعر دولار (unitCostUsd) مع تحويل عرض الدولار باستخدام سعر الصرف المسجّل لذلك اليوم.',
         'حصة د.لورا ود.سامر = (مجموع تحصيل جلسات الطبيب − تكلفة المواد في جلساته) × 50%.',
         'صافي ربح المركز في البطاقة = 50% المتبقية من د.لورا + 50% المتبقية من د.سامر + صافي جلسات أطباء آخرين (كامل الصافي لصالح المركز).',

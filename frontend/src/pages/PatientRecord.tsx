@@ -11,12 +11,12 @@ import {
   validatePaymentChannelBeforeSubmit,
   type PaymentChannel,
 } from '../components/PaymentChannelFields'
+import { BillingPaymentModal } from '../components/BillingPaymentModal'
 import {
-  PackageCollectionFields,
-  packageCollectionBodyExtras,
-  validatePackageCollectionBeforeSubmit,
-  type PayCurrency,
-} from '../components/PackageCollectionFields'
+  netCollectedSypFromPayment,
+  paymentRequestHasCollection,
+  type BillingPaymentRequestBody,
+} from '../utils/billingPaymentForm'
 import {
   FULL_BODY_BOOKING_LABEL,
   FULL_BODY_SESSION_AREA_COUNT,
@@ -37,6 +37,14 @@ type Tab =
   | 'dermatology'
   | 'dental'
   | 'skin_care'
+
+type PendingPackagePayment = {
+  kind: 'laser' | 'solarium'
+  listDueSyp: number
+  subtitle: string
+  body: Record<string, unknown>
+  onSuccess: () => void
+}
 
 const laserTypes = ['Mix', 'Yag', 'Alex'] as const
 
@@ -947,11 +955,10 @@ export function PatientRecord() {
   const [packageSessionsCount, setPackageSessionsCount] = useState('6')
   const [packageTotalSyp, setPackageTotalSyp] = useState('')
   const [packagePaidSyp, setPackagePaidSyp] = useState('')
-  const [packagePayChannel, setPackagePayChannel] = useState<PaymentChannel>('cash')
-  const [packagePayBankName, setPackagePayBankName] = useState('')
-  const [packagePayCurrency, setPackagePayCurrency] = useState<PayCurrency>('SYP')
-  const [packagePayUsd, setPackagePayUsd] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
+  const [pkgPayModal, setPkgPayModal] = useState<PendingPackagePayment | null>(null)
+  const [pkgPayModalBusy, setPkgPayModalBusy] = useState(false)
+  const [pkgPayModalErr, setPkgPayModalErr] = useState('')
   const [laserPkgTemplates, setLaserPkgTemplates] = useState<LaserPackageTemplateListItem[]>([])
   const [laserPkgTplLoading, setLaserPkgTplLoading] = useState(false)
   const [laserTplPickIds, setLaserTplPickIds] = useState<string[]>([])
@@ -984,12 +991,7 @@ export function PatientRecord() {
   const [solariumPkgSessions, setSolariumPkgSessions] = useState('10')
   const [solariumPkgTotal, setSolariumPkgTotal] = useState('')
   const [solariumPkgPaid, setSolariumPkgPaid] = useState('')
-  const [solariumPkgChannel, setSolariumPkgChannel] = useState<PaymentChannel>('cash')
-  const [solariumPkgBankName, setSolariumPkgBankName] = useState('')
-  const [solariumPkgPayCurrency, setSolariumPkgPayCurrency] = useState<PayCurrency>('SYP')
-  const [solariumPkgPayUsd, setSolariumPkgPayUsd] = useState('')
   const [solariumPkgNotes, setSolariumPkgNotes] = useState('')
-  const [solariumPkgBusy, setSolariumPkgBusy] = useState(false)
   const [solariumPkgErr, setSolariumPkgErr] = useState('')
   const [solariumPkgOk, setSolariumPkgOk] = useState('')
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
@@ -2169,6 +2171,59 @@ export function PatientRecord() {
   const settleWillRemainDebtSyp = Math.max(0, debtNow - settleEnteredSyp)
   const settleWillAddCreditSyp = Math.max(0, settleEnteredSyp - debtNow)
 
+  async function postPatientPackage(body: Record<string, unknown>) {
+    if (!id) throw new Error('معرّف المريض غير متوفر')
+    const data = await api<{
+      package: PatientPackage
+      summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+    }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    setPatient((prev) =>
+      prev
+        ? {
+            ...prev,
+            outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
+            prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
+            departments:
+              body.department === 'solarium'
+                ? Array.from(new Set([...(prev.departments || []), 'solarium' as const]))
+                : prev.departments,
+            sessionPackages: [...(Array.isArray(prev.sessionPackages) ? prev.sessionPackages : []), data.package],
+          }
+        : prev,
+    )
+    return data
+  }
+
+  async function confirmPackagePayment(payment: BillingPaymentRequestBody) {
+    if (!pkgPayModal) return
+    setPkgPayModalBusy(true)
+    setPkgPayModalErr('')
+    try {
+      const body: Record<string, unknown> = { ...pkgPayModal.body }
+      const totalSyp = Math.round(Number(body.packageTotalSyp) || 0)
+      let paidAmountSyp = Math.round(Number(body.paidAmountSyp) || 0)
+      if (paymentRequestHasCollection(payment)) {
+        const collectedSyp = netCollectedSypFromPayment(payment, usdSypRate)
+        if (paidAmountSyp <= 0 && collectedSyp > 0) {
+          paidAmountSyp = Math.min(totalSyp, collectedSyp)
+        }
+        body.paidAmountSyp = paidAmountSyp
+        Object.assign(body, payment)
+      }
+      await postPatientPackage(body)
+      pkgPayModal.onSuccess()
+      setPkgPayModal(null)
+      setPkgPayModalErr('')
+    } catch (e) {
+      setPkgPayModalErr(e instanceof ApiError ? e.message : 'تعذر حفظ الباكج')
+    } finally {
+      setPkgPayModalBusy(false)
+    }
+  }
+
   return (
     <>
       <div style={{ marginBottom: '1rem' }}>
@@ -2995,7 +3050,9 @@ export function PatientRecord() {
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
             يُسجَّل باكج الليزر من <strong>قوالب الباكج</strong> المعرفة في النظام. يمكن اختيار{' '}
             <strong>أكثر من قالب معاً</strong>؛ يُجمع النظام تلقائياً أسعار القوالب ومناطقها في باكج واحد. يحدد
-            الاستقبال عدد الجلسات والسعر الفعلي والمبلغ المدفوع؛ عند وجود دفعة يُسجَّل في الجرد اليومي فوراً. عند دفع
+            الاستقبال عدد الجلسات والسعر الفعلي والمبلغ المدفوع؛ تُفتح{' '}
+            <strong>نافذة التحصيل</strong> عند الحفظ (حتى لو المدفوع صفر — يمكن التأكيد بدون قبض أو إدخال مبلغ
+            التحصيل). عند دفع
             أقل من الإجمالي يُضاف الفرق إلى ذمم المريض.
           </p>
           <div style={{ marginTop: '0.75rem' }}>
@@ -3031,14 +3088,14 @@ export function PatientRecord() {
                         display: 'flex',
                         alignItems: 'flex-start',
                         gap: '0.45rem',
-                        cursor: packageBusy || solariumPkgBusy ? 'default' : 'pointer',
-                        opacity: packageBusy || solariumPkgBusy ? 0.65 : 1,
+                        cursor: packageBusy || pkgPayModalBusy ? 'default' : 'pointer',
+                        opacity: packageBusy || pkgPayModalBusy ? 0.65 : 1,
                       }}
                     >
                       <input
                         type="checkbox"
                         checked={checked}
-                        disabled={packageBusy || solariumPkgBusy}
+                        disabled={packageBusy || pkgPayModalBusy}
                         onChange={() => {
                           setLaserTplPickIds((prev) => {
                             const next = checked ? prev.filter((x) => x !== t.id) : [...prev, t.id]
@@ -3073,7 +3130,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 value={packageTitle}
-                disabled={packageBusy || solariumPkgBusy || laserTplPickIds.length > 0}
+                disabled={packageBusy || pkgPayModalBusy || laserTplPickIds.length > 0}
                 onChange={(e) => setPackageTitle(e.target.value)}
                 placeholder={laserTplPickIds.length > 0 ? 'يُملأ من القوالب المختارة' : 'اختر قالباً واحداً على الأقل'}
               />
@@ -3083,7 +3140,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="numeric"
-                disabled={packageBusy || solariumPkgBusy}
+                disabled={packageBusy || pkgPayModalBusy}
                 value={packageSessionsCount}
                 onChange={(e) => setPackageSessionsCount(e.target.value)}
                 placeholder="6"
@@ -3094,7 +3151,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="decimal"
-                disabled={packageBusy || solariumPkgBusy}
+                disabled={packageBusy || pkgPayModalBusy}
                 value={packageTotalSyp}
                 onChange={(e) => setPackageTotalSyp(e.target.value)}
                 placeholder="0"
@@ -3105,37 +3162,19 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="decimal"
-                disabled={packageBusy || solariumPkgBusy}
+                disabled={packageBusy || pkgPayModalBusy}
                 value={packagePaidSyp}
                 onChange={(e) => setPackagePaidSyp(e.target.value)}
                 placeholder="0"
               />
             </div>
           </div>
-          {canUsePaymentChannels ? (
-            <PackageCollectionFields
-              dueSyp={Math.max(0, Math.round(parseFloat(packagePaidSyp) || 0))}
-              payCurrency={packagePayCurrency}
-              onPayCurrencyChange={setPackagePayCurrency}
-              amountUsd={packagePayUsd}
-              onAmountUsdChange={setPackagePayUsd}
-              channel={packagePayChannel}
-              bankName={packagePayBankName}
-              onChannelChange={setPackagePayChannel}
-              onBankNameChange={setPackagePayBankName}
-              usdSypRate={usdSypRate}
-              disabled={packageBusy || solariumPkgBusy}
-              namePrefix="laser-pkg"
-              banks={paymentBanks}
-              banksLoading={paymentBanksLoading}
-            />
-          ) : null}
           <div style={{ marginTop: '0.75rem' }}>
             <label className="form-label">ملاحظات</label>
             <textarea
               className="textarea"
               rows={2}
-              disabled={packageBusy || solariumPkgBusy}
+              disabled={packageBusy || pkgPayModalBusy}
               value={packageNotes}
               onChange={(e) => setPackageNotes(e.target.value)}
               placeholder="ملاحظات إضافية على الباكج..."
@@ -3148,7 +3187,7 @@ export function PatientRecord() {
             className="btn btn-primary"
             style={{ marginTop: '0.9rem' }}
             disabled={
-              packageBusy || solariumPkgBusy || laserTplPickIds.length === 0 || laserPkgTemplates.length === 0
+              packageBusy || pkgPayModalBusy || laserTplPickIds.length === 0 || laserPkgTemplates.length === 0
             }
             onClick={async () => {
               if (!id) return
@@ -3173,60 +3212,16 @@ export function PatientRecord() {
                 setPackageErr('المبلغ المدفوع يجب أن يكون بين 0 وإجمالي الباكج.')
                 return
               }
-              if (paidSyp > 0 && canUsePaymentChannels) {
-                const collectErr = validatePackageCollectionBeforeSubmit({
-                  dueSyp: paidSyp,
-                  payCurrency: packagePayCurrency,
-                  amountUsd: packagePayUsd,
-                  channel: packagePayChannel,
-                  bankName: packagePayBankName,
-                  usdSypRate,
-                })
-                if (collectErr) {
-                  setPackageErr(collectErr)
-                  return
-                }
+              const body: Record<string, unknown> = {
+                department: 'laser',
+                title: packageTitle.trim() || undefined,
+                sessionsCount,
+                packageTotalSyp: totalSyp,
+                paidAmountSyp: paidSyp,
+                notes: packageNotes.trim(),
+                laserPackageTemplateIds: laserTplPickIds,
               }
-              setPackageBusy(true)
-              try {
-                const body: Record<string, unknown> = {
-                  department: 'laser',
-                  title: packageTitle.trim() || undefined,
-                  sessionsCount,
-                  packageTotalSyp: totalSyp,
-                  paidAmountSyp: paidSyp,
-                  notes: packageNotes.trim(),
-                  laserPackageTemplateIds: laserTplPickIds,
-                }
-                if (paidSyp > 0 && canUsePaymentChannels) {
-                  Object.assign(
-                    body,
-                    packageCollectionBodyExtras({
-                      dueSyp: paidSyp,
-                      payCurrency: packagePayCurrency,
-                      amountUsd: packagePayUsd,
-                      channel: packagePayChannel,
-                      bankName: packagePayBankName,
-                    }),
-                  )
-                }
-                const data = await api<{
-                  package: PatientPackage
-                  summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
-                }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
-                  method: 'POST',
-                  body: JSON.stringify(body),
-                })
-                setPatient((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
-                        prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
-                        sessionPackages: [...(Array.isArray(prev.sessionPackages) ? prev.sessionPackages : []), data.package],
-                      }
-                    : prev,
-                )
+              const resetLaserPackageForm = () => {
                 setPackageOk('تم حفظ الباكج بنجاح.')
                 setPackageTitle('')
                 setPackageSessionsCount('6')
@@ -3234,15 +3229,15 @@ export function PatientRecord() {
                 setPackagePaidSyp('')
                 setPackageNotes('')
                 setLaserTplPickIds([])
-                setPackagePayChannel('cash')
-                setPackagePayBankName('')
-                setPackagePayCurrency('SYP')
-                setPackagePayUsd('')
-              } catch (e) {
-                setPackageErr(e instanceof ApiError ? e.message : 'تعذر حفظ الباكج')
-              } finally {
-                setPackageBusy(false)
               }
+              setPkgPayModalErr('')
+              setPkgPayModal({
+                kind: 'laser',
+                listDueSyp: paidSyp,
+                subtitle: `${patient?.name || 'مريض'} — باكج ليزر (${sessionsCount} جلسة)`,
+                body,
+                onSuccess: resetLaserPackageForm,
+              })
             }}
           >
             {packageBusy ? 'جاري الحفظ…' : 'حفظ الباكج'}
@@ -3252,8 +3247,9 @@ export function PatientRecord() {
             باكج سولاريوم
           </h2>
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-            أدخل إجمالي سعر الباكج والمبلغ المدفوع حالياً. الفرق يُسجَّل ذمةً على المريض. إن وُجد دفع الآن يُحصَّل في
-            الجرد المالي ضمن السولاريوم، وتظهر الجلسات في الملف لاستهلاكها واحدةً تلو الأخرى.
+            أدخل إجمالي سعر الباكج والمبلغ المدفوع حالياً. الفرق يُسجَّل ذمةً على المريض. عند الحفظ تُفتح نافذة
+            التحصيل (حتى لو المدفوع صفر) — يمكن التأكيد بدون قبض نقدي أو إدخال المبلغ المحصَّل بالليرة/الدولار
+            والكاش/البنك والترجيع.
           </p>
           <div className="grid-2" style={{ marginTop: '0.75rem' }}>
             <div>
@@ -3261,7 +3257,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="numeric"
-                disabled={packageBusy || solariumPkgBusy}
+                disabled={packageBusy || pkgPayModalBusy}
                 value={solariumPkgSessions}
                 onChange={(e) => setSolariumPkgSessions(e.target.value)}
                 placeholder="10"
@@ -3272,7 +3268,7 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="decimal"
-                disabled={packageBusy || solariumPkgBusy}
+                disabled={packageBusy || pkgPayModalBusy}
                 value={solariumPkgTotal}
                 onChange={(e) => setSolariumPkgTotal(e.target.value)}
                 placeholder="0"
@@ -3283,37 +3279,19 @@ export function PatientRecord() {
               <input
                 className="input"
                 inputMode="decimal"
-                disabled={packageBusy || solariumPkgBusy}
+                disabled={packageBusy || pkgPayModalBusy}
                 value={solariumPkgPaid}
                 onChange={(e) => setSolariumPkgPaid(e.target.value)}
                 placeholder="0"
               />
             </div>
           </div>
-          {canUsePaymentChannels ? (
-            <PackageCollectionFields
-              dueSyp={Math.max(0, Math.round(parseFloat(solariumPkgPaid) || 0))}
-              payCurrency={solariumPkgPayCurrency}
-              onPayCurrencyChange={setSolariumPkgPayCurrency}
-              amountUsd={solariumPkgPayUsd}
-              onAmountUsdChange={setSolariumPkgPayUsd}
-              channel={solariumPkgChannel}
-              bankName={solariumPkgBankName}
-              onChannelChange={setSolariumPkgChannel}
-              onBankNameChange={setSolariumPkgBankName}
-              usdSypRate={usdSypRate}
-              disabled={packageBusy || solariumPkgBusy}
-              namePrefix="sol-pkg"
-              banks={paymentBanks}
-              banksLoading={paymentBanksLoading}
-            />
-          ) : null}
           <div style={{ marginTop: '0.75rem' }}>
             <label className="form-label">ملاحظات (اختياري)</label>
             <textarea
               className="textarea"
               rows={2}
-              disabled={packageBusy || solariumPkgBusy}
+              disabled={packageBusy || pkgPayModalBusy}
               value={solariumPkgNotes}
               onChange={(e) => setSolariumPkgNotes(e.target.value)}
               placeholder="ملاحظات على الباكج…"
@@ -3325,7 +3303,7 @@ export function PatientRecord() {
             type="button"
             className="btn btn-primary"
             style={{ marginTop: '0.9rem' }}
-            disabled={packageBusy || solariumPkgBusy}
+            disabled={packageBusy || pkgPayModalBusy}
             onClick={async () => {
               if (!id) return
               setSolariumPkgErr('')
@@ -3345,80 +3323,31 @@ export function PatientRecord() {
                 setSolariumPkgErr('المبلغ المدفوع يجب أن يكون بين 0 وإجمالي الباكج.')
                 return
               }
-              if (paidSyp > 0 && canUsePaymentChannels) {
-                const collectErr = validatePackageCollectionBeforeSubmit({
-                  dueSyp: paidSyp,
-                  payCurrency: solariumPkgPayCurrency,
-                  amountUsd: solariumPkgPayUsd,
-                  channel: solariumPkgChannel,
-                  bankName: solariumPkgBankName,
-                  usdSypRate,
-                })
-                if (collectErr) {
-                  setSolariumPkgErr(collectErr)
-                  return
-                }
+              const body: Record<string, unknown> = {
+                department: 'solarium',
+                sessionsCount,
+                packageTotalSyp: totalSyp,
+                paidAmountSyp: paidSyp,
+                notes: solariumPkgNotes.trim(),
               }
-              setSolariumPkgBusy(true)
-              try {
-                const body: Record<string, unknown> = {
-                  department: 'solarium',
-                  sessionsCount,
-                  packageTotalSyp: totalSyp,
-                  paidAmountSyp: paidSyp,
-                  notes: solariumPkgNotes.trim(),
-                }
-                if (paidSyp > 0 && canUsePaymentChannels) {
-                  Object.assign(
-                    body,
-                    packageCollectionBodyExtras({
-                      dueSyp: paidSyp,
-                      payCurrency: solariumPkgPayCurrency,
-                      amountUsd: solariumPkgPayUsd,
-                      channel: solariumPkgChannel,
-                      bankName: solariumPkgBankName,
-                    }),
-                  )
-                }
-                const data = await api<{
-                  package: PatientPackage
-                  summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
-                }>(`/api/patients/${encodeURIComponent(id)}/packages`, {
-                  method: 'POST',
-                  body: JSON.stringify(body),
-                })
-                setPatient((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
-                        prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
-                        departments: Array.from(
-                          new Set([...(prev.departments || []), 'solarium' as const]),
-                        ),
-                        sessionPackages: [...(Array.isArray(prev.sessionPackages) ? prev.sessionPackages : []), data.package],
-                      }
-                    : prev,
-                )
-                setSolariumPkgOk(
-                  paidSyp > 0 ? 'تم إنشاء باكج السولاريوم والتحصيل بنجاح.' : 'تم إنشاء باكج السولاريوم (ذمة على المريض).',
-                )
+              const resetSolariumPackageForm = () => {
+                setSolariumPkgOk('تم حفظ باكج السولاريوم بنجاح.')
                 setSolariumPkgSessions('10')
                 setSolariumPkgTotal('')
                 setSolariumPkgPaid('')
                 setSolariumPkgNotes('')
-                setSolariumPkgChannel('cash')
-                setSolariumPkgBankName('')
-                setSolariumPkgPayCurrency('SYP')
-                setSolariumPkgPayUsd('')
-              } catch (e) {
-                setSolariumPkgErr(e instanceof ApiError ? e.message : 'تعذر إنشاء الباكج')
-              } finally {
-                setSolariumPkgBusy(false)
               }
+              setPkgPayModalErr('')
+              setPkgPayModal({
+                kind: 'solarium',
+                listDueSyp: paidSyp,
+                subtitle: `${patient?.name || 'مريض'} — باكج سولاريوم (${sessionsCount} جلسة)`,
+                body,
+                onSuccess: resetSolariumPackageForm,
+              })
             }}
           >
-            {solariumPkgBusy ? 'جاري الحفظ…' : 'حفظ باكج السولاريوم'}
+            {pkgPayModalBusy ? 'جاري الحفظ…' : 'حفظ باكج السولاريوم'}
           </button>
 
           <h3 className="card-title" style={{ marginTop: '1.35rem', fontSize: '0.95rem' }}>
@@ -3492,7 +3421,7 @@ export function PatientRecord() {
                         type="button"
                         className="btn btn-secondary"
                         style={{ fontSize: '0.78rem' }}
-                        disabled={packageBusy || solariumPkgBusy}
+                        disabled={packageBusy || pkgPayModalBusy}
                         onClick={async () => {
                           if (!id) return
                           setPackageErr('')
@@ -3533,7 +3462,7 @@ export function PatientRecord() {
                       type="button"
                       className="btn btn-secondary"
                       style={{ fontSize: '0.78rem', marginBottom: '0.35rem', color: 'var(--danger)' }}
-                      disabled={packageBusy || solariumPkgBusy}
+                      disabled={packageBusy || pkgPayModalBusy}
                       onClick={async () => {
                         if (!id) return
                         const label =
@@ -3618,7 +3547,7 @@ export function PatientRecord() {
                         <input
                           type="checkbox"
                           checked={s.completedByReception}
-                          disabled={s.completedByReception || packageBusy || solariumPkgBusy}
+                          disabled={s.completedByReception || packageBusy || pkgPayModalBusy}
                           onChange={async (e) => {
                             if (!id) return
                             const nextCompleted = e.target.checked
@@ -3711,8 +3640,8 @@ export function PatientRecord() {
         <div className="card">
           <h2 className="card-title">تسديد ذمم</h2>
           <p style={{ marginTop: '-0.25rem', color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: 1.55 }}>
-            تسجيل مبلغ دفعّه المريض ليُخصم من إجمالي الذمة المفتوحة على ملفه. يُضاف المبلغ فوراً إلى{' '}
-            <strong>الجرد المالي اليومي</strong> ضمن قسم «تسديد ذمم» مع تفاصيل العملية.
+            تسجيل مبلغ دفعّه المريض ليُخصم من إجمالي الذمة المفتوحة على ملفه. يُوزَّع المبلغ على الأقسام (ليزر، جلدية، …) حسب
+            الجلسات التي سبّبت الذمة، ويُضاف إلى مالية القسم المعني في التقارير.
           </p>
           <div
             style={{
@@ -5933,6 +5862,28 @@ export function PatientRecord() {
           </div>
         </div>
       ) : null}
+
+      <BillingPaymentModal
+        open={pkgPayModal != null}
+        onClose={() => {
+          if (pkgPayModalBusy) return
+          setPkgPayModal(null)
+          setPkgPayModalErr('')
+        }}
+        onConfirm={(payment) => confirmPackagePayment(payment)}
+        busy={pkgPayModalBusy}
+        externalError={pkgPayModalErr}
+        title={
+          pkgPayModal?.kind === 'solarium' ? 'تحصيل باكج سولاريوم' : 'تحصيل باكج ليزر'
+        }
+        subtitle={pkgPayModal?.subtitle}
+        listDueSyp={pkgPayModal?.listDueSyp ?? 0}
+        usdSypRate={usdSypRate}
+        clinicBusinessDate={clinicBusinessDate || undefined}
+        itemBusinessDate={clinicBusinessDate || undefined}
+        confirmLabel="تأكيد التحصيل وحفظ الباكج"
+        bankOptions={paymentBanks}
+      />
     </>
   )
 }

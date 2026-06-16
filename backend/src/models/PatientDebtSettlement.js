@@ -14,6 +14,16 @@ const patientDebtSettlementSchema = new mongoose.Schema(
     bankName: { type: String, default: '', trim: true },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     receivedAt: { type: Date, default: () => new Date(), index: true },
+    /** توزيع المبلغ المخصوم من الذمة على الأقسام (ليزر، جلدية، …) */
+    departmentAllocations: [
+      {
+        department: { type: String, required: true, trim: true },
+        amountSyp: { type: Number, required: true, min: 0 },
+        procedureLabel: { type: String, default: '', trim: true },
+        billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+        providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      },
+    ],
   },
   { timestamps: true },
 )

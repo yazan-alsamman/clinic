@@ -18,6 +18,11 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { nextSequence } from '../models/Counter.js'
 import { writeAudit } from '../utils/audit.js'
 import { postLaserSessionIfCompleted } from '../services/postingService.js'
+import {
+  applyLaserDebtAllocationsToSpecialistRows,
+  findDebtSettlementsForBusinessDateFilter,
+  mergeLaserDebtSettlementsIntoPaymentBreakdown,
+} from '../services/patientDebtSettlementAllocation.js'
 import { resolveLaserPackageSessionForBooking } from '../services/laserPackageBooking.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
@@ -968,7 +973,8 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
   const itemFilter = { department: 'laser', status: 'paid', businessDate: businessDateFilter }
   const itemsRaw = await BillingItem.find(itemFilter).select('_id businessDate clinicalSessionId').lean()
   if (!itemsRaw.length) {
-    return empty()
+    const debtSettlements = await findDebtSettlementsForBusinessDateFilter(businessDateFilter)
+    return mergeLaserDebtSettlementsIntoPaymentBreakdown(empty(), debtSettlements)
   }
   const cids = [...new Set(itemsRaw.map((i) => i.clinicalSessionId).filter(Boolean))]
   const completedLasers = await LaserSession.find({
@@ -980,7 +986,8 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
   const completedSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
   const items = itemsRaw.filter((i) => completedSet.has(String(i.clinicalSessionId || '')))
   if (!items.length) {
-    return empty()
+    const debtSettlements = await findDebtSettlementsForBusinessDateFilter(businessDateFilter)
+    return mergeLaserDebtSettlementsIntoPaymentBreakdown(empty(), debtSettlements)
   }
   const itemByPayment = new Map(items.map((i) => [String(i._id), i]))
   const payments = await BillingPayment.find({ billingItemId: { $in: items.map((i) => i._id) } }).lean()
@@ -1022,11 +1029,13 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
   const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))
   const totalsSyp = cashSyp + banks.reduce((s, b) => s + (Math.round(Number(b.totalSyp)) || 0), 0)
   const totalsUsd = round2(cashUsd + banks.reduce((s, b) => s + (Number(b.totalUsd) || 0), 0))
-  return {
+  const base = {
     cash: { totalSyp: cashSyp, totalUsd: round2(cashUsd) },
     banks,
     totals: { totalSyp: totalsSyp, totalUsd: totalsUsd },
   }
+  const debtSettlements = await findDebtSettlementsForBusinessDateFilter(businessDateFilter)
+  return mergeLaserDebtSettlementsIntoPaymentBreakdown(base, debtSettlements)
 }
 
 /** المبلغ المُحصَّل فعلياً للبند (بعد خصم الاستقبال) — يطابق finance.js */
@@ -1053,15 +1062,21 @@ async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
     .select('clinicalSessionId providerUserId paymentId')
     .lean()
 
-  if (!paidItems.length) {
-    const rows = specialists.map((sp) => ({
-      userId: String(sp._id),
-      name: String(sp.name || '').trim() || '—',
-      active: sp.active !== false,
-      totalAmountSyp: 0,
-      sessionsCount: 0,
-    }))
-    return { rows }
+  const baseRows =
+    paidItems.length === 0
+      ? specialists.map((sp) => ({
+          userId: String(sp._id),
+          name: String(sp.name || '').trim() || '—',
+          active: sp.active !== false,
+          totalAmountSyp: 0,
+          sessionsCount: 0,
+        }))
+      : null
+
+  if (baseRows) {
+    const debtSettlements = await findDebtSettlementsForBusinessDateFilter(businessDateFilter)
+    const merged = applyLaserDebtAllocationsToSpecialistRows(baseRows, debtSettlements, specialistIdSet)
+    return { rows: merged.rows, debtSettlementUnassignedSyp: merged.debtSettlementUnassignedSyp }
   }
 
   const clinicalIds = [...new Set(paidItems.map((i) => i.clinicalSessionId).filter(Boolean))]
@@ -1099,25 +1114,32 @@ async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
       sessionsCount: current.sessionsCount,
     }
   })
-  return { rows }
+  const debtSettlements = await findDebtSettlementsForBusinessDateFilter(businessDateFilter)
+  const merged = applyLaserDebtAllocationsToSpecialistRows(rows, debtSettlements, specialistIdSet)
+  return { rows: merged.rows, debtSettlementUnassignedSyp: merged.debtSettlementUnassignedSyp }
 }
 
 laserRouter.get('/finance-daily', requireRoles('super_admin'), async (req, res) => {
   try {
     const date = String(req.query.date || '').trim() || req.businessDate || todayBusinessDate()
-    const { rows } = await buildLaserFinanceRowsBySpecialist(date)
+    const { rows, debtSettlementUnassignedSyp } = await buildLaserFinanceRowsBySpecialist(date)
     const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
     const laserPaymentBreakdown = await buildLaserPaymentBreakdown(date)
     const bdRate = await BusinessDay.findOne({ businessDate: date }).select('usdSypRate').lean()
     const r = bdRate?.usdSypRate
     const usdSypRate =
       r != null && Number.isFinite(Number(r)) && Number(r) > 0 ? Number(r) : null
+    const totalRevenueSyp =
+      Math.round(rows.reduce((s, row) => s + (Number(row.totalAmountSyp) || 0), 0)) +
+      Math.round(Number(debtSettlementUnassignedSyp) || 0)
     res.json({
       date,
       rows,
       topSpecialist: top ? { userId: top.userId, name: top.name, totalAmountSyp: top.totalAmountSyp } : null,
       usdSypRate,
       laserPaymentBreakdown,
+      debtSettlementUnassignedSyp: Math.round(Number(debtSettlementUnassignedSyp) || 0),
+      totalRevenueSyp,
     })
   } catch (e) {
     console.error(e)
@@ -1190,9 +1212,11 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
   try {
     const month = resolveReportMonth(req.query.month, req.businessDate || todayBusinessDate())
     const monthRe = new RegExp(`^${month}-`)
-    const { rows } = await buildLaserFinanceRowsBySpecialist(monthRe)
+    const { rows, debtSettlementUnassignedSyp } = await buildLaserFinanceRowsBySpecialist(monthRe)
     const top = [...rows].sort((a, b) => b.totalAmountSyp - a.totalAmountSyp)[0] || null
-    const totalSessionRevenueSyp = Math.round(rows.reduce((s, r) => s + (Number(r.totalAmountSyp) || 0), 0))
+    const totalSessionRevenueSyp =
+      Math.round(rows.reduce((s, r) => s + (Number(r.totalAmountSyp) || 0), 0)) +
+      Math.round(Number(debtSettlementUnassignedSyp) || 0)
     const expDoc = await LaserMonthlyExpenses.findOne({ month }).select('lines').lean()
     const totalExpensesSyp = sumLaserExpenseLinesSyp(expDoc?.lines)
     const netProfitSyp = totalSessionRevenueSyp - totalExpensesSyp
@@ -1205,6 +1229,7 @@ laserRouter.get('/finance-monthly', requireRoles('super_admin'), async (req, res
       totalExpensesSyp,
       netProfitSyp,
       laserPaymentBreakdown,
+      debtSettlementUnassignedSyp: Math.round(Number(debtSettlementUnassignedSyp) || 0),
     })
   } catch (e) {
     console.error(e)

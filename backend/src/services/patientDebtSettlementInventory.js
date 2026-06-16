@@ -1,7 +1,46 @@
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
+import { normalizeDebtDepartment } from './patientDebtSettlementAllocation.js'
 
 export const DEBT_SETTLEMENT_DEPT_KEY = 'debt_settlement'
 export const DEBT_SETTLEMENT_DEPT_LABEL = 'تسديد ذمم'
+
+const DEPT_LABEL_AR = {
+  laser: 'ليزر',
+  dermatology: 'جلدية',
+  dental: 'أسنان',
+  solarium: 'سولاريوم',
+  skin: 'بشرة',
+  general: 'عام',
+  debt_settlement: DEBT_SETTLEMENT_DEPT_LABEL,
+}
+
+function deptLabel(key) {
+  return DEPT_LABEL_AR[key] ?? key
+}
+
+function roundMoney(n) {
+  return Math.round(Number(n) || 0)
+}
+
+function bumpDeptBucket(rollup, deptKey, channel, amountSyp) {
+  if (!rollup.byDept[deptKey]) {
+    rollup.byDept[deptKey] = {
+      key: deptKey,
+      label: deptLabel(deptKey),
+      transactionCount: 0,
+      cashSyp: 0,
+      cashUsd: 0,
+      bankSyp: 0,
+      bankUsd: 0,
+    }
+  }
+  rollup.byDept[deptKey].transactionCount += 1
+  if (channel === 'cash') {
+    rollup.byDept[deptKey].cashSyp += amountSyp
+  } else {
+    rollup.byDept[deptKey].bankSyp += amountSyp
+  }
+}
 
 export async function fetchPatientDebtSettlementsForDate(businessDate) {
   return PatientDebtSettlement.find({ businessDate })
@@ -35,24 +74,9 @@ export function mergeDebtSettlementsIntoRollup(rollup, settlements) {
       rollup.bankMap.set(bankLabel, cur)
     }
 
-    const deptKey = DEBT_SETTLEMENT_DEPT_KEY
-    if (!rollup.byDept[deptKey]) {
-      rollup.byDept[deptKey] = {
-        key: deptKey,
-        label: DEBT_SETTLEMENT_DEPT_LABEL,
-        transactionCount: 0,
-        cashSyp: 0,
-        cashUsd: 0,
-        bankSyp: 0,
-        bankUsd: 0,
-      }
-    }
-    rollup.byDept[deptKey].transactionCount += 1
-    if (channel === 'cash') {
-      rollup.byDept[deptKey].cashSyp += enteredSyp
-    } else {
-      rollup.byDept[deptKey].bankSyp += enteredSyp
-    }
+    const allocations = Array.isArray(ds.departmentAllocations)
+      ? ds.departmentAllocations.filter((a) => roundMoney(a.amountSyp) > 0)
+      : []
 
     const patientName =
       ds.patientId && typeof ds.patientId === 'object' && 'name' in ds.patientId
@@ -62,6 +86,77 @@ export function mergeDebtSettlementsIntoRollup(rollup, settlements) {
       ds.receivedBy && typeof ds.receivedBy === 'object' && 'name' in ds.receivedBy
         ? String(ds.receivedBy.name || '').trim()
         : ''
+
+    if (allocations.length > 0) {
+      for (const alloc of allocations) {
+        const allocSyp = roundMoney(alloc.amountSyp)
+        const deptKey = normalizeDebtDepartment(alloc.department)
+        bumpDeptBucket(rollup, deptKey, channel, allocSyp)
+
+        const labelPart = String(alloc.procedureLabel || '').trim()
+        const procedureLabel = labelPart
+          ? `تسديد ذمة (${deptLabel(deptKey)}): ${labelPart}`
+          : `تسديد ذمة — ${deptLabel(deptKey)}`
+
+        rollup.transactions.push({
+          billingItemId: alloc.billingItemId ? String(alloc.billingItemId) : '',
+          paymentId: `debt-settlement-${String(ds._id)}-${deptKey}`,
+          transactionKind: 'debt_settlement',
+          paidAt: ds.receivedAt
+            ? new Date(ds.receivedAt).toISOString()
+            : ds.createdAt
+              ? new Date(ds.createdAt).toISOString()
+              : null,
+          patientName: patientName || '—',
+          providerName: '—',
+          receivedByName: receivedByName || '—',
+          department: deptKey,
+          departmentLabel: deptLabel(deptKey),
+          procedureLabel,
+          paymentChannel: channel,
+          bankName: channel === 'bank' ? bankLabel : '',
+          payCurrency: 'SYP',
+          receivedAmountSyp: allocSyp,
+          receivedAmountUsd: 0,
+          amountDueSyp: allocSyp,
+          settlementDeltaSyp: 0,
+          patientRefundSyp: 0,
+          patientRefundUsd: 0,
+        })
+      }
+      if (extraToCreditSyp > 0) {
+        bumpDeptBucket(rollup, DEBT_SETTLEMENT_DEPT_KEY, channel, extraToCreditSyp)
+        rollup.transactions.push({
+          billingItemId: '',
+          paymentId: `debt-settlement-${String(ds._id)}-credit`,
+          transactionKind: 'debt_settlement',
+          paidAt: ds.receivedAt
+            ? new Date(ds.receivedAt).toISOString()
+            : ds.createdAt
+              ? new Date(ds.createdAt).toISOString()
+              : null,
+          patientName: patientName || '—',
+          providerName: '—',
+          receivedByName: receivedByName || '—',
+          department: DEBT_SETTLEMENT_DEPT_KEY,
+          departmentLabel: DEBT_SETTLEMENT_DEPT_LABEL,
+          procedureLabel: `فائض تسديد ذمة للرصيد الإضافي: ${extraToCreditSyp.toLocaleString('ar-SY')} ل.س`,
+          paymentChannel: channel,
+          bankName: channel === 'bank' ? bankLabel : '',
+          payCurrency: 'SYP',
+          receivedAmountSyp: extraToCreditSyp,
+          receivedAmountUsd: 0,
+          amountDueSyp: 0,
+          settlementDeltaSyp: extraToCreditSyp,
+          patientRefundSyp: 0,
+          patientRefundUsd: 0,
+        })
+      }
+      continue
+    }
+
+    const deptKey = DEBT_SETTLEMENT_DEPT_KEY
+    bumpDeptBucket(rollup, deptKey, channel, enteredSyp)
 
     const procedureParts = [`تسديد ذمة — ${enteredSyp.toLocaleString('ar-SY')} ل.س`]
     if (appliedToDebtSyp > 0) {

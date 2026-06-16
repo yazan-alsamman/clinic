@@ -13,14 +13,12 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { patientToDto } from '../utils/dto.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
-import {
-  recordBillingStraightPayment,
-  resolvePackageCollectionFromBody,
-} from '../services/recordBillingStraightCashSyp.js'
+import { completeBillingItemPayment } from '../services/billingPaymentCompletion.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
+import { buildDepartmentAllocationsForSettlement } from '../services/patientDebtSettlementAllocation.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
 
@@ -151,6 +149,17 @@ async function nextSequentialFileNumber() {
 
 function canManagePackages(role) {
   return role === 'super_admin' || role === 'reception'
+}
+
+/** هل طلب الباكج يتضمن تحصيلاً نقدياً فعلياً (مبلغ مستلم > 0)؟ */
+function hasPackagePaymentCollection(body) {
+  const payCurrency = String(body?.payCurrency || 'SYP').trim().toUpperCase()
+  if (payCurrency === 'USD') {
+    const usd = Number(body?.amountUsd)
+    return Number.isFinite(usd) && usd > 0
+  }
+  const syp = Number(body?.amountSyp)
+  return Number.isFinite(syp) && syp > 0
 }
 
 /** جلسة باكج مُستهلكة أو مربوطة بعلاج/تحصيل */
@@ -811,6 +820,7 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
 
     const businessDate = todayBusinessDate()
     const receivedAt = new Date()
+    const departmentAllocations = await buildDepartmentAllocationsForSettlement(p._id, appliedToDebtSyp)
     const debtSettlement = await PatientDebtSettlement.create({
       patientId: p._id,
       businessDate,
@@ -823,6 +833,7 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       bankName,
       receivedBy: req.user._id,
       receivedAt,
+      departmentAllocations,
     })
 
     const outcome =
@@ -848,6 +859,7 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         appliedToDebtSyp,
         extraToCreditSyp,
         outcome,
+        departmentAllocations,
       },
     })
 
@@ -863,6 +875,11 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         extraToCreditSyp,
         outcome,
         businessDate,
+        departmentAllocations: departmentAllocations.map((a) => ({
+          department: a.department,
+          amountSyp: a.amountSyp,
+          procedureLabel: a.procedureLabel || '',
+        })),
       },
       summary: {
         outstandingDebtSyp: debtAfter,
@@ -1050,7 +1067,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       let billingPaid = false
       let payResult = null
       try {
-        if (paidAmountSyp > 0) {
+        if (paidAmountSyp > 0 && hasPackagePaymentCollection(req.body)) {
           const procedureDescription = `سولاريوم — باكج مسبق الدفع (${sessionsCount} جلسة)${patientName ? ` — ${patientName}` : ''}`
           cs = await ClinicalSession.create({
             patientId: p._id,
@@ -1083,26 +1100,14 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
           cs.billingItemId = bi._id
           await cs.save()
 
-          let collection
           try {
-            collection = await resolvePackageCollectionFromBody(req.body, {
-              dueSyp: paidAmountSyp,
-              businessDate,
+            payResult = await completeBillingItemPayment(bi, req.body, req.user, {
+              skipPatientDebtUpdate: true,
             })
-          } catch (chErr) {
-            res.status(400).json({ error: String(chErr?.message || chErr) })
+          } catch (payErr) {
+            res.status(400).json({ error: String(payErr?.message || payErr) })
             return
           }
-          payResult = await recordBillingStraightPayment({
-            billingItemId: bi._id,
-            receivedByUser: req.user,
-            paymentChannel: collection.paymentChannel,
-            bankName: collection.bankName,
-            payCurrency: collection.payCurrency,
-            amountSyp: collection.amountSyp,
-            amountUsd: collection.amountUsd,
-            skipPatientDebtUpdate: true,
-          })
           billingPaid = true
         }
 
@@ -1266,7 +1271,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     let purchaseBi = null
     let billingPaid = false
     try {
-      if (paidAmountSyp > 0) {
+      if (paidAmountSyp > 0 && hasPackagePaymentCollection(req.body)) {
         const patientName = String(p.name || '').trim()
         const procedureDescription = `ليزر — باكج مسبق الدفع (${sessionsCount} جلسة)${title ? ` — ${title}` : ''}${
           patientName ? ` — ${patientName}` : ''
@@ -1300,26 +1305,14 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         })
         purchaseCs.billingItemId = purchaseBi._id
         await purchaseCs.save()
-        let collection
         try {
-          collection = await resolvePackageCollectionFromBody(req.body, {
-            dueSyp: paidAmountSyp,
-            businessDate,
+          await completeBillingItemPayment(purchaseBi, req.body, req.user, {
+            skipPatientDebtUpdate: true,
           })
-        } catch (chErr) {
-          res.status(400).json({ error: String(chErr?.message || chErr) })
+        } catch (payErr) {
+          res.status(400).json({ error: String(payErr?.message || payErr) })
           return
         }
-        await recordBillingStraightPayment({
-          billingItemId: purchaseBi._id,
-          receivedByUser: req.user,
-          paymentChannel: collection.paymentChannel,
-          bankName: collection.bankName,
-          payCurrency: collection.payCurrency,
-          amountSyp: collection.amountSyp,
-          amountUsd: collection.amountUsd,
-          skipPatientDebtUpdate: true,
-        })
         billingPaid = true
       }
 

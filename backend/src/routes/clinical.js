@@ -682,6 +682,25 @@ function formatSessionTime(iso) {
   return d.toLocaleTimeString('ar-SY', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
+/**
+ * مدة الجلسة المعروضة — تبدأ من وقت تسجيل الجلسة السريرية (نفس عمود الساعة).
+ * لجلسات الليزر المربوطة: نهاية = آخر تحديث للجلسة السريرية أو سجل الليزر (أيهما أحدث)،
+ * دون استخدام createdAt القديم لسجل الليزر الذي قد يُنشأ قبل إتمام الجلسة بساعات.
+ */
+function computeSessionDurationMs(clinicalRow, laser) {
+  const start = new Date(clinicalRow.createdAt).getTime()
+  if (!Number.isFinite(start)) return 0
+  const clinicalEnd = new Date(clinicalRow.updatedAt).getTime()
+  let end = Number.isFinite(clinicalEnd) ? clinicalEnd : start
+  if (laser) {
+    const laserEnd = new Date(laser.updatedAt).getTime()
+    if (Number.isFinite(laserEnd) && laserEnd >= start) {
+      end = Math.max(end, laserEnd)
+    }
+  }
+  return Math.max(0, end - start)
+}
+
 /** ملخص جلسات يوم عمل واحد — جميع الأقسام (لمدير النظام فقط) */
 clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async (req, res) => {
   try {
@@ -707,12 +726,7 @@ clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async 
 
     const sessions = rows.map((r) => {
       const laser = r.laserSessionId ? laserById.get(String(r.laserSessionId)) : null
-      let durationMs = 0
-      if (laser) {
-        durationMs = new Date(laser.updatedAt).getTime() - new Date(laser.createdAt).getTime()
-      } else {
-        durationMs = new Date(r.updatedAt).getTime() - new Date(r.createdAt).getTime()
-      }
+      const durationMs = computeSessionDurationMs(r, laser)
       const cn = String(r.notes || '').trim()
       const ln = laser ? String(laser.notes || '').trim() : ''
       const notesCombined = [cn, ln].filter(Boolean).join(' — ') || '—'

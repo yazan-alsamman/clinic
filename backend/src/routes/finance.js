@@ -6,6 +6,7 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { ExpenseEntry, EXPENSE_CATEGORIES } from '../models/ExpenseEntry.js'
+import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
 
@@ -171,6 +172,22 @@ function sumRevenueByDepartment(items, payById) {
     const dep = bi.department
     if (!Object.prototype.hasOwnProperty.call(rev, dep)) continue
     rev[dep] += collectedForItem(bi, payById)
+  }
+  for (const k of Object.keys(rev)) rev[k] = Math.round(rev[k])
+  return rev
+}
+
+async function sumDebtSettlementRevenueByDepartment({ from, to }) {
+  const rev = { laser: 0, dermatology: 0, skin: 0, dental: 0, solarium: 0 }
+  const settlements = await PatientDebtSettlement.find({
+    businessDate: { $gte: from, $lte: to },
+  }).lean()
+  for (const ds of settlements) {
+    for (const alloc of ds.departmentAllocations || []) {
+      const dep = alloc.department
+      if (!Object.prototype.hasOwnProperty.call(rev, dep)) continue
+      rev[dep] += Math.round(Number(alloc.amountSyp) || 0)
+    }
   }
   for (const k of Object.keys(rev)) rev[k] = Math.round(rev[k])
   return rev
@@ -391,6 +408,11 @@ financeRouter.get('/dashboard', async (req, res) => {
     }
 
     const revenueByDept = sumRevenueByDepartment(items, payById)
+    const debtRevByDept = await sumDebtSettlementRevenueByDepartment(range)
+    for (const k of Object.keys(revenueByDept)) {
+      if (deptFilter && deptFilter !== 'general' && k !== deptFilter) continue
+      revenueByDept[k] = Math.round((revenueByDept[k] || 0) + (debtRevByDept[k] || 0))
+    }
     let totalRevenueSyp = Math.round(Object.values(revenueByDept).reduce((a, n) => a + n, 0))
     let overallExpensesTablesSyp = totalExpensesTablesSyp
     if (deptFilter === 'general') {

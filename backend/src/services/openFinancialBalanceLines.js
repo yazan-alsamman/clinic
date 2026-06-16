@@ -173,6 +173,38 @@ export async function loadBillingItemsAndPaymentsForPatients(patientIds) {
   return { items, payments }
 }
 
+/** سطور الذمة المفتوحة على ملف مريض (جلسات ثم باكجات ثم غير مربوطة) — لتوزيع تسديد الذمة */
+export function buildPatientOpenDebtLinesFromData(patient, items, payments) {
+  const entries = buildLedgerEntriesFromBilling(items, payments)
+  const { openDebtLines, remainingDebt } = computeOpenFinancialLineBuckets(
+    entries,
+    Number(patient.outstandingDebtSyp) || 0,
+    Number(patient.prepaidCreditSyp) || 0,
+  )
+  const billingPart = openDebtLines.map((line) => ({ ...line, source: 'billing' }))
+  const { packageDebtLines, remainingDebtAfterPackages } = allocatePackageDebtRemainderLines(
+    remainingDebt,
+    Array.isArray(patient.sessionPackages) ? patient.sessionPackages : [],
+  )
+  const synthetic =
+    remainingDebtAfterPackages > 0
+      ? [
+          {
+            paymentEntryId: '',
+            billingItemId: '',
+            clinicalSessionId: '',
+            department: null,
+            businessDate: '',
+            procedureLabel: 'ذمة غير مربوطة بجلسة أو باكج في السجل',
+            amountSyp: roundMoney(remainingDebtAfterPackages),
+            synthetic: true,
+            source: 'synthetic',
+          },
+        ]
+      : []
+  return [...billingPart, ...packageDebtLines, ...synthetic]
+}
+
 /** patientDocs: lean documents with _id, fileNumber, name, outstandingDebtSyp, prepaidCreditSyp, sessionPackages */
 export async function buildAdminOpenFinancialLines(patientDocs, mode) {
   if (!patientDocs.length) return []
