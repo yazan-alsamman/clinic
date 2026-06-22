@@ -13,6 +13,7 @@ import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate, isValidYmd } from '../utils/date.js'
 import { round2, round6 } from '../utils/money.js'
 import { resolveSolariumPatientDisplayName } from '../services/solariumWalkInDisplay.js'
+import { slotIntervalMinutes } from '../utils/scheduleTime.js'
 
 export const clinicalRouter = Router()
 
@@ -667,12 +668,85 @@ const DEPARTMENT_LABEL_AR = {
   solarium: 'سولاريوم',
 }
 
-function formatDurationFromMs(ms) {
-  if (!Number.isFinite(ms) || ms < 0) return '—'
-  const minutes = Math.floor(ms / 60000)
-  if (minutes < 1) return 'أقل من دقيقة'
-  if (minutes === 1) return '1 دقيقة'
-  return `${minutes} دقيقة`
+function formatDurationMinutes(minutes) {
+  if (!Number.isFinite(minutes) || minutes < 0) return '—'
+  const m = Math.round(minutes)
+  if (m < 1) return 'أقل من دقيقة'
+  if (m === 1) return '1 دقيقة'
+  return `${m} دقيقة`
+}
+
+function bookedSlotDurationMinutes(slot) {
+  if (!slot) return null
+  const iv = slotIntervalMinutes(slot)
+  if (!iv) return null
+  return iv.end - iv.start
+}
+
+function departmentToServiceType(dept) {
+  const map = {
+    laser: 'laser',
+    solarium: 'solarium',
+    skin: 'skin',
+    dental: 'dental',
+    dermatology: 'dermatology',
+  }
+  return map[String(dept || '')] || null
+}
+
+/** استخراج 6 أو 12 من وصف جلسة سولاريوم مثل: سولاريوم — 12 دقيقة — الاسم */
+function parseSolariumMinutesFromProcedure(proc) {
+  const m = String(proc || '').match(/—\s*(\d+)\s*دقيقة/)
+  if (!m) return null
+  const n = parseInt(m[1], 10)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function findBestSlotForClinical(clinicalRow, patientSlots) {
+  if (!patientSlots?.length) return null
+  if (patientSlots.length === 1) return patientSlots[0]
+  const d = clinicalRow.createdAt ? new Date(clinicalRow.createdAt) : null
+  if (!d || Number.isNaN(d.getTime())) return patientSlots[0]
+  const clinicalMinutes = d.getHours() * 60 + d.getMinutes()
+  let best = patientSlots[0]
+  let bestDiff = Infinity
+  for (const slot of patientSlots) {
+    const iv = slotIntervalMinutes(slot)
+    if (!iv) continue
+    const diff = Math.abs(iv.start - clinicalMinutes)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = slot
+    }
+  }
+  return best
+}
+
+function resolveBookedDurationMinutes(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService) {
+  if (clinicalRow.scheduleSlotId) {
+    const d = bookedSlotDurationMinutes(slotsById.get(String(clinicalRow.scheduleSlotId)))
+    if (d != null) return d
+  }
+  if (clinicalRow.laserSessionId) {
+    const d = bookedSlotDurationMinutes(slotsByLaserId.get(String(clinicalRow.laserSessionId)))
+    if (d != null) return d
+  }
+  if (clinicalRow.department === 'solarium') {
+    const parsed = parseSolariumMinutesFromProcedure(clinicalRow.procedureDescription)
+    if (parsed != null) return parsed
+  }
+  const serviceType = departmentToServiceType(clinicalRow.department)
+  const pid = clinicalRow.patientId?._id
+    ? String(clinicalRow.patientId._id)
+    : clinicalRow.patientId
+      ? String(clinicalRow.patientId)
+      : ''
+  if (serviceType && pid) {
+    const slot = findBestSlotForClinical(clinicalRow, slotsByPatientService.get(`${pid}|${serviceType}`) || [])
+    const d = bookedSlotDurationMinutes(slot)
+    if (d != null) return d
+  }
+  return null
 }
 
 function formatSessionTime(iso) {
@@ -680,25 +754,6 @@ function formatSessionTime(iso) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   return d.toLocaleTimeString('ar-SY', { hour: 'numeric', minute: '2-digit', hour12: true })
-}
-
-/**
- * مدة الجلسة المعروضة — تبدأ من وقت تسجيل الجلسة السريرية (نفس عمود الساعة).
- * لجلسات الليزر المربوطة: نهاية = آخر تحديث للجلسة السريرية أو سجل الليزر (أيهما أحدث)،
- * دون استخدام createdAt القديم لسجل الليزر الذي قد يُنشأ قبل إتمام الجلسة بساعات.
- */
-function computeSessionDurationMs(clinicalRow, laser) {
-  const start = new Date(clinicalRow.createdAt).getTime()
-  if (!Number.isFinite(start)) return 0
-  const clinicalEnd = new Date(clinicalRow.updatedAt).getTime()
-  let end = Number.isFinite(clinicalEnd) ? clinicalEnd : start
-  if (laser) {
-    const laserEnd = new Date(laser.updatedAt).getTime()
-    if (Number.isFinite(laserEnd) && laserEnd >= start) {
-      end = Math.max(end, laserEnd)
-    }
-  }
-  return Math.max(0, end - start)
 }
 
 /** ملخص جلسات يوم عمل واحد — جميع الأقسام (لمدير النظام فقط) */
@@ -716,17 +771,56 @@ clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async 
       .lean()
 
     const laserSessionIds = [...new Set(rows.map((r) => r.laserSessionId).filter(Boolean).map(String))]
-    const laserById = new Map()
-    if (laserSessionIds.length > 0) {
-      const lasers = await LaserSession.find({ _id: { $in: laserSessionIds } })
-        .select('createdAt updatedAt notes')
-        .lean()
-      for (const l of lasers) laserById.set(String(l._id), l)
+    const scheduleSlotIds = [...new Set(rows.map((r) => r.scheduleSlotId).filter(Boolean).map(String))]
+    const patientIds = [
+      ...new Set(
+        rows
+          .map((r) => (r.patientId?._id ? String(r.patientId._id) : r.patientId ? String(r.patientId) : ''))
+          .filter(Boolean),
+      ),
+    ]
+
+    const slotQueryOr = []
+    if (laserSessionIds.length) slotQueryOr.push({ laserSessionId: { $in: laserSessionIds } })
+    if (scheduleSlotIds.length) slotQueryOr.push({ _id: { $in: scheduleSlotIds } })
+    if (patientIds.length) {
+      slotQueryOr.push({
+        patientId: { $in: patientIds },
+        serviceType: { $in: ['laser', 'solarium', 'skin', 'dental', 'dermatology'] },
+      })
+    }
+
+    const [lasers, scheduleSlots] = await Promise.all([
+      laserSessionIds.length
+        ? LaserSession.find({ _id: { $in: laserSessionIds } })
+            .select('notes')
+            .lean()
+        : [],
+      slotQueryOr.length
+        ? ScheduleSlot.find({ businessDate, $or: slotQueryOr })
+            .select('time endTime laserSessionId patientId serviceType')
+            .lean()
+        : [],
+    ])
+
+    const laserById = new Map(lasers.map((l) => [String(l._id), l]))
+    const slotsById = new Map(scheduleSlots.map((s) => [String(s._id), s]))
+    const slotsByLaserId = new Map(
+      scheduleSlots.filter((s) => s.laserSessionId).map((s) => [String(s.laserSessionId), s]),
+    )
+    const slotsByPatientService = new Map()
+    for (const s of scheduleSlots) {
+      const pid = s.patientId ? String(s.patientId) : ''
+      const st = String(s.serviceType || '')
+      if (!pid || !st) continue
+      const key = `${pid}|${st}`
+      if (!slotsByPatientService.has(key)) slotsByPatientService.set(key, [])
+      slotsByPatientService.get(key).push(s)
     }
 
     const sessions = rows.map((r) => {
       const laser = r.laserSessionId ? laserById.get(String(r.laserSessionId)) : null
-      const durationMs = computeSessionDurationMs(r, laser)
+      const durationMinutes = resolveBookedDurationMinutes(r, slotsById, slotsByLaserId, slotsByPatientService)
       const cn = String(r.notes || '').trim()
       const ln = laser ? String(laser.notes || '').trim() : ''
       const notesCombined = [cn, ln].filter(Boolean).join(' — ') || '—'
@@ -741,7 +835,7 @@ clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async 
         patientName,
         providerName: r.providerUserId?.name || '—',
         timeLabel: formatSessionTime(r.createdAt),
-        durationLabel: formatDurationFromMs(durationMs),
+        durationLabel: durationMinutes != null ? formatDurationMinutes(durationMinutes) : '—',
         notes: notesCombined,
       }
     })
