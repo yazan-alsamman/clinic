@@ -21,6 +21,7 @@ const patientDebtSettlementSchema = new mongoose.Schema(
         amountSyp: { type: Number, required: true, min: 0 },
         procedureLabel: { type: String, default: '', trim: true },
         billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+        clinicalSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalSession', default: null },
         providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       },
     ],

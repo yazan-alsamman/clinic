@@ -9,20 +9,17 @@ import { ExpenseEntry, EXPENSE_CATEGORIES } from '../models/ExpenseEntry.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
+import {
+  addDermatologyRevenueToTotals,
+  applyDermatologyDebtSettlements,
+  createEmptyDermatologyShareTotals,
+  finalizeDermatologyShares,
+  loadDermatologyDebtSettlementLookup,
+} from '../services/dermatologyFinanceShares.js'
 
 export const financeRouter = Router()
 
 financeRouter.use(authMiddleware, loadBusinessDay, requireRoles('super_admin'))
-
-function providerNameMatchesLora(name) {
-  const raw = String(name || '').trim()
-  const s = raw.toLowerCase()
-  return /لورا|laura|lora/.test(raw) || s.includes('lora') || s.includes('laura')
-}
-
-function providerNameMatchesSamer(name) {
-  return /سامر|samer/.test(String(name || '').trim())
-}
 
 function parseYmd(raw) {
   const s = String(raw || '').trim().slice(0, 10)
@@ -112,58 +109,24 @@ function collectedForItem(bi, payById) {
   return Math.round(Number(pay?.amountSyp) || 0)
 }
 
-function computeDermatologyShares(items, sessionById, payById) {
+function computeDermatologyShares(items, sessionById, payById, debtSettlements = [], debtLookup = null) {
   const sharePercent = 50
-  let loraRevenueSyp = 0
-  let loraMaterialSyp = 0
-  let samerRevenueSyp = 0
-  let samerMaterialSyp = 0
-  let otherRevenueSyp = 0
-  let otherMaterialSyp = 0
-  let totalMaterialSyp = 0
+  const totals = createEmptyDermatologyShareTotals()
 
   for (const bi of items) {
     if (bi.department !== 'dermatology') continue
     const collected = collectedForItem(bi, payById)
     const cs = sessionById.get(String(bi.clinicalSessionId))
     const matTotal = Math.round(Number(cs?.materialCostSypTotal) || 0)
-    totalMaterialSyp += matTotal
     const providerName = String(bi.providerUserId?.name || '').trim()
-
-    if (providerNameMatchesLora(providerName)) {
-      loraRevenueSyp += collected
-      loraMaterialSyp += matTotal
-    } else if (providerNameMatchesSamer(providerName)) {
-      samerRevenueSyp += collected
-      samerMaterialSyp += matTotal
-    } else {
-      otherRevenueSyp += collected
-      otherMaterialSyp += matTotal
-    }
+    addDermatologyRevenueToTotals(totals, collected, matTotal, providerName)
   }
 
-  const poolLora = Math.max(0, loraRevenueSyp - loraMaterialSyp)
-  const poolSamer = Math.max(0, samerRevenueSyp - samerMaterialSyp)
-  const loraPayableSyp = Math.round(poolLora * (sharePercent / 100))
-  const samerPayableSyp = Math.round(poolSamer * (sharePercent / 100))
-  const loraClinicHalfSyp = Math.round(poolLora - loraPayableSyp)
-  const samerClinicHalfSyp = Math.round(poolSamer - samerPayableSyp)
-  const otherNetSyp = Math.max(0, otherRevenueSyp - otherMaterialSyp)
-  const clinicNetSyp = Math.round(loraClinicHalfSyp + samerClinicHalfSyp + otherNetSyp)
-
-  return {
-    sharePercent,
-    loraPayableSyp,
-    samerPayableSyp,
-    loraSessionRevenueSyp: Math.round(loraRevenueSyp),
-    loraMaterialSyp: Math.round(loraMaterialSyp),
-    samerSessionRevenueSyp: Math.round(samerRevenueSyp),
-    samerMaterialSyp: Math.round(samerMaterialSyp),
-    totalMaterialSyp: Math.round(totalMaterialSyp),
-    clinicNetSyp,
-    otherSessionRevenueSyp: Math.round(otherRevenueSyp),
-    otherMaterialSyp: Math.round(otherMaterialSyp),
+  if (debtSettlements.length > 0 && debtLookup) {
+    applyDermatologyDebtSettlements(totals, debtSettlements, debtLookup)
   }
+
+  return finalizeDermatologyShares(totals, sharePercent)
 }
 
 function sumRevenueByDepartment(items, payById) {
@@ -177,12 +140,9 @@ function sumRevenueByDepartment(items, payById) {
   return rev
 }
 
-async function sumDebtSettlementRevenueByDepartment({ from, to }) {
+function sumDebtSettlementRevenueFromSettlements(settlements) {
   const rev = { laser: 0, dermatology: 0, skin: 0, dental: 0, solarium: 0 }
-  const settlements = await PatientDebtSettlement.find({
-    businessDate: { $gte: from, $lte: to },
-  }).lean()
-  for (const ds of settlements) {
+  for (const ds of settlements || []) {
     for (const alloc of ds.departmentAllocations || []) {
       const dep = alloc.department
       if (!Object.prototype.hasOwnProperty.call(rev, dep)) continue
@@ -191,6 +151,13 @@ async function sumDebtSettlementRevenueByDepartment({ from, to }) {
   }
   for (const k of Object.keys(rev)) rev[k] = Math.round(rev[k])
   return rev
+}
+
+async function sumDebtSettlementRevenueByDepartment({ from, to }) {
+  const settlements = await PatientDebtSettlement.find({
+    businessDate: { $gte: from, $lte: to },
+  }).lean()
+  return sumDebtSettlementRevenueFromSettlements(settlements)
 }
 
 function laserSpecialistTop(items, payById) {
@@ -407,8 +374,13 @@ financeRouter.get('/dashboard', async (req, res) => {
       payById = bundle.payById
     }
 
+    const debtSettlements = await PatientDebtSettlement.find({
+      businessDate: { $gte: range.from, $lte: range.to },
+    }).lean()
+    const debtLookup = await loadDermatologyDebtSettlementLookup(debtSettlements)
+
     const revenueByDept = sumRevenueByDepartment(items, payById)
-    const debtRevByDept = await sumDebtSettlementRevenueByDepartment(range)
+    const debtRevByDept = sumDebtSettlementRevenueFromSettlements(debtSettlements)
     for (const k of Object.keys(revenueByDept)) {
       if (deptFilter && deptFilter !== 'general' && k !== deptFilter) continue
       revenueByDept[k] = Math.round((revenueByDept[k] || 0) + (debtRevByDept[k] || 0))
@@ -422,7 +394,7 @@ financeRouter.get('/dashboard', async (req, res) => {
       overallExpensesTablesSyp = Math.round(expenseTotals[deptFilter] || 0)
     }
 
-    const dermShares = computeDermatologyShares(items, sessionById, payById)
+    const dermShares = computeDermatologyShares(items, sessionById, payById, debtSettlements, debtLookup)
 
     const laserRev = revenueByDept.laser
     const laserExp = expenseTotals.laser || 0

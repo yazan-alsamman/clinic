@@ -161,7 +161,9 @@ export function allocatePackageCreditRemainderLines(remainingCredit, sessionPack
 export async function loadBillingItemsAndPaymentsForPatients(patientIds) {
   if (!patientIds.length) return { items: [], payments: [] }
   const items = await BillingItem.find({ patientId: { $in: patientIds } })
-    .select('_id patientId department clinicalSessionId amountDueSyp effectiveAmountDueSyp businessDate procedureLabel')
+    .select(
+      '_id patientId department clinicalSessionId providerUserId amountDueSyp effectiveAmountDueSyp businessDate procedureLabel',
+    )
     .lean()
   const itemIds = items.map((i) => i._id)
   const payments =

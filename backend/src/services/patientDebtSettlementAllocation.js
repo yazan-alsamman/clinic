@@ -33,6 +33,7 @@ export function allocateAppliedDebtAcrossLines(openLines, appliedToDebtSyp, item
       amountSyp: take,
       procedureLabel: String(line.procedureLabel || '').trim(),
       billingItemId: bi?._id || line.billingItemId || null,
+      clinicalSessionId: bi?.clinicalSessionId || line.clinicalSessionId || null,
       providerUserId: bi?.providerUserId || null,
     })
   }
