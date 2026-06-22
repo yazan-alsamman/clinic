@@ -309,13 +309,21 @@ export function BillingPage() {
         return
       }
     }
-    if (payChannel === 'bank' && !payBankName.trim()) {
-      setErr('اختر البنك ثم أدخل المبلغ المستلم.')
-      return
+    if (payChannel === 'bank') {
+      const sypCheck = Number(normalizeDecimalDigits(paySyp))
+      const usdCheck = parseFloat(normalizeDecimalDigits(payUsd))
+      const hasCollection =
+        payCurrency === 'SYP'
+          ? Number.isFinite(sypCheck) && sypCheck > 0
+          : Number.isFinite(usdCheck) && usdCheck > 0
+      if (hasCollection && !payBankName.trim()) {
+        setErr('اختر البنك ثم أدخل المبلغ المستلم.')
+        return
+      }
     }
     if (payCurrency === 'SYP') {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      if (!Number.isFinite(syp) || syp <= 0) {
+      if (!Number.isFinite(syp) || syp < 0) {
         setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
         return
       }
@@ -396,7 +404,7 @@ export function BillingPage() {
           paymentChannel: payChannel,
           bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
           amountSyp:
-            payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
+            payCurrency === 'SYP' && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
           amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
           discountPercent: discountPct > 0 ? discountPct : 0,
           ...refundPayload,
@@ -439,13 +447,21 @@ export function BillingPage() {
         return
       }
     }
-    if (payChannel === 'bank' && !payBankName.trim()) {
-      setErr('اختر البنك ثم أدخل المبلغ المستلم.')
-      return
+    if (payChannel === 'bank') {
+      const sypCheck = Number(normalizeDecimalDigits(paySyp))
+      const usdCheck = parseFloat(normalizeDecimalDigits(payUsd))
+      const hasCollection =
+        payCurrency === 'SYP'
+          ? Number.isFinite(sypCheck) && sypCheck > 0
+          : Number.isFinite(usdCheck) && usdCheck > 0
+      if (hasCollection && !payBankName.trim()) {
+        setErr('اختر البنك ثم أدخل المبلغ المستلم.')
+        return
+      }
     }
     if (payCurrency === 'SYP') {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      if (!Number.isFinite(syp) || syp <= 0) {
+      if (!Number.isFinite(syp) || syp < 0) {
         setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
         return
       }
@@ -526,7 +542,7 @@ export function BillingPage() {
           paymentChannel: payChannel,
           bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
           amountSyp:
-            payCurrency === 'SYP' && Number.isFinite(syp) && syp > 0 ? Math.round(syp) : undefined,
+            payCurrency === 'SYP' && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
           amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
           discountPercent: discountPct > 0 ? discountPct : 0,
           ...refundPayload,
@@ -1245,8 +1261,17 @@ export function BillingPage() {
               let usdParsed = 0
               if (payCurrency === 'SYP') {
                 const syp = Number(normalizeDecimalDigits(paySyp))
-                grossSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
+                if (!Number.isFinite(syp) || syp < 0) return null
+                grossSyp = Math.round(syp)
                 netSyp = grossSyp
+                if (grossSyp === 0) {
+                  return (
+                    <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
+                      لن يُحصَّل مبلغ — سيُسجَّل كامل المستحق ({due.toLocaleString('ar-SY')} ل.س) كذمة على
+                      المريض.
+                    </p>
+                  )
+                }
               } else {
                 const usd = parseFloat(normalizeDecimalDigits(payUsd))
                 usdParsed = usd

@@ -37,10 +37,11 @@ export async function listActivePaymentBanks() {
  * @param {Record<string, unknown>} body
  * @returns {Promise<{ paymentChannel: 'cash' | 'bank', bankName: string }>}
  */
-export async function resolvePaymentChannelFromBody(body) {
+export async function resolvePaymentChannelFromBody(body, opts = {}) {
   const paymentChannel = String(body?.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
   let bankName = ''
-  if (paymentChannel === 'bank') {
+  const requireBank = opts.requireBank !== false
+  if (paymentChannel === 'bank' && requireBank) {
     bankName = String(body?.bankName || '').trim()
     const allowedNames = new Set((await listActivePaymentBanks()).map((b) => b.name))
     if (!bankName || !allowedNames.has(bankName)) {

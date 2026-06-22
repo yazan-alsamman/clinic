@@ -252,8 +252,10 @@ export function computePaymentSettlementPreview(opts: {
   const { form, payPreviewRate } = opts
   if (form.payCurrency === 'SYP') {
     const syp = Number(normalizeDecimalDigits(form.paySyp))
-    grossSyp = Number.isFinite(syp) && syp > 0 ? Math.round(syp) : 0
+    if (!Number.isFinite(syp) || syp < 0) return { kind: 'none' }
+    grossSyp = Math.round(syp)
     netSyp = grossSyp
+    if (grossSyp === 0) return { kind: 'under', delta: -due }
   } else {
     const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
     usdParsed = usd

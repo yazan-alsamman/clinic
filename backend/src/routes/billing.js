@@ -21,6 +21,11 @@ import {
 } from '../services/patientDebtSettlementInventory.js'
 import { resolveBillingPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 import { BILLING_PAYMENT_DUPLICATE_MSG, isMongoDuplicateKeyError } from '../utils/mongoErrors.js'
+import {
+  assertBillingCollectionAmountValid,
+  isZeroSypCollectionAllowed,
+  parseSypReceivedFromBody,
+} from '../services/billingPaymentCompletion.js'
 
 /** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
 function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
@@ -1025,23 +1030,6 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     const payCurrencyRaw = String(body.payCurrency || 'SYP').trim().toUpperCase()
     const payCurrency = payCurrencyRaw === 'USD' ? 'USD' : 'SYP'
 
-    const paymentChannel = String(body.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
-    let bankName = ''
-    if (paymentChannel === 'bank') {
-      bankName = String(body.bankName || '').trim()
-      const settings = await getOrCreatePaymentSettings()
-      const allowedNames = new Set(
-        (settings.banks || [])
-          .filter((b) => b.active !== false)
-          .map((b) => String(b.name || '').trim())
-          .filter(Boolean),
-      )
-      if (!bankName || !allowedNames.has(bankName)) {
-        res.status(400).json({ error: 'اختر البنك من القائمة المعتمدة' })
-        return
-      }
-    }
-
     let receivedSyp = 0
     let receivedUsd = 0
     let patientRefundSyp = 0
@@ -1113,12 +1101,12 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         return
       }
     } else {
-      const amountSypRaw = Number(body.amountSyp)
-      receivedSyp = Number.isFinite(amountSypRaw) && amountSypRaw > 0 ? Math.round(amountSypRaw) : 0
-    }
-    if (receivedSyp <= 0) {
-      res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
-      return
+      const parsed = parseSypReceivedFromBody(body)
+      if (!parsed.ok) {
+        res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
+        return
+      }
+      receivedSyp = parsed.receivedSyp
     }
 
     /** صافٍ ما بقي لدى العيادة بعد الترجيع (للمقارنة مع المستحق والرصيد/الذمة) — حقول المستلم في السجل تبقى إجمالية */
@@ -1131,9 +1119,29 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
             usdSypRateUsed,
           )
         : receivedSyp
-    if (netReceivedSyp <= 0) {
-      res.status(400).json({ error: 'صافي المبلغ بعد الترجيع غير صالح — يجب أن يبقى للعيادة مبلغ موجب يغطي التحصيل.' })
+    try {
+      assertBillingCollectionAmountValid({ receivedSyp, netReceivedSyp, payCurrency, dueForSettlement })
+    } catch (amtErr) {
+      res.status(400).json({ error: String(amtErr?.message || amtErr) })
       return
+    }
+
+    const paymentChannel = String(body.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
+    let bankName = ''
+    const requireBank = !isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement)
+    if (paymentChannel === 'bank' && requireBank) {
+      bankName = String(body.bankName || '').trim()
+      const settings = await getOrCreatePaymentSettings()
+      const allowedNames = new Set(
+        (settings.banks || [])
+          .filter((b) => b.active !== false)
+          .map((b) => String(b.name || '').trim())
+          .filter(Boolean),
+      )
+      if (!bankName || !allowedNames.has(bankName)) {
+        res.status(400).json({ error: 'اختر البنك من القائمة المعتمدة' })
+        return
+      }
     }
 
     const method = paymentChannel === 'bank' ? 'bank' : 'cash'

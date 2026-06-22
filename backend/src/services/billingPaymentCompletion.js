@@ -52,6 +52,31 @@ function mapDiscountError(err) {
   return null
 }
 
+/** تحصيل 0 ل.س مسموح — يُسجَّل كامل المستحق كذمة على المريض */
+export function parseSypReceivedFromBody(body) {
+  const raw = Number(body?.amountSyp)
+  if (!Number.isFinite(raw) || raw < 0) return { ok: false }
+  return { ok: true, receivedSyp: Math.round(raw) }
+}
+
+export function isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement) {
+  return receivedSyp === 0 && netReceivedSyp === 0 && dueForSettlement > 0
+}
+
+export function assertBillingCollectionAmountValid({ receivedSyp, netReceivedSyp, payCurrency, dueForSettlement }) {
+  const zeroAllowed = payCurrency === 'SYP' && isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement)
+  if (!zeroAllowed && receivedSyp <= 0) {
+    const err = new Error('مبلغ الدفع غير صالح')
+    err.code = 'INVALID_AMOUNT'
+    throw err
+  }
+  if (!zeroAllowed && netReceivedSyp <= 0) {
+    const err = new Error('صافي المبلغ بعد الترجيع غير صالح — يجب أن يبقى للعيادة مبلغ موجب يغطي التحصيل.')
+    err.code = 'INVALID_NET'
+    throw err
+  }
+}
+
 /**
  * تأكيد دفع بند فوترة معلّق — نفس منطق POST /api/billing/:id/complete-payment
  *
@@ -105,19 +130,6 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   const dueForSettlement = discountMeta.effectiveAmountDueSyp
   const payCurrencyRaw = String(reqBody.payCurrency || 'SYP').trim().toUpperCase()
   const payCurrency = payCurrencyRaw === 'USD' ? 'USD' : 'SYP'
-
-  let paymentChannel
-  let bankName
-  try {
-    ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(reqBody))
-  } catch (chErr) {
-    if (chErr?.code === 'BANK_REQUIRED') {
-      const err = new Error(String(chErr.message))
-      err.code = 'BANK_REQUIRED'
-      throw err
-    }
-    throw chErr
-  }
 
   let receivedSyp = 0
   let receivedUsd = 0
@@ -196,23 +208,33 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       throw err
     }
   } else {
-    const amountSypRaw = Number(reqBody.amountSyp)
-    receivedSyp = Number.isFinite(amountSypRaw) && amountSypRaw > 0 ? Math.round(amountSypRaw) : 0
-  }
-  if (receivedSyp <= 0) {
-    const err = new Error('مبلغ الدفع غير صالح')
-    err.code = 'INVALID_AMOUNT'
-    throw err
+    const parsed = parseSypReceivedFromBody(reqBody)
+    if (!parsed.ok) {
+      const err = new Error('مبلغ الدفع غير صالح')
+      err.code = 'INVALID_AMOUNT'
+      throw err
+    }
+    receivedSyp = parsed.receivedSyp
   }
 
   const netReceivedSyp =
     payCurrency === 'USD'
       ? netReceivedSypAfterUsdCollection(amountUsdRaw, patientRefundSyp, patientRefundUsd, usdSypRateUsed)
       : receivedSyp
-  if (netReceivedSyp <= 0) {
-    const err = new Error('صافي المبلغ بعد الترجيع غير صالح — يجب أن يبقى للعيادة مبلغ موجب يغطي التحصيل.')
-    err.code = 'INVALID_NET'
-    throw err
+  assertBillingCollectionAmountValid({ receivedSyp, netReceivedSyp, payCurrency, dueForSettlement })
+
+  let paymentChannel
+  let bankName
+  try {
+    const requireBank = !isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement)
+    ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(reqBody, { requireBank }))
+  } catch (chErr) {
+    if (chErr?.code === 'BANK_REQUIRED') {
+      const err = new Error(String(chErr.message))
+      err.code = 'BANK_REQUIRED'
+      throw err
+    }
+    throw chErr
   }
 
   const method = paymentChannel === 'bank' ? 'bank' : 'cash'
