@@ -23,7 +23,7 @@ import {
   findDebtSettlementsForBusinessDateFilter,
   mergeLaserDebtSettlementsIntoPaymentBreakdown,
 } from '../services/patientDebtSettlementAllocation.js'
-import { resolveLaserPackageSessionForBooking } from '../services/laserPackageBooking.js'
+import { resolveLaserPackageSessionForBooking, normalizeLaserSlotPackageModeForResolve } from '../services/laserPackageBooking.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
 
@@ -1394,6 +1394,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         }
       }
     }
+    const resolvedSlotPackageMode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
     const skipLaserPackage =
       body.skipLaserPackage === true ||
       body.forceOutsidePackage === true ||
@@ -1401,7 +1402,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
 
     const packageMatch = skipLaserPackage
       ? null
-      : await resolveLaserPackageSessionForBooking(patient, slotPackageMode)
+      : await resolveLaserPackageSessionForBooking(patient, resolvedSlotPackageMode)
     const isPackageSession = Boolean(packageMatch)
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
     const patientGender = normalizePatientGender(patient.gender)

@@ -21,6 +21,7 @@ import {
   FULL_BODY_SESSION_AREA_COUNT,
   isFullBodyLaserBookingText,
   normalizeLaserBookingText,
+  parseBookedLaserAddonSegment,
   splitLaserOfferAreaLabels,
 } from '../data/laserFullBody'
 import type { LaserCategory, Patient, Role } from '../types'
@@ -1473,6 +1474,12 @@ export function PatientRecord() {
           setLaserCoverPriceSyp(Math.max(0, Math.round(Number(pricingData.laserCoverSyp) || 0)))
           setSelectedLaserItemIds((prev) => {
             const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
+            if (
+              bookedLaserSlotPkgMode === 'continue_package_with_addon' ||
+              bookedLaserSlotPkgMode === 'use_package_with_addon'
+            ) {
+              return validPrev
+            }
             if (!bookedLaserProcedureText) return validPrev
 
             const byName = new Map<string, string>()
@@ -1962,9 +1969,11 @@ export function PatientRecord() {
 
     const wantsContinueOnly =
       bookedLaserSlotPkgMode === 'continue_package' ||
+      bookedLaserSlotPkgMode === 'continue_package_with_addon' ||
       (!bookedLaserSlotPkgMode && bookedLaserProcedureText.startsWith('استكمال باكج'))
     const wantsFullPackage =
       bookedLaserSlotPkgMode === 'use_package' ||
+      bookedLaserSlotPkgMode === 'use_package_with_addon' ||
       (!bookedLaserSlotPkgMode && bookedLaserProcedureText === 'جلسة ضمن باكج ليزر')
 
     if (!wantsContinueOnly && !wantsFullPackage) return
@@ -2001,7 +2010,12 @@ export function PatientRecord() {
     const blockKey = `${id}|${bookedLaserSlotId || ''}`
     if (bookedLaserSlotId && laserPkgPrefillBlockedKeyRef.current === blockKey) return
 
-    setSelectedLaserAddonItemIds([])
+    if (
+      bookedLaserSlotPkgMode !== 'continue_package_with_addon' &&
+      bookedLaserSlotPkgMode !== 'use_package_with_addon'
+    ) {
+      setSelectedLaserAddonItemIds([])
+    }
     setSelectedLaserItemIds((prev) => (prev.length > 0 ? prev : [...ids]))
   }, [
     tab,
@@ -2019,8 +2033,50 @@ export function PatientRecord() {
   ])
 
   useEffect(() => {
-    if (!sessionInPackageMode) setSelectedLaserAddonItemIds([])
-  }, [sessionInPackageMode])
+    if (tab !== 'laser' || bookedLaserIsFullBody) return
+    if (
+      bookedLaserSlotPkgMode !== 'continue_package_with_addon' &&
+      bookedLaserSlotPkgMode !== 'use_package_with_addon'
+    ) {
+      return
+    }
+    if (laserProcedureLoading || !laserProcedureGroups.length) return
+    const addonSegment = parseBookedLaserAddonSegment(bookedLaserProcedureText, bookedLaserSlotPkgMode)
+    if (!addonSegment) return
+    const byName = new Map<string, string>()
+    for (const g of laserProcedureGroups) {
+      for (const item of g.items || []) {
+        byName.set(String(item.name || '').trim().toLowerCase(), String(item.id))
+      }
+    }
+    const matchedIds = addonSegment
+      .split(/\s*(?:\+|،|,|\/|\\|\||-)\s*/g)
+      .map((x) => normalizeLaserBookingText(x))
+      .filter(Boolean)
+      .map((name) => byName.get(name))
+      .filter((id): id is string => Boolean(id))
+    if (matchedIds.length > 0) {
+      setSelectedLaserAddonItemIds([...new Set(matchedIds)])
+    }
+  }, [
+    tab,
+    bookedLaserIsFullBody,
+    bookedLaserSlotPkgMode,
+    bookedLaserProcedureText,
+    laserProcedureLoading,
+    laserProcedureGroups,
+  ])
+
+  useEffect(() => {
+    if (sessionInPackageMode) return
+    if (
+      bookedLaserSlotPkgMode === 'continue_package_with_addon' ||
+      bookedLaserSlotPkgMode === 'use_package_with_addon'
+    ) {
+      return
+    }
+    setSelectedLaserAddonItemIds([])
+  }, [sessionInPackageMode, bookedLaserSlotPkgMode])
 
   const dentalPlanApproved = dentalPlan?.status === 'approved'
   const dentalPlanSummary =

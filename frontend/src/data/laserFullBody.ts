@@ -29,6 +29,23 @@ export function isFullBodyLaserBookingText(text: string): boolean {
   return n === 'جسم كامل' || n === 'full body' || n === 'fullbody'
 }
 
+/** جزء المناطق خارج الباكج من نص موعد الحجز (عند وضع with_addon) */
+export function parseBookedLaserAddonSegment(procedureText: string, slotPkgMode: string): string {
+  const proc = String(procedureText || '').trim()
+  const mode = String(slotPkgMode || '').trim()
+  if (mode !== 'continue_package_with_addon' && mode !== 'use_package_with_addon') return ''
+  if (proc.startsWith('استكمال باكج')) {
+    const idx = proc.indexOf(' + ')
+    return idx >= 0 ? proc.slice(idx + 3).trim() : ''
+  }
+  if (proc.startsWith('جلسة ضمن باكج ليزر')) {
+    const rest = proc.slice('جلسة ضمن باكج ليزر'.length).trim()
+    if (!rest) return ''
+    return rest.replace(/^\+\s*/, '').trim()
+  }
+  return ''
+}
+
 export function fullBodySessionAreaLabels(offerName?: string): string[] {
   if (isFullBodyLaserBookingText(offerName || '')) {
     return [...FULL_BODY_SESSION_AREA_LABELS]

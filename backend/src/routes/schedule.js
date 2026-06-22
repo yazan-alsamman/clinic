@@ -552,9 +552,13 @@ function slotToDto(s) {
     status: busy ? 'busy' : 'free',
     patientId: o.patientId ? String(o.patientId) : null,
     patientName: o.patientName || '',
-    laserPackageBookingMode: ['use_package', 'outside_package', 'continue_package'].includes(
-      String(o.laserPackageBookingMode || '').trim(),
-    )
+    laserPackageBookingMode: [
+      'use_package',
+      'outside_package',
+      'continue_package',
+      'continue_package_with_addon',
+      'use_package_with_addon',
+    ].includes(String(o.laserPackageBookingMode || '').trim())
       ? String(o.laserPackageBookingMode).trim()
       : '',
   }
@@ -603,9 +607,13 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     const laserPkgRaw = String(body.laserPackageBookingMode || '').trim()
     const laserPackageBookingMode =
       serviceType === 'laser' &&
-      (laserPkgRaw === 'use_package' ||
-        laserPkgRaw === 'outside_package' ||
-        laserPkgRaw === 'continue_package')
+      [
+        'use_package',
+        'outside_package',
+        'continue_package',
+        'continue_package_with_addon',
+        'use_package_with_addon',
+      ].includes(laserPkgRaw)
         ? laserPkgRaw
         : ''
     const patientId = body.patientId
@@ -631,7 +639,10 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     }
     if (serviceType === 'laser' && laserPackageBookingMode) {
       const bookingCtx = await getLaserBookingContextForPatient(patient)
-      if (laserPackageBookingMode === 'continue_package') {
+      if (
+        laserPackageBookingMode === 'continue_package' ||
+        laserPackageBookingMode === 'continue_package_with_addon'
+      ) {
         if (!bookingCtx.partialVisit) {
           res.status(400).json({
             error: 'لا توجد جلسة باكج قيد الإكمال لهذا المريض — اختر «جلسة جديدة ضمن الباكج» أو «خارج الباكج».',
@@ -639,7 +650,11 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
           return
         }
       }
-      if (laserPackageBookingMode === 'use_package' && !bookingCtx.hasFreshPackageSession) {
+      if (
+        (laserPackageBookingMode === 'use_package' ||
+          laserPackageBookingMode === 'use_package_with_addon') &&
+        !bookingCtx.hasFreshPackageSession
+      ) {
         res.status(400).json({
           error:
             'لا توجد جلسة باكج جديدة متاحة — استخدم «إكمال المنطقة المتبقية» إن وُجدت جلسة ناقصة، أو «خارج الباكج».',

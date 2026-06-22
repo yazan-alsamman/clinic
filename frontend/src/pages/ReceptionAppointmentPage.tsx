@@ -32,7 +32,25 @@ function patientHasOpenLaserPackage(patient: Patient | null): boolean {
   return false
 }
 
-type LaserPackageBookingIntent = '' | 'use_package' | 'outside_package' | 'continue_package'
+type LaserPackageBookingIntent =
+  | ''
+  | 'use_package'
+  | 'outside_package'
+  | 'continue_package'
+  | 'continue_package_with_addon'
+  | 'use_package_with_addon'
+
+function isLaserPackageWithAddonIntent(intent: LaserPackageBookingIntent): boolean {
+  return intent === 'continue_package_with_addon' || intent === 'use_package_with_addon'
+}
+
+function isLaserContinuePackageIntent(intent: LaserPackageBookingIntent): boolean {
+  return intent === 'continue_package' || intent === 'continue_package_with_addon'
+}
+
+function isLaserUsePackageIntent(intent: LaserPackageBookingIntent): boolean {
+  return intent === 'use_package' || intent === 'use_package_with_addon'
+}
 
 type LaserBookingContext = {
   hasOpenPackage: boolean
@@ -751,6 +769,10 @@ export function ReceptionAppointmentPage() {
       setFormErr('اختر نوع حجز الباكج من الخيارات أعلاه قبل تأكيد الموعد.')
       return false
     }
+    if (isLaserPackageWithAddonIntent(laserIntent) && selectedLaserItems.length === 0) {
+      setFormErr('اختر منطقة واحدة على الأقل خارج الباكج.')
+      return false
+    }
     if (assignBlocked) {
       setFormErr('يوم العمل غير مفعّل — لا يمكن حجز موعد من الاستقبال حتى يفعّل المدير اليوم.')
       return false
@@ -791,15 +813,20 @@ export function ReceptionAppointmentPage() {
       setFormErr('رقم غرفة الليزر غير صالح')
       return false
     }
-    const usePackageSlot = selectedService === 'laser' && laserIntent === 'use_package'
-    const continuePackageSlot = selectedService === 'laser' && laserIntent === 'continue_package'
+    const usePackageSlot = selectedService === 'laser' && isLaserUsePackageIntent(laserIntent)
+    const continuePackageSlot = selectedService === 'laser' && isLaserContinuePackageIntent(laserIntent)
+    const addonLabel = selectedLaserItems.map((item) => item.name).join(' + ').trim()
     const remainingLabel = (laserBookingContext?.partialVisit?.remainingAreas || []).join('، ').trim()
     const proc =
       selectedService === 'laser'
         ? continuePackageSlot
-          ? `استكمال باكج ليزر${remainingLabel ? ` — ${remainingLabel}` : ''}`
+          ? `استكمال باكج ليزر${remainingLabel ? ` — ${remainingLabel}` : ''}${
+              isLaserPackageWithAddonIntent(laserIntent) && addonLabel ? ` + ${addonLabel}` : ''
+            }`
           : usePackageSlot
-            ? 'جلسة ضمن باكج ليزر'
+            ? `جلسة ضمن باكج ليزر${
+                isLaserPackageWithAddonIntent(laserIntent) && addonLabel ? ` + ${addonLabel}` : ''
+              }`
             : selectedLaserItems.map((item) => item.name).join(' + ').trim()
         : procedureType.trim()
     if (!proc) {
@@ -1360,18 +1387,32 @@ export function ReceptionAppointmentPage() {
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {laserBookingContext?.partialVisit ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={assignBlocked || laserBookingContextLoading}
-                      onClick={() => {
-                        setFormErr('')
-                        setLaserPackageBookingIntent('continue_package')
-                        setSelectedLaserItemIds([])
-                      }}
-                    >
-                      إكمال المنطقة المتبقية فقط (نفس جلسة الباكج)
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={assignBlocked || laserBookingContextLoading}
+                        onClick={() => {
+                          setFormErr('')
+                          setLaserPackageBookingIntent('continue_package')
+                          setSelectedLaserItemIds([])
+                        }}
+                      >
+                        إكمال المنطقة المتبقية فقط (نفس جلسة الباكج)
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={assignBlocked || laserBookingContextLoading}
+                        onClick={() => {
+                          setFormErr('')
+                          setLaserPackageBookingIntent('continue_package_with_addon')
+                          setSelectedLaserItemIds([])
+                        }}
+                      >
+                        المنطقة المتبقية ومنطقة خارج الباكج
+                      </button>
+                    </>
                   ) : null}
                   {laserBookingContext?.hasFreshPackageSession ? (
                     <button
@@ -1387,6 +1428,20 @@ export function ReceptionAppointmentPage() {
                       {laserBookingContext?.partialVisit
                         ? 'حجز جلسة جديدة من ضمن الباكج (جلسة باكج أخرى متاحة)'
                         : 'حجز لمناطق الباكج'}
+                    </button>
+                  ) : null}
+                  {laserBookingContext?.partialVisit && laserBookingContext?.hasFreshPackageSession ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={assignBlocked || laserBookingContextLoading}
+                      onClick={() => {
+                        setFormErr('')
+                        setLaserPackageBookingIntent('use_package_with_addon')
+                        setSelectedLaserItemIds([])
+                      }}
+                    >
+                      جلسة جديدة من الباكج ومنطقة خارج الباكج
                     </button>
                   ) : null}
                   {!laserBookingContext?.partialVisit && !laserBookingContext?.hasFreshPackageSession ? (
@@ -1443,7 +1498,8 @@ export function ReceptionAppointmentPage() {
               ) : null}
               {selectedService === 'laser' &&
               picked &&
-              laserPackageBookingIntent === 'continue_package' ? (
+              laserPackageBookingIntent === 'continue_package' ||
+              laserPackageBookingIntent === 'continue_package_with_addon' ? (
                 <p
                   style={{
                     margin: '0 0 0.65rem',
@@ -1455,20 +1511,42 @@ export function ReceptionAppointmentPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  تم اختيار <strong>إكمال المنطقة المتبقية</strong> لنفس جلسة الباكج — المناطق المتبقية:{' '}
-                  <strong>
-                    {(laserBookingContext?.partialVisit?.remainingAreas || []).join('، ') || '—'}
-                  </strong>
-                  . ستُفتح عند الأخصائي لاستكمال الجلسة نفسها.
+                  {laserPackageBookingIntent === 'continue_package_with_addon' ? (
+                    <>
+                      تم اختيار <strong>إكمال المنطقة المتبقية مع إضافة خارج الباكج</strong> — المتبقية من
+                      الباكج:{' '}
+                      <strong>
+                        {(laserBookingContext?.partialVisit?.remainingAreas || []).join('، ') || '—'}
+                      </strong>
+                      . اختر المناطق الإضافية أدناه.
+                    </>
+                  ) : (
+                    <>
+                      تم اختيار <strong>إكمال المنطقة المتبقية</strong> لنفس جلسة الباكج — المناطق المتبقية:{' '}
+                      <strong>
+                        {(laserBookingContext?.partialVisit?.remainingAreas || []).join('، ') || '—'}
+                      </strong>
+                      . ستُفتح عند الأخصائي لاستكمال الجلسة نفسها.
+                    </>
+                  )}
                 </p>
               ) : null}
               {selectedService === 'laser' &&
               picked &&
               patientHasOpenLaserPackage(picked) &&
-              laserPackageBookingIntent === 'use_package' ? (
+              isLaserUsePackageIntent(laserPackageBookingIntent) ? (
                 <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                  تم اختيار تسجيل هذا الموعد كـ <strong>جلسة جديدة ضمن باكج الليزر</strong>. لا حاجة لاختيار المناطق هنا؛
-                  ستُعرض مناطق الباكج عند إنشاء الجلسة في قسم الليزر.
+                  {laserPackageBookingIntent === 'use_package_with_addon' ? (
+                    <>
+                      تم اختيار <strong>جلسة جديدة ضمن باكج الليزر مع إضافة خارج الباكج</strong>. ستُعرض مناطق
+                      الباكج عند إنشاء الجلسة — اختر المناطق الإضافية أدناه.
+                    </>
+                  ) : (
+                    <>
+                      تم اختيار تسجيل هذا الموعد كـ <strong>جلسة جديدة ضمن باكج الليزر</strong>. لا حاجة لاختيار
+                      المناطق هنا؛ ستُعرض مناطق الباكج عند إنشاء الجلسة في قسم الليزر.
+                    </>
+                  )}
                 </p>
               ) : null}
               {selectedService === 'laser' &&

@@ -91,8 +91,16 @@ export async function findContinueLaserPackageSession(patientLike) {
   return null
 }
 
+
+export function normalizeLaserSlotPackageModeForResolve(mode) {
+  const m = String(mode || '').trim()
+  if (m === 'continue_package_with_addon') return 'continue_package'
+  if (m === 'use_package_with_addon') return 'use_package'
+  return m
+}
+
 export async function resolveLaserPackageSessionForBooking(patientLike, slotPackageMode) {
-  const mode = String(slotPackageMode || '').trim()
+  const mode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
   if (mode === 'outside_package') return null
   if (mode === 'continue_package') return findContinueLaserPackageSession(patientLike)
   if (mode === 'use_package') return findFreshLaserPackageSession(patientLike)
