@@ -197,7 +197,9 @@ export function ReceptionInventoryDetailBody({
                             {cashRow ? 'كاش' : `بنك: ${t.bankName}`}
                           </span>
                         </td>
-                        <td style={{ padding: '0.5rem', fontWeight: 700 }}>{t.payCurrency === 'USD' ? 'USD' : 'ل.س'}</td>
+                        <td style={{ padding: '0.5rem', fontWeight: 700 }}>
+                          {t.payCurrency === 'USD' ? 'USD' : t.payCurrency === 'MIXED' ? 'ل.س+USD' : 'ل.س'}
+                        </td>
                         <td style={{ padding: '0.5rem', direction: 'ltr', textAlign: 'left' }}>
                           {t.receivedAmountSyp.toLocaleString('ar-SY')}
                         </td>
@@ -651,7 +653,9 @@ export function ReceptionInventoryDetailBody({
                             {cashRow ? 'كاش' : `بنك: ${t.bankName}`}
                           </span>
                         </td>
-                        <td style={{ padding: '0.5rem', fontWeight: 700 }}>{t.payCurrency === 'USD' ? 'USD' : 'ل.س'}</td>
+                        <td style={{ padding: '0.5rem', fontWeight: 700 }}>
+                          {t.payCurrency === 'USD' ? 'USD' : t.payCurrency === 'MIXED' ? 'ل.س+USD' : 'ل.س'}
+                        </td>
                         <td style={{ padding: '0.5rem', direction: 'ltr', textAlign: 'left' }}>
                           {t.receivedAmountSyp.toLocaleString('ar-SY')}
                         </td>

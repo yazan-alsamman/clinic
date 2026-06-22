@@ -22,23 +22,9 @@ import {
 import { resolveBillingPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 import { BILLING_PAYMENT_DUPLICATE_MSG, isMongoDuplicateKeyError } from '../utils/mongoErrors.js'
 import {
-  assertBillingCollectionAmountValid,
-  isZeroSypCollectionAllowed,
-  parseSypReceivedFromBody,
+  completeBillingItemPayment,
 } from '../services/billingPaymentCompletion.js'
-
-/** صافي ل.س بعد دفع USD وترجيع — يطابق frontend/src/utils/usdExactDue.ts */
-function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
-  const u = Number(amountUsd)
-  const r = Number(rate)
-  const rs = Math.round(Number(patientRefundSyp) || 0)
-  const ru = Number(patientRefundUsd) || 0
-  if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0
-  if (ru > 0) {
-    return Math.round((u - ru) * r) - rs
-  }
-  return Math.round(u * r) - rs
-}
+import { normalizePayCurrency } from '../services/billingPaymentReceipt.js'
 
 /** يُرجع { discountPercent, listAmountDueSyp, effectiveAmountDueSyp } — يرمي إن كانت النسبة غير صالحة */
 function resolveBillingDiscount(listDueSyp, discountPercentBody) {
@@ -127,7 +113,8 @@ function aggregateReceptionPaidItems(items, payById) {
     const p = payById.get(String(bi.paymentId))
     if (!p) continue
 
-    const payCur = String(p.payCurrency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
+    const payCurRaw = String(p.payCurrency || 'SYP').toUpperCase()
+    const payCur = normalizePayCurrency(payCurRaw)
     const sypPart = Math.round(Number(p.receivedAmountSyp) || 0)
     const usdPart = round2(Number(p.receivedAmountUsd) || 0)
     const channel = p.paymentChannel === 'bank' ? 'bank' : 'cash'
@@ -154,7 +141,12 @@ function aggregateReceptionPaidItems(items, payById) {
     const sypNetForCashbook = payCur === 'USD' ? -refSyp : sypPart
 
     if (channel === 'cash') {
-      if (payCur === 'USD') {
+      if (payCur === 'MIXED') {
+        cash.totalSyp += sypPart
+        cash.totalUsd = round2(cash.totalUsd + usdPart)
+        byDept[deptKey].cashSyp += sypPart
+        byDept[deptKey].cashUsd = round2(byDept[deptKey].cashUsd + usdPart)
+      } else if (payCur === 'USD') {
         cash.totalUsd = round2(cash.totalUsd + usdNet)
         cash.totalSyp += sypNetForCashbook
         byDept[deptKey].cashUsd = round2(byDept[deptKey].cashUsd + usdNet)
@@ -166,7 +158,12 @@ function aggregateReceptionPaidItems(items, payById) {
     } else {
       const label = String(p.bankName || '').trim() || 'بنك'
       const cur = bankMap.get(label) || { bankName: label, totalSyp: 0, totalUsd: 0 }
-      if (payCur === 'USD') {
+      if (payCur === 'MIXED') {
+        cur.totalSyp += sypPart
+        cur.totalUsd = round2(cur.totalUsd + usdPart)
+        byDept[deptKey].bankSyp += sypPart
+        byDept[deptKey].bankUsd = round2(byDept[deptKey].bankUsd + usdPart)
+      } else if (payCur === 'USD') {
         cur.totalUsd = round2(cur.totalUsd + usdNet)
         cur.totalSyp += sypNetForCashbook
         byDept[deptKey].bankUsd = round2(byDept[deptKey].bankUsd + usdNet)
@@ -986,388 +983,68 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
       res.status(404).json({ error: 'البند غير موجود' })
       return
     }
-    if (bi.status !== 'pending_payment') {
-      res.status(400).json({ error: 'البند ليس في انتظار الدفع' })
-      return
-    }
-    const savedListDueSyp = Math.round(Number(bi.listAmountDueSyp || bi.amountDueSyp) || 0)
-    const savedDiscountPercent = Number(bi.discountPercent) || 0
-    const savedEffectiveDueSyp = Math.round(Number(bi.effectiveAmountDueSyp || bi.amountDueSyp) || 0)
-    const dueBaseSyp = savedDiscountPercent > 0 ? savedEffectiveDueSyp : savedListDueSyp
-    if (dueBaseSyp <= 0) {
-      res.status(400).json({
-        error: bi.isPackagePrepaid
-          ? 'هذه الجلسة ضمن باكج ولا يوجد مبلغ إضافي مستحق. استخدم «إنقاص جلسة» من صفحة التحصيل.'
-          : 'لا يوجد مبلغ مستحق على هذا البند. افتح ملف المريض وتأكد من تسعير الجلسة (ليزر / استقبال) بالليرة ثم أعد إنشاء البند إن لزم.',
-      })
-      return
-    }
 
-    const body = req.body ?? {}
-    let discountMeta
-    if (savedDiscountPercent > 0) {
-      discountMeta = {
-        discountPercent: savedDiscountPercent,
-        listAmountDueSyp: savedListDueSyp,
-        effectiveAmountDueSyp: savedEffectiveDueSyp,
+    let result
+    try {
+      result = await completeBillingItemPayment(bi, req.body ?? {}, req.user)
+    } catch (payErr) {
+      const code = payErr?.code
+      const msg = String(payErr?.message || payErr)
+      if (code === 'NOT_PENDING') {
+        res.status(400).json({ error: msg })
+        return
       }
-    } else {
-      try {
-        discountMeta = resolveBillingDiscount(savedListDueSyp, body.discountPercent)
-      } catch (e) {
-        if (e && e.message === 'DISCOUNT_RANGE') {
-          res.status(400).json({ error: 'نسبة الخصم يجب أن تكون بين 0 و 100.' })
-          return
-        }
-        if (e && e.message === 'DISCOUNT_TOO_DEEP') {
-          res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
-          return
-        }
-        throw e
-      }
-    }
-    const dueForSettlement = discountMeta.effectiveAmountDueSyp
-    const payCurrencyRaw = String(body.payCurrency || 'SYP').trim().toUpperCase()
-    const payCurrency = payCurrencyRaw === 'USD' ? 'USD' : 'SYP'
-
-    let receivedSyp = 0
-    let receivedUsd = 0
-    let patientRefundSyp = 0
-    let patientRefundUsd = 0
-    /** سعر الصرف المستخدم لدفعة USD (لحساب صافي الليرة بعد ترجيع USD) */
-    let usdSypRateUsed = 0
-    /** مبلغ USD المستلم (يُملأ عند payCurrency === USD فقط) */
-    let amountUsdRaw = 0
-    if (payCurrency === 'USD') {
-      const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
-      const rate = Number(bd?.usdSypRate)
-      if (!Number.isFinite(rate) || rate <= 0) {
+      if (code === 'ZERO_DUE') {
         res.status(400).json({
-          error:
-            'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
+          error: bi.isPackagePrepaid
+            ? 'هذه الجلسة ضمن باكج ولا يوجد مبلغ إضافي مستحق. استخدم «إنقاص جلسة» من صفحة التحصيل.'
+            : 'لا يوجد مبلغ مستحق على هذا البند. افتح ملف المريض وتأكد من تسعير الجلسة (ليزر / استقبال) بالليرة ثم أعد إنشاء البند إن لزم.',
         })
         return
       }
-      amountUsdRaw = Number(body.amountUsd)
-      if (!Number.isFinite(amountUsdRaw) || amountUsdRaw <= 0) {
-        res.status(400).json({ error: 'مبلغ الدفع بالدولار غير صالح' })
+      if (code === 'DISCOUNT' || code === 'INVALID_AMOUNT' || code === 'INVALID_USD' || code === 'INVALID_REFUND' || code === 'INVALID_NET' || code === 'NO_RATE' || code === 'BANK_REQUIRED' || code === 'DUPLICATE') {
+        res.status(400).json({ error: msg })
         return
       }
-      /** لا نستخدم round2 قبل الضرب — وإلا يضيعت مطابقة المستحق (مثال 110000÷15000) */
-      usdSypRateUsed = rate
-      receivedSyp = Math.round(amountUsdRaw * rate)
-      receivedUsd = round6(amountUsdRaw)
-      if (receivedSyp <= 0) {
-        res.status(400).json({ error: 'المبلغ بالدولار صغير جداً بالنسبة لسعر الصرف.' })
-        return
-      }
-
-      const refundCurRaw = String(body.refundCurrency || '').trim().toUpperCase()
-      const refundCurrency = refundCurRaw === 'USD' ? 'USD' : refundCurRaw === 'SYP' ? 'SYP' : null
-      if (refundCurrency === 'SYP') {
-        const refSyp = Number(body.refundAmount)
-        if (body.refundAmount != null && String(body.refundAmount).trim() !== '') {
-          if (!Number.isFinite(refSyp) || refSyp < 0) {
-            res.status(400).json({ error: 'مبلغ الترجيع بالليرة غير صالح' })
-            return
-          }
-          patientRefundSyp = refSyp > 0 ? Math.round(refSyp) : 0
-        }
-      } else if (refundCurrency === 'USD') {
-        const refUsd = Number(body.refundAmount)
-        if (body.refundAmount != null && String(body.refundAmount).trim() !== '') {
-          if (!Number.isFinite(refUsd) || refUsd < 0) {
-            res.status(400).json({ error: 'مبلغ الترجيع بالدولار غير صالح' })
-            return
-          }
-          patientRefundUsd = refUsd > 0 ? round6(refUsd) : 0
-        }
-      } else if (body.refundAmount != null && String(body.refundAmount).trim() !== '') {
-        res.status(400).json({ error: 'حدد عملة الترجيع (ليرة أو دولار) عند إدخال مبلغ الترجيع' })
-        return
-      }
-
-      if (patientRefundSyp > 0 && patientRefundSyp > receivedSyp) {
-        res.status(400).json({ error: 'مبلغ الترجيع بالليرة أكبر من المقابل المستلم بالليرة لهذه الدفعة' })
-        return
-      }
-      if (patientRefundUsd > 0 && patientRefundUsd > amountUsdRaw) {
-        res.status(400).json({ error: 'مبلغ الترجيع بالدولار أكبر من المبلغ المستلم بالدولار' })
-        return
-      }
-      const refundSypEquivUsd = patientRefundUsd > 0 ? Math.round(patientRefundUsd * rate) : 0
-      if (patientRefundSyp + refundSypEquivUsd > receivedSyp) {
-        res.status(400).json({ error: 'إجمالي الترجيع (ليرة ومقابل دولار) يتجاوز المبلغ المستلم بالليرة' })
-        return
-      }
-    } else {
-      const parsed = parseSypReceivedFromBody(body)
-      if (!parsed.ok) {
-        res.status(400).json({ error: 'مبلغ الدفع غير صالح' })
-        return
-      }
-      receivedSyp = parsed.receivedSyp
+      throw payErr
     }
 
-    /** صافٍ ما بقي لدى العيادة بعد الترجيع (للمقارنة مع المستحق والرصيد/الذمة) — حقول المستلم في السجل تبقى إجمالية */
-    const netReceivedSyp =
-      payCurrency === 'USD'
-        ? netReceivedSypAfterUsdCollection(
-            amountUsdRaw,
-            patientRefundSyp,
-            patientRefundUsd,
-            usdSypRateUsed,
-          )
-        : receivedSyp
-    try {
-      assertBillingCollectionAmountValid({ receivedSyp, netReceivedSyp, payCurrency, dueForSettlement })
-    } catch (amtErr) {
-      res.status(400).json({ error: String(amtErr?.message || amtErr) })
-      return
-    }
-
-    const paymentChannel = String(body.paymentChannel || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash'
-    let bankName = ''
-    const requireBank = !isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement)
-    if (paymentChannel === 'bank' && requireBank) {
-      bankName = String(body.bankName || '').trim()
-      const settings = await getOrCreatePaymentSettings()
-      const allowedNames = new Set(
-        (settings.banks || [])
-          .filter((b) => b.active !== false)
-          .map((b) => String(b.name || '').trim())
-          .filter(Boolean),
-      )
-      if (!bankName || !allowedNames.has(bankName)) {
-        res.status(400).json({ error: 'اختر البنك من القائمة المعتمدة' })
-        return
-      }
-    }
-
-    const method = paymentChannel === 'bank' ? 'bank' : 'cash'
-    const appliedAmountSyp = Math.min(netReceivedSyp, dueForSettlement)
-    let settlementDeltaSyp = netReceivedSyp - dueForSettlement
-    /** فرق ≤ سعر 1 USD + صافي «أوراق» USD عدد صحيح (مستلم−ترجيع USD، أو صافي ل.س÷سعر عند ترجيع ل.س فقط): لا رصيد إضافي */
-    let absorbCashNetUsdQualifies = false
-    if (payCurrency === 'USD' && usdSypRateUsed > 0) {
-      if (patientRefundUsd > 0 && patientRefundSyp > 0) {
-        absorbCashNetUsdQualifies = false
-      } else if (patientRefundUsd > 0) {
-        const netUsdCash = amountUsdRaw - patientRefundUsd
-        absorbCashNetUsdQualifies =
-          Number.isFinite(netUsdCash) &&
-          netUsdCash > 0 &&
-          Math.abs(netUsdCash - Math.round(netUsdCash)) < 1e-5
-      } else if (patientRefundSyp > 0) {
-        const implied = netReceivedSyp / usdSypRateUsed
-        absorbCashNetUsdQualifies =
-          Number.isFinite(implied) &&
-          implied > 0 &&
-          Math.abs(implied - Math.round(implied)) < 1e-5
-      } else {
-        absorbCashNetUsdQualifies =
-          Number.isFinite(amountUsdRaw) &&
-          amountUsdRaw > 0 &&
-          Math.abs(amountUsdRaw - Math.round(amountUsdRaw)) < 1e-5
-      }
-    }
-    if (
-      payCurrency === 'USD' &&
-      usdSypRateUsed > 0 &&
-      settlementDeltaSyp > 0 &&
-      settlementDeltaSyp <= usdSypRateUsed &&
-      absorbCashNetUsdQualifies
-    ) {
-      settlementDeltaSyp = 0
-    }
-
-    const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
-    if (existingPay) {
-      res.status(400).json({ error: BILLING_PAYMENT_DUPLICATE_MSG })
-      return
-    }
-
-    let payment
-    try {
-      payment = await BillingPayment.create({
-        billingItemId: bi._id,
-        amountSyp: appliedAmountSyp,
-        receivedAmountSyp: receivedSyp,
-        settlementDeltaSyp,
-        payCurrency,
-        receivedAmountUsd: payCurrency === 'USD' ? receivedUsd : 0,
-        patientRefundSyp: payCurrency === 'USD' ? patientRefundSyp : 0,
-        patientRefundUsd: payCurrency === 'USD' ? patientRefundUsd : 0,
-        paymentChannel,
-        bankName: paymentChannel === 'bank' ? bankName : '',
-        method,
-        receivedBy: req.user._id,
-        discountPercent: discountMeta.discountPercent,
-        listAmountDueSyp: discountMeta.listAmountDueSyp,
-        effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
-      })
-    } catch (createErr) {
-      if (isMongoDuplicateKeyError(createErr)) {
-        res.status(400).json({ error: BILLING_PAYMENT_DUPLICATE_MSG })
-        return
-      }
-      throw createErr
-    }
-
-    /** يوم التحصيل في التقارير المالية (مالية الجلدية وغيرها) — لا يُعتمد تاريخ إنشاء الجلسة فقط */
-    bi.businessDate = todayBusinessDate()
-    bi.status = 'paid'
-    bi.paymentId = payment._id
-    bi.paidAt = new Date()
-    await bi.save()
-
-    if (bi.department === 'laser') {
-      await LaserSession.updateOne({ billingItemId: bi._id }, { $set: { status: 'completed' } })
-    }
-
-    const patient = await Patient.findById(bi.patientId).lean()
-    let outstandingDebtSyp = 0
-    let prepaidCreditSyp = 0
-    if (patient) {
-      let debt = Math.round(Number(patient.outstandingDebtSyp) || 0)
-      let credit = Math.round(Number(patient.prepaidCreditSyp) || 0)
-      if (settlementDeltaSyp < 0) {
-        let need = Math.abs(settlementDeltaSyp)
-        const useCredit = Math.min(credit, need)
-        credit -= useCredit
-        need -= useCredit
-        debt += need
-      } else if (settlementDeltaSyp > 0) {
-        let extra = settlementDeltaSyp
-        const settleDebt = Math.min(debt, extra)
-        debt -= settleDebt
-        extra -= settleDebt
-        credit += extra
-      }
-      // Avoid full document validation on legacy patient records (e.g. missing newer required fields).
-      await Patient.updateOne(
-        { _id: bi.patientId },
-        {
-          $set: {
-            outstandingDebtSyp: debt,
-            prepaidCreditSyp: credit,
-          },
-        },
-      )
-      outstandingDebtSyp = debt
-      prepaidCreditSyp = credit
-    }
-
-    let posting = { skipped: true, reason: 'unknown' }
-    try {
-      posting = await postBillingPayment(payment._id, req.user._id)
-    } catch (postErr) {
-      console.error('postBillingPayment:', postErr)
-      try {
-        await writeAudit({
-          user: req.user,
-          action: 'دفع مؤكد — فشل الترحيل المحاسبي',
-          entityType: 'BillingPayment',
-          entityId: payment._id,
-          details: {
-            error: String(postErr?.message || postErr),
-            receivedSyp,
-            receivedUsd,
-            payCurrency,
-            appliedAmountSyp,
-            settlementDeltaSyp,
-            patientRefundSyp,
-            patientRefundUsd,
-            discountPercent: discountMeta.discountPercent,
-            listAmountDueSyp: discountMeta.listAmountDueSyp,
-            effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
-          },
-        })
-      } catch (auditErr) {
-        console.error('writeAudit (posting failure):', auditErr)
-      }
-      res.status(201).json({
-        payment: {
-          id: String(payment._id),
-          amountSyp: payment.amountSyp,
-          receivedAmountSyp: payment.receivedAmountSyp,
-          settlementDeltaSyp: payment.settlementDeltaSyp,
-          payCurrency: payment.payCurrency,
-          receivedAmountUsd: payment.receivedAmountUsd,
-          patientRefundSyp: payment.patientRefundSyp,
-          patientRefundUsd: payment.patientRefundUsd,
-          method: payment.method,
-          discountPercent: payment.discountPercent,
-          listAmountDueSyp: payment.listAmountDueSyp,
-          effectiveAmountDueSyp: payment.effectiveAmountDueSyp,
-        },
-        billingItem: { id: String(bi._id), status: bi.status },
-        patientSettlement: {
-          outstandingDebtSyp,
-          prepaidCreditSyp,
-        },
-        accountingWarning: String(postErr?.message || postErr),
-      })
-      return
-    }
-
-    try {
-      await writeAudit({
-        user: req.user,
-        action: 'تأكيد دفع بند فوترة',
-        entityType: 'BillingItem',
-        entityId: bi._id,
-        details: {
-          paymentId: String(payment._id),
-          receivedSyp,
-          receivedUsd,
-          payCurrency,
-          appliedAmountSyp,
-          settlementDeltaSyp,
-          paymentChannel,
-          bankName: paymentChannel === 'bank' ? bankName : undefined,
-          accountingSkipped: posting.skipped,
-          patientRefundSyp,
-          patientRefundUsd,
-          discountPercent: discountMeta.discountPercent,
-          listAmountDueSyp: discountMeta.listAmountDueSyp,
-          effectiveAmountDueSyp: discountMeta.effectiveAmountDueSyp,
-        },
-      })
-    } catch (auditErr) {
-      console.error('writeAudit (payment success):', auditErr)
-    }
-
-    const financialDocument = posting.document
+    const payment = await BillingPayment.findById(result.paymentId).lean()
+    const posting = result.posting
+    const financialDocument = posting?.document
       ? { id: String(posting.document._id), idempotencyKey: posting.document.idempotencyKey }
-      : posting.documentId
+      : posting?.documentId
         ? { id: posting.documentId, alreadyPosted: true }
         : null
 
+    if (result.postingError) {
+      res.status(201).json({
+        payment: {
+          id: result.paymentId,
+          ...result.payment,
+          method: payment?.method,
+          paymentChannel: payment?.paymentChannel,
+          bankName: payment?.bankName || undefined,
+        },
+        billingItem: { id: String(bi._id), status: 'paid' },
+        patientSettlement: result.patientSettlement,
+        accountingWarning: result.postingError,
+      })
+      return
+    }
+
     res.status(201).json({
       payment: {
-        id: String(payment._id),
-        amountSyp: payment.amountSyp,
-        receivedAmountSyp: payment.receivedAmountSyp,
-        settlementDeltaSyp: payment.settlementDeltaSyp,
-        payCurrency: payment.payCurrency,
-        receivedAmountUsd: payment.receivedAmountUsd,
-        patientRefundSyp: payment.patientRefundSyp,
-        patientRefundUsd: payment.patientRefundUsd,
-        method: payment.method,
-        paymentChannel: payment.paymentChannel,
-        bankName: payment.bankName || undefined,
-        discountPercent: payment.discountPercent,
-        listAmountDueSyp: payment.listAmountDueSyp,
-        effectiveAmountDueSyp: payment.effectiveAmountDueSyp,
+        id: result.paymentId,
+        ...result.payment,
+        method: payment?.method,
+        paymentChannel: payment?.paymentChannel,
+        bankName: payment?.bankName || undefined,
       },
-      billingItem: { id: String(bi._id), status: bi.status },
-      patientSettlement: {
-        outstandingDebtSyp,
-        prepaidCreditSyp,
-      },
+      billingItem: { id: String(bi._id), status: 'paid' },
+      patientSettlement: result.patientSettlement,
       financialDocument,
-      accountingSkipped: posting.skipped,
+      accountingSkipped: posting?.skipped,
     })
   } catch (e) {
     console.error(e)
@@ -1378,7 +1055,6 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
-
 /** تفاصيل بند تحصيل للتعديل الكامل — مدير النظام فقط */
 billingRouter.get('/:id/admin-detail', requireRoles('super_admin'), async (req, res) => {
   try {

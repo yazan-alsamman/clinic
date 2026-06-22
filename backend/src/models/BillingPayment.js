@@ -10,7 +10,7 @@ const billingPaymentSchema = new mongoose.Schema(
     /** الفرق: موجب = رصيد إضافي، سالب = ذمة */
     settlementDeltaSyp: { type: Number, default: 0 },
     /** عملة التحصيل الفعلية من المريض */
-    payCurrency: { type: String, enum: ['SYP', 'USD'], default: 'SYP' },
+    payCurrency: { type: String, enum: ['SYP', 'USD', 'MIXED'], default: 'SYP' },
     /** عند الدفع بالدولار: المبلغ المستلم بالدولار (للتقارير) */
     receivedAmountUsd: { type: Number, default: 0, min: 0 },
     /** عند التحصيل بالدولار: ما رُدّ للمريض نقداً (توثيق — ل.س أو USD حسب الحقل غير الصفري) */

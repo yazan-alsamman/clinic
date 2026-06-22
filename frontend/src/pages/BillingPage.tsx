@@ -9,6 +9,7 @@ import {
   usdRoundedUpCashOffer,
 } from '../utils/usdExactDue'
 import { BillingItemAdminEditModal } from '../components/BillingItemAdminEditModal'
+import { mixedNetReceivedSyp, type PayCurrency } from '../utils/billingPaymentForm'
 
 type Item = {
   id: string
@@ -191,7 +192,7 @@ export function BillingPage() {
   const [adminEditItem, setAdminEditItem] = useState<Item | null>(null)
   const [paySyp, setPaySyp] = useState('')
   const [payUsd, setPayUsd] = useState('')
-  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>('SYP')
+  const [payCurrency, setPayCurrency] = useState<PayCurrency>('SYP')
   const [payChannel, setPayChannel] = useState<'cash' | 'bank'>('cash')
   const [payBankName, setPayBankName] = useState('')
   const [bankOptions, setBankOptions] = useState<{ id: string; name: string }[]>([])
@@ -315,7 +316,9 @@ export function BillingPage() {
       const hasCollection =
         payCurrency === 'SYP'
           ? Number.isFinite(sypCheck) && sypCheck > 0
-          : Number.isFinite(usdCheck) && usdCheck > 0
+          : payCurrency === 'MIXED'
+            ? (Number.isFinite(sypCheck) && sypCheck > 0) || (Number.isFinite(usdCheck) && usdCheck > 0)
+            : Number.isFinite(usdCheck) && usdCheck > 0
       if (hasCollection && !payBankName.trim()) {
         setErr('اختر البنك ثم أدخل المبلغ المستلم.')
         return
@@ -325,6 +328,25 @@ export function BillingPage() {
       const syp = Number(normalizeDecimalDigits(paySyp))
       if (!Number.isFinite(syp) || syp < 0) {
         setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
+        return
+      }
+    } else if (payCurrency === 'MIXED') {
+      const syp = Number(normalizeDecimalDigits(paySyp))
+      const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      if (!Number.isFinite(syp) || syp < 0) {
+        setErr('مبلغ الليرة في التحصيل المختلط غير صالح.')
+        return
+      }
+      if (!Number.isFinite(usd) || usd < 0) {
+        setErr('مبلغ الدولار في التحصيل المختلط غير صالح.')
+        return
+      }
+      if (syp <= 0 && usd <= 0) {
+        setErr('أدخل مبلغاً بالليرة أو بالدولار (أو كليهما).')
+        return
+      }
+      if (usd > 0 && !(payPreviewRate && payPreviewRate > 0)) {
+        setErr('لا يتوفر سعر صرف لحساب جزء الدولار.')
         return
       }
     } else {
@@ -404,8 +426,13 @@ export function BillingPage() {
           paymentChannel: payChannel,
           bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
           amountSyp:
-            payCurrency === 'SYP' && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
-          amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
+            (payCurrency === 'SYP' || payCurrency === 'MIXED') && Number.isFinite(syp) && syp >= 0
+              ? Math.round(syp)
+              : undefined,
+          amountUsd:
+            (payCurrency === 'USD' || payCurrency === 'MIXED') && Number.isFinite(usd) && usd >= 0
+              ? usd
+              : undefined,
           discountPercent: discountPct > 0 ? discountPct : 0,
           ...refundPayload,
         }),
@@ -453,7 +480,9 @@ export function BillingPage() {
       const hasCollection =
         payCurrency === 'SYP'
           ? Number.isFinite(sypCheck) && sypCheck > 0
-          : Number.isFinite(usdCheck) && usdCheck > 0
+          : payCurrency === 'MIXED'
+            ? (Number.isFinite(sypCheck) && sypCheck > 0) || (Number.isFinite(usdCheck) && usdCheck > 0)
+            : Number.isFinite(usdCheck) && usdCheck > 0
       if (hasCollection && !payBankName.trim()) {
         setErr('اختر البنك ثم أدخل المبلغ المستلم.')
         return
@@ -463,6 +492,25 @@ export function BillingPage() {
       const syp = Number(normalizeDecimalDigits(paySyp))
       if (!Number.isFinite(syp) || syp < 0) {
         setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
+        return
+      }
+    } else if (payCurrency === 'MIXED') {
+      const syp = Number(normalizeDecimalDigits(paySyp))
+      const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      if (!Number.isFinite(syp) || syp < 0) {
+        setErr('مبلغ الليرة في التحصيل المختلط غير صالح.')
+        return
+      }
+      if (!Number.isFinite(usd) || usd < 0) {
+        setErr('مبلغ الدولار في التحصيل المختلط غير صالح.')
+        return
+      }
+      if (syp <= 0 && usd <= 0) {
+        setErr('أدخل مبلغاً بالليرة أو بالدولار (أو كليهما).')
+        return
+      }
+      if (usd > 0 && !(payPreviewRate && payPreviewRate > 0)) {
+        setErr('لا يتوفر سعر صرف لحساب جزء الدولار.')
         return
       }
     } else {
@@ -542,8 +590,13 @@ export function BillingPage() {
           paymentChannel: payChannel,
           bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
           amountSyp:
-            payCurrency === 'SYP' && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
-          amountUsd: payCurrency === 'USD' && Number.isFinite(usd) && usd > 0 ? usd : undefined,
+            (payCurrency === 'SYP' || payCurrency === 'MIXED') && Number.isFinite(syp) && syp >= 0
+              ? Math.round(syp)
+              : undefined,
+          amountUsd:
+            (payCurrency === 'USD' || payCurrency === 'MIXED') && Number.isFinite(usd) && usd >= 0
+              ? usd
+              : undefined,
           discountPercent: discountPct > 0 ? discountPct : 0,
           ...refundPayload,
         }),
@@ -1103,7 +1156,31 @@ export function BillingPage() {
                   />
                   دولار أمريكي (USD)
                 </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="pay-currency"
+                    checked={payCurrency === 'MIXED'}
+                    onChange={() => {
+                      setPayCurrency('MIXED')
+                      setPaySyp(String(effectiveDueSyp))
+                      setPayUsd('')
+                      setPayRefundCurrency('SYP')
+                      setPayRefundAmount('')
+                    }}
+                  />
+                  ليرة ودولار معاً
+                </label>
               </div>
+              {payCurrency === 'MIXED' && payPreviewRate ? (
+                <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                  يُحسب الإجمالي: ليرة نقدية + (دولار × {payPreviewRate.toLocaleString('ar-SY')}) ثم يُقارن بالمستحق.
+                </p>
+              ) : payCurrency === 'MIXED' && !payPreviewRate ? (
+                <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
+                  لا يتوفر سعر صرف — أدخل جزء الليرة فقط أو فعّل يوم العمل لإدخال الدولار.
+                </p>
+              ) : null}
             </div>
             <div style={{ marginTop: '0.55rem' }}>
               <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
@@ -1153,7 +1230,13 @@ export function BillingPage() {
                   ))}
                 </select>
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  بعد اختيار البنك، أدخل المبلغ المستلم {payCurrency === 'USD' ? 'بالدولار' : 'بالليرة'} أدناه.
+                  بعد اختيار البنك، أدخل المبلغ المستلم{' '}
+                  {payCurrency === 'USD'
+                    ? 'بالدولار'
+                    : payCurrency === 'MIXED'
+                      ? 'بالليرة و/أو بالدولار'
+                      : 'بالليرة'}{' '}
+                  أدناه.
                 </p>
               </div>
             ) : null}
@@ -1169,6 +1252,36 @@ export function BillingPage() {
                     placeholder="0"
                     style={{ marginTop: '0.25rem', maxWidth: 280 }}
                   />
+                </>
+              ) : payCurrency === 'MIXED' ? (
+                <>
+                  <label className="form-label">المبلغ المستلم نقداً (ل.س)</label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={paySyp}
+                    onChange={(e) => setPaySyp(e.target.value)}
+                    placeholder="0"
+                    style={{ marginTop: '0.25rem', maxWidth: 280 }}
+                  />
+                  <label className="form-label" style={{ display: 'block', marginTop: '0.55rem' }}>
+                    المبلغ المستلم (USD)
+                  </label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    step="any"
+                    value={payUsd}
+                    onChange={(e) => setPayUsd(e.target.value)}
+                    placeholder="0"
+                    style={{ marginTop: '0.25rem', maxWidth: 320 }}
+                  />
+                  {payPreviewRate ? (
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      مقابل الدولار بالليرة = USD × {payPreviewRate.toLocaleString('ar-SY')} (تقريب أقرب ليرة).
+                    </p>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -1272,6 +1385,20 @@ export function BillingPage() {
                     </p>
                   )
                 }
+              } else if (payCurrency === 'MIXED') {
+                const syp = Number(normalizeDecimalDigits(paySyp))
+                const usd = parseFloat(normalizeDecimalDigits(payUsd))
+                if (!Number.isFinite(syp) || syp < 0 || !Number.isFinite(usd) || usd < 0) return null
+                netSyp = mixedNetReceivedSyp(syp, usd, payPreviewRate || 0)
+                grossSyp = netSyp
+                if (netSyp === 0 && syp === 0 && usd === 0) {
+                  return (
+                    <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
+                      لن يُحصَّل مبلغ — سيُسجَّل كامل المستحق ({due.toLocaleString('ar-SY')} ل.س) كذمة على
+                      المريض.
+                    </p>
+                  )
+                }
               } else {
                 const usd = parseFloat(normalizeDecimalDigits(payUsd))
                 usdParsed = usd
@@ -1293,7 +1420,7 @@ export function BillingPage() {
                   rate: payPreviewRate,
                 })
               }
-              if (!(grossSyp > 0)) return null
+              if (!(grossSyp > 0) && netSyp === 0 && payCurrency !== 'MIXED') return null
 
               if (payCurrency === 'USD' && netSyp <= 0) {
                 return (

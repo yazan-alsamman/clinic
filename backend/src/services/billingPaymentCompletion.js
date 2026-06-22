@@ -1,25 +1,24 @@
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
-import { BusinessDay } from '../models/BusinessDay.js'
 import { LaserSession } from '../models/LaserSession.js'
 import { Patient } from '../models/Patient.js'
 import { postBillingPayment } from './postingService.js'
 import { resolvePaymentChannelFromBody } from './paymentChannelSettings.js'
+import {
+  assertBillingCollectionAmountValid,
+  isZeroCollectionAllowed,
+  parseSypReceivedFromBody,
+  paymentRecordReceivedFields,
+  resolveBillingPaymentReceipt,
+} from './billingPaymentReceipt.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
 import { BILLING_PAYMENT_DUPLICATE_MSG, isMongoDuplicateKeyError } from '../utils/mongoErrors.js'
 
-function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
-  const u = Number(amountUsd)
-  const r = Number(rate)
-  const rs = Math.round(Number(patientRefundSyp) || 0)
-  const ru = Number(patientRefundUsd) || 0
-  if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0
-  if (ru > 0) {
-    return Math.round((u - ru) * r) - rs
-  }
-  return Math.round(u * r) - rs
+/** توافق مع billing.js القديم */
+export function isZeroSypCollectionAllowed(_receivedSyp, netReceivedSyp, dueForSettlement) {
+  return isZeroCollectionAllowed(netReceivedSyp, dueForSettlement)
 }
 
 function resolveBillingDiscount(listDueSyp, discountPercentBody) {
@@ -52,29 +51,16 @@ function mapDiscountError(err) {
   return null
 }
 
-/** تحصيل 0 ل.س مسموح — يُسجَّل كامل المستحق كذمة على المريض */
-export function parseSypReceivedFromBody(body) {
-  const raw = Number(body?.amountSyp)
-  if (!Number.isFinite(raw) || raw < 0) return { ok: false }
-  return { ok: true, receivedSyp: Math.round(raw) }
-}
+export { parseSypReceivedFromBody, isZeroCollectionAllowed, assertBillingCollectionAmountValid }
 
-export function isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement) {
-  return receivedSyp === 0 && netReceivedSyp === 0 && dueForSettlement > 0
-}
-
-export function assertBillingCollectionAmountValid({ receivedSyp, netReceivedSyp, payCurrency, dueForSettlement }) {
-  const zeroAllowed = payCurrency === 'SYP' && isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement)
-  if (!zeroAllowed && receivedSyp <= 0) {
-    const err = new Error('مبلغ الدفع غير صالح')
-    err.code = 'INVALID_AMOUNT'
-    throw err
-  }
-  if (!zeroAllowed && netReceivedSyp <= 0) {
-    const err = new Error('صافي المبلغ بعد الترجيع غير صالح — يجب أن يبقى للعيادة مبلغ موجب يغطي التحصيل.')
-    err.code = 'INVALID_NET'
-    throw err
-  }
+function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
+  const u = Number(amountUsd)
+  const r = Number(rate)
+  const rs = Math.round(Number(patientRefundSyp) || 0)
+  const ru = Number(patientRefundUsd) || 0
+  if (!Number.isFinite(u) || u <= 0 || !Number.isFinite(r) || r <= 0) return 0
+  if (ru > 0) return Math.round((u - ru) * r) - rs
+  return Math.round(u * r) - rs
 }
 
 /**
@@ -128,105 +114,23 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     }
   }
   const dueForSettlement = discountMeta.effectiveAmountDueSyp
-  const payCurrencyRaw = String(reqBody.payCurrency || 'SYP').trim().toUpperCase()
-  const payCurrency = payCurrencyRaw === 'USD' ? 'USD' : 'SYP'
-
-  let receivedSyp = 0
-  let receivedUsd = 0
-  let patientRefundSyp = 0
-  let patientRefundUsd = 0
-  let usdSypRateUsed = 0
-  let amountUsdRaw = 0
-
-  if (payCurrency === 'USD') {
-    const bd = await BusinessDay.findOne({ businessDate: bi.businessDate }).lean()
-    const rate = Number(bd?.usdSypRate)
-    if (!Number.isFinite(rate) || rate <= 0) {
-      const err = new Error(
-        'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
-      )
-      err.code = 'NO_RATE'
-      throw err
-    }
-    amountUsdRaw = Number(reqBody.amountUsd)
-    if (!Number.isFinite(amountUsdRaw) || amountUsdRaw <= 0) {
-      const err = new Error('مبلغ الدفع بالدولار غير صالح')
-      err.code = 'INVALID_USD'
-      throw err
-    }
-    usdSypRateUsed = rate
-    receivedSyp = Math.round(amountUsdRaw * rate)
-    receivedUsd = round6(amountUsdRaw)
-    if (receivedSyp <= 0) {
-      const err = new Error('المبلغ بالدولار صغير جداً بالنسبة لسعر الصرف.')
-      err.code = 'INVALID_USD'
-      throw err
-    }
-
-    const refundCurRaw = String(reqBody.refundCurrency || '').trim().toUpperCase()
-    const refundCurrency = refundCurRaw === 'USD' ? 'USD' : refundCurRaw === 'SYP' ? 'SYP' : null
-    if (refundCurrency === 'SYP') {
-      const refSyp = Number(reqBody.refundAmount)
-      if (reqBody.refundAmount != null && String(reqBody.refundAmount).trim() !== '') {
-        if (!Number.isFinite(refSyp) || refSyp < 0) {
-          const err = new Error('مبلغ الترجيع بالليرة غير صالح')
-          err.code = 'INVALID_REFUND'
-          throw err
-        }
-        patientRefundSyp = refSyp > 0 ? Math.round(refSyp) : 0
-      }
-    } else if (refundCurrency === 'USD') {
-      const refUsd = Number(reqBody.refundAmount)
-      if (reqBody.refundAmount != null && String(reqBody.refundAmount).trim() !== '') {
-        if (!Number.isFinite(refUsd) || refUsd < 0) {
-          const err = new Error('مبلغ الترجيع بالدولار غير صالح')
-          err.code = 'INVALID_REFUND'
-          throw err
-        }
-        patientRefundUsd = refUsd > 0 ? round6(refUsd) : 0
-      }
-    } else if (reqBody.refundAmount != null && String(reqBody.refundAmount).trim() !== '') {
-      const err = new Error('حدد عملة الترجيع (ليرة أو دولار) عند إدخال مبلغ الترجيع')
-      err.code = 'INVALID_REFUND'
-      throw err
-    }
-
-    if (patientRefundSyp > 0 && patientRefundSyp > receivedSyp) {
-      const err = new Error('مبلغ الترجيع بالليرة أكبر من المقابل المستلم بالليرة لهذه الدفعة')
-      err.code = 'INVALID_REFUND'
-      throw err
-    }
-    if (patientRefundUsd > 0 && patientRefundUsd > amountUsdRaw) {
-      const err = new Error('مبلغ الترجيع بالدولار أكبر من المبلغ المستلم بالدولار')
-      err.code = 'INVALID_REFUND'
-      throw err
-    }
-    const refundSypEquivUsd = patientRefundUsd > 0 ? Math.round(patientRefundUsd * rate) : 0
-    if (patientRefundSyp + refundSypEquivUsd > receivedSyp) {
-      const err = new Error('إجمالي الترجيع (ليرة ومقابل دولار) يتجاوز المبلغ المستلم بالليرة')
-      err.code = 'INVALID_REFUND'
-      throw err
-    }
-  } else {
-    const parsed = parseSypReceivedFromBody(reqBody)
-    if (!parsed.ok) {
-      const err = new Error('مبلغ الدفع غير صالح')
-      err.code = 'INVALID_AMOUNT'
-      throw err
-    }
-    receivedSyp = parsed.receivedSyp
-  }
-
-  const netReceivedSyp =
-    payCurrency === 'USD'
-      ? netReceivedSypAfterUsdCollection(amountUsdRaw, patientRefundSyp, patientRefundUsd, usdSypRateUsed)
-      : receivedSyp
-  assertBillingCollectionAmountValid({ receivedSyp, netReceivedSyp, payCurrency, dueForSettlement })
+  const receipt = await resolveBillingPaymentReceipt(reqBody, bi.businessDate)
+  const {
+    payCurrency,
+    netReceivedSyp,
+    receivedAmountSyp: receivedSyp,
+    receivedAmountUsd: receivedUsd,
+    patientRefundSyp,
+    patientRefundUsd,
+    usdSypRateUsed,
+    amountUsdRaw,
+  } = receipt
+  assertBillingCollectionAmountValid({ netReceivedSyp, dueForSettlement })
 
   let paymentChannel
   let bankName
   try {
-    const requireBank = !isZeroSypCollectionAllowed(receivedSyp, netReceivedSyp, dueForSettlement)
+    const requireBank = !isZeroCollectionAllowed(netReceivedSyp, dueForSettlement)
     ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(reqBody, { requireBank }))
   } catch (chErr) {
     if (chErr?.code === 'BANK_REQUIRED') {
@@ -285,10 +189,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       amountSyp: appliedAmountSyp,
       receivedAmountSyp: receivedSyp,
       settlementDeltaSyp,
-      payCurrency,
-      receivedAmountUsd: payCurrency === 'USD' ? receivedUsd : 0,
-      patientRefundSyp: payCurrency === 'USD' ? patientRefundSyp : 0,
-      patientRefundUsd: payCurrency === 'USD' ? patientRefundUsd : 0,
+      ...paymentRecordReceivedFields(receipt),
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
       method,
@@ -358,9 +259,11 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
 
   let posting = { skipped: true, reason: 'unknown' }
+  let postingError = null
   try {
     posting = await postBillingPayment(payment._id, receivedByUser._id)
   } catch (postErr) {
+    postingError = postErr
     console.error('postBillingPayment:', postErr)
     try {
       await writeAudit({
@@ -383,38 +286,40 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     } catch (auditErr) {
       console.error('writeAudit (posting failure):', auditErr)
     }
-    throw postErr
   }
 
-  try {
-    await writeAudit({
-      user: receivedByUser,
-      action: 'تأكيد دفع بند فوترة',
-      entityType: 'BillingItem',
-      entityId: bi._id,
-      details: {
-        paymentId: String(payment._id),
-        receivedSyp,
-        receivedUsd,
-        payCurrency,
-        appliedAmountSyp,
-        settlementDeltaSyp,
-        paymentChannel,
-        bankName: paymentChannel === 'bank' ? bankName : undefined,
-        patientRefundSyp,
-        patientRefundUsd,
-        discountPercent: discountMeta.discountPercent,
-        accountingSkipped: posting.skipped,
-      },
-    })
-  } catch (auditErr) {
-    console.error('writeAudit (payment success):', auditErr)
+  if (!postingError) {
+    try {
+      await writeAudit({
+        user: receivedByUser,
+        action: 'تأكيد دفع بند فوترة',
+        entityType: 'BillingItem',
+        entityId: bi._id,
+        details: {
+          paymentId: String(payment._id),
+          receivedSyp,
+          receivedUsd,
+          payCurrency,
+          appliedAmountSyp,
+          settlementDeltaSyp,
+          paymentChannel,
+          bankName: paymentChannel === 'bank' ? bankName : undefined,
+          patientRefundSyp,
+          patientRefundUsd,
+          discountPercent: discountMeta.discountPercent,
+          accountingSkipped: posting.skipped,
+        },
+      })
+    } catch (auditErr) {
+      console.error('writeAudit (payment success):', auditErr)
+    }
   }
 
   return {
     paymentId: String(payment._id),
     billingItemId: String(bi._id),
     posting,
+    postingError: postingError ? String(postingError?.message || postingError) : null,
     patientSettlement: { outstandingDebtSyp, prepaidCreditSyp },
     payment: {
       amountSyp: payment.amountSyp,

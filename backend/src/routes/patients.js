@@ -158,6 +158,11 @@ function hasPackagePaymentCollection(body) {
     const usd = Number(body?.amountUsd)
     return Number.isFinite(usd) && usd > 0
   }
+  if (payCurrency === 'MIXED') {
+    const syp = Number(body?.amountSyp)
+    const usd = Number(body?.amountUsd)
+    return (Number.isFinite(syp) && syp > 0) || (Number.isFinite(usd) && usd > 0)
+  }
   const syp = Number(body?.amountSyp)
   return Number.isFinite(syp) && syp > 0
 }

@@ -23,7 +23,7 @@ export type TxRow = {
   procedureLabel: string
   paymentChannel: 'cash' | 'bank'
   bankName: string
-  payCurrency: 'SYP' | 'USD'
+  payCurrency: 'SYP' | 'USD' | 'MIXED'
   receivedAmountSyp: number
   receivedAmountUsd: number
   amountDueSyp: number

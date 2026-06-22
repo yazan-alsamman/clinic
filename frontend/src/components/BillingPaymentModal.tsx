@@ -8,10 +8,11 @@ import {
   resolveEffectiveDueSyp,
   resolveUsdCashOffer,
   validateBillingPaymentForm,
+  mixedNetReceivedSyp,
   type BillingPaymentFormState,
   type BillingPaymentRequestBody,
-  type PayCurrency,
 } from '../utils/billingPaymentForm'
+import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 
 export type BillingPaymentModalProps = {
   open: boolean
@@ -139,6 +140,14 @@ export function BillingPaymentModal({
       payRefundAmount: usdCashOffer.impliedRefundSyp > 0 ? String(usdCashOffer.impliedRefundSyp) : '',
     }))
   }, [open, form.payCurrency, usdCashOffer])
+
+  const mixedNetPreview = useMemo(() => {
+    if (form.payCurrency !== 'MIXED' || !payPreviewRate) return null
+    const syp = Number(normalizeDecimalDigits(form.paySyp))
+    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    if (!Number.isFinite(syp) || !Number.isFinite(usd)) return null
+    return mixedNetReceivedSyp(syp, usd, payPreviewRate)
+  }, [form.payCurrency, form.paySyp, form.payUsd, payPreviewRate])
 
   const settlementPreview = useMemo(
     () =>
@@ -397,7 +406,40 @@ export function BillingPaymentModal({
               />
               دولار أمريكي (USD)
             </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="billing-pay-currency"
+                checked={form.payCurrency === 'MIXED'}
+                disabled={busy}
+                onChange={() => {
+                  patchForm({
+                    payCurrency: 'MIXED',
+                    paySyp: String(effectiveDueSyp),
+                    payUsd: '',
+                    payRefundCurrency: 'SYP',
+                    payRefundAmount: '',
+                  })
+                }}
+              />
+              ليرة ودولار معاً
+            </label>
           </div>
+          {form.payCurrency === 'MIXED' && payPreviewRate ? (
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+              يُحسب الإجمالي: ليرة نقدية + (دولار × {payPreviewRate.toLocaleString('ar-SY')}) ثم يُقارن بالمستحق.
+              {mixedNetPreview != null ? (
+                <>
+                  {' '}
+                  الإجمالي الحالي: <strong>{mixedNetPreview.toLocaleString('ar-SY')} ل.س</strong>
+                </>
+              ) : null}
+            </p>
+          ) : form.payCurrency === 'MIXED' && !payPreviewRate ? (
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
+              لا يتوفر سعر صرف — أدخل جزء الليرة فقط أو فعّل يوم العمل لإدخال الدولار.
+            </p>
+          ) : null}
         </div>
 
         <div style={{ marginTop: '0.55rem' }}>
@@ -449,7 +491,13 @@ export function BillingPaymentModal({
               ))}
             </select>
             <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              بعد اختيار البنك، أدخل المبلغ المستلم {form.payCurrency === 'USD' ? 'بالدولار' : 'بالليرة'} أدناه.
+              بعد اختيار البنك، أدخل المبلغ المستلم{' '}
+              {form.payCurrency === 'USD'
+                ? 'بالدولار'
+                : form.payCurrency === 'MIXED'
+                  ? 'بالليرة و/أو بالدولار'
+                  : 'بالليرة'}{' '}
+              أدناه.
             </p>
           </div>
         ) : null}
@@ -467,6 +515,38 @@ export function BillingPaymentModal({
                 placeholder="0"
                 style={{ marginTop: '0.25rem', maxWidth: 280 }}
               />
+            </>
+          ) : form.payCurrency === 'MIXED' ? (
+            <>
+              <label className="form-label">المبلغ المستلم نقداً (ل.س)</label>
+              <input
+                className="input"
+                inputMode="decimal"
+                disabled={busy}
+                value={form.paySyp}
+                onChange={(e) => patchForm({ paySyp: e.target.value })}
+                placeholder="0"
+                style={{ marginTop: '0.25rem', maxWidth: 280 }}
+              />
+              <label className="form-label" style={{ display: 'block', marginTop: '0.55rem' }}>
+                المبلغ المستلم (USD)
+              </label>
+              <input
+                className="input"
+                inputMode="decimal"
+                dir="ltr"
+                step="any"
+                disabled={busy}
+                value={form.payUsd}
+                onChange={(e) => patchForm({ payUsd: e.target.value })}
+                placeholder="0"
+                style={{ marginTop: '0.25rem', maxWidth: 320 }}
+              />
+              {payPreviewRate ? (
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  مقابل الدولار بالليرة = USD × {payPreviewRate.toLocaleString('ar-SY')} (تقريب أقرب ليرة).
+                </p>
+              ) : null}
             </>
           ) : (
             <>
@@ -520,7 +600,7 @@ export function BillingPaymentModal({
                       name="billing-refund-currency"
                       checked={form.payRefundCurrency === 'SYP'}
                       disabled={busy}
-                      onChange={() => patchForm({ payRefundCurrency: 'SYP' as PayCurrency })}
+                      onChange={() => patchForm({ payRefundCurrency: 'SYP' })}
                     />
                     بالليرة السورية
                   </label>
@@ -530,7 +610,7 @@ export function BillingPaymentModal({
                       name="billing-refund-currency"
                       checked={form.payRefundCurrency === 'USD'}
                       disabled={busy}
-                      onChange={() => patchForm({ payRefundCurrency: 'USD' as PayCurrency })}
+                      onChange={() => patchForm({ payRefundCurrency: 'USD' })}
                     />
                     بالدولار (USD)
                   </label>

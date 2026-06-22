@@ -5,7 +5,7 @@ import {
   usdRoundedUpCashOffer,
 } from './usdExactDue'
 
-export type PayCurrency = 'SYP' | 'USD'
+export type PayCurrency = 'SYP' | 'USD' | 'MIXED'
 export type PaymentChannel = 'cash' | 'bank'
 
 export type BillingPaymentRequestBody = {
@@ -15,7 +15,7 @@ export type BillingPaymentRequestBody = {
   amountSyp?: number
   amountUsd?: number
   discountPercent?: number
-  refundCurrency?: PayCurrency
+  refundCurrency?: 'SYP' | 'USD'
   refundAmount?: number
 }
 
@@ -25,7 +25,7 @@ export type BillingPaymentFormState = {
   payBankName: string
   paySyp: string
   payUsd: string
-  payRefundCurrency: PayCurrency
+  payRefundCurrency: 'SYP' | 'USD'
   payRefundAmount: string
   payDiscountEnabled: boolean
   payDiscountPercent: string
@@ -33,6 +33,15 @@ export type BillingPaymentFormState = {
 
 function stripPct(s: string) {
   return s.replace(/%/g, '').trim()
+}
+
+export function mixedNetReceivedSyp(sypCash: number, usdAmount: number, rate: number): number {
+  const syp = Math.max(0, Math.round(Number(sypCash) || 0))
+  const usd = Number(usdAmount) || 0
+  const r = Number(rate) || 0
+  if (!(r > 0)) return syp
+  if (!(usd > 0)) return syp
+  return syp + Math.round(usd * r)
 }
 
 export function parseDiscountPercentInput(enabled: boolean, percentStr: string): number {
@@ -97,12 +106,20 @@ export function hasPositiveReceivedAmount(form: BillingPaymentFormState): boolea
     const syp = Number(normalizeDecimalDigits(form.paySyp))
     return Number.isFinite(syp) && syp > 0
   }
+  if (form.payCurrency === 'MIXED') {
+    const syp = Number(normalizeDecimalDigits(form.paySyp))
+    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    return (Number.isFinite(syp) && syp > 0) || (Number.isFinite(usd) && usd > 0)
+  }
   const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
   return Number.isFinite(usd) && usd > 0
 }
 
 export function paymentRequestHasCollection(body: BillingPaymentRequestBody): boolean {
   if (body.payCurrency === 'USD') return (Number(body.amountUsd) || 0) > 0
+  if (body.payCurrency === 'MIXED') {
+    return (Number(body.amountSyp) || 0) > 0 || (Number(body.amountUsd) || 0) > 0
+  }
   return (Number(body.amountSyp) || 0) > 0
 }
 
@@ -110,6 +127,10 @@ export function netCollectedSypFromPayment(
   payment: BillingPaymentRequestBody,
   usdSypRate: number | null,
 ): number {
+  if (payment.payCurrency === 'MIXED') {
+    const rate = Number(usdSypRate) || 0
+    return mixedNetReceivedSyp(Number(payment.amountSyp) || 0, Number(payment.amountUsd) || 0, rate)
+  }
   if (payment.payCurrency === 'USD') {
     const usd = Number(payment.amountUsd) || 0
     const rate = Number(usdSypRate) || 0
@@ -158,6 +179,17 @@ export function validateBillingPaymentForm(opts: {
     const syp = Number(normalizeDecimalDigits(form.paySyp))
     if (!Number.isFinite(syp) || syp < 0) return 'أدخل مبلغاً صالحاً بالليرة السورية.'
     if (!allowZero && syp <= 0) return 'أدخل مبلغاً صالحاً بالليرة السورية.'
+    return null
+  }
+  if (form.payCurrency === 'MIXED') {
+    const syp = Number(normalizeDecimalDigits(form.paySyp))
+    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    if (!Number.isFinite(syp) || syp < 0) return 'مبلغ الليرة في التحصيل المختلط غير صالح.'
+    if (!Number.isFinite(usd) || usd < 0) return 'مبلغ الدولار في التحصيل المختلط غير صالح.'
+    if (!allowZero && syp <= 0 && usd <= 0) return 'أدخل مبلغاً بالليرة أو بالدولار (أو كليهما).'
+    if (usd > 0 && !(opts.payPreviewRate && opts.payPreviewRate > 0)) {
+      return 'لا يتوفر سعر صرف لحساب جزء الدولار — فعّل يوم العمل أو استخدم تاريخ بند له سعر محفوظ.'
+    }
     return null
   }
   const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
@@ -225,13 +257,14 @@ export function buildBillingPaymentRequestBody(opts: {
   const preset = Number(opts.presetDiscountPercent) || 0
   const discountPct =
     preset > 0 ? 0 : form.payDiscountEnabled ? parseDiscountPercentInput(true, form.payDiscountPercent) : 0
+  const includeSyp = form.payCurrency === 'SYP' || form.payCurrency === 'MIXED'
+  const includeUsd = form.payCurrency === 'USD' || form.payCurrency === 'MIXED'
   return {
     payCurrency: form.payCurrency,
     paymentChannel: form.payChannel,
     bankName: form.payChannel === 'bank' ? form.payBankName.trim() : undefined,
-    amountSyp:
-      form.payCurrency === 'SYP' && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
-    amountUsd: form.payCurrency === 'USD' && Number.isFinite(usd) && usd >= 0 ? usd : undefined,
+    amountSyp: includeSyp && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
+    amountUsd: includeUsd && Number.isFinite(usd) && usd >= 0 ? usd : undefined,
     discountPercent: discountPct > 0 ? discountPct : 0,
     ...refundPayload,
   }
@@ -256,6 +289,18 @@ export function computePaymentSettlementPreview(opts: {
     grossSyp = Math.round(syp)
     netSyp = grossSyp
     if (grossSyp === 0) return { kind: 'under', delta: -due }
+  } else if (form.payCurrency === 'MIXED') {
+    const syp = Number(normalizeDecimalDigits(form.paySyp))
+    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    if (!Number.isFinite(syp) || syp < 0 || !Number.isFinite(usd) || usd < 0) return { kind: 'none' }
+    usdParsed = usd
+    grossSyp = Math.round(syp)
+    if (usd > 0) {
+      if (!payPreviewRate || payPreviewRate <= 0) return { kind: 'none' }
+      grossSyp += Math.round(usd * payPreviewRate)
+    }
+    netSyp = mixedNetReceivedSyp(syp, usd, payPreviewRate || 0)
+    if (netSyp === 0 && syp === 0 && usd === 0) return { kind: 'under', delta: -due }
   } else {
     const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
     usdParsed = usd
@@ -277,7 +322,7 @@ export function computePaymentSettlementPreview(opts: {
       rate: payPreviewRate,
     })
   }
-  if (!(grossSyp > 0)) return { kind: 'none' }
+  if (!(grossSyp > 0) && netSyp === 0 && form.payCurrency !== 'MIXED') return { kind: 'none' }
   if (form.payCurrency === 'USD' && netSyp <= 0) return { kind: 'invalid_net' }
   let delta = netSyp - due
   if (form.payCurrency === 'USD' && payPreviewRate) {
