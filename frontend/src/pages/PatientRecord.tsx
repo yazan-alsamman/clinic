@@ -4117,6 +4117,35 @@ export function PatientRecord() {
                   الإضافات فقط ويُحصّلها الاستقبال عند «إنقاص جلسة و دفع».
                 </p>
               ) : null}
+              {sessionInPackageMode &&
+              (bookedLaserSlotPkgMode === 'use_package_with_addon' ||
+                bookedLaserSlotPkgMode === 'continue_package_with_addon') &&
+              selectedLaserAddonItems.length > 0 ? (
+                <div
+                  style={{
+                    marginTop: '0.55rem',
+                    padding: '0.55rem 0.65rem',
+                    borderRadius: 10,
+                    border: '1px solid var(--amber)',
+                    background: 'var(--warning-dim)',
+                  }}
+                >
+                  <p style={{ margin: '0 0 0.35rem', fontSize: '0.86rem', fontWeight: 700, color: 'var(--amber)' }}>
+                    مناطق محجوزة من خارج الباكج (تُحسب بسعر النظام)
+                  </p>
+                  <ul style={{ margin: 0, paddingInlineStart: '1.15rem', fontSize: '0.86rem', lineHeight: 1.55 }}>
+                    {selectedLaserAddonItems.map((item) => (
+                      <li key={item.id}>
+                        {item.name} —{' '}
+                        {resolveLaserItemPriceByPatientGender(item, pricingGender).toLocaleString('ar-SY')} ل.س
+                      </li>
+                    ))}
+                  </ul>
+                  <p style={{ margin: '0.4rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    كل منطقة تظهر كسطر إضافي في جدول الجلسة مع تنويه «خارج الباكج».
+                  </p>
+                </div>
+              ) : null}
               {partialPackageLaserSession?.packageAreaBreakdown ? (
                 <div
                   style={{
@@ -4162,7 +4191,14 @@ export function PatientRecord() {
                     </thead>
                     <tbody>
                       {laserLineItemsWithPricing.map((row) => (
-                        <tr key={row.rowId}>
+                        <tr
+                          key={row.rowId}
+                          style={
+                            sessionInPackageMode && row.isAddon
+                              ? { background: 'color-mix(in srgb, var(--warning-dim) 70%, transparent)' }
+                              : undefined
+                          }
+                        >
                         <td>
                           <select
                             className="select"
@@ -4179,9 +4215,13 @@ export function PatientRecord() {
                         </td>
                         <td>
                           <span style={{ fontWeight: 600 }}>{row.areaLabel || '—'}</span>
-                          {row.isAddon ? (
-                            <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', color: 'var(--amber)' }}>
-                              خارج الباكج
+                          {sessionInPackageMode && row.isAddon ? (
+                            <div style={{ marginTop: '0.25rem', fontSize: '0.78rem', color: 'var(--amber)', lineHeight: 1.35 }}>
+                              خارج الباكج — تُحسب بسعر النظام
+                            </div>
+                          ) : sessionInPackageMode && !row.isAddon ? (
+                            <div style={{ marginTop: '0.25rem', fontSize: '0.78rem', color: 'var(--success)', lineHeight: 1.35 }}>
+                              ضمن الباكج (مدفوع مسبقاً)
                             </div>
                           ) : null}
                         </td>
@@ -4247,7 +4287,11 @@ export function PatientRecord() {
                           </label>
                         </td>
                         <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {(Number(row.lineCostSyp) || 0).toLocaleString('ar-SY')} ل.س
+                          {sessionInPackageMode && !row.isAddon ? (
+                            <span style={{ color: 'var(--text-muted)' }}>0 ل.س</span>
+                          ) : (
+                            <>{(Number(row.lineCostSyp) || 0).toLocaleString('ar-SY')} ل.س</>
+                          )}
                         </td>
                         <td>
                           <button

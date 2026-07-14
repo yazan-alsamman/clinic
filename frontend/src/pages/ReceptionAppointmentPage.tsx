@@ -1415,34 +1415,34 @@ export function ReceptionAppointmentPage() {
                     </>
                   ) : null}
                   {laserBookingContext?.hasFreshPackageSession ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={assignBlocked || laserBookingContextLoading}
-                      onClick={() => {
-                        setFormErr('')
-                        setLaserPackageBookingIntent('use_package')
-                        setSelectedLaserItemIds([])
-                      }}
-                    >
-                      {laserBookingContext?.partialVisit
-                        ? 'حجز جلسة جديدة من ضمن الباكج (جلسة باكج أخرى متاحة)'
-                        : 'حجز لمناطق الباكج'}
-                    </button>
-                  ) : null}
-                  {laserBookingContext?.partialVisit && laserBookingContext?.hasFreshPackageSession ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={assignBlocked || laserBookingContextLoading}
-                      onClick={() => {
-                        setFormErr('')
-                        setLaserPackageBookingIntent('use_package_with_addon')
-                        setSelectedLaserItemIds([])
-                      }}
-                    >
-                      جلسة جديدة من الباكج ومنطقة خارج الباكج
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={assignBlocked || laserBookingContextLoading}
+                        onClick={() => {
+                          setFormErr('')
+                          setLaserPackageBookingIntent('use_package')
+                          setSelectedLaserItemIds([])
+                        }}
+                      >
+                        {laserBookingContext?.partialVisit
+                          ? 'حجز جلسة جديدة من ضمن الباكج (جلسة باكج أخرى متاحة)'
+                          : 'حجز لمناطق الباكج'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={assignBlocked || laserBookingContextLoading}
+                        onClick={() => {
+                          setFormErr('')
+                          setLaserPackageBookingIntent('use_package_with_addon')
+                          setSelectedLaserItemIds([])
+                        }}
+                      >
+                        حجز جلسة من الباكج ومناطق من خارج الباكج
+                      </button>
+                    </>
                   ) : null}
                   {!laserBookingContext?.partialVisit && !laserBookingContext?.hasFreshPackageSession ? (
                     <button
@@ -1538,8 +1538,9 @@ export function ReceptionAppointmentPage() {
                 <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
                   {laserPackageBookingIntent === 'use_package_with_addon' ? (
                     <>
-                      تم اختيار <strong>جلسة جديدة ضمن باكج الليزر مع إضافة خارج الباكج</strong>. ستُعرض مناطق
-                      الباكج عند إنشاء الجلسة — اختر المناطق الإضافية أدناه.
+                      تم اختيار <strong>جلسة من الباكج + مناطق خارج الباكج</strong>. جلسة الباكج مدفوعة مسبقاً —
+                      اختر أدناه المناطق الإضافية التي تُحسب بسعر النظام، وتظهر للأخصائية كأسطر منفصلة مع تنويه «خارج
+                      الباكج».
                     </>
                   ) : (
                     <>
