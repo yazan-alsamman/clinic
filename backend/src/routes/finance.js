@@ -98,10 +98,85 @@ async function loadPaidBillingItems({ from, to, department, providerUserId }) {
 
   const payIds = [...new Set(items.map((i) => i.paymentId).filter(Boolean).map(String))]
   const payments =
-    payIds.length > 0 ? await BillingPayment.find({ _id: { $in: payIds } }).select('amountSyp').lean() : []
+    payIds.length > 0
+      ? await BillingPayment.find({ _id: { $in: payIds } })
+          .select('amountSyp discountPercent listAmountDueSyp effectiveAmountDueSyp receivedAt')
+          .lean()
+      : []
   const payById = new Map(payments.map((p) => [String(p._id), p]))
 
   return { items, sessionById, payById }
+}
+
+const DEPT_LABEL_AR = {
+  laser: 'ليزر',
+  dermatology: 'جلدية',
+  skin: 'بشرة',
+  dental: 'أسنان',
+  solarium: 'سولاريوم',
+}
+
+/**
+ * صفوف الخصومات من البنود المسدّدة (نسبة/قيمة > 0).
+ * يفضّل لقطة الدفع إن وُجدت، وإلا حقول البند.
+ */
+function buildDiscountRows(items, payById) {
+  const rows = []
+  let totalDiscountSyp = 0
+  for (const bi of items) {
+    const pay = payById.get(String(bi.paymentId))
+    const payPct = Number(pay?.discountPercent) || 0
+    const biPct = Number(bi.discountPercent) || 0
+    const discountPercent = payPct > 0 ? payPct : biPct
+    const listAmountDueSyp = Math.round(
+      Number(
+        payPct > 0 && Number(pay?.listAmountDueSyp) > 0
+          ? pay.listAmountDueSyp
+          : bi.listAmountDueSyp || bi.amountDueSyp,
+      ) || 0,
+    )
+    const effectiveAmountDueSyp = Math.round(
+      Number(
+        payPct > 0 && Number(pay?.effectiveAmountDueSyp) >= 0
+          ? pay.effectiveAmountDueSyp
+          : bi.effectiveAmountDueSyp || bi.amountDueSyp,
+      ) || 0,
+    )
+    const discountValueSyp = Math.max(0, listAmountDueSyp - effectiveAmountDueSyp)
+    if (!(discountPercent > 0) && !(discountValueSyp > 0)) continue
+
+    const patientName =
+      bi.patientId && typeof bi.patientId === 'object' && bi.patientId.name != null
+        ? String(bi.patientId.name || '').trim()
+        : ''
+    const providerName =
+      bi.providerUserId && typeof bi.providerUserId === 'object' && bi.providerUserId.name != null
+        ? String(bi.providerUserId.name || '').trim()
+        : ''
+    const department = String(bi.department || '')
+    rows.push({
+      billingItemId: String(bi._id),
+      paymentId: bi.paymentId ? String(bi.paymentId) : null,
+      patientName: patientName || '—',
+      procedureLabel: String(bi.procedureLabel || '—'),
+      department,
+      departmentLabel: DEPT_LABEL_AR[department] || department || '—',
+      providerName: providerName || '—',
+      listAmountDueSyp,
+      discountPercent,
+      effectiveAmountDueSyp,
+      discountValueSyp,
+      businessDate: String(bi.businessDate || ''),
+      paidAt: bi.paidAt ? new Date(bi.paidAt).toISOString() : null,
+    })
+    totalDiscountSyp += discountValueSyp
+  }
+  rows.sort((a, b) => {
+    const d = String(b.businessDate).localeCompare(String(a.businessDate), 'ar')
+    if (d !== 0) return d
+    return String(b.paidAt || '').localeCompare(String(a.paidAt || ''))
+  })
+  return { totalDiscountSyp: Math.round(totalDiscountSyp), rows }
 }
 
 function collectedForItem(bi, payById) {
@@ -395,6 +470,7 @@ financeRouter.get('/dashboard', async (req, res) => {
     }
 
     const dermShares = computeDermatologyShares(items, sessionById, payById, debtSettlements, debtLookup)
+    const discounts = buildDiscountRows(items, payById)
 
     const laserRev = revenueByDept.laser
     const laserExp = expenseTotals.laser || 0
@@ -473,6 +549,12 @@ financeRouter.get('/dashboard', async (req, res) => {
         totalRevenueSyp,
         totalExpensesSyp: overallExpensesTablesSyp,
         totalProfitSyp: Math.round(totalProfitSyp),
+        totalDiscountsSyp: discounts.totalDiscountSyp,
+      },
+      discounts: {
+        totalDiscountSyp: discounts.totalDiscountSyp,
+        count: discounts.rows.length,
+        rows: discounts.rows,
       },
       laser: {
         totalRevenueSyp: laserRev,

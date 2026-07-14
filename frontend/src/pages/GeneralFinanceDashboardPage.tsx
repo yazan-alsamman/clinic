@@ -3,11 +3,37 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 
+type DiscountRow = {
+  billingItemId: string
+  paymentId: string | null
+  patientName: string
+  procedureLabel: string
+  department: string
+  departmentLabel: string
+  providerName: string
+  listAmountDueSyp: number
+  discountPercent: number
+  effectiveAmountDueSyp: number
+  discountValueSyp: number
+  businessDate: string
+  paidAt: string | null
+}
+
 type DashboardPayload = {
   from: string
   to: string
   filters: { department: string; providerUserId: string | null }
-  overall: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
+  overall: {
+    totalRevenueSyp: number
+    totalExpensesSyp: number
+    totalProfitSyp: number
+    totalDiscountsSyp?: number
+  }
+  discounts?: {
+    totalDiscountSyp: number
+    count: number
+    rows: DiscountRow[]
+  }
   laser: {
     totalRevenueSyp: number
     totalExpensesSyp: number
@@ -285,6 +311,77 @@ export function GeneralFinanceDashboardPage() {
               والمصاريف العامة.
             </p>
           </div>
+          <div className="card" style={{ borderColor: '#c084fc', background: 'linear-gradient(160deg, #faf5ff 0%, #f3e8ff 100%)' }}>
+            <h3 style={{ margin: 0, color: '#6b21a8', fontSize: '0.95rem' }}>إجمالي الخصومات</h3>
+            <p style={{ margin: '0.4rem 0 0', fontWeight: 800, color: '#581c87' }}>
+              {fmtSyp(data?.overall.totalDiscountsSyp ?? data?.discounts?.totalDiscountSyp ?? 0)}
+            </p>
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#7e22ce' }}>
+              مجموع فرق السعر النظامي عن السعر بعد الخصم للجلسات المسدّدة ضمن التصفية والنطاق الزمني
+              {data?.discounts?.count != null ? ` (${data.discounts.count} جلسة).` : '.'}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section style={{ marginTop: '1.35rem' }}>
+        <h2 style={{ fontSize: '1.1rem', margin: '0 0 0.65rem' }}>الخصومات المطبّقة على الجلسات</h2>
+        <p className="page-desc" style={{ marginTop: 0, marginBottom: '0.65rem' }}>
+          كل جلسة سُدّد تحصيلها ضمن النطاق والتصفية وكان عليها خصم (نسبة أو فرق عن السعر النظامي).
+        </p>
+        <div className="card" style={{ overflowX: 'auto', padding: 0 }}>
+          <table className="data-table" style={{ width: '100%', margin: 0, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>اسم المريض</th>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>نوع الجلسة</th>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>المقدم</th>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>سعر الجلسة النظامي</th>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>نسبة الخصم</th>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>سعر الجلسة بعد الخصم</th>
+                <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem' }}>تاريخ الجلسة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.discounts?.rows || []).length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ padding: '0.9rem 0.75rem', color: 'var(--text-muted)' }}>
+                    لا توجد خصومات مسجّلة ضمن النطاق والتصفية الحالية.
+                  </td>
+                </tr>
+              ) : (
+                (data?.discounts?.rows || []).map((row) => (
+                  <tr key={row.billingItemId}>
+                    <td style={{ padding: '0.55rem 0.75rem' }}>{row.patientName}</td>
+                    <td style={{ padding: '0.55rem 0.75rem' }}>
+                      {row.procedureLabel}
+                      {row.departmentLabel ? (
+                        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {row.departmentLabel}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td style={{ padding: '0.55rem 0.75rem' }}>{row.providerName}</td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtSyp(row.listAmountDueSyp)}
+                    </td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(row.discountPercent || 0).toLocaleString('ar-SY', {
+                        maximumFractionDigits: 2,
+                      })}
+                      ٪
+                    </td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtSyp(row.effectiveAmountDueSyp)}
+                    </td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                      {row.businessDate || '—'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 

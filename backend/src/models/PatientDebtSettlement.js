@@ -12,6 +12,15 @@ const patientDebtSettlementSchema = new mongoose.Schema(
     debtAfter: { type: Number, default: 0, min: 0 },
     paymentChannel: { type: String, enum: ['cash', 'bank'], default: 'cash' },
     bankName: { type: String, default: '', trim: true },
+    /** عملة التحصيل الفعلية من المريض */
+    payCurrency: { type: String, enum: ['SYP', 'USD', 'MIXED'], default: 'SYP' },
+    /** عند الدفع بالدولار أو مختلط: مبلغ الدولار المستلم */
+    receivedAmountUsd: { type: Number, default: 0, min: 0 },
+    /** جزء الليرة النقدي المستلم عند مختلط؛ عند USD كامل يبقى عادة 0 مقابل السعر المحفوظ في enteredSyp */
+    receivedAmountSypCash: { type: Number, default: 0, min: 0 },
+    patientRefundSyp: { type: Number, default: 0, min: 0 },
+    patientRefundUsd: { type: Number, default: 0, min: 0 },
+    usdSypRateUsed: { type: Number, default: 0, min: 0 },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     receivedAt: { type: Date, default: () => new Date(), index: true },
     /** توزيع المبلغ المخصوم من الذمة على الأقسام (ليزر، جلدية، …) */

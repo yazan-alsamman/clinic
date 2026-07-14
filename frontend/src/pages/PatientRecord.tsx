@@ -942,9 +942,7 @@ export function PatientRecord() {
   const [financialSettleBankName, setFinancialSettleBankName] = useState('')
   const [financialSettleBusy, setFinancialSettleBusy] = useState(false)
   const [financialSettleErr, setFinancialSettleErr] = useState('')
-  const [debtPayAmount, setDebtPayAmount] = useState('')
-  const [debtPayChannel, setDebtPayChannel] = useState<PaymentChannel>('cash')
-  const [debtPayBankName, setDebtPayBankName] = useState('')
+  const [debtPayModalOpen, setDebtPayModalOpen] = useState(false)
   const [debtPayBusy, setDebtPayBusy] = useState(false)
   const [debtPayErr, setDebtPayErr] = useState('')
   const [debtPayOk, setDebtPayOk] = useState('')
@@ -2214,15 +2212,55 @@ export function PatientRecord() {
   }
 
   const debtNow = Math.round(Number(patient.outstandingDebtSyp) || 0)
-  const debtPayPreviewSyp = Math.max(0, Math.round(parseFloat(normalizeDecimalDigits(debtPayAmount)) || 0))
-  const debtPayWillApplySyp = Math.min(debtNow, debtPayPreviewSyp)
-  const debtPayWillRemainSyp = Math.max(0, debtNow - debtPayPreviewSyp)
-  const debtPayWillCreditSyp = Math.max(0, debtPayPreviewSyp - debtNow)
   const settlePreviewSyp = Math.max(0, Math.round(parseFloat(financialSettleSyp) || 0))
   const settleEnteredSyp = settlePreviewSyp
   const settleWillCoverSyp = Math.min(debtNow, settleEnteredSyp)
   const settleWillRemainDebtSyp = Math.max(0, debtNow - settleEnteredSyp)
   const settleWillAddCreditSyp = Math.max(0, settleEnteredSyp - debtNow)
+
+  async function confirmDebtSettlement(payment: BillingPaymentRequestBody) {
+    if (!id) return
+    setDebtPayErr('')
+    setDebtPayOk('')
+    setDebtPayBusy(true)
+    try {
+      const result = await api<{
+        settlement: {
+          enteredSyp: number
+          appliedToDebtSyp: number
+          debtAfter: number
+          extraToCreditSyp: number
+        }
+        summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+      }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
+        method: 'POST',
+        body: JSON.stringify(payment),
+      })
+      setPatient((prev) =>
+        prev
+          ? {
+              ...prev,
+              outstandingDebtSyp: Number(result.summary?.outstandingDebtSyp) || 0,
+              prepaidCreditSyp: Number(result.summary?.prepaidCreditSyp) || 0,
+            }
+          : prev,
+      )
+      const applied = Math.round(Number(result.settlement?.appliedToDebtSyp) || 0)
+      const after = Math.round(Number(result.summary?.outstandingDebtSyp) || 0)
+      const extra = Math.round(Number(result.settlement?.extraToCreditSyp) || 0)
+      const entered = Math.round(Number(result.settlement?.enteredSyp) || 0)
+      setDebtPayOk(
+        extra > 0
+          ? `تم استلام ${entered.toLocaleString('ar-SY')} ل.س وخصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي: ${after.toLocaleString('ar-SY')} ل.س — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي.`
+          : `تم استلام ${entered.toLocaleString('ar-SY')} ل.س وخصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي: ${after.toLocaleString('ar-SY')} ل.س.`,
+      )
+      setDebtPayModalOpen(false)
+    } catch (e) {
+      setDebtPayErr(e instanceof ApiError ? e.message : 'تعذر تسجيل التسديد')
+    } finally {
+      setDebtPayBusy(false)
+    }
+  }
 
   async function postPatientPackage(body: Record<string, unknown>) {
     if (!id) throw new Error('معرّف المريض غير متوفر')
@@ -3688,57 +3726,10 @@ export function PatientRecord() {
             </p>
           ) : (
             <>
-              {canUsePaymentChannels ? (
-                <PaymentChannelFields
-                  channel={debtPayChannel}
-                  bankName={debtPayBankName}
-                  onChannelChange={setDebtPayChannel}
-                  onBankNameChange={setDebtPayBankName}
-                  disabled={debtPayBusy}
-                  namePrefix="debt-pay"
-                  banks={paymentBanks}
-                  banksLoading={paymentBanksLoading}
-                />
-              ) : null}
-              <div style={{ marginTop: '1rem', maxWidth: 360 }}>
-                <label className="form-label">المبلغ المدفوع (ل.س)</label>
-                <input
-                  className="input"
-                  inputMode="decimal"
-                  value={debtPayAmount}
-                  onChange={(e) => {
-                    setDebtPayErr('')
-                    setDebtPayOk('')
-                    setDebtPayAmount(e.target.value)
-                  }}
-                  placeholder="0"
-                  disabled={debtPayBusy}
-                  style={{ marginTop: '0.25rem' }}
-                />
-              </div>
-              <div
-                style={{
-                  marginTop: '0.75rem',
-                  display: 'grid',
-                  gap: '0.35rem',
-                  fontSize: '0.88rem',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                <div>
-                  يُخصم من الذمة: <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(debtPayWillApplySyp)}</strong>
-                </div>
-                <div>
-                  الذمة المتبقية بعد التسديد:{' '}
-                  <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(debtPayWillRemainSyp)}</strong>
-                </div>
-                {debtPayWillCreditSyp > 0 ? (
-                  <div>
-                    فائض يُضاف للرصيد الإضافي:{' '}
-                    <strong style={{ color: 'var(--text)' }}>{renderMoneySyp(debtPayWillCreditSyp)}</strong>
-                  </div>
-                ) : null}
-              </div>
+              <p style={{ marginTop: '0.85rem', fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                استخدم نافذة التحصيل الموحّدة لتسديد الذمة بالليرة، بالدولار، أو بالعملتين معاً (كاش أو بنك)، بنفس
+                طريقة تحصيل الجلسات والباكجات. يُقارن المبلغ بالصافي المحاسبي بالليرة حسب سعر صرف يوم العمل.
+              </p>
               {debtPayErr ? <p style={{ color: 'var(--danger)', marginTop: '0.75rem' }}>{debtPayErr}</p> : null}
               {debtPayOk ? <p style={{ color: 'var(--success)', marginTop: '0.75rem' }}>{debtPayOk}</p> : null}
               <button
@@ -3746,66 +3737,13 @@ export function PatientRecord() {
                 className="btn btn-primary"
                 style={{ marginTop: '1rem' }}
                 disabled={debtPayBusy}
-                onClick={async () => {
-                  if (!id) return
+                onClick={() => {
                   setDebtPayErr('')
                   setDebtPayOk('')
-                  const syp = Math.max(0, Math.round(parseFloat(normalizeDecimalDigits(debtPayAmount)) || 0))
-                  if (!(syp > 0)) {
-                    setDebtPayErr('أدخل مبلغاً بالليرة أكبر من صفر.')
-                    return
-                  }
-                  const chErr = validatePaymentChannelBeforeSubmit(debtPayChannel, debtPayBankName)
-                  if (chErr) {
-                    setDebtPayErr(chErr)
-                    return
-                  }
-                  setDebtPayBusy(true)
-                  try {
-                    const result = await api<{
-                      settlement: {
-                        enteredSyp: number
-                        appliedToDebtSyp: number
-                        debtAfter: number
-                        extraToCreditSyp: number
-                      }
-                      summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
-                    }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        amountSyp: syp,
-                        paymentChannel: debtPayChannel,
-                        bankName: debtPayChannel === 'bank' ? debtPayBankName.trim() : undefined,
-                      }),
-                    })
-                    setPatient((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            outstandingDebtSyp: Number(result.summary?.outstandingDebtSyp) || 0,
-                            prepaidCreditSyp: Number(result.summary?.prepaidCreditSyp) || 0,
-                          }
-                        : prev,
-                    )
-                    const applied = Math.round(Number(result.settlement?.appliedToDebtSyp) || 0)
-                    const after = Math.round(Number(result.summary?.outstandingDebtSyp) || 0)
-                    const extra = Math.round(Number(result.settlement?.extraToCreditSyp) || 0)
-                    setDebtPayOk(
-                      extra > 0
-                        ? `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي. يظهر المبلغ في الجرد المالي اليومي.`
-                        : `تم خصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي على الذمة: ${after.toLocaleString('ar-SY')} ل.س. يظهر المبلغ في الجرد المالي اليومي.`,
-                    )
-                    setDebtPayAmount('')
-                    setDebtPayChannel('cash')
-                    setDebtPayBankName('')
-                  } catch (e) {
-                    setDebtPayErr(e instanceof ApiError ? e.message : 'تعذر تسجيل التسديد')
-                  } finally {
-                    setDebtPayBusy(false)
-                  }
+                  setDebtPayModalOpen(true)
                 }}
               >
-                {debtPayBusy ? 'جاري الحفظ…' : 'تأكيد تسديد الذمة'}
+                تسديد الذمة…
               </button>
             </>
           )}
@@ -5904,6 +5842,27 @@ export function PatientRecord() {
         itemBusinessDate={clinicBusinessDate || undefined}
         confirmLabel="حفظ الباكج وتحصيل"
         bankOptions={paymentBanks}
+      />
+
+      <BillingPaymentModal
+        open={debtPayModalOpen}
+        onClose={() => {
+          if (debtPayBusy) return
+          setDebtPayModalOpen(false)
+          setDebtPayErr('')
+        }}
+        onConfirm={(payment) => void confirmDebtSettlement(payment)}
+        busy={debtPayBusy}
+        externalError={debtPayErr}
+        title="تسديد ذمة المريض"
+        subtitle={`الذمة الحالية: ${debtNow.toLocaleString('ar-SY')} ل.س — يمكن التحصيل بالليرة أو الدولار أو كليهما.`}
+        listDueSyp={debtNow}
+        usdSypRate={usdSypRate}
+        clinicBusinessDate={clinicBusinessDate || undefined}
+        itemBusinessDate={clinicBusinessDate || undefined}
+        confirmLabel="تأكيد تسديد الذمة"
+        bankOptions={paymentBanks}
+        allowZeroAmount={false}
       />
     </>
   )

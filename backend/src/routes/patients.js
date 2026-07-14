@@ -21,6 +21,11 @@ import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../
 import { buildDepartmentAllocationsForSettlement } from '../services/patientDebtSettlementAllocation.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
+import {
+  paymentRecordReceivedFields,
+  resolveBillingPaymentReceipt,
+} from '../services/billingPaymentReceipt.js'
+import { round6 } from '../utils/money.js'
 
 const CLINICAL_ROLES = [
   'super_admin',
@@ -792,15 +797,35 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    const enteredSyp = parsePositiveSypInteger(req.body?.amountSyp)
-    if (enteredSyp == null) {
-      res.status(400).json({ error: 'أدخل مبلغاً بالليرة أكبر من الصفر' })
+
+    const businessDate = todayBusinessDate()
+    let receipt
+    try {
+      receipt = await resolveBillingPaymentReceipt(req.body ?? {}, businessDate)
+    } catch (receiptErr) {
+      const code = receiptErr?.code
+      if (
+        code === 'NO_RATE' ||
+        code === 'INVALID_USD' ||
+        code === 'INVALID_AMOUNT' ||
+        code === 'INVALID_REFUND'
+      ) {
+        res.status(400).json({ error: String(receiptErr?.message || receiptErr) })
+        return
+      }
+      throw receiptErr
+    }
+
+    const enteredSyp = Math.round(Number(receipt.netReceivedSyp) || 0)
+    if (!(enteredSyp > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغاً صالحاً أكبر من الصفر (ليرة و/أو دولار حسب اختيار العملة)' })
       return
     }
+
     let paymentChannel = 'cash'
     let bankName = ''
     try {
-      ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body))
+      ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(req.body ?? {}))
     } catch (chErr) {
       res.status(400).json({ error: String(chErr?.message || chErr) })
       return
@@ -812,6 +837,7 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
     const extraToCreditSyp = enteredSyp - appliedToDebtSyp
     const debtAfter = debtBefore - appliedToDebtSyp
     const creditAfter = creditBefore + extraToCreditSyp
+    const receivedFields = paymentRecordReceivedFields(receipt)
 
     await Patient.updateOne(
       { _id: p._id },
@@ -823,7 +849,6 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       },
     )
 
-    const businessDate = todayBusinessDate()
     const receivedAt = new Date()
     const departmentAllocations = await buildDepartmentAllocationsForSettlement(p._id, appliedToDebtSyp)
     const debtSettlement = await PatientDebtSettlement.create({
@@ -836,6 +861,17 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       debtAfter,
       paymentChannel,
       bankName,
+      payCurrency: receivedFields.payCurrency,
+      receivedAmountUsd: receivedFields.receivedAmountUsd,
+      receivedAmountSypCash:
+        receivedFields.payCurrency === 'MIXED'
+          ? Math.round(Number(receipt.receivedAmountSyp) || 0)
+          : receivedFields.payCurrency === 'SYP'
+            ? Math.round(Number(receipt.receivedAmountSyp) || 0)
+            : 0,
+      patientRefundSyp: receivedFields.patientRefundSyp,
+      patientRefundUsd: receivedFields.patientRefundUsd,
+      usdSypRateUsed: Math.round(Number(receipt.usdSypRateUsed) || 0),
       receivedBy: req.user._id,
       receivedAt,
       departmentAllocations,
@@ -864,6 +900,8 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         appliedToDebtSyp,
         extraToCreditSyp,
         outcome,
+        payCurrency: receivedFields.payCurrency,
+        receivedAmountUsd: receivedFields.receivedAmountUsd,
         departmentAllocations,
       },
     })
@@ -880,6 +918,8 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         extraToCreditSyp,
         outcome,
         businessDate,
+        payCurrency: receivedFields.payCurrency,
+        receivedAmountUsd: round6(Number(receivedFields.receivedAmountUsd) || 0),
         departmentAllocations: departmentAllocations.map((a) => ({
           department: a.department,
           amountSyp: a.amountSyp,

@@ -13,7 +13,8 @@ import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate, isValidYmd } from '../utils/date.js'
 import { round2, round6 } from '../utils/money.js'
 import { resolveSolariumPatientDisplayName } from '../services/solariumWalkInDisplay.js'
-import { slotIntervalMinutes } from '../utils/scheduleTime.js'
+import { normalizeHm, slotIntervalMinutes } from '../utils/scheduleTime.js'
+import { wallMinutesAsiaDamascus } from '../utils/shiftTime.js'
 
 export const clinicalRouter = Router()
 
@@ -705,9 +706,8 @@ function parseSolariumMinutesFromProcedure(proc) {
 function findBestSlotForClinical(clinicalRow, patientSlots) {
   if (!patientSlots?.length) return null
   if (patientSlots.length === 1) return patientSlots[0]
-  const d = clinicalRow.createdAt ? new Date(clinicalRow.createdAt) : null
-  if (!d || Number.isNaN(d.getTime())) return patientSlots[0]
-  const clinicalMinutes = d.getHours() * 60 + d.getMinutes()
+  const clinicalMinutes = wallMinutesAsiaDamascus(clinicalRow.createdAt)
+  if (clinicalMinutes == null) return patientSlots[0]
   let best = patientSlots[0]
   let bestDiff = Infinity
   for (const slot of patientSlots) {
@@ -722,18 +722,14 @@ function findBestSlotForClinical(clinicalRow, patientSlots) {
   return best
 }
 
-function resolveBookedDurationMinutes(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService) {
+function resolveBookedScheduleSlot(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService) {
   if (clinicalRow.scheduleSlotId) {
-    const d = bookedSlotDurationMinutes(slotsById.get(String(clinicalRow.scheduleSlotId)))
-    if (d != null) return d
+    const slot = slotsById.get(String(clinicalRow.scheduleSlotId))
+    if (slot) return slot
   }
   if (clinicalRow.laserSessionId) {
-    const d = bookedSlotDurationMinutes(slotsByLaserId.get(String(clinicalRow.laserSessionId)))
-    if (d != null) return d
-  }
-  if (clinicalRow.department === 'solarium') {
-    const parsed = parseSolariumMinutesFromProcedure(clinicalRow.procedureDescription)
-    if (parsed != null) return parsed
+    const slot = slotsByLaserId.get(String(clinicalRow.laserSessionId))
+    if (slot) return slot
   }
   const serviceType = departmentToServiceType(clinicalRow.department)
   const pid = clinicalRow.patientId?._id
@@ -742,18 +738,51 @@ function resolveBookedDurationMinutes(clinicalRow, slotsById, slotsByLaserId, sl
       ? String(clinicalRow.patientId)
       : ''
   if (serviceType && pid) {
-    const slot = findBestSlotForClinical(clinicalRow, slotsByPatientService.get(`${pid}|${serviceType}`) || [])
-    const d = bookedSlotDurationMinutes(slot)
-    if (d != null) return d
+    return findBestSlotForClinical(clinicalRow, slotsByPatientService.get(`${pid}|${serviceType}`) || [])
   }
   return null
+}
+
+function resolveBookedDurationMinutes(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService) {
+  const slot = resolveBookedScheduleSlot(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService)
+  const fromSlot = bookedSlotDurationMinutes(slot)
+  if (fromSlot != null) return fromSlot
+  if (clinicalRow.department === 'solarium') {
+    const parsed = parseSolariumMinutesFromProcedure(clinicalRow.procedureDescription)
+    if (parsed != null) return parsed
+  }
+  return null
+}
+
+/** وقت بداية الموعد المحجوز HH:mm → مثل 9:30 ص */
+function formatBookedHmLabel(hm) {
+  const n = normalizeHm(hm)
+  if (!n) return null
+  const [h24, min] = n.split(':').map((x) => parseInt(x, 10))
+  if (!Number.isFinite(h24) || !Number.isFinite(min)) return null
+  const period = h24 < 12 ? 'ص' : 'م'
+  let h12 = h24 % 12
+  if (h12 === 0) h12 = 12
+  return `${h12}:${String(min).padStart(2, '0')} ${period}`
 }
 
 function formatSessionTime(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleTimeString('ar-SY', { hour: 'numeric', minute: '2-digit', hour12: true })
+  return d.toLocaleTimeString('ar-SY', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Damascus',
+  })
+}
+
+function resolveSessionTimeLabel(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService) {
+  const slot = resolveBookedScheduleSlot(clinicalRow, slotsById, slotsByLaserId, slotsByPatientService)
+  const fromSlot = formatBookedHmLabel(slot?.time)
+  if (fromSlot) return fromSlot
+  return formatSessionTime(clinicalRow.createdAt)
 }
 
 /** ملخص جلسات يوم عمل واحد — جميع الأقسام (لمدير النظام فقط) */
@@ -834,7 +863,7 @@ clinicalRouter.get('/sessions/day-overview', requireRoles('super_admin'), async 
         sessionType: DEPARTMENT_LABEL_AR[r.department] || String(r.department || '—'),
         patientName,
         providerName: r.providerUserId?.name || '—',
-        timeLabel: formatSessionTime(r.createdAt),
+        timeLabel: resolveSessionTimeLabel(r, slotsById, slotsByLaserId, slotsByPatientService),
         durationLabel: durationMinutes != null ? formatDurationMinutes(durationMinutes) : '—',
         notes: notesCombined,
       }
