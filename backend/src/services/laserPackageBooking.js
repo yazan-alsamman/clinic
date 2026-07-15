@@ -1,43 +1,11 @@
 import { LaserSession } from '../models/LaserSession.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
+import { buildPackageAreaBreakdown } from './laserPackageAreaBreakdown.js'
 
 function packageExpectedAreaCount(pkg) {
   const ids = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
   return Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0), ids.length)
-}
-
-function buildAreaBreakdownFromSessionRow(sessionRow, pkg, nameByOptionId) {
-  const packageIds = (Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : [])
-    .map(String)
-    .filter(Boolean)
-  if (!packageIds.length) return null
-
-  const doneItems = (Array.isArray(sessionRow?.lineItems) ? sessionRow.lineItems : []).filter((r) => !r.isAddon)
-  const doneAreas = []
-  const remainingProcedureOptionIds = [...packageIds]
-  for (const li of doneItems) {
-    const oid = String(li.procedureOptionId || '')
-    const label =
-      String(li.areaLabel || '').trim() || (oid ? nameByOptionId.get(oid) : '') || ''
-    if (label) doneAreas.push(label)
-    if (oid) {
-      const idx = remainingProcedureOptionIds.indexOf(oid)
-      if (idx >= 0) remainingProcedureOptionIds.splice(idx, 1)
-    }
-  }
-  const remainingAreas = remainingProcedureOptionIds
-    .map((id) => nameByOptionId.get(id) || id)
-    .filter(Boolean)
-  const expected = packageExpectedAreaCount(pkg)
-  const isPartial = doneAreas.length > 0 && doneAreas.length < expected
-  return {
-    doneAreas,
-    remainingAreas,
-    remainingProcedureOptionIds,
-    isPartial,
-    expectedAreaCount: expected,
-  }
 }
 
 /** أول جلسة باكج بلا ربط ليزر ولم تُثبَّت من الاستقبال */
@@ -128,23 +96,28 @@ export async function getLaserBookingContextForPatient(patientDoc) {
       if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
     }
   }
-  const nameRows =
+  const optionRows =
     optionIds.size > 0
       ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
-          .select('name')
+          .select('name kind')
           .lean()
       : []
-  const nameByOptionId = new Map(nameRows.map((r) => [String(r._id), String(r.name || '').trim()]))
+  const optionMetaById = new Map(
+    optionRows.map((r) => [
+      String(r._id),
+      { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+    ]),
+  )
 
   const fresh = findFreshLaserPackageSession(patientDoc)
   const hasFreshPackageSession = Boolean(fresh)
 
   let partialVisit = null
   if (continueMatch?.existingLaserSession && continueMatch.pkg) {
-    const breakdown = buildAreaBreakdownFromSessionRow(
+    const breakdown = buildPackageAreaBreakdown(
       continueMatch.existingLaserSession,
       continueMatch.pkg,
-      nameByOptionId,
+      optionMetaById,
     )
     if (breakdown?.isPartial) {
       partialVisit = {

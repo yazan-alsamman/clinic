@@ -24,6 +24,41 @@ export function normalizeLaserBookingText(text: string): string {
     .replace(/\s+/g, ' ')
 }
 
+const PACKAGE_AREA_ALIASES: Record<string, string> = {
+  باط: 'إبطين',
+  ابط: 'إبطين',
+  إبط: 'إبطين',
+  ابطين: 'إبطين',
+  إبطين: 'إبطين',
+  'حواف بكيني': 'بكيني',
+  بكيني: 'بكيني',
+  ساقين: 'ساقين',
+  رجلين: 'ساقين',
+  ساعدين: 'ساعدين',
+  يدين: 'ساعدين',
+}
+
+/** توحيد أسماء مناطق الباكج للمقارنة (مثل باط ↔ إبطين) */
+export function normalizePackageAreaLabel(text: string): string {
+  const n = normalizeLaserBookingText(text)
+  if (!n) return ''
+  return PACKAGE_AREA_ALIASES[n] || n
+}
+
+export function laserProcedureMatchesRemainingPackageAreas(
+  item: { name: string; kind?: string },
+  remainingAreaLabels: string[],
+): boolean {
+  const remaining = new Set(remainingAreaLabels.map((x) => normalizePackageAreaLabel(x)).filter(Boolean))
+  if (!remaining.size) return false
+  const matches = (label: string) => remaining.has(normalizePackageAreaLabel(label))
+  if (matches(item.name)) return true
+  if (item.kind === 'offer') {
+    return splitLaserOfferAreaLabels(item.name).some((part) => matches(part))
+  }
+  return false
+}
+
 export function isFullBodyLaserBookingText(text: string): boolean {
   const n = normalizeLaserBookingText(text)
   return n === 'جسم كامل' || n === 'full body' || n === 'fullbody'

@@ -23,6 +23,7 @@ import {
   normalizeLaserBookingText,
   parseBookedLaserAddonSegment,
   splitLaserOfferAreaLabels,
+  laserProcedureMatchesRemainingPackageAreas,
 } from '../data/laserFullBody'
 import type { LaserCategory, Patient, Role } from '../types'
 
@@ -1995,12 +1996,20 @@ export function PatientRecord() {
 
     let ids = (pkg?.procedureOptionIds || []).filter(Boolean)
     if (wantsContinueOnly && partialPackageLaserSession) {
-      const doneIds = new Set(
-        (partialPackageLaserSession.lineItems || [])
-          .filter((li) => !li.isAddon && li.procedureOptionId)
-          .map((li) => li.procedureOptionId),
-      )
-      ids = ids.filter((oid) => !doneIds.has(oid))
+      const remainingLabels = partialPackageLaserSession.packageAreaBreakdown?.remainingAreas || []
+      if (remainingLabels.length > 0) {
+        ids = ids.filter((oid) => {
+          const item = laserItemById.get(oid)
+          return item ? laserProcedureMatchesRemainingPackageAreas(item, remainingLabels) : false
+        })
+      } else {
+        const doneIds = new Set(
+          (partialPackageLaserSession.lineItems || [])
+            .filter((li) => !li.isAddon && li.procedureOptionId)
+            .map((li) => li.procedureOptionId),
+        )
+        ids = ids.filter((oid) => !doneIds.has(oid))
+      }
     }
     if (!ids.length) return
     if (!ids.every((oid) => laserItemById.has(oid))) return
@@ -2028,6 +2037,7 @@ export function PatientRecord() {
     (activeLaserPackage?.procedureOptionIds || []).join(','),
     clinicalHistory,
     partialPackageLaserSession?.id,
+    partialPackageLaserSession?.packageAreaBreakdown?.remainingAreas?.join(','),
   ])
 
   useEffect(() => {

@@ -8,37 +8,18 @@ import { DentalMasterPlan } from '../models/DentalMasterPlan.js'
 import { Patient } from '../models/Patient.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { normalizeHm, hmToMinutes } from '../utils/scheduleTime.js'
+import { buildPackageAreaBreakdown } from './laserPackageAreaBreakdown.js'
 
-function buildLaserPackageAreaBreakdown(sessionRow, packagesById, nameByOptionId) {
+function buildLaserPackageAreaBreakdown(sessionRow, packagesById, optionMetaById) {
   if (sessionRow?.isPackageSession !== true) return null
   const pkg = packagesById.get(String(sessionRow.patientPackageId || ''))
   if (!pkg) return null
-  const packageIds = (Array.isArray(pkg.procedureOptionIds) ? pkg.procedureOptionIds : [])
-    .map(String)
-    .filter(Boolean)
-  if (!packageIds.length) return null
-
-  const doneItems = (Array.isArray(sessionRow.lineItems) ? sessionRow.lineItems : []).filter((r) => !r.isAddon)
-  const doneAreas = []
-  const idsRemaining = [...packageIds]
-  for (const li of doneItems) {
-    const oid = String(li.procedureOptionId || '')
-    const label =
-      String(li.areaLabel || '').trim() ||
-      (oid ? nameByOptionId.get(oid) : '') ||
-      ''
-    if (label) doneAreas.push(label)
-    if (oid) {
-      const idx = idsRemaining.indexOf(oid)
-      if (idx >= 0) idsRemaining.splice(idx, 1)
-    }
-  }
-  const remainingAreas = idsRemaining.map((id) => nameByOptionId.get(id) || id).filter(Boolean)
-  const expected = Math.max(1, Math.trunc(Number(pkg.areaCount) || 0), packageIds.length)
+  const breakdown = buildPackageAreaBreakdown(sessionRow, pkg, optionMetaById)
+  if (!breakdown) return null
   return {
-    doneAreas,
-    remainingAreas,
-    isPartial: doneAreas.length < expected,
+    doneAreas: breakdown.doneAreas,
+    remainingAreas: breakdown.remainingAreas,
+    isPartial: breakdown.isPartial,
   }
 }
 
@@ -100,13 +81,18 @@ export async function getClinicalBundleForPatientId(pid) {
       if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
     }
   }
-  const nameRows =
+  const optionRows =
     optionIds.size > 0
       ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
-          .select('name')
+          .select('name kind')
           .lean()
       : []
-  const nameByOptionId = new Map(nameRows.map((r) => [String(r._id), String(r.name || '').trim()]))
+  const optionMetaById = new Map(
+    optionRows.map((r) => [
+      String(r._id),
+      { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+    ]),
+  )
 
   const billingIds = laserRows.map((s) => s.billingItemId).filter(Boolean)
   const billingItems = billingIds.length
@@ -181,7 +167,7 @@ export async function getClinicalBundleForPatientId(pid) {
         chargeByPulseCount: row.chargeByPulseCount === true,
         isAddon: row.isAddon === true,
       })),
-      packageAreaBreakdown: buildLaserPackageAreaBreakdown(s, packagesById, nameByOptionId),
+      packageAreaBreakdown: buildLaserPackageAreaBreakdown(s, packagesById, optionMetaById),
     }
   })
 
