@@ -9,7 +9,7 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { SolariumSettings } from '../models/SolariumSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
-import { recordBillingStraightCashSyp } from '../services/recordBillingStraightCashSyp.js'
+import { recordBillingStraightPayment } from '../services/recordBillingStraightCashSyp.js'
 import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
 import {
   SOLARIUM_WALKIN_FILE_NUMBER,
@@ -117,6 +117,10 @@ solariumRouter.get('/daily-register', requireRoles('super_admin'), async (req, r
       const proc = String(cs.procedureDescription || bi?.procedureLabel || '')
       const kind = classifySolariumRow(proc)
       const amountSyp = Math.round(Number(bi?.amountDueSyp ?? bi?.effectiveAmountDueSyp ?? cs.sessionFeeSyp) || 0)
+      const payCurrencyRaw = String(pay?.payCurrency || 'SYP').trim().toUpperCase()
+      const payCurrency =
+        payCurrencyRaw === 'USD' || payCurrencyRaw === 'MIXED' ? payCurrencyRaw : 'SYP'
+      const receivedAmountUsd = Math.max(0, Number(pay?.receivedAmountUsd) || 0)
       const walkInPlaceholder = isSolariumWalkInPlaceholderPatient(patient)
       return {
         id: String(cs._id),
@@ -127,6 +131,8 @@ solariumRouter.get('/daily-register', requireRoles('super_admin'), async (req, r
         patientName: resolveSolariumPatientDisplayName(patient, proc),
         fileNumber: walkInPlaceholder ? '' : patient?.fileNumber ? String(patient.fileNumber) : '',
         amountSyp,
+        payCurrency,
+        receivedAmountUsd,
         billingStatus: bi?.status ? String(bi.status) : '',
         receivedByName: receiver?.name ? String(receiver.name).trim() : '—',
         receivedAt: pay?.receivedAt ? new Date(pay.receivedAt).toISOString() : null,
@@ -165,7 +171,7 @@ solariumRouter.put('/settings', requireRoles('super_admin'), async (req, res) =>
 })
 
 /**
- * تسجيل جلسة سولاريوم باسم حرّ (غير مرتبط بملفات المرضى) + تحصيل فوري نقداً ل.س
+ * تسجيل جلسة سولاريوم باسم حرّ (غير مرتبط بملفات المرضى) + تحصيل فوري ل.س أو USD
  * يُحسب ضمن الجرد المالي اليومي مثل باقي التحصيلات (receivedBy = المستخدم الحالي).
  */
 solariumRouter.post(
@@ -202,6 +208,9 @@ solariumRouter.post(
         })
         return
       }
+
+      const payCurrency =
+        String(body.payCurrency || 'SYP').trim().toUpperCase() === 'USD' ? 'USD' : 'SYP'
 
       const businessDate = String(body.businessDate || '').trim() || req.businessDate || todayBusinessDate()
       const placeholder = await ensureSolariumWalkInPlaceholderPatient()
@@ -250,11 +259,17 @@ solariumRouter.post(
         res.status(400).json({ error: String(chErr?.message || chErr) })
         return
       }
-      const payResult = await recordBillingStraightCashSyp({
+
+      const amountUsdRaw = Number(body.amountUsd)
+      const payResult = await recordBillingStraightPayment({
         billingItemId: bi._id,
         receivedByUser: req.user,
         paymentChannel,
         bankName,
+        payCurrency,
+        amountSyp: payCurrency === 'SYP' ? fee : undefined,
+        amountUsd: payCurrency === 'USD' ? amountUsdRaw : 0,
+        skipPatientDebtUpdate: true,
       })
 
       await writeAudit({
@@ -266,6 +281,8 @@ solariumRouter.post(
           displayName,
           sessionMinutes,
           feeSyp: fee,
+          payCurrency,
+          amountUsd: payCurrency === 'USD' ? amountUsdRaw : undefined,
           billingItemId: String(bi._id),
           paymentId: payResult.paymentId,
         },
@@ -277,6 +294,8 @@ solariumRouter.post(
         billingItemId: String(bi._id),
         paymentId: payResult.paymentId,
         amountSyp: fee,
+        payCurrency,
+        amountUsd: payCurrency === 'USD' ? amountUsdRaw : 0,
         procedureLabel: procedureDescription,
       })
     } catch (e) {
@@ -286,7 +305,13 @@ solariumRouter.post(
       }
       console.error(e)
       const msg = String(e?.message || e)
-      if (msg.includes('البند') || msg.includes('دفعة')) {
+      if (
+        msg.includes('البند') ||
+        msg.includes('دفعة') ||
+        msg.includes('الدولار') ||
+        msg.includes('سعر صرف') ||
+        msg.includes('المبلغ')
+      ) {
         res.status(400).json({ error: msg })
         return
       }

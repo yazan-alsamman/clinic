@@ -20,6 +20,8 @@ export type PackageCollectionFieldsProps = {
   onChannelChange: (c: PaymentChannel) => void
   onBankNameChange: (name: string) => void
   usdSypRate: number | null
+  /** عنوان صندوق التحصيل */
+  title?: string
   disabled?: boolean
   namePrefix?: string
   banks?: { id: string; name: string }[]
@@ -37,6 +39,7 @@ export function PackageCollectionFields({
   onChannelChange,
   onBankNameChange,
   usdSypRate,
+  title = 'طريقة التحصيل (عند وجود مدفوع)',
   disabled = false,
   namePrefix = 'pkg-collect',
   banks = [],
@@ -64,7 +67,7 @@ export function PackageCollectionFields({
       }}
     >
       <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 700 }}>
-        طريقة التحصيل (عند وجود مدفوع)
+        {title}
       </span>
       {!(due > 0) ? (
         <p style={{ margin: '0 0 0.5rem', fontSize: '0.84rem', color: 'var(--text-muted)' }}>

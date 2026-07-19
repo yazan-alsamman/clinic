@@ -3,11 +3,12 @@ import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { api, ApiError } from '../api/client'
 import {
-  PaymentChannelFields,
-  usePaymentBankOptions,
-  validatePaymentChannelBeforeSubmit,
-  type PaymentChannel,
-} from '../components/PaymentChannelFields'
+  PackageCollectionFields,
+  packageCollectionBodyExtras,
+  validatePackageCollectionBeforeSubmit,
+  type PayCurrency,
+} from '../components/PackageCollectionFields'
+import { usePaymentBankOptions, type PaymentChannel } from '../components/PaymentChannelFields'
 import type { Role } from '../types'
 
 type SolariumRegisterRow = {
@@ -19,6 +20,8 @@ type SolariumRegisterRow = {
   patientName: string
   fileNumber: string
   amountSyp: number
+  payCurrency?: 'SYP' | 'USD' | 'MIXED' | string
+  receivedAmountUsd?: number
   billingStatus: string
   receivedByName: string
   receivedAt: string | null
@@ -40,9 +43,21 @@ function formatDt(iso: string | null) {
   }
 }
 
+function formatRegisterAmount(r: SolariumRegisterRow) {
+  const cur = String(r.payCurrency || 'SYP').toUpperCase()
+  const usd = Number(r.receivedAmountUsd) || 0
+  if (cur === 'USD' && usd > 0) {
+    return `${usd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD (≈ ${r.amountSyp.toLocaleString('ar-SY')} ل.س)`
+  }
+  if (cur === 'MIXED' && usd > 0) {
+    return `${r.amountSyp.toLocaleString('ar-SY')} ل.س + ${usd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD`
+  }
+  return `${r.amountSyp.toLocaleString('ar-SY')} ل.س`
+}
+
 export function ReceptionSolariumPage() {
   const { user } = useAuth()
-  const { dayActive, businessDate } = useClinic()
+  const { dayActive, businessDate, usdSypRate } = useClinic()
   const role = user?.role as Role | undefined
   const allowed = role === 'reception' || role === 'super_admin'
   const assignBlocked = role === 'reception' && !dayActive
@@ -63,6 +78,8 @@ export function ReceptionSolariumPage() {
   const [registerRows, setRegisterRows] = useState<SolariumRegisterRow[]>([])
   const [registerLoading, setRegisterLoading] = useState(false)
   const [registerErr, setRegisterErr] = useState('')
+  const [payCurrency, setPayCurrency] = useState<PayCurrency>('SYP')
+  const [amountUsd, setAmountUsd] = useState('')
   const [payChannel, setPayChannel] = useState<PaymentChannel>('cash')
   const [payBankName, setPayBankName] = useState('')
   const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(allowed)
@@ -148,27 +165,34 @@ export function ReceptionSolariumPage() {
       setErr('أدخل اسم المريض')
       return
     }
-    const chErr = validatePaymentChannelBeforeSubmit(payChannel, payBankName)
-    if (chErr) {
-      setErr(chErr)
+    const currentPrice = sessionMinutes === 12 ? price12 : price6
+    const collectErr = validatePackageCollectionBeforeSubmit({
+      dueSyp: currentPrice,
+      payCurrency,
+      amountUsd,
+      channel: payChannel,
+      bankName: payBankName,
+      usdSypRate,
+    })
+    if (collectErr) {
+      setErr(collectErr)
       return
     }
     setSaving(true)
     setErr('')
     setOk('')
     try {
-      const body: {
-        displayName: string
-        sessionMinutes: number
-        businessDate?: string
-        paymentChannel: PaymentChannel
-        bankName?: string
-      } = {
+      const body: Record<string, unknown> = {
         displayName: name,
         sessionMinutes,
-        paymentChannel: payChannel,
+        ...packageCollectionBodyExtras({
+          dueSyp: currentPrice,
+          payCurrency,
+          amountUsd,
+          channel: payChannel,
+          bankName: payBankName,
+        }),
       }
-      if (payChannel === 'bank') body.bankName = payBankName.trim()
       const bd = businessDate?.trim()
       if (bd) body.businessDate = bd
       await api('/api/solarium/sessions/confirm', {
@@ -177,6 +201,8 @@ export function ReceptionSolariumPage() {
       })
       setOk('تم تسجيل الجلسة والتحصيل — يظهر المبلغ في الجرد المالي اليومي.')
       setDisplayName('')
+      setPayCurrency('SYP')
+      setAmountUsd('')
       setPayChannel('cash')
       setPayBankName('')
       void loadSettings()
@@ -204,8 +230,8 @@ export function ReceptionSolariumPage() {
     <>
       <h1 className="page-title">سولاريوم</h1>
       <p className="page-desc">
-        حقل الاسم للعرض في السجل فقط — غير مرتبط ببحث المرضى أو ملفاتهم. عند التأكيد يُحصّل المبلغ (كاش أو بنك) باسم
-        المستخدم الذي يؤكد، ويُدمج مع الجرد المالي اليومي.
+        حقل الاسم للعرض في السجل فقط — غير مرتبط ببحث المرضى أو ملفاتهم. عند التأكيد يُحصّل المبلغ (ليرة أو دولار، كاش أو
+        بنك) باسم المستخدم الذي يؤكد، ويُدمج مع الجرد المالي اليومي.
       </p>
 
       {assignBlocked ? (
@@ -220,7 +246,8 @@ export function ReceptionSolariumPage() {
             أسعار الجلسات (ل.س)
           </h2>
           <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: 0 }}>
-            يحددها مدير النظام؛ تُستخدم تلقائياً عند تأكيد الجلسة من السكرتاريا.
+            يحددها مدير النظام؛ تُستخدم تلقائياً عند تأكيد الجلسة من السكرتاريا. عند التحصيل بالدولار يُحوَّل المبلغ
+            بسعر يوم العمل.
           </p>
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
@@ -244,8 +271,8 @@ export function ReceptionSolariumPage() {
             سجل السولاريوم اليومي
           </h2>
           <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: 0 }}>
-            جلسات الزائر (6/12 دقيقة) وباكجات السولاريوم المدفوعة مسبقاً من ملفات المرضى — حسب <strong>تاريخ العمل</strong> المسجّل
-            على الجلسة. اختر أي تاريخ لعرض أيام سابقة.
+            جلسات الزائر (6/12 دقيقة) وباكجات السولاريوم المدفوعة مسبقاً من ملفات المرضى — حسب <strong>تاريخ العمل</strong>{' '}
+            المسجّل على الجلسة. اختر أي تاريخ لعرض أيام سابقة.
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginTop: '0.65rem' }}>
             <div>
@@ -277,7 +304,7 @@ export function ReceptionSolariumPage() {
                     <th>النوع</th>
                     <th>المريض / الملف</th>
                     <th>الوصف</th>
-                    <th>المبلغ (ل.س)</th>
+                    <th>المبلغ</th>
                     <th>حصل بواسطة</th>
                     <th>حالة الفوترة</th>
                   </tr>
@@ -294,7 +321,7 @@ export function ReceptionSolariumPage() {
                         ) : null}
                       </td>
                       <td style={{ maxWidth: 280, whiteSpace: 'pre-wrap', fontSize: '0.88rem' }}>{r.procedureDescription}</td>
-                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.amountSyp.toLocaleString('ar-SY')}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.88rem' }}>{formatRegisterAmount(r)}</td>
                       <td>{r.receivedByName}</td>
                       <td>{r.billingStatus || '—'}</td>
                     </tr>
@@ -303,10 +330,10 @@ export function ReceptionSolariumPage() {
                 <tfoot>
                   <tr>
                     <td colSpan={4} style={{ fontWeight: 700 }}>
-                      الإجمالي
+                      الإجمالي (بالليرة)
                     </td>
                     <td style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {registerRows.reduce((s, r) => s + (Number(r.amountSyp) || 0), 0).toLocaleString('ar-SY')}
+                      {registerRows.reduce((s, r) => s + (Number(r.amountSyp) || 0), 0).toLocaleString('ar-SY')} ل.س
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -347,12 +374,25 @@ export function ReceptionSolariumPage() {
             </select>
             <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
               المستحق للتحصيل: <strong>{currentPrice.toLocaleString('ar-SY')} ل.س</strong>
+              {payCurrency === 'USD' && usdSypRate != null && usdSypRate > 0 ? (
+                <>
+                  {' '}
+                  — يُحصَّل بالدولار وفق سعر اليوم ({usdSypRate.toLocaleString('ar-SY')} ل.س / USD)
+                </>
+              ) : null}
             </p>
-            <PaymentChannelFields
+            <PackageCollectionFields
+              title="طريقة استلام الدفع"
+              dueSyp={currentPrice}
+              payCurrency={payCurrency}
+              onPayCurrencyChange={setPayCurrency}
+              amountUsd={amountUsd}
+              onAmountUsdChange={setAmountUsd}
               channel={payChannel}
               bankName={payBankName}
               onChannelChange={setPayChannel}
               onBankNameChange={setPayBankName}
+              usdSypRate={usdSypRate}
               disabled={confirmBlocked}
               namePrefix="sol-walkin"
               banks={paymentBanks}
