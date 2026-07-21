@@ -23,7 +23,7 @@ import {
   findDebtSettlementsForBusinessDateFilter,
   mergeLaserDebtSettlementsIntoPaymentBreakdown,
 } from '../services/patientDebtSettlementAllocation.js'
-import { resolveLaserPackageSessionForBooking, normalizeLaserSlotPackageModeForResolve } from '../services/laserPackageBooking.js'
+import { resolveLaserPackageSessionForBooking, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas } from '../services/laserPackageBooking.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
 
@@ -1403,16 +1403,22 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const packageMatch = skipLaserPackage
       ? null
       : await resolveLaserPackageSessionForBooking(patient, resolvedSlotPackageMode)
-    const isPackageSession = Boolean(packageMatch)
-    const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
     const patientGender = normalizePatientGender(patient.gender)
 
     let effectiveMainOptionIds = parseUniqueStringIds(body.procedureOptionIds)
-    if (isPackageSession && effectiveMainOptionIds.length === 0) {
+    const addonProcedureOptionIdsEarly = parseUniqueStringIds(body.addonProcedureOptionIds)
+    let rawLineItems = parseLaserSessionLineItems(body.laserLineItems)
+    /** الأخصائي حذف مناطق الباكج وأبقى خارج الباكج فقط — لا نعيد تعبئة مناطق الباكج تلقائياً */
+    const bodyExplicitlyAddonOnly =
+      effectiveMainOptionIds.length === 0 &&
+      (addonProcedureOptionIdsEarly.length > 0 ||
+        (rawLineItems.length > 0 && rawLineItems.every((row) => row.isAddon === true)))
+
+    if (packageMatch && effectiveMainOptionIds.length === 0 && !bodyExplicitlyAddonOnly) {
       const snap = Array.isArray(packageMatch?.pkg?.procedureOptionIds) ? packageMatch.pkg.procedureOptionIds : []
       effectiveMainOptionIds = parseUniqueStringIds(snap)
     }
-    const addonProcedureOptionIds = parseUniqueStringIds(body.addonProcedureOptionIds).filter(
+    const addonProcedureOptionIds = addonProcedureOptionIdsEarly.filter(
       (id) => !effectiveMainOptionIds.includes(id),
     )
     const allProcedureOptionIds = [...new Set([...effectiveMainOptionIds, ...addonProcedureOptionIds])]
@@ -1435,8 +1441,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const selectedAddonOptions = addonProcedureOptionIds
       .map((id) => procedureOptionsById.get(id))
       .filter(Boolean)
-    let rawLineItems = parseLaserSessionLineItems(body.laserLineItems)
-    if (isPackageSession && rawLineItems.length === 0 && effectiveMainOptionIds.length > 0) {
+    if (packageMatch && rawLineItems.length === 0 && effectiveMainOptionIds.length > 0 && !bodyExplicitlyAddonOnly) {
       rawLineItems = effectiveMainOptionIds.map((procedureOptionId) => ({
         procedureOptionId,
         areaLabel: '',
@@ -1498,6 +1503,14 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         lineCostSyp: Math.max(0, Math.round(lineCostSyp)),
       }
     })
+
+    /**
+     * استهلاك جلسة الباكج فقط عند تسجيل منطقة واحدة على الأقل من مناطق الباكج.
+     * مناطق خارج الباكج وحدها = جلسة عادية مدفوعة، دون إنقاص/ربط باكج.
+     */
+    const recordedPackageAreaCount = countLaserPackageNonAddonAreas({ lineItems: normalizedLineItems })
+    const isPackageSession = Boolean(packageMatch) && recordedPackageAreaCount > 0
+    const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
 
     /** جلسة باكج: المبلغ المطلوب = مناطق خارج الباكج فقط (ليرة) */
     let packageAddOnGrossSyp = 0
@@ -1618,6 +1631,21 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
                 .filter(Boolean),
             ),
           ].slice(0, 20)
+    /** خارج الباكج فقط (بدون استهلاك باكج): أظهر المناطق في الوصف كجلسة عادية */
+    if (!isPackageSession && manualAreaLabels.length === 0) {
+      const fromLines = [
+        ...new Set(
+          normalizedLineItems
+            .map((row) => String(row.areaLabel || '').trim())
+            .filter(Boolean),
+        ),
+      ].slice(0, 20)
+      if (fromLines.length > 0) {
+        manualAreaLabels.push(...fromLines)
+      } else if (addonManualLabels.length > 0) {
+        manualAreaLabels.push(...addonManualLabels)
+      }
+    }
     const linesPw = normalizedLineItems.map((row) => row.pw).filter(Boolean)
     const linesPulse = normalizedLineItems.map((row) => row.pulse).filter(Boolean)
     const linesShots = normalizedLineItems.map((row) => row.shotCount).filter(Boolean)

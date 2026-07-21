@@ -25,6 +25,7 @@ import {
   completeBillingItemPayment,
 } from '../services/billingPaymentCompletion.js'
 import { normalizePayCurrency } from '../services/billingPaymentReceipt.js'
+import { demoteAddonOnlyLinkedPackageSession } from '../services/laserPackageBooking.js'
 
 /** يُرجع { discountPercent, listAmountDueSyp, effectiveAmountDueSyp } — يرمي إن كانت النسبة غير صالحة */
 function resolveBillingDiscount(listDueSyp, discountPercentBody) {
@@ -459,10 +460,23 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
           const pid = pidRaw ? String(pidRaw) : ''
           if (pid && mongoose.isValidObjectId(pid)) {
             const [ls, p] = await Promise.all([
-              LaserSession.findOne({ billingItemId: b._id }).select('lineItems').lean(),
+              LaserSession.findOne({ billingItemId: b._id }).select('_id lineItems').lean(),
               Patient.findById(pid).select('sessionPackages').lean(),
             ])
             const recorded = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
+            if (recorded === 0) {
+              await demoteAddonOnlyLinkedPackageSession({
+                patientId: pid,
+                packageId: b.patientPackageId,
+                packageSessionId: b.patientPackageSessionId,
+                laserSessionId: ls?._id,
+                billingItemId: b._id,
+              })
+              dto.isPackagePrepaid = false
+              dto.patientPackageId = undefined
+              dto.patientPackageSessionId = undefined
+              return dto
+            }
             const pkgRows = Array.isArray(p?.sessionPackages) ? p.sessionPackages : []
             const pkg = pkgRows.find((x) => String(x._id) === String(b.patientPackageId))
             const expected = Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0))

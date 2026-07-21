@@ -15,7 +15,7 @@ import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { completeBillingItemPayment } from '../services/billingPaymentCompletion.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
-import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
+import { getLaserBookingContextForPatient, demoteAddonOnlyLinkedPackageSession } from '../services/laserPackageBooking.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
 import { buildDepartmentAllocationsForSettlement } from '../services/patientDebtSettlementAllocation.js'
@@ -1663,6 +1663,21 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       res.status(400).json({ error: 'لا يمكن إلغاء إتمام جلسة باكج بعد تثبيتها' })
       return
     }
+
+    if (completed && sess.linkedLaserSessionId && mongoose.isValidObjectId(sess.linkedLaserSessionId)) {
+      const lsForComplete = await LaserSession.findById(sess.linkedLaserSessionId).select('lineItems').lean()
+      const recordedForComplete = (Array.isArray(lsForComplete?.lineItems) ? lsForComplete.lineItems : []).filter(
+        (r) => !r.isAddon,
+      ).length
+      if (recordedForComplete === 0) {
+        res.status(400).json({
+          error:
+            'لا يمكن إنقاص جلسة الباكج: جلسة الليزر المرتبطة لا تتضمن أي منطقة من الباكج (مناطق خارج الباكج فقط). حصّل المبلغ كجلسة عادية دون إنقاص باكج.',
+        })
+        return
+      }
+    }
+
     const completedAt = completed ? new Date() : null
     await Patient.updateOne(
       { _id: p._id },
@@ -1724,10 +1739,33 @@ patientsRouter.get('/:id', async (req, res) => {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
-    const p = await Patient.findById(req.params.id)
+    let p = await Patient.findById(req.params.id)
     if (!p) {
       res.status(404).json({ error: 'المريض غير موجود' })
       return
+    }
+    const pkgs = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
+    let healed = false
+    for (const pkg of pkgs) {
+      if (String(pkg?.department || '') !== 'laser') continue
+      for (const sess of pkg.sessions || []) {
+        if (!sess?.linkedLaserSessionId || sess.completedByReception === true) continue
+        const ok = await demoteAddonOnlyLinkedPackageSession({
+          patientId: p._id,
+          packageId: pkg._id,
+          packageSessionId: sess._id,
+          laserSessionId: sess.linkedLaserSessionId,
+          billingItemId: sess.linkedBillingItemId,
+        })
+        if (ok) healed = true
+      }
+    }
+    if (healed) {
+      p = await Patient.findById(req.params.id)
+      if (!p) {
+        res.status(404).json({ error: 'المريض غير موجود' })
+        return
+      }
     }
     res.json({ patient: patientToDto(p) })
   } catch (e) {

@@ -1,11 +1,101 @@
 import { LaserSession } from '../models/LaserSession.js'
 import { BillingItem } from '../models/BillingItem.js'
+import { ClinicalSession } from '../models/ClinicalSession.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
+import { Patient } from '../models/Patient.js'
 import { buildPackageAreaBreakdown } from './laserPackageAreaBreakdown.js'
 
 function packageExpectedAreaCount(pkg) {
   const ids = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
   return Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0), ids.length)
+}
+
+export function countLaserPackageNonAddonAreas(sessionRow) {
+  return (Array.isArray(sessionRow?.lineItems) ? sessionRow.lineItems : []).filter((r) => !r.isAddon).length
+}
+
+/**
+ * جلسة حُجزت كباكج+خارج ثم بقيت مناطق خارج الباكج فقط:
+ * لا يجب ربط/استهلاك جلسة الباكج — نفك الربط ونحوّل البند لجلسة عادية مدفوعة.
+ * @returns {Promise<boolean>} true إذا تم فك الربط
+ */
+export async function demoteAddonOnlyLinkedPackageSession({
+  patientId,
+  packageId,
+  packageSessionId,
+  laserSessionId,
+  billingItemId,
+}) {
+  const pid = String(patientId || '').trim()
+  const pkgId = String(packageId || '').trim()
+  const sessId = String(packageSessionId || '').trim()
+  const lsId = String(laserSessionId || '').trim()
+  const biId = String(billingItemId || '').trim()
+  if (!pid || !pkgId || !sessId) return false
+
+  let ls = null
+  if (lsId) {
+    ls = await LaserSession.findById(lsId).select('lineItems isPackageSession').lean()
+  }
+  if (!ls && biId) {
+    ls = await LaserSession.findOne({ billingItemId: biId }).select('_id lineItems isPackageSession').lean()
+  }
+  if (!ls) return false
+  if (countLaserPackageNonAddonAreas(ls) > 0) return false
+
+  await Patient.updateOne(
+    { _id: pid },
+    {
+      $set: {
+        'sessionPackages.$[pkg].sessions.$[sess].linkedLaserSessionId': null,
+        'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': null,
+        'sessionPackages.$[pkg].sessions.$[sess].packagePartialAreasAcknowledgedByReception': 0,
+        'sessionPackages.$[pkg].sessions.$[sess].areasAdjustedOnly': false,
+      },
+    },
+    {
+      arrayFilters: [{ 'pkg._id': pkgId }, { 'sess._id': sessId }],
+    },
+  )
+
+  const resolvedLsId = lsId || String(ls._id || '')
+  if (resolvedLsId) {
+    await LaserSession.updateOne(
+      { _id: resolvedLsId },
+      {
+        $set: {
+          isPackageSession: false,
+          patientPackageId: '',
+          patientPackageSessionId: '',
+        },
+      },
+    )
+    await ClinicalSession.updateMany(
+      { laserSessionId: resolvedLsId },
+      {
+        $set: {
+          isPackageSession: false,
+          patientPackageId: '',
+          patientPackageSessionId: '',
+        },
+      },
+    )
+  }
+
+  if (biId) {
+    await BillingItem.updateOne(
+      { _id: biId },
+      {
+        $set: {
+          isPackagePrepaid: false,
+          patientPackageId: '',
+          patientPackageSessionId: '',
+        },
+      },
+    )
+  }
+
+  return true
 }
 
 /** أول جلسة باكج بلا ربط ليزر ولم تُثبَّت من الاستقبال */
@@ -43,8 +133,19 @@ export async function findContinueLaserPackageSession(patientLike) {
       const bi = session.linkedBillingItemId
         ? await BillingItem.findById(String(session.linkedBillingItemId)).lean()
         : null
-      const recorded = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
-      if (ls && bi?.status === 'pending_payment' && recorded < expectedAreas) {
+      const recorded = countLaserPackageNonAddonAreas(ls)
+      // مناطق خارج الباكج فقط — فك الربط الخاطئ ولا تُعتبر استكمالاً لجلسة باكج
+      if (ls && recorded === 0) {
+        await demoteAddonOnlyLinkedPackageSession({
+          patientId: patientLike?._id || patientLike?.id,
+          packageId: pkg._id,
+          packageSessionId: session._id,
+          laserSessionId: session.linkedLaserSessionId,
+          billingItemId: session.linkedBillingItemId || ls.billingItemId,
+        })
+        continue
+      }
+      if (ls && bi?.status === 'pending_payment' && recorded > 0 && recorded < expectedAreas) {
         return {
           pkg,
           session,

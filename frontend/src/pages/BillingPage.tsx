@@ -173,6 +173,17 @@ function itemPackageReadyForSessionDecrement(item: Item): boolean {
   return rec >= exp
 }
 
+/** باكج مربوط لكن بدون أي منطقة من الباكج (خارج فقط) — تحصيلك عادي بلا إنقاص جلسة */
+function itemIsAddonOnlyOutsidePackage(item: Item): boolean {
+  if (!item.isPackagePrepaid) return false
+  if (!hasLaserPackageAreaMetrics(item)) return false
+  return Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0) === 0
+}
+
+function itemShowsPackageDecrementActions(item: Item): boolean {
+  return item.isPackagePrepaid === true && !itemIsAddonOnlyOutsidePackage(item)
+}
+
 export function BillingPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
@@ -823,7 +834,7 @@ export function BillingPage() {
                       </button>
                     </>
                   ) : null}
-                  {b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
+                  {itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) > 0 ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -847,7 +858,7 @@ export function BillingPage() {
                       {busyId === b.id ? 'جاري المعالجة…' : 'إنقاص جلسة و دفع'}
                     </button>
                   ) : null}
-                  {b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
+                  {itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) <= 0 ? (
                     <>
                       {itemPackageNeedsPartialAreaSettle(b) ? (
                         <button
@@ -875,7 +886,7 @@ export function BillingPage() {
                       ) : null}
                     </>
                   ) : null}
-                  {!b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
+                  {(!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) && itemEffectiveDueSyp(b) > 0 ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -898,18 +909,19 @@ export function BillingPage() {
                     >
                       {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                     </button>
-                  ) : !b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
+                  ) : (!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) &&
+                    itemEffectiveDueSyp(b) <= 0 ? (
                     <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
                       مستحق ٠ — راجع الملف
                     </span>
                   ) : null}
                 </div>
-                {b.isPackagePrepaid && itemEffectiveDueSyp(b) > 0 ? (
+                {itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) > 0 ? (
                   <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                     جلسة باكج مع مناطق إضافية خارج الباكج — استخدم «إنقاص جلسة و دفع» لتسجيل الدفعة ثم خصم جلسة من
                     الباكج.
                   </p>
-                ) : b.isPackagePrepaid && itemEffectiveDueSyp(b) <= 0 ? (
+                ) : itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) <= 0 ? (
                   itemPackageWaitingForMoreAreas(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                       تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية في ملف المريض ثم
@@ -951,7 +963,7 @@ export function BillingPage() {
         >
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
-              {payItem.isPackagePrepaid && itemEffectiveDueSyp(payItem) > 0
+              {itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
                 ? 'إنقاص جلسة باكج ودفع الإضافات'
                 : 'تأكيد استلام الدفع'}
             </h3>
@@ -1483,14 +1495,14 @@ export function BillingPage() {
                 className="btn btn-primary"
                 disabled={busyId === payItem.id || itemEffectiveDueSyp(payItem) <= 0}
                 onClick={() =>
-                  void (payItem.isPackagePrepaid && itemEffectiveDueSyp(payItem) > 0
+                  void (itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
                     ? completePackageAddonPayAndConsume()
                     : completePay(payItem.id))
                 }
               >
                 {busyId === payItem.id
                   ? 'جاري الحفظ…'
-                  : payItem.isPackagePrepaid && itemEffectiveDueSyp(payItem) > 0
+                  : itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
                     ? 'تأكيد الدفع وإنقاص الجلسة'
                     : 'تأكيد استلام الدفع'}
               </button>
