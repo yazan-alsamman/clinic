@@ -18,7 +18,6 @@ const PatientSearch             = lazyPage(() => import('./pages/PatientSearch')
 const PatientRecord             = lazyPage(() => import('./pages/PatientRecord'), 'PatientRecord')
 const BookedAppointmentsPage    = lazyPage(() => import('./pages/BookedAppointmentsPage'), 'BookedAppointmentsPage')
 const ReceptionAppointmentPage  = lazyPage(() => import('./pages/ReceptionAppointmentPage'), 'ReceptionAppointmentPage')
-const DentalPage                = lazyPage(() => import('./pages/DentalPage'), 'DentalPage')
 const InventoryPage             = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage')
 const AdminUsers                = lazyPage(() => import('./pages/AdminUsers'), 'AdminUsers')
 const AdminSendNotificationsPage = lazyPage(() => import('./pages/AdminSendNotificationsPage'), 'AdminSendNotificationsPage')
@@ -101,7 +100,7 @@ export default function App() {
                 <Route path="/reception/appointment" element={<ReceptionAppointmentPage />} />
                 <Route path="/reception/walk-in-session" element={<ReceptionWalkInSessionPage />} />
                 <Route path="/reception/solarium" element={<ReceptionSolariumPage />} />
-                <Route path="/dental" element={<DentalPage />} />
+                <Route path="/dental" element={<Navigate to="/patients" replace />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/reception/cash-movement" element={<ReceptionCashMovementPage />} />
                 <Route path="/reception/daily-inventory" element={<ReceptionDailyInventoryPage />} />

@@ -11,7 +11,6 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'reception_appointment', path: '/reception/appointment', label: 'إضافة موعد' },
   { key: 'reception_walk_in_session', path: '/reception/walk-in-session', label: 'إنشاء جلسة بدون موعد' },
   { key: 'reception_solarium', path: '/reception/solarium', label: 'سولاريوم' },
-  { key: 'dental', path: '/dental', label: 'الأسنان' },
   { key: 'billing_queue', path: '/billing', label: 'التحصيل' },
   { key: 'reception_cash_movement', path: '/reception/cash-movement', label: 'حركة الصندوق' },
   { key: 'reception_daily_inventory', path: '/reception/daily-inventory', label: 'جرد مالي يومي' },
@@ -75,7 +74,7 @@ const roleNav: Record<Role, NavKey[]> = {
     'inventory',
     'account_password',
   ],
-  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'dental', 'account_password'],
+  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {

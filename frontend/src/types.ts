@@ -19,7 +19,6 @@ export type NavKey =
   | 'reception_appointment'
   | 'reception_walk_in_session'
   | 'reception_solarium'
-  | 'dental'
   | 'billing_queue'
   | 'reception_cash_movement'
   | 'reception_daily_inventory'
