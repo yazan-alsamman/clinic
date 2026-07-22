@@ -22,6 +22,7 @@ export function patientToDto(p) {
     phone: o.phone ?? '',
     gender: o.gender === 'male' || o.gender === 'female' ? o.gender : '',
     outstandingDebtSyp: Number(o.outstandingDebtSyp) || 0,
+    outstandingDebtUsd: Number(o.outstandingDebtUsd) || 0,
     prepaidCreditSyp: Number(o.prepaidCreditSyp) || 0,
     paperLaserEntries: Array.isArray(o.paperLaserEntries) ? o.paperLaserEntries : [],
     sessionPackages: Array.isArray(o.sessionPackages)

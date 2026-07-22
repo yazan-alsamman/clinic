@@ -4,6 +4,7 @@ import {
   buildPatientOpenDebtLinesFromData,
   loadBillingItemsAndPaymentsForPatients,
 } from './openFinancialBalanceLines.js'
+import { round6 } from '../utils/money.js'
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -16,42 +17,78 @@ export function normalizeDebtDepartment(dept) {
   return KNOWN_DEPT.has(d) ? d : 'general'
 }
 
-/** يوزّع المبلغ المخصوم من الذمة FIFO على سطور الذمة المفتوحة */
-export function allocateAppliedDebtAcrossLines(openLines, appliedToDebtSyp, itemById = new Map()) {
+/**
+ * يوزّع مبلغ التحصيل (بالليرة بعد التحويل) على سطور الذمة المفتوحة FIFO.
+ * سطور USD تُغطى بتحويل المبلغ بسعر يوم التسديد مع الحفاظ على خصم الذمة بالدولار.
+ */
+export function allocateAppliedDebtAcrossLines(openLines, appliedToDebtSyp, itemById = new Map(), usdSypRate = 0) {
   let remaining = roundMoney(appliedToDebtSyp)
+  const rate = Number(usdSypRate) || 0
   const allocations = []
+  let appliedSypDebt = 0
+  let appliedUsdDebt = 0
+
   for (const line of openLines || []) {
     if (!(remaining > 0)) break
+    const currency = String(line.currency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
+    const bi = line.billingItemId ? itemById.get(String(line.billingItemId)) : null
+
+    if (currency === 'USD') {
+      const capUsd = round6(Number(line.amountUsd) || 0)
+      if (!(capUsd > 1e-9) || !(rate > 0)) continue
+      const maxUsdFromPay = remaining / rate
+      const takeUsd = round6(Math.min(capUsd, maxUsdFromPay))
+      if (!(takeUsd > 1e-9)) continue
+      const takeSyp = Math.round(takeUsd * rate)
+      if (!(takeSyp > 0)) continue
+      remaining = roundMoney(remaining - takeSyp)
+      appliedUsdDebt = round6(appliedUsdDebt + takeUsd)
+      allocations.push({
+        department: normalizeDebtDepartment(line.department),
+        amountSyp: takeSyp,
+        amountUsd: takeUsd,
+        currency: 'USD',
+        procedureLabel: String(line.procedureLabel || '').trim(),
+        billingItemId: bi?._id || line.billingItemId || null,
+        clinicalSessionId: bi?.clinicalSessionId || line.clinicalSessionId || null,
+        providerUserId: bi?.providerUserId || null,
+      })
+      continue
+    }
+
     const cap = roundMoney(Number(line.amountSyp) || 0)
     if (!(cap > 0)) continue
     const take = roundMoney(Math.min(remaining, cap))
     if (!(take > 0)) continue
     remaining = roundMoney(remaining - take)
-    const bi = line.billingItemId ? itemById.get(String(line.billingItemId)) : null
+    appliedSypDebt = roundMoney(appliedSypDebt + take)
     allocations.push({
       department: normalizeDebtDepartment(line.department),
       amountSyp: take,
+      amountUsd: 0,
+      currency: 'SYP',
       procedureLabel: String(line.procedureLabel || '').trim(),
       billingItemId: bi?._id || line.billingItemId || null,
       clinicalSessionId: bi?.clinicalSessionId || line.clinicalSessionId || null,
       providerUserId: bi?.providerUserId || null,
     })
   }
-  return allocations
+
+  return { allocations, appliedSypDebt, appliedUsdDebt, remainingPaySyp: remaining }
 }
 
 /** يُحسب توزيع تسديد الذمة على الأقسام قبل خصم المبلغ من ملف المريض */
-export async function buildDepartmentAllocationsForSettlement(patientId, appliedToDebtSyp) {
+export async function buildDepartmentAllocationsForSettlement(patientId, appliedToDebtSyp, usdSypRate = 0) {
   const applied = roundMoney(appliedToDebtSyp)
-  if (!(applied > 0)) return []
+  if (!(applied > 0)) return { allocations: [], appliedSypDebt: 0, appliedUsdDebt: 0 }
   const patient = await Patient.findById(patientId)
-    .select('outstandingDebtSyp prepaidCreditSyp sessionPackages')
+    .select('outstandingDebtSyp outstandingDebtUsd prepaidCreditSyp sessionPackages')
     .lean()
-  if (!patient) return []
+  if (!patient) return { allocations: [], appliedSypDebt: 0, appliedUsdDebt: 0 }
   const { items, payments } = await loadBillingItemsAndPaymentsForPatients([patientId])
   const openLines = buildPatientOpenDebtLinesFromData(patient, items, payments)
   const itemById = new Map(items.map((i) => [String(i._id), i]))
-  return allocateAppliedDebtAcrossLines(openLines, applied, itemById)
+  return allocateAppliedDebtAcrossLines(openLines, applied, itemById, usdSypRate)
 }
 
 export async function findDebtSettlementsForBusinessDateFilter(businessDateFilter) {

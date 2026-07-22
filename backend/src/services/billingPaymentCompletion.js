@@ -175,6 +175,26 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     settlementDeltaSyp = 0
   }
 
+  /** بند مسعّر بالدولار: الذمة/الفائض يُحفظان بالدولار */
+  const isUsdBilling = String(bi.currency || 'SYP').toUpperCase() === 'USD'
+  const dueUsd = isUsdBilling
+    ? round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
+    : 0
+  let settlementDeltaUsd = 0
+  if (isUsdBilling && dueUsd > 0 && usdSypRateUsed > 0) {
+    const netUsd = round6(netReceivedSyp / usdSypRateUsed)
+    settlementDeltaUsd = round6(netUsd - dueUsd)
+    if (
+      payCurrency === 'USD' &&
+      settlementDeltaUsd > 0 &&
+      settlementDeltaUsd * usdSypRateUsed <= usdSypRateUsed &&
+      absorbCashNetUsdQualifies
+    ) {
+      settlementDeltaUsd = 0
+    }
+    settlementDeltaSyp = Math.round(settlementDeltaUsd * usdSypRateUsed)
+  }
+
   const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
   if (existingPay) {
     const err = new Error(BILLING_PAYMENT_DUPLICATE_MSG)
@@ -189,6 +209,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       amountSyp: appliedAmountSyp,
       receivedAmountSyp: receivedSyp,
       settlementDeltaSyp,
+      settlementDeltaUsd: isUsdBilling ? settlementDeltaUsd : 0,
       ...paymentRecordReceivedFields(receipt),
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
@@ -224,12 +245,37 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
 
   let outstandingDebtSyp = 0
+  let outstandingDebtUsd = 0
   let prepaidCreditSyp = 0
   const patient = await Patient.findById(bi.patientId).lean()
   if (patient && !opts.skipPatientDebtUpdate) {
     let debt = Math.round(Number(patient.outstandingDebtSyp) || 0)
+    let debtUsd = round6(Number(patient.outstandingDebtUsd) || 0)
     let credit = Math.round(Number(patient.prepaidCreditSyp) || 0)
-    if (settlementDeltaSyp < 0) {
+
+    if (isUsdBilling && Math.abs(settlementDeltaUsd) > 1e-9) {
+      if (settlementDeltaUsd < 0) {
+        let needUsd = round6(Math.abs(settlementDeltaUsd))
+        if (credit > 0 && usdSypRateUsed > 0) {
+          const creditAsUsd = round6(credit / usdSypRateUsed)
+          const useCreditUsd = Math.min(creditAsUsd, needUsd)
+          const useCreditSyp = Math.round(useCreditUsd * usdSypRateUsed)
+          credit = Math.max(0, credit - useCreditSyp)
+          needUsd = round6(needUsd - useCreditUsd)
+        }
+        debtUsd = round6(debtUsd + needUsd)
+      } else if (settlementDeltaUsd > 0) {
+        let extraUsd = round6(settlementDeltaUsd)
+        const settleUsdDebt = Math.min(debtUsd, extraUsd)
+        debtUsd = round6(debtUsd - settleUsdDebt)
+        extraUsd = round6(extraUsd - settleUsdDebt)
+        let extraSyp = usdSypRateUsed > 0 ? Math.round(extraUsd * usdSypRateUsed) : 0
+        const settleSypDebt = Math.min(debt, extraSyp)
+        debt -= settleSypDebt
+        extraSyp -= settleSypDebt
+        credit += extraSyp
+      }
+    } else if (settlementDeltaSyp < 0) {
       let need = Math.abs(settlementDeltaSyp)
       const useCredit = Math.min(credit, need)
       credit -= useCredit
@@ -240,21 +286,30 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       const settleDebt = Math.min(debt, extra)
       debt -= settleDebt
       extra -= settleDebt
-      credit += extra
+      if (extra > 0 && debtUsd > 0 && usdSypRateUsed > 0) {
+        const extraAsUsd = round6(extra / usdSypRateUsed)
+        const settleUsd = Math.min(debtUsd, extraAsUsd)
+        debtUsd = round6(debtUsd - settleUsd)
+        extra -= Math.round(settleUsd * usdSypRateUsed)
+      }
+      credit += Math.max(0, extra)
     }
     await Patient.updateOne(
       { _id: bi.patientId },
       {
         $set: {
           outstandingDebtSyp: debt,
+          outstandingDebtUsd: debtUsd,
           prepaidCreditSyp: credit,
         },
       },
     )
     outstandingDebtSyp = debt
+    outstandingDebtUsd = debtUsd
     prepaidCreditSyp = credit
   } else if (patient) {
     outstandingDebtSyp = Math.round(Number(patient.outstandingDebtSyp) || 0)
+    outstandingDebtUsd = round6(Number(patient.outstandingDebtUsd) || 0)
     prepaidCreditSyp = Math.round(Number(patient.prepaidCreditSyp) || 0)
   }
 
@@ -320,11 +375,12 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     billingItemId: String(bi._id),
     posting,
     postingError: postingError ? String(postingError?.message || postingError) : null,
-    patientSettlement: { outstandingDebtSyp, prepaidCreditSyp },
+    patientSettlement: { outstandingDebtSyp, outstandingDebtUsd, prepaidCreditSyp },
     payment: {
       amountSyp: payment.amountSyp,
       receivedAmountSyp: payment.receivedAmountSyp,
       settlementDeltaSyp: payment.settlementDeltaSyp,
+      settlementDeltaUsd: payment.settlementDeltaUsd,
       payCurrency: payment.payCurrency,
       receivedAmountUsd: payment.receivedAmountUsd,
       patientRefundSyp: payment.patientRefundSyp,

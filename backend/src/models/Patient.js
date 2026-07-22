@@ -80,8 +80,10 @@ const patientSchema = new mongoose.Schema(
     lastVisit: { type: Date, default: null },
     phone: { type: String, default: '' },
     gender: { type: String, default: '' },
-    /** رصيد مستحق على المريض (ذمم) */
+    /** رصيد مستحق على المريض (ذمم) بالليرة */
     outstandingDebtSyp: { type: Number, default: 0, min: 0 },
+    /** ذمم مسجّلة بالدولار (جلسات مسعّرة بالـ USD) — تُحفظ بالدولار ولا تُحوَّل لليرة */
+    outstandingDebtUsd: { type: Number, default: 0, min: 0 },
     /** رصيد إضافي مدفوع مسبقاً للمريض */
     prepaidCreditSyp: { type: Number, default: 0, min: 0 },
     /** إدخالات أرشيف ورقي (ليزر/جلسات قديمة) */

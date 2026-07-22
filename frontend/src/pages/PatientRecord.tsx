@@ -2221,12 +2221,32 @@ export function PatientRecord() {
     })
   }
 
-  const debtNow = Math.round(Number(patient.outstandingDebtSyp) || 0)
+  const debtNowSyp = Math.round(Number(patient.outstandingDebtSyp) || 0)
+  const debtNowUsd = Number(patient.outstandingDebtUsd) || 0
+  const debtNowUsdRounded = Math.round(debtNowUsd * 1e6) / 1e6
+  const debtNowSypEquiv =
+    debtNowSyp +
+    (usdSypRate != null && usdSypRate > 0 && debtNowUsdRounded > 0
+      ? Math.round(debtNowUsdRounded * usdSypRate)
+      : 0)
+  const hasOpenDebt = debtNowSyp > 0 || debtNowUsdRounded > 0
+  const debtNow = debtNowSypEquiv > 0 ? debtNowSypEquiv : debtNowSyp
   const settlePreviewSyp = Math.max(0, Math.round(parseFloat(financialSettleSyp) || 0))
   const settleEnteredSyp = settlePreviewSyp
   const settleWillCoverSyp = Math.min(debtNow, settleEnteredSyp)
   const settleWillRemainDebtSyp = Math.max(0, debtNow - settleEnteredSyp)
   const settleWillAddCreditSyp = Math.max(0, settleEnteredSyp - debtNow)
+
+  function formatOpenDebtLabel() {
+    const parts: string[] = []
+    if (debtNowSyp > 0) parts.push(`${debtNowSyp.toLocaleString('ar-SY')} ل.س`)
+    if (debtNowUsdRounded > 0) {
+      parts.push(
+        `${debtNowUsdRounded.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD`,
+      )
+    }
+    return parts.length ? parts.join(' + ') : '0 ل.س'
+  }
 
   async function confirmDebtSettlement(payment: BillingPaymentRequestBody) {
     if (!id) return
@@ -2241,7 +2261,7 @@ export function PatientRecord() {
           debtAfter: number
           extraToCreditSyp: number
         }
-        summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+        summary: { outstandingDebtSyp: number; outstandingDebtUsd?: number; prepaidCreditSyp: number }
       }>(`/api/patients/${encodeURIComponent(id)}/financial-settlement`, {
         method: 'POST',
         body: JSON.stringify(payment),
@@ -2251,18 +2271,27 @@ export function PatientRecord() {
           ? {
               ...prev,
               outstandingDebtSyp: Number(result.summary?.outstandingDebtSyp) || 0,
+              outstandingDebtUsd: Number(result.summary?.outstandingDebtUsd) || 0,
               prepaidCreditSyp: Number(result.summary?.prepaidCreditSyp) || 0,
             }
           : prev,
       )
       const applied = Math.round(Number(result.settlement?.appliedToDebtSyp) || 0)
-      const after = Math.round(Number(result.summary?.outstandingDebtSyp) || 0)
+      const afterSyp = Math.round(Number(result.summary?.outstandingDebtSyp) || 0)
+      const afterUsd = Number(result.summary?.outstandingDebtUsd) || 0
       const extra = Math.round(Number(result.settlement?.extraToCreditSyp) || 0)
       const entered = Math.round(Number(result.settlement?.enteredSyp) || 0)
+      const afterParts = [
+        afterSyp > 0 ? `${afterSyp.toLocaleString('ar-SY')} ل.س` : null,
+        afterUsd > 0
+          ? `${afterUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD`
+          : null,
+      ].filter(Boolean)
+      const afterLabel = afterParts.length ? afterParts.join(' + ') : '0'
       setDebtPayOk(
         extra > 0
-          ? `تم استلام ${entered.toLocaleString('ar-SY')} ل.س وخصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي: ${after.toLocaleString('ar-SY')} ل.س — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي.`
-          : `تم استلام ${entered.toLocaleString('ar-SY')} ل.س وخصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي: ${after.toLocaleString('ar-SY')} ل.س.`,
+          ? `تم استلام ما يعادل ${entered.toLocaleString('ar-SY')} ل.س وخصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي: ${afterLabel} — وأُضيف ${extra.toLocaleString('ar-SY')} ل.س للرصيد الإضافي.`
+          : `تم استلام ما يعادل ${entered.toLocaleString('ar-SY')} ل.س وخصم ${applied.toLocaleString('ar-SY')} ل.س من الذمة. المتبقي: ${afterLabel}.`,
       )
       setDebtPayModalOpen(false)
     } catch (e) {
@@ -3723,14 +3752,19 @@ export function PatientRecord() {
           >
             <span className="form-label">إجمالي الذمة الحالية</span>
             <div style={{ marginTop: '0.2rem', fontWeight: 700, fontSize: '1.15rem' }}>
-              {renderMoneySyp(debtNow)}
+              {formatOpenDebtLabel()}
             </div>
+            {debtNowUsdRounded > 0 ? (
+              <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                الذمة بالدولار تبقى مسجّلة بالدولار؛ عند التسديد بالليرة يُستخدم سعر صرف يوم التسديد.
+              </p>
+            ) : null}
           </div>
           {!clinicDayActive ? (
             <p style={{ color: 'var(--warning)', marginTop: '0.85rem', fontSize: '0.88rem' }}>
               يوم العمل غير مفعّل — لا يمكن تسجيل تسديد الذمة حتى يفعّل المدير اليوم.
             </p>
-          ) : debtNow <= 0 ? (
+          ) : !hasOpenDebt ? (
             <p style={{ color: 'var(--success)', marginTop: '0.85rem', marginBottom: 0 }}>
               لا توجد ذمة مفتوحة على هذا المريض حالياً.
             </p>
@@ -3767,7 +3801,7 @@ export function PatientRecord() {
             <div>
               <span className="form-label">إجمالي الذمم</span>
               <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
-                {renderMoneySyp(Number(patient.outstandingDebtSyp) || 0)}
+                {formatOpenDebtLabel()}
               </div>
             </div>
             <div>
@@ -5909,7 +5943,7 @@ export function PatientRecord() {
         busy={debtPayBusy}
         externalError={debtPayErr}
         title="تسديد ذمة المريض"
-        subtitle={`الذمة الحالية: ${debtNow.toLocaleString('ar-SY')} ل.س — يمكن التحصيل بالليرة أو الدولار أو كليهما.`}
+        subtitle={`الذمة الحالية: ${formatOpenDebtLabel()} — يمكن التحصيل بالليرة أو الدولار أو كليهما (الذمة الأصلية تبقى بليرتها/دولارها).`}
         listDueSyp={debtNow}
         usdSypRate={usdSypRate}
         clinicBusinessDate={clinicBusinessDate || undefined}

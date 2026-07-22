@@ -10,6 +10,9 @@ const patientDebtSettlementSchema = new mongoose.Schema(
     extraToCreditSyp: { type: Number, default: 0, min: 0 },
     debtBefore: { type: Number, default: 0, min: 0 },
     debtAfter: { type: Number, default: 0, min: 0 },
+    debtBeforeUsd: { type: Number, default: 0, min: 0 },
+    debtAfterUsd: { type: Number, default: 0, min: 0 },
+    appliedToDebtUsd: { type: Number, default: 0, min: 0 },
     paymentChannel: { type: String, enum: ['cash', 'bank'], default: 'cash' },
     bankName: { type: String, default: '', trim: true },
     /** عملة التحصيل الفعلية من المريض */
@@ -28,6 +31,8 @@ const patientDebtSettlementSchema = new mongoose.Schema(
       {
         department: { type: String, required: true, trim: true },
         amountSyp: { type: Number, required: true, min: 0 },
+        amountUsd: { type: Number, default: 0, min: 0 },
+        currency: { type: String, enum: ['SYP', 'USD'], default: 'SYP' },
         procedureLabel: { type: String, default: '', trim: true },
         billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
         clinicalSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalSession', default: null },

@@ -56,6 +56,7 @@ export interface Patient {
   /** ذكر / أنثى — فارغ إن لم يُحدَّد */
   gender?: 'male' | 'female' | ''
   outstandingDebtSyp?: number
+  outstandingDebtUsd?: number
   prepaidCreditSyp?: number
   paperLaserEntries?: Array<{
     therapist: string

@@ -7,8 +7,13 @@ const billingPaymentSchema = new mongoose.Schema(
     amountSyp: { type: Number, required: true, min: 0 },
     /** المبلغ المستلم فعلياً من المريض */
     receivedAmountSyp: { type: Number, default: 0, min: 0 },
-    /** الفرق: موجب = رصيد إضافي، سالب = ذمة */
+    /** الفرق: موجب = رصيد إضافي، سالب = ذمة (بالليرة) */
     settlementDeltaSyp: { type: Number, default: 0 },
+    /**
+     * فرق التسوية بالدولار عندما يكون بند الفوترة مسعّراً بالـ USD.
+     * سالب = ذمة بالدولار تُحفظ في outstandingDebtUsd.
+     */
+    settlementDeltaUsd: { type: Number, default: 0 },
     /** عملة التحصيل الفعلية من المريض */
     payCurrency: { type: String, enum: ['SYP', 'USD', 'MIXED'], default: 'SYP' },
     /** عند الدفع بالدولار: المبلغ المستلم بالدولار (للتقارير) */

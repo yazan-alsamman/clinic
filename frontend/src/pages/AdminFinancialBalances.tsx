@@ -16,6 +16,8 @@ type FinLine = {
   businessDate: string
   procedureLabel: string
   amountSyp: number
+  amountUsd?: number
+  currency?: 'SYP' | 'USD' | string
   synthetic?: boolean
   /** من الخادم: billing | package | synthetic */
   source?: 'billing' | 'package' | 'synthetic'
@@ -27,6 +29,7 @@ type PatientWipeHit = {
   fileNumber: string
   name: string
   outstandingDebtSyp?: number
+  outstandingDebtUsd?: number
   prepaidCreditSyp?: number
 }
 
@@ -114,6 +117,18 @@ function MoneySyp({ amountSyp, tone }: { amountSyp: number; tone: 'debt' | 'cred
   return (
     <strong style={{ color, fontVariantNumeric: 'tabular-nums' }}>{n.toLocaleString('ar-SY')} ل.س</strong>
   )
+}
+
+function MoneyDebtLine({ r }: { r: FinLine }) {
+  const usd = Number(r.amountUsd) || 0
+  if (String(r.currency || '').toUpperCase() === 'USD' || usd > 0) {
+    return (
+      <strong style={{ color: 'var(--danger)', fontVariantNumeric: 'tabular-nums' }} dir="ltr">
+        {usd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD
+      </strong>
+    )
+  }
+  return <MoneySyp amountSyp={r.amountSyp} tone="debt" />
 }
 
 function deptLabel(d: string | null | undefined) {
@@ -213,8 +228,16 @@ export function AdminFinancialBalances() {
     }
   }, [detailTarget])
 
-  const debtTotal = useMemo(
-    () => debtLines.reduce((s, r) => s + (Number(r.amountSyp) || 0), 0),
+  const debtTotalSyp = useMemo(
+    () => debtLines.reduce((s, r) => s + (String(r.currency).toUpperCase() === 'USD' ? 0 : Number(r.amountSyp) || 0), 0),
+    [debtLines],
+  )
+  const debtTotalUsd = useMemo(
+    () =>
+      debtLines.reduce(
+        (s, r) => s + (String(r.currency).toUpperCase() === 'USD' || (Number(r.amountUsd) || 0) > 0 ? Number(r.amountUsd) || 0 : 0),
+        0,
+      ),
     [debtLines],
   )
   const creditTotal = useMemo(
@@ -290,25 +313,35 @@ export function AdminFinancialBalances() {
   async function clearStoredBalance(kind: 'debt' | 'credit') {
     if (!wipePatient) return
     const debt = Math.round(Number(wipePatient.outstandingDebtSyp) || 0)
+    const debtUsd = Number(wipePatient.outstandingDebtUsd) || 0
     const credit = Math.round(Number(wipePatient.prepaidCreditSyp) || 0)
+    const debtLabel = [
+      debt > 0 ? `${debt.toLocaleString('ar-SY')} ل.س` : null,
+      debtUsd > 0 ? `${debtUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD` : null,
+    ]
+      .filter(Boolean)
+      .join(' + ')
     const label =
       kind === 'debt'
-        ? `مسح الذمة المخزّنة على المريض (${debt.toLocaleString('ar-SY')} ل.س)؟ لا يُعدّل بنود الفوترة في النظام.`
+        ? `مسح الذمة المخزّنة على المريض (${debtLabel || '0'})؟ لا يُعدّل بنود الفوترة في النظام.`
         : `مسح الرصيد الإضافي المخزّن (${credit.toLocaleString('ar-SY')} ل.س)؟`
     if (!window.confirm(label)) return
     setWipeActionBusy(true)
     setWipeErr('')
     setWipeOk('')
     try {
-      const d = await api<{ summary: { outstandingDebtSyp: number; prepaidCreditSyp: number } }>(
-        `/api/patients/${encodeURIComponent(wipePatient.id)}/financial-clear-balance`,
-        { method: 'POST', body: JSON.stringify({ kind }) },
-      )
+      const d = await api<{
+        summary: { outstandingDebtSyp: number; outstandingDebtUsd?: number; prepaidCreditSyp: number }
+      }>(`/api/patients/${encodeURIComponent(wipePatient.id)}/financial-clear-balance`, {
+        method: 'POST',
+        body: JSON.stringify({ kind }),
+      })
       setWipePatient((prev) =>
         prev
           ? {
               ...prev,
               outstandingDebtSyp: Number(d.summary?.outstandingDebtSyp) || 0,
+              outstandingDebtUsd: Number(d.summary?.outstandingDebtUsd) || 0,
               prepaidCreditSyp: Number(d.summary?.prepaidCreditSyp) || 0,
             }
           : prev,
@@ -377,6 +410,16 @@ export function AdminFinancialBalances() {
                 <span className="form-label">ذمة مخزّنة</span>
                 <div style={{ fontWeight: 700, color: 'var(--danger)', fontVariantNumeric: 'tabular-nums' }}>
                   {(Math.round(Number(wipePatient.outstandingDebtSyp) || 0)).toLocaleString('ar-SY')} ل.س
+                  {Number(wipePatient.outstandingDebtUsd) > 0 ? (
+                    <span dir="ltr">
+                      {' '}
+                      +{' '}
+                      {Number(wipePatient.outstandingDebtUsd).toLocaleString('en-US', {
+                        maximumFractionDigits: 6,
+                      })}{' '}
+                      USD
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <div>
@@ -391,7 +434,11 @@ export function AdminFinancialBalances() {
                 type="button"
                 className="btn btn-secondary"
                 style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
-                disabled={wipeActionBusy || (Math.round(Number(wipePatient.outstandingDebtSyp) || 0) <= 0)}
+                disabled={
+                  wipeActionBusy ||
+                  (Math.round(Number(wipePatient.outstandingDebtSyp) || 0) <= 0 &&
+                    !(Number(wipePatient.outstandingDebtUsd) > 0))
+                }
                 onClick={() => void clearStoredBalance('debt')}
               >
                 مسح الذمة المخزّنة
@@ -442,7 +489,14 @@ export function AdminFinancialBalances() {
         </div>
         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
           <div style={{ marginBottom: '0.25rem', fontWeight: 600 }}>إجمالي الظاهر</div>
-          <MoneySyp amountSyp={debtTotal} tone="neutral" />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+            <MoneySyp amountSyp={debtTotalSyp} tone="neutral" />
+            {debtTotalUsd > 0 ? (
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }} dir="ltr">
+                + {debtTotalUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="table-wrap">
           <table className="data-table">
@@ -452,7 +506,7 @@ export function AdminFinancialBalances() {
                 <th>الاسم</th>
                 <th>البيان</th>
                 <th>مصدر الذمة</th>
-                <th>المبلغ (ل.س)</th>
+                    <th>المبلغ</th>
                 <th>الملف</th>
               </tr>
             </thead>
@@ -506,7 +560,7 @@ export function AdminFinancialBalances() {
                         )}
                       </td>
                       <td>
-                        <MoneySyp amountSyp={r.amountSyp} tone="debt" />
+                        <MoneyDebtLine r={r} />
                       </td>
                       <td>
                         <Link to={`/patients/${r.patientId}`} style={{ fontSize: '0.88rem' }}>
@@ -553,7 +607,7 @@ export function AdminFinancialBalances() {
                 <th>الاسم</th>
                 <th>البيان</th>
                 <th>مصدر الرصيد</th>
-                <th>المبلغ (ل.س)</th>
+                    <th>المبلغ</th>
                 <th>الملف</th>
               </tr>
             </thead>

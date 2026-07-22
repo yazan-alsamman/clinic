@@ -24,6 +24,7 @@ import { resolvePaymentChannelFromBody } from '../services/paymentChannelSetting
 import {
   paymentRecordReceivedFields,
   resolveBillingPaymentReceipt,
+  fetchUsdSypRateForBusinessDate,
 } from '../services/billingPaymentReceipt.js'
 import { round6 } from '../utils/money.js'
 
@@ -370,11 +371,13 @@ patientsRouter.get('/financial-balances', async (req, res) => {
     }
     const debtDept = parseFinancialBalanceDept(req.query.debtDepartment)
     const creditDept = parseFinancialBalanceDept(req.query.creditDepartment)
-    const select = 'fileNumber name outstandingDebtSyp prepaidCreditSyp sessionPackages'
+    const select = 'fileNumber name outstandingDebtSyp outstandingDebtUsd prepaidCreditSyp sessionPackages'
     const [debtPatients, creditPatients] = await Promise.all([
-      Patient.find({ outstandingDebtSyp: { $gt: 0 } })
+      Patient.find({
+        $or: [{ outstandingDebtSyp: { $gt: 0 } }, { outstandingDebtUsd: { $gt: 0 } }],
+      })
         .select(select)
-        .sort({ outstandingDebtSyp: -1, name: 1 })
+        .sort({ outstandingDebtSyp: -1, outstandingDebtUsd: -1, name: 1 })
         .limit(5000)
         .lean(),
       Patient.find({ prepaidCreditSyp: { $gt: 0 } })
@@ -831,11 +834,33 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       return
     }
 
-    const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const debtBeforeSyp = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const debtBeforeUsd = round6(Number(p.outstandingDebtUsd) || 0)
     const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
-    const appliedToDebtSyp = Math.min(debtBefore, enteredSyp)
-    const extraToCreditSyp = enteredSyp - appliedToDebtSyp
-    const debtAfter = debtBefore - appliedToDebtSyp
+    let usdRate = Number(receipt.usdSypRateUsed) || 0
+    if (debtBeforeUsd > 1e-9 && !(usdRate > 0)) {
+      usdRate = (await fetchUsdSypRateForBusinessDate(businessDate)) || 0
+      if (!(usdRate > 0)) {
+        res.status(400).json({
+          error: 'لتسديد ذمة مسجّلة بالدولار يلزم سعر صرف ليوم العمل.',
+        })
+        return
+      }
+    }
+
+    const {
+      allocations: departmentAllocations,
+      appliedSypDebt,
+      appliedUsdDebt,
+    } = await buildDepartmentAllocationsForSettlement(p._id, enteredSyp, usdRate)
+
+    const appliedToDebtSypBucket = Math.min(debtBeforeSyp, Math.round(Number(appliedSypDebt) || 0))
+    const appliedToDebtUsd = round6(Math.min(debtBeforeUsd, Number(appliedUsdDebt) || 0))
+    const appliedUsdAsSyp = usdRate > 0 ? Math.round(appliedToDebtUsd * usdRate) : 0
+    const appliedToDebtSypTotal = appliedToDebtSypBucket + appliedUsdAsSyp
+    const extraToCreditSyp = Math.max(0, enteredSyp - appliedToDebtSypTotal)
+    const debtAfterSyp = Math.max(0, debtBeforeSyp - appliedToDebtSypBucket)
+    const debtAfterUsd = round6(Math.max(0, debtBeforeUsd - appliedToDebtUsd))
     const creditAfter = creditBefore + extraToCreditSyp
     const receivedFields = paymentRecordReceivedFields(receipt)
 
@@ -843,22 +868,25 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       { _id: p._id },
       {
         $set: {
-          outstandingDebtSyp: debtAfter,
+          outstandingDebtSyp: debtAfterSyp,
+          outstandingDebtUsd: debtAfterUsd,
           prepaidCreditSyp: creditAfter,
         },
       },
     )
 
     const receivedAt = new Date()
-    const departmentAllocations = await buildDepartmentAllocationsForSettlement(p._id, appliedToDebtSyp)
     const debtSettlement = await PatientDebtSettlement.create({
       patientId: p._id,
       businessDate,
       enteredSyp,
-      appliedToDebtSyp,
+      appliedToDebtSyp: appliedToDebtSypTotal,
+      appliedToDebtUsd,
       extraToCreditSyp,
-      debtBefore,
-      debtAfter,
+      debtBefore: debtBeforeSyp,
+      debtAfter: debtAfterSyp,
+      debtBeforeUsd,
+      debtAfterUsd,
       paymentChannel,
       bankName,
       payCurrency: receivedFields.payCurrency,
@@ -871,18 +899,20 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
             : 0,
       patientRefundSyp: receivedFields.patientRefundSyp,
       patientRefundUsd: receivedFields.patientRefundUsd,
-      usdSypRateUsed: Math.round(Number(receipt.usdSypRateUsed) || 0),
+      usdSypRateUsed: Math.round(usdRate || Number(receipt.usdSypRateUsed) || 0),
       receivedBy: req.user._id,
       receivedAt,
       departmentAllocations,
     })
 
+    const totalDebtBeforeSypEquiv =
+      debtBeforeSyp + (usdRate > 0 ? Math.round(debtBeforeUsd * usdRate) : 0)
     const outcome =
-      debtBefore <= 0
+      totalDebtBeforeSypEquiv <= 0
         ? 'credit_only'
-        : enteredSyp < debtBefore
+        : enteredSyp < totalDebtBeforeSypEquiv
           ? 'partial'
-          : enteredSyp === debtBefore
+          : enteredSyp === totalDebtBeforeSypEquiv
             ? 'exact'
             : 'overpay'
 
@@ -893,11 +923,14 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       entityId: p._id,
       details: {
         enteredSyp,
-        debtBefore,
-        debtAfter,
+        debtBeforeSyp,
+        debtAfterSyp,
+        debtBeforeUsd,
+        debtAfterUsd,
         creditBefore,
         creditAfter,
-        appliedToDebtSyp,
+        appliedToDebtSyp: appliedToDebtSypTotal,
+        appliedToDebtUsd,
         extraToCreditSyp,
         outcome,
         payCurrency: receivedFields.payCurrency,
@@ -910,11 +943,14 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       settlement: {
         id: String(debtSettlement._id),
         enteredSyp,
-        debtBefore,
-        debtAfter,
+        debtBefore: debtBeforeSyp,
+        debtAfter: debtAfterSyp,
+        debtBeforeUsd,
+        debtAfterUsd,
         creditBefore,
         creditAfter,
-        appliedToDebtSyp,
+        appliedToDebtSyp: appliedToDebtSypTotal,
+        appliedToDebtUsd,
         extraToCreditSyp,
         outcome,
         businessDate,
@@ -923,11 +959,14 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
         departmentAllocations: departmentAllocations.map((a) => ({
           department: a.department,
           amountSyp: a.amountSyp,
+          amountUsd: a.amountUsd || 0,
+          currency: a.currency || 'SYP',
           procedureLabel: a.procedureLabel || '',
         })),
       },
       summary: {
-        outstandingDebtSyp: debtAfter,
+        outstandingDebtSyp: debtAfterSyp,
+        outstandingDebtUsd: debtAfterUsd,
         prepaidCreditSyp: creditAfter,
       },
     })
@@ -963,12 +1002,15 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
       return
     }
     const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const debtBeforeUsd = round6(Number(p.outstandingDebtUsd) || 0)
     const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
 
     let debtAfter = debtBefore
+    let debtAfterUsd = debtBeforeUsd
     let creditAfter = creditBefore
     if (kind === 'debt') {
       debtAfter = 0
+      debtAfterUsd = 0
     } else {
       creditAfter = 0
     }
@@ -978,6 +1020,7 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
       {
         $set: {
           outstandingDebtSyp: debtAfter,
+          outstandingDebtUsd: debtAfterUsd,
           prepaidCreditSyp: creditAfter,
         },
       },
@@ -992,6 +1035,8 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
         kind,
         debtBefore,
         debtAfter,
+        debtBeforeUsd,
+        debtAfterUsd,
         creditBefore,
         creditAfter,
         fileNumber: String(p.fileNumber || ''),
@@ -1002,6 +1047,7 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
     res.json({
       summary: {
         outstandingDebtSyp: debtAfter,
+        outstandingDebtUsd: debtAfterUsd,
         prepaidCreditSyp: creditAfter,
       },
     })
