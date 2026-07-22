@@ -11,6 +11,72 @@ export const dentalRouter = Router()
 dentalRouter.use(authMiddleware, loadBusinessDay)
 
 const DENTAL_READ = ['super_admin', 'dental_branch', 'reception']
+const DENTAL_CHART_WRITE = ['super_admin', 'dental_branch']
+const FDI_VALID = new Set([
+  11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45,
+  46, 47, 48,
+])
+const SURFACE_VIEWS = new Set(['buccal', 'occlusal'])
+const SURFACE_REGIONS = new Set(['M', 'D', 'O', 'B', 'L', 'I'])
+
+function emptyDentalChartDto() {
+  return { teeth: [], updatedAt: null, updatedBy: null }
+}
+
+function chartToDto(chart) {
+  if (!chart) return emptyDentalChartDto()
+  return {
+    teeth: (chart.teeth || []).map((t) => ({
+      fdi: Number(t.fdi),
+      status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
+      implantColor: t.implantColor === 'teal' || t.implantColor === 'red' ? t.implantColor : null,
+      surfaces: (t.surfaces || []).map((s) => ({
+        view: s.view === 'occlusal' ? 'occlusal' : 'buccal',
+        region: String(s.region || 'O').toUpperCase(),
+        label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
+      })),
+      note: String(t.note || '').trim().slice(0, 500),
+    })),
+    updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
+    updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
+  }
+}
+
+function normalizeChartTeeth(rawTeeth) {
+  if (!Array.isArray(rawTeeth)) return []
+  const byFdi = new Map()
+  for (const row of rawTeeth) {
+    const fdi = Math.round(Number(row?.fdi))
+    if (!FDI_VALID.has(fdi)) continue
+    let status = String(row?.status || 'present').trim()
+    if (status !== 'missing' && status !== 'implant') status = 'present'
+    let implantColor = null
+    if (status === 'implant') {
+      implantColor = row?.implantColor === 'red' ? 'red' : 'teal'
+    }
+    const surfaces = []
+    if (status === 'present' && Array.isArray(row?.surfaces)) {
+      for (const s of row.surfaces) {
+        const view = String(s?.view || '').trim()
+        const region = String(s?.region || '').trim().toUpperCase()
+        if (!SURFACE_VIEWS.has(view) || !SURFACE_REGIONS.has(region)) continue
+        surfaces.push({
+          view,
+          region,
+          label: String(s?.label || 'حشوة كومبوزيت').trim().slice(0, 120) || 'حشوة كومبوزيت',
+        })
+      }
+    }
+    byFdi.set(fdi, {
+      fdi,
+      status,
+      ...(status === 'implant' ? { implantColor } : {}),
+      surfaces: status === 'present' ? surfaces.slice(0, 12) : [],
+      note: String(row?.note || '').trim().slice(0, 500),
+    })
+  }
+  return [...byFdi.values()].sort((a, b) => a.fdi - b.fdi)
+}
 
 function planSummary(items) {
   if (!items?.length) return ''
@@ -94,6 +160,59 @@ dentalRouter.get('/dashboard', async (req, res) => {
       strategic,
       approvedQueue,
     })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.get('/chart/:patientId', async (req, res) => {
+  try {
+    if (!DENTAL_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const patient = await Patient.findById(req.params.patientId).select('dentalChart').lean()
+    if (!patient) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    res.json({ chart: chartToDto(patient.dentalChart) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
+  try {
+    if (!DENTAL_CHART_WRITE.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية لتعديل مخطط الأسنان' })
+      return
+    }
+    const patient = await Patient.findById(req.params.patientId)
+    if (!patient) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const teeth = normalizeChartTeeth(req.body?.teeth)
+    patient.dentalChart = {
+      teeth,
+      updatedAt: new Date(),
+      updatedBy: req.user._id,
+    }
+    if (!patient.departments.includes('dental')) {
+      patient.departments = [...new Set([...patient.departments, 'dental'])]
+    }
+    await patient.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تحديث مخطط الأسنان',
+      entityType: 'Patient',
+      entityId: patient._id,
+      details: { toothCount: teeth.length },
+    })
+    res.json({ chart: chartToDto(patient.dentalChart) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

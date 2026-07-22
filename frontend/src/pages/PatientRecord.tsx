@@ -12,6 +12,7 @@ import {
   type PaymentChannel,
 } from '../components/PaymentChannelFields'
 import { BillingPaymentModal } from '../components/BillingPaymentModal'
+import { DentalOdontogram } from '../components/dental/DentalOdontogram'
 import {
   netCollectedSypFromPayment,
   type BillingPaymentRequestBody,
@@ -54,13 +55,6 @@ function parseLaserShotsForPricing(raw: string) {
   if (!Number.isFinite(num) || num <= 0) return 0
   return Math.round(num)
 }
-
-type DentalPlanDto = {
-  id: string
-  status: 'draft' | 'approved'
-  items: { label?: string; note?: string; tooth?: number }[]
-  approvedAt?: string | null
-} | null
 
 type ClinicalLaserRow = {
   id: string
@@ -858,11 +852,6 @@ export function PatientRecord() {
   const [savingLaser, setSavingLaser] = useState(false)
   const [laserSessionErr, setLaserSessionErr] = useState('')
   const [laserSessionOk, setLaserSessionOk] = useState('')
-  const [dentalPlan, setDentalPlan] = useState<DentalPlanDto>(null)
-  const [planDraft, setPlanDraft] = useState(
-    'تقويم للفكين — حشو 11، 12 — متابعة تنظيف دوري.',
-  )
-  const [approvingPlan, setApprovingPlan] = useState(false)
   const [dermProcedureDescription, setDermProcedureDescription] = useState('')
   const [dermSessionNotes, setDermSessionNotes] = useState('')
   const [clinicalSessionDetail, setClinicalSessionDetail] = useState<DermatologySessionRow | null>(null)
@@ -879,7 +868,6 @@ export function PatientRecord() {
   const [dermSessionsLoading, setDermSessionsLoading] = useState(false)
   const [recvAllSessions, setRecvAllSessions] = useState<DermatologySessionRow[]>([])
   const [laserClinSessions, setLaserClinSessions] = useState<DermatologySessionRow[]>([])
-  const [dentalClinSessions, setDentalClinSessions] = useState<DermatologySessionRow[]>([])
   const [solSessions, setSolSessions] = useState<DermatologySessionRow[]>([])
   const [recvDept, setRecvDept] = useState<'laser' | 'dermatology' | 'dental'>('dermatology')
   const [recvProviders, setRecvProviders] = useState<{ id: string; name: string }[]>([])
@@ -994,14 +982,6 @@ export function PatientRecord() {
   const [laserSessionDetail, setLaserSessionDetail] = useState<ClinicalLaserRow | null>(null)
   const [laserSessionCompleting, setLaserSessionCompleting] = useState(false)
   const [laserDetailActionErr, setLaserDetailActionErr] = useState('')
-  const [toothState, setToothState] = useState<Record<number, 'healthy' | 'planned' | 'treated'>>(() => {
-    const o: Record<number, 'healthy' | 'planned' | 'treated'> = {}
-    for (let i = 1; i <= 32; i += 1) o[i] = 'healthy'
-    o[11] = 'planned'
-    o[12] = 'planned'
-    o[26] = 'treated'
-    return o
-  })
 
   const canEditPatientProfile = role === 'super_admin' || role === 'reception'
 
@@ -1015,7 +995,6 @@ export function PatientRecord() {
       if (role === 'super_admin' || role === 'reception') setRecvAllSessions(rows)
       setDermSessions(rows.filter((s) => s.department === 'dermatology'))
       setLaserClinSessions(rows.filter((s) => s.department === 'laser'))
-      setDentalClinSessions(rows.filter((s) => s.department === 'dental'))
       setSolSessions(rows.filter((s) => s.department === 'skin'))
     } catch {
       /* lists unchanged */
@@ -1396,27 +1375,6 @@ export function PatientRecord() {
   }, [id, tab])
 
   useEffect(() => {
-    if (!id) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const data = await api<{ plan: DentalPlanDto }>(`/api/dental/plans/${id}`)
-        if (cancelled) return
-        setDentalPlan(data.plan)
-        if (data.plan?.items?.length) {
-          const text = data.plan.items.map((i) => i.label || i.note || '').filter(Boolean).join('\n')
-          if (text) setPlanDraft(text)
-        }
-      } catch {
-        if (!cancelled) setDentalPlan(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [id])
-
-  useEffect(() => {
     if (!id || (tab !== 'overview' && tab !== 'packages' && tab !== 'laser')) return
     let cancelled = false
     setClinicalHistoryLoading(true)
@@ -1738,14 +1696,6 @@ export function PatientRecord() {
     const allowed = visibleTabs.some((t) => t.key === tab)
     if (!allowed) setTab('overview')
   }, [tab, visibleTabs])
-
-  const cycleTooth = useCallback((n: number) => {
-    setToothState((prev) => {
-      const order: ('healthy' | 'planned' | 'treated')[] = ['healthy', 'planned', 'treated']
-      const i = order.indexOf(prev[n] ?? 'healthy')
-      return { ...prev, [n]: order[(i + 1) % order.length] }
-    })
-  }, [])
 
   const patientPackages: PatientPackage[] = useMemo(() => {
     if (!patient) return []
@@ -2085,13 +2035,6 @@ export function PatientRecord() {
     }
     setSelectedLaserAddonItemIds([])
   }, [sessionInPackageMode, bookedLaserSlotPkgMode])
-
-  const dentalPlanApproved = dentalPlan?.status === 'approved'
-  const dentalPlanSummary =
-    dentalPlan?.items
-      ?.map((i) => i.label || i.note)
-      .filter(Boolean)
-      .join(' — ') || '—'
 
   function addDermMaterialRow() {
     setDermSelectedMaterials((prev) => [...prev, { inventoryItemId: '', quantity: '1' }])
@@ -5184,213 +5127,16 @@ export function PatientRecord() {
       {tab === 'dental' &&
         (canAccessTab(role, 'dental') ? (
           <div className="card">
-            {role === 'dental_branch' && !dentalPlanApproved && (
-              <div
-                className="no-access"
-                style={{ marginBottom: '1.25rem', textAlign: 'center' }}
-              >
-                <strong>بانتظار اعتماد خطة العلاج</strong>
-                <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem' }}>
-                  ستظهر الخطة والمخطط السني هنا فور اعتماد الدكتور إلياس.
-                </p>
-              </div>
-            )}
-            {role === 'super_admin' && (
-              <div
-                style={{
-                  padding: '1rem',
-                  background: dentalPlanApproved ? 'var(--success-bg)' : 'var(--bg)',
-                  borderRadius: 'var(--radius)',
-                  marginBottom: '1.25rem',
-                  border: `1px solid ${dentalPlanApproved ? '#86efac' : 'var(--border)'}`,
-                }}
-              >
-                <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem' }}>خطة العلاج الشاملة</h3>
-                <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem' }}>
-                  قيود المخطط الاستراتيجي: المعاينة الأولى ووضع الخطة للدكتور إلياس فقط.
-                </p>
-                <textarea
-                  className="textarea"
-                  value={planDraft}
-                  onChange={(e) => setPlanDraft(e.target.value)}
-                  style={{ minHeight: 72 }}
-                  disabled={dentalPlanApproved}
-                />
-                {!dentalPlanApproved ? (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ marginTop: '0.75rem' }}
-                    disabled={approvingPlan}
-                    onClick={async () => {
-                      if (!id) return
-                      setApprovingPlan(true)
-                      try {
-                        const data = await api<{
-                          plan: {
-                            id: string
-                            status: string
-                            items: { label?: string }[]
-                            approvedAt?: string | null
-                          }
-                        }>(`/api/dental/plans/${id}/approve`, {
-                          method: 'POST',
-                          body: JSON.stringify({
-                            items: [{ label: planDraft }],
-                          }),
-                        })
-                        setDentalPlan({
-                          id: data.plan.id,
-                          status: data.plan.status as 'approved',
-                          items: data.plan.items,
-                          approvedAt: data.plan.approvedAt,
-                        })
-                      } finally {
-                        setApprovingPlan(false)
-                      }
-                    }}
-                  >
-                    {approvingPlan ? 'جاري الاعتماد…' : 'اعتماد الخطة ومزامنتها مع الأطباء'}
-                  </button>
-                ) : (
-                  <p style={{ margin: '0.75rem 0 0', fontWeight: 600, color: 'var(--success)' }}>
-                    ✓ تم الاعتماد — تظهر الخطة لأطباء الفروع عند فتح ملف المريض
-                  </p>
-                )}
-              </div>
-            )}
-            {(role === 'dental_branch' && dentalPlanApproved) ||
-            (role === 'super_admin' && dentalPlanApproved) ? (
-              <div
-                style={{
-                  position: 'sticky',
-                  top: 0,
-                  background: 'var(--surface)',
-                  paddingBottom: '0.75rem',
-                  borderBottom: '1px solid var(--border)',
-                  marginBottom: '1rem',
-                  zIndex: 2,
-                }}
-              >
-                <strong>الخطة المعتمدة:</strong> {dentalPlanSummary}
-              </div>
+            <h2 className="card-title">مخطط الأسنان</h2>
+            <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              مخطط FDI تفاعلي — يُحفظ تلقائياً على ملف المريض.
+            </p>
+            {id ? (
+              <DentalOdontogram
+                patientId={id}
+                canEdit={role === 'super_admin' || role === 'dental_branch'}
+              />
             ) : null}
-            {(role === 'super_admin' || dentalPlanApproved) && (
-            <>
-            <h3 className="card-title">مخطط الأسنان</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '-0.5rem' }}>
-              سليم / مخطط / معالَج — اضغط للتبديل (عرض تجريبي)
-            </p>
-            <div className="tooth-grid">
-              {Array.from({ length: 32 }, (_, i) => i + 1).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={`tooth-btn ${toothState[n]}`}
-                  onClick={() => cycleTooth(n)}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-            <h3 className="card-title" style={{ marginTop: '1.5rem' }}>
-              الذمم المالية
-            </h3>
-            <div className="grid-2">
-              <div className="stat-card">
-                <div className="lbl">الإجمالي</div>
-                <div className="val">2٬400 ل.س</div>
-              </div>
-              <div className="stat-card">
-                <div className="lbl">المدفوع</div>
-                <div className="val">1٬000 ل.س</div>
-              </div>
-              <div className="stat-card" style={{ borderColor: 'var(--warning)' }}>
-                <div className="lbl">المتبقي</div>
-                <div className="val" style={{ color: 'var(--warning)' }}>
-                  1٬400 ل.س
-                </div>
-              </div>
-            </div>
-            <h3 className="card-title" style={{ marginTop: '1.5rem', fontSize: '0.95rem' }}>
-              جلسات التحصيل السريرية (أسنان)
-            </h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 0 }}>
-              أكمل الوصف والمواد المستخدمة لبنود أنشأها الاستقبال أو سجّلت كجلسة أسنان.
-            </p>
-            {dentalClinSessions.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.88rem' }}>لا توجد جلسات مسجّلة.</p>
-            ) : (
-              <div className="table-wrap" style={{ marginTop: '0.5rem' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>التاريخ</th>
-                      <th>الوصف</th>
-                      <th>المقدّم</th>
-                      <th>المستحق</th>
-                      <th>التحصيل</th>
-                      <th>إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dentalClinSessions.flatMap((s) => {
-                      const hasDetail =
-                        Boolean(String(s.notes || '').trim()) || (s.materials?.length ?? 0) > 0
-                      const rows = [
-                        <tr key={s.id}>
-                          <td>{s.businessDate}</td>
-                          <td>{s.procedureDescription || '—'}</td>
-                          <td>{s.providerName}</td>
-                          <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
-                          <td>
-                            {s.isPackagePrepaid
-                              ? 'مدفوعة مسبقاً (باكج)'
-                              : s.billingStatus === 'paid'
-                                ? 'مدفوع'
-                                : 'معلّق'}
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                              <button
-                                type="button"
-                                className="btn btn-ghost"
-                                style={{ fontSize: '0.78rem' }}
-                                onClick={() => setClinicalSessionDetail(s)}
-                              >
-                                تفاصيل
-                              </button>
-                              {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary"
-                                  style={{ fontSize: '0.78rem' }}
-                                  onClick={() => void openSessionEdit(s)}
-                                >
-                                  تكميل
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>,
-                      ]
-                      if (hasDetail) {
-                        rows.push(
-                          <tr key={`${s.id}-detail`}>
-                            <td colSpan={6} style={{ background: 'var(--surface-2)', padding: '0.65rem 0.75rem' }}>
-                              <ClinicalSessionDetailExtras session={s} />
-                            </td>
-                          </tr>,
-                        )
-                      }
-                      return rows
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            </>
-            )}
           </div>
         ) : (
           <div className="no-access">

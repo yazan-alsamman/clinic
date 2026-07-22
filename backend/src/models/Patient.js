@@ -56,6 +56,35 @@ const patientPackageSchema = new mongoose.Schema(
   { _id: true, timestamps: true },
 )
 
+const dentalChartSurfaceSchema = new mongoose.Schema(
+  {
+    view: { type: String, enum: ['buccal', 'occlusal'], required: true },
+    region: { type: String, enum: ['M', 'D', 'O', 'B', 'L', 'I'], required: true },
+    label: { type: String, default: 'حشوة كومبوزيت', trim: true, maxlength: 120 },
+  },
+  { _id: false },
+)
+
+const dentalChartToothSchema = new mongoose.Schema(
+  {
+    fdi: { type: Number, required: true, min: 11, max: 48 },
+    status: { type: String, enum: ['present', 'missing', 'implant'], default: 'present' },
+    implantColor: { type: String, enum: ['teal', 'red'], default: undefined },
+    surfaces: { type: [dentalChartSurfaceSchema], default: [] },
+    note: { type: String, default: '', trim: true, maxlength: 500 },
+  },
+  { _id: false },
+)
+
+const dentalChartSchema = new mongoose.Schema(
+  {
+    teeth: { type: [dentalChartToothSchema], default: [] },
+    updatedAt: { type: Date, default: null },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  },
+  { _id: false },
+)
+
 const patientSchema = new mongoose.Schema(
   {
     fileNumber: { type: String, required: true, trim: true, unique: true, index: true },
@@ -90,6 +119,8 @@ const patientSchema = new mongoose.Schema(
     paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
     /** باقات جلسات مسبقة الدفع (حالياً: ليزر) */
     sessionPackages: { type: [patientPackageSchema], default: [] },
+    /** مخطط الأسنان التفاعلي (FDI) */
+    dentalChart: { type: dentalChartSchema, default: () => ({ teeth: [] }) },
     /** بوابة المريض — تسجيل دخول منفصل عن موظفي العيادة */
     portalUsername: { type: String, trim: true, sparse: true, unique: true },
     portalPasswordHash: { type: String, default: undefined },
