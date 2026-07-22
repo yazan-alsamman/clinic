@@ -249,7 +249,6 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                     {providers.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
-                        {p.noShare || p.virtual ? ' (بدون نسبة — كامل للقسم)' : ''}
                       </option>
                     ))}
                     {draft.providerUserId &&
