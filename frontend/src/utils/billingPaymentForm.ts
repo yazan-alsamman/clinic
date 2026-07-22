@@ -108,10 +108,12 @@ export function hasPositiveReceivedAmount(form: BillingPaymentFormState): boolea
   }
   if (form.payCurrency === 'MIXED') {
     const syp = Number(normalizeDecimalDigits(form.paySyp))
-    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+    const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
     return (Number.isFinite(syp) && syp > 0) || (Number.isFinite(usd) && usd > 0)
   }
-  const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+  const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+  const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
   return Number.isFinite(usd) && usd > 0
 }
 
@@ -183,7 +185,8 @@ export function validateBillingPaymentForm(opts: {
   }
   if (form.payCurrency === 'MIXED') {
     const syp = Number(normalizeDecimalDigits(form.paySyp))
-    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+    const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
     if (!Number.isFinite(syp) || syp < 0) return 'مبلغ الليرة في التحصيل المختلط غير صالح.'
     if (!Number.isFinite(usd) || usd < 0) return 'مبلغ الدولار في التحصيل المختلط غير صالح.'
     if (!allowZero && syp <= 0 && usd <= 0) return 'أدخل مبلغاً بالليرة أو بالدولار (أو كليهما).'
@@ -192,7 +195,8 @@ export function validateBillingPaymentForm(opts: {
     }
     return null
   }
-  const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+  const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+  const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
   if (!Number.isFinite(usd) || usd < 0) return 'أدخل مبلغاً صالحاً بالدولار.'
   if (!allowZero && usd <= 0) return 'أدخل مبلغاً صالحاً بالدولار.'
   if (!hasReceived) return null
@@ -240,7 +244,8 @@ export function buildBillingPaymentRequestBody(opts: {
 }): BillingPaymentRequestBody {
   const { form } = opts
   const syp = Number(normalizeDecimalDigits(form.paySyp))
-  const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+  const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+  const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
   const refundTrim = form.payRefundAmount.trim()
   const refundPayload =
     form.payCurrency === 'USD' && refundTrim
@@ -291,7 +296,8 @@ export function computePaymentSettlementPreview(opts: {
     if (grossSyp === 0) return { kind: 'under', delta: -due }
   } else if (form.payCurrency === 'MIXED') {
     const syp = Number(normalizeDecimalDigits(form.paySyp))
-    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+    const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
     if (!Number.isFinite(syp) || syp < 0 || !Number.isFinite(usd) || usd < 0) return { kind: 'none' }
     usdParsed = usd
     grossSyp = Math.round(syp)
@@ -302,9 +308,12 @@ export function computePaymentSettlementPreview(opts: {
     netSyp = mixedNetReceivedSyp(syp, usd, payPreviewRate || 0)
     if (netSyp === 0 && syp === 0 && usd === 0) return { kind: 'under', delta: -due }
   } else {
-    const usd = parseFloat(normalizeDecimalDigits(form.payUsd))
+    const usdRaw = normalizeDecimalDigits(form.payUsd).trim()
+    const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
+    if (!Number.isFinite(usd) || usd < 0) return { kind: 'none' }
+    if (usd === 0) return { kind: 'under', delta: -due }
+    if (!payPreviewRate || payPreviewRate <= 0) return { kind: 'none' }
     usdParsed = usd
-    if (!payPreviewRate || !Number.isFinite(usd) || usd <= 0) return { kind: 'none' }
     grossSyp = Math.round(usd * payPreviewRate)
     if (form.payRefundAmount.trim()) {
       if (form.payRefundCurrency === 'SYP') {

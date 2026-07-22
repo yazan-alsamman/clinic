@@ -3329,7 +3329,7 @@ export function PatientRecord() {
                 return
               }
               const totalSyp = Math.max(0, Math.round(parseFloat(packageTotalSyp) || 0))
-              if (!(totalSyp > 0)) {
+              if (!Number.isFinite(totalSyp) || totalSyp < 0) {
                 setPackageErr('أدخل إجمالي سعر الباكج بالليرة.')
                 return
               }
@@ -3420,7 +3420,7 @@ export function PatientRecord() {
                 return
               }
               const totalSyp = Math.max(0, Math.round(parseFloat(solariumPkgTotal) || 0))
-              if (!(totalSyp > 0)) {
+              if (!Number.isFinite(totalSyp) || totalSyp < 0) {
                 setSolariumPkgErr('أدخل إجمالي سعر الباكج بالليرة.')
                 return
               }
@@ -4063,7 +4063,7 @@ export function PatientRecord() {
                 setRecvErr('')
                 setRecvOk('')
                 const feeSyp = Math.max(0, Math.round(parseFloat(recvFeeSyp) || 0))
-                if (!(feeSyp > 0)) {
+                if (!Number.isFinite(feeSyp) || feeSyp < 0) {
                   setRecvErr('أدخل مبلغ التحصيل بالليرة.')
                   return
                 }
@@ -4542,8 +4542,9 @@ export function PatientRecord() {
                       return
                     }
                   }
-                  if (!(selectedLaserTotalSyp > 0) && !(laserCoverSelected && laserCoverPriceSyp > 0)) {
-                    setLaserSessionErr('اختر مناطق/عروض بسعر صالح أو فعّل محاسبة الضربات مع عدد ضربات صحيح.')
+                  // المبلغ 0 مسموح (جلسة مجانية / تحصيل لاحق كذمة)
+                  if (selectedLaserTotalSyp < 0) {
+                    setLaserSessionErr('المبلغ غير صالح.')
                     return
                   }
                 }
@@ -5036,12 +5037,12 @@ export function PatientRecord() {
                 const feeSyp = Math.max(0, Math.round(parseFloat(dermSessionFeeSyp) || 0))
                 const feeUsd = Math.max(0, Number.parseFloat(dermSessionFeeUsd) || 0)
                 if (dermFeeCurrency === 'USD') {
-                  if (!(feeUsd > 0)) {
-                    setDermErr('أدخل سعر الجلسة بالدولار (قيمة أكبر من صفر).')
+                  if (!(feeUsd >= 0) || !Number.isFinite(feeUsd)) {
+                    setDermErr('أدخل سعر الجلسة بالدولار (رقم صفر أو أكبر).')
                     return
                   }
-                } else if (!(feeSyp > 0)) {
-                  setDermErr('أدخل سعر الجلسة بالليرة (قيمة أكبر من صفر).')
+                } else if (!(feeSyp >= 0) || !Number.isFinite(feeSyp)) {
+                  setDermErr('أدخل سعر الجلسة بالليرة (رقم صفر أو أكبر).')
                   return
                 }
                 const discountPercent = Math.max(0, Math.min(100, Number.parseFloat(dermDiscountPercent) || 0))

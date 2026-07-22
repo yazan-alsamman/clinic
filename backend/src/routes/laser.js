@@ -1595,15 +1595,15 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       costGrossSyp += laserCoverAppliedSyp
     }
 
-    if (!isPackageSession && !(costGrossSyp > 0)) {
-      res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالليرة (قيمة أكبر من صفر)' })
+    if (!isPackageSession && costGrossSyp < 0) {
+      res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالليرة (رقم صفر أو أكبر)' })
       return
     }
     const amountDueSyp = isPackageSession
       ? Math.round(packageAddOnGrossSyp)
       : Math.round(costGrossSyp * (1 - discountPercent / 100))
-    if (!isPackageSession && amountDueSyp <= 0) {
-      res.status(400).json({ error: 'المبلغ بعد الحسم يجب أن يكون أكبر من صفر' })
+    if (!isPackageSession && amountDueSyp < 0) {
+      res.status(400).json({ error: 'المبلغ بعد الحسم غير صالح' })
       return
     }
 

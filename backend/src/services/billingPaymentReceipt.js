@@ -34,11 +34,19 @@ export function mixedNetReceivedSyp(sypCash, usdAmount, rate) {
 }
 
 export function isZeroCollectionAllowed(netReceivedSyp, dueForSettlement) {
-  return Math.round(Number(netReceivedSyp) || 0) === 0 && Math.round(Number(dueForSettlement) || 0) > 0
+  const net = Math.round(Number(netReceivedSyp) || 0)
+  const due = Math.round(Number(dueForSettlement) || 0)
+  // تحصيل صفر مسموح دائماً (ذمة كاملة، أو بند بلا مستحق)
+  return net === 0 && due >= 0
 }
 
 export function assertBillingCollectionAmountValid({ netReceivedSyp, dueForSettlement }) {
   const net = Math.round(Number(netReceivedSyp) || 0)
+  if (net < 0) {
+    const err = new Error('مبلغ الدفع غير صالح')
+    err.code = 'INVALID_AMOUNT'
+    throw err
+  }
   const zeroAllowed = isZeroCollectionAllowed(net, dueForSettlement)
   if (!zeroAllowed && net <= 0) {
     const err = new Error('مبلغ الدفع غير صالح')
@@ -78,18 +86,34 @@ export async function resolveBillingPaymentReceipt(reqBody, businessDate) {
   let netReceivedSyp = 0
 
   if (payCurrency === 'USD') {
+    amountUsdRaw = Number(reqBody.amountUsd)
+    if (reqBody.amountUsd == null || String(reqBody.amountUsd).trim() === '') {
+      amountUsdRaw = 0
+    }
+    if (!Number.isFinite(amountUsdRaw) || amountUsdRaw < 0) {
+      const err = new Error('مبلغ الدفع بالدولار غير صالح')
+      err.code = 'INVALID_USD'
+      throw err
+    }
+    // تحصيل صفر بالدولار (ذمة كاملة) — لا يحتاج سعر صرف
+    if (amountUsdRaw === 0) {
+      return {
+        payCurrency,
+        netReceivedSyp: 0,
+        receivedAmountSyp: 0,
+        receivedAmountUsd: 0,
+        patientRefundSyp: 0,
+        patientRefundUsd: 0,
+        usdSypRateUsed: 0,
+        amountUsdRaw: 0,
+      }
+    }
     const rate = await fetchUsdSypRateForBusinessDate(businessDate)
     if (rate == null) {
       const err = new Error(
         'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
       )
       err.code = 'NO_RATE'
-      throw err
-    }
-    amountUsdRaw = Number(reqBody.amountUsd)
-    if (!Number.isFinite(amountUsdRaw) || amountUsdRaw <= 0) {
-      const err = new Error('مبلغ الدفع بالدولار غير صالح')
-      err.code = 'INVALID_USD'
       throw err
     }
     usdSypRateUsed = rate
@@ -153,24 +177,40 @@ export async function resolveBillingPaymentReceipt(reqBody, businessDate) {
       usdSypRateUsed,
     )
   } else if (payCurrency === 'MIXED') {
-    const rate = await fetchUsdSypRateForBusinessDate(businessDate)
-    if (rate == null) {
-      const err = new Error(
-        'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
-      )
-      err.code = 'NO_RATE'
-      throw err
-    }
     const parsedSyp = parseSypReceivedFromBody(reqBody)
     if (!parsedSyp.ok) {
       const err = new Error('مبلغ الليرة في التحصيل المختلط غير صالح')
       err.code = 'INVALID_AMOUNT'
       throw err
     }
-    amountUsdRaw = Number(reqBody.amountUsd)
+    amountUsdRaw =
+      reqBody.amountUsd == null || String(reqBody.amountUsd).trim() === ''
+        ? 0
+        : Number(reqBody.amountUsd)
     if (!Number.isFinite(amountUsdRaw) || amountUsdRaw < 0) {
       const err = new Error('مبلغ الدولار في التحصيل المختلط غير صالح')
       err.code = 'INVALID_USD'
+      throw err
+    }
+    // تحصيل صفر مختلط — لا يحتاج سعر صرف
+    if (parsedSyp.receivedSyp === 0 && amountUsdRaw === 0) {
+      return {
+        payCurrency,
+        netReceivedSyp: 0,
+        receivedAmountSyp: 0,
+        receivedAmountUsd: 0,
+        patientRefundSyp: 0,
+        patientRefundUsd: 0,
+        usdSypRateUsed: 0,
+        amountUsdRaw: 0,
+      }
+    }
+    const rate = await fetchUsdSypRateForBusinessDate(businessDate)
+    if (rate == null) {
+      const err = new Error(
+        'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
+      )
+      err.code = 'NO_RATE'
       throw err
     }
     usdSypRateUsed = rate

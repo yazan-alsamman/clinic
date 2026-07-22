@@ -1095,12 +1095,12 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     }
 
     if (department === 'solarium') {
-      let packageTotalSyp = parsePositiveSypInteger(req.body?.packageTotalSyp)
+      let packageTotalSyp = parseNonNegativeSypInteger(req.body?.packageTotalSyp)
       let paidAmountSyp = parseNonNegativeSypInteger(
         req.body?.paidAmountSyp ?? req.body?.collectedAmountSyp ?? req.body?.amountSyp,
       )
       if (packageTotalSyp == null) {
-        const legacyCollected = parsePositiveSypInteger(
+        const legacyCollected = parseNonNegativeSypInteger(
           req.body?.collectedAmountSyp ?? req.body?.paidAmountSyp ?? req.body?.amountSyp,
         )
         if (legacyCollected != null) {
@@ -1290,7 +1290,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       return
     }
 
-    const packageTotalSyp = parsePositiveSypInteger(req.body?.packageTotalSyp)
+    const packageTotalSyp = parseNonNegativeSypInteger(req.body?.packageTotalSyp)
     if (packageTotalSyp == null) {
       res.status(400).json({ error: 'أدخل إجمالي سعر الباكج بالليرة' })
       return

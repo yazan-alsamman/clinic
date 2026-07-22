@@ -42,9 +42,19 @@ function parsePositiveSypInteger(raw) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+function parseNonNegativeSypInteger(raw) {
+  const n = Math.round(Number(raw))
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
 function parsePositiveUsd(raw) {
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function parseNonNegativeUsd(raw) {
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : null
 }
 
 function parseDiscountPercent(raw) {
@@ -330,9 +340,9 @@ clinicalRouter.post(
         return
       }
 
-      const sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      const sessionFeeSyp = parseNonNegativeSypInteger(body.sessionFeeSyp)
       if (sessionFeeSyp == null) {
-        res.status(400).json({ error: 'أدخل مبلغ التحصيل بالليرة (قيمة أكبر من صفر)' })
+        res.status(400).json({ error: 'أدخل مبلغ التحصيل بالليرة (رقم صفر أو أكبر)' })
         return
       }
 
@@ -497,27 +507,27 @@ clinicalRouter.post(
         providerUserId = slot.assignedSpecialistUserId
       }
 
-      let sessionFeeSyp = parsePositiveSypInteger(body.sessionFeeSyp)
+      let sessionFeeSyp = parseNonNegativeSypInteger(body.sessionFeeSyp)
       let sessionFeeUsd = 0
       let billingCurrency = 'SYP'
       const feeCurrency = String(body.feeCurrency || 'SYP').trim().toUpperCase()
       if (department === 'dermatology' && feeCurrency === 'USD') {
-        const feeUsd = parsePositiveUsd(body.sessionFeeUsd)
+        const feeUsd = parseNonNegativeUsd(body.sessionFeeUsd)
         if (feeUsd == null) {
-          res.status(400).json({ error: 'أدخل سعر الجلسة بالدولار (قيمة أكبر من صفر)' })
+          res.status(400).json({ error: 'أدخل سعر الجلسة بالدولار (رقم صفر أو أكبر)' })
           return
         }
         const rate = Number(req.businessDay?.usdSypRate)
-        if (!Number.isFinite(rate) || rate <= 0) {
+        if (feeUsd > 0 && (!Number.isFinite(rate) || rate <= 0)) {
           res.status(400).json({ error: 'لا يوجد سعر صرف لليوم. اطلب من المدير إدخال سعر الدولار أولاً.' })
           return
         }
         sessionFeeUsd = round6(feeUsd)
-        sessionFeeSyp = Math.round(feeUsd * rate)
+        sessionFeeSyp = feeUsd > 0 ? Math.round(feeUsd * rate) : 0
         billingCurrency = 'USD'
       }
       if (sessionFeeSyp == null) {
-        res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (قيمة أكبر من صفر)' })
+        res.status(400).json({ error: 'أدخل رسوم الجلسة بالليرة (رقم صفر أو أكبر)' })
         return
       }
 
@@ -553,14 +563,14 @@ clinicalRouter.post(
       const amountDueSyp = Math.round(listAmountDueSyp * (1 - discountPercent / 100))
       const amountDueUsd =
         billingCurrency === 'USD' ? round6(listAmountDueUsd * (1 - discountPercent / 100)) : 0
-      if (amountDueSyp < 1) {
+      if (amountDueSyp < 0) {
         await restoreMaterialsFromSnapshot(materialLines)
-        res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.' })
+        res.status(400).json({ error: 'المستحق بعد الخصم غير صالح.' })
         return
       }
-      if (billingCurrency === 'USD' && !(amountDueUsd > 0)) {
+      if (billingCurrency === 'USD' && amountDueUsd < 0) {
         await restoreMaterialsFromSnapshot(materialLines)
-        res.status(400).json({ error: 'الخصم كبير جداً — المستحق بعد الخصم بالدولار أصبح صفراً.' })
+        res.status(400).json({ error: 'المستحق بعد الخصم بالدولار غير صالح.' })
         return
       }
 

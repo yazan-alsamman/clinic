@@ -154,13 +154,15 @@ export function validatePackageCollectionBeforeSubmit(opts: {
   usdSypRate: number | null
 }): string | null {
   const due = Math.max(0, Math.round(Number(opts.dueSyp) || 0))
-  if (!(due > 0)) return 'أدخل المبلغ المدفوع حالياً قبل التحصيل.'
+  // مدفوع حالياً = 0 يعني لا تحصيل الآن (مسموح لباكج/جلسة بلا قبض فوري)
+  if (!(due > 0)) return null
   const chErr = validatePaymentChannelBeforeSubmit(opts.channel, opts.bankName)
   if (chErr) return chErr
   if (opts.payCurrency === 'USD') {
     const rate = Number(opts.usdSypRate)
     if (!(rate > 0)) return 'لا يتوفر سعر صرف ليوم العمل — فعّل اليوم مع سعر الدولار.'
-    const usd = Number(opts.amountUsd)
+    const usdRaw = String(opts.amountUsd ?? '').trim()
+    const usd = usdRaw === '' ? 0 : Number(usdRaw)
     if (!Number.isFinite(usd) || usd <= 0) return 'أدخل المبلغ المستلم بالدولار.'
     const receivedSyp = Math.round(usd * rate)
     if (receivedSyp < due) {

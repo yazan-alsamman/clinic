@@ -343,7 +343,8 @@ export function BillingPage() {
       }
     } else if (payCurrency === 'MIXED') {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      const usdRaw = normalizeDecimalDigits(payUsd).trim()
+      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
       if (!Number.isFinite(syp) || syp < 0) {
         setErr('مبلغ الليرة في التحصيل المختلط غير صالح.')
         return
@@ -352,21 +353,18 @@ export function BillingPage() {
         setErr('مبلغ الدولار في التحصيل المختلط غير صالح.')
         return
       }
-      if (syp <= 0 && usd <= 0) {
-        setErr('أدخل مبلغاً بالليرة أو بالدولار (أو كليهما).')
-        return
-      }
       if (usd > 0 && !(payPreviewRate && payPreviewRate > 0)) {
         setErr('لا يتوفر سعر صرف لحساب جزء الدولار.')
         return
       }
     } else {
-      const usd = parseFloat(normalizeDecimalDigits(payUsd))
-      if (!Number.isFinite(usd) || usd <= 0) {
+      const usdRaw = normalizeDecimalDigits(payUsd).trim()
+      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
+      if (!Number.isFinite(usd) || usd < 0) {
         setErr('أدخل مبلغاً صالحاً بالدولار.')
         return
       }
-      if (payRefundAmount.trim()) {
+      if (usd > 0 && payRefundAmount.trim()) {
         const ref =
           payRefundCurrency === 'SYP'
             ? Number(normalizeDecimalDigits(payRefundAmount))
@@ -376,41 +374,40 @@ export function BillingPage() {
           return
         }
       }
-      if (payPreviewRate && payPreviewRate > 0) {
-        const usdG = parseFloat(normalizeDecimalDigits(payUsd))
-        if (Number.isFinite(usdG) && usdG > 0) {
-          const grossSyp = Math.round(usdG * payPreviewRate)
-          let refSyp = 0
-          let refUsd = 0
-          if (payRefundAmount.trim()) {
-            if (payRefundCurrency === 'SYP') {
-              refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
-            } else {
-              refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
-            }
+      if (usd > 0 && payPreviewRate && payPreviewRate > 0) {
+        const usdG = usd
+        const grossSyp = Math.round(usdG * payPreviewRate)
+        let refSyp = 0
+        let refUsd = 0
+        if (payRefundAmount.trim()) {
+          if (payRefundCurrency === 'SYP') {
+            refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
+          } else {
+            refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
           }
-          const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
-          if (refEquiv > grossSyp) {
-            setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
-            return
-          }
-          const netSyp = netReceivedSypAfterUsdCollection({
-            amountUsd: usdG,
-            patientRefundSyp: refSyp,
-            patientRefundUsd: refUsd,
-            rate: payPreviewRate,
-          })
-          if (netSyp <= 0) {
-            setErr('صافي المبلغ بعد الترجيع يجب أن يكون أكبر من صفر.')
-            return
-          }
+        }
+        const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
+        if (refEquiv > grossSyp) {
+          setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
+          return
+        }
+        const netSyp = netReceivedSypAfterUsdCollection({
+          amountUsd: usdG,
+          patientRefundSyp: refSyp,
+          patientRefundUsd: refUsd,
+          rate: payPreviewRate,
+        })
+        if (netSyp < 0) {
+          setErr('صافي المبلغ بعد الترجيع غير صالح.')
+          return
         }
       }
     }
     setBusyId(id)
     try {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      const usdRaw = normalizeDecimalDigits(payUsd).trim()
+      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
       const refundTrim = payRefundAmount.trim()
       const refundPayload =
         payCurrency === 'USD' && refundTrim
@@ -507,7 +504,8 @@ export function BillingPage() {
       }
     } else if (payCurrency === 'MIXED') {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      const usdRaw = normalizeDecimalDigits(payUsd).trim()
+      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
       if (!Number.isFinite(syp) || syp < 0) {
         setErr('مبلغ الليرة في التحصيل المختلط غير صالح.')
         return
@@ -516,21 +514,18 @@ export function BillingPage() {
         setErr('مبلغ الدولار في التحصيل المختلط غير صالح.')
         return
       }
-      if (syp <= 0 && usd <= 0) {
-        setErr('أدخل مبلغاً بالليرة أو بالدولار (أو كليهما).')
-        return
-      }
       if (usd > 0 && !(payPreviewRate && payPreviewRate > 0)) {
         setErr('لا يتوفر سعر صرف لحساب جزء الدولار.')
         return
       }
     } else {
-      const usd = parseFloat(normalizeDecimalDigits(payUsd))
-      if (!Number.isFinite(usd) || usd <= 0) {
+      const usdRaw = normalizeDecimalDigits(payUsd).trim()
+      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
+      if (!Number.isFinite(usd) || usd < 0) {
         setErr('أدخل مبلغاً صالحاً بالدولار.')
         return
       }
-      if (payRefundAmount.trim()) {
+      if (usd > 0 && payRefundAmount.trim()) {
         const ref =
           payRefundCurrency === 'SYP'
             ? Number(normalizeDecimalDigits(payRefundAmount))
@@ -540,41 +535,40 @@ export function BillingPage() {
           return
         }
       }
-      if (payPreviewRate && payPreviewRate > 0) {
-        const usdG = parseFloat(normalizeDecimalDigits(payUsd))
-        if (Number.isFinite(usdG) && usdG > 0) {
-          const grossSyp = Math.round(usdG * payPreviewRate)
-          let refSyp = 0
-          let refUsd = 0
-          if (payRefundAmount.trim()) {
-            if (payRefundCurrency === 'SYP') {
-              refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
-            } else {
-              refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
-            }
+      if (usd > 0 && payPreviewRate && payPreviewRate > 0) {
+        const usdG = usd
+        const grossSyp = Math.round(usdG * payPreviewRate)
+        let refSyp = 0
+        let refUsd = 0
+        if (payRefundAmount.trim()) {
+          if (payRefundCurrency === 'SYP') {
+            refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
+          } else {
+            refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
           }
-          const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
-          if (refEquiv > grossSyp) {
-            setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
-            return
-          }
-          const netSyp = netReceivedSypAfterUsdCollection({
-            amountUsd: usdG,
-            patientRefundSyp: refSyp,
-            patientRefundUsd: refUsd,
-            rate: payPreviewRate,
-          })
-          if (netSyp <= 0) {
-            setErr('صافي المبلغ بعد الترجيع يجب أن يكون أكبر من صفر.')
-            return
-          }
+        }
+        const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
+        if (refEquiv > grossSyp) {
+          setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
+          return
+        }
+        const netSyp = netReceivedSypAfterUsdCollection({
+          amountUsd: usdG,
+          patientRefundSyp: refSyp,
+          patientRefundUsd: refUsd,
+          rate: payPreviewRate,
+        })
+        if (netSyp < 0) {
+          setErr('صافي المبلغ بعد الترجيع غير صالح.')
+          return
         }
       }
     }
     setBusyId(payItem.id)
     try {
       const syp = Number(normalizeDecimalDigits(paySyp))
-      const usd = parseFloat(normalizeDecimalDigits(payUsd))
+      const usdRaw = normalizeDecimalDigits(payUsd).trim()
+      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
       const refundTrim = payRefundAmount.trim()
       const refundPayload =
         payCurrency === 'USD' && refundTrim
@@ -1399,7 +1393,8 @@ export function BillingPage() {
                 }
               } else if (payCurrency === 'MIXED') {
                 const syp = Number(normalizeDecimalDigits(paySyp))
-                const usd = parseFloat(normalizeDecimalDigits(payUsd))
+                const usdRaw = normalizeDecimalDigits(payUsd).trim()
+                const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
                 if (!Number.isFinite(syp) || syp < 0 || !Number.isFinite(usd) || usd < 0) return null
                 netSyp = mixedNetReceivedSyp(syp, usd, payPreviewRate || 0)
                 grossSyp = netSyp
@@ -1412,9 +1407,19 @@ export function BillingPage() {
                   )
                 }
               } else {
-                const usd = parseFloat(normalizeDecimalDigits(payUsd))
+                const usdRaw = normalizeDecimalDigits(payUsd).trim()
+                const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
                 usdParsed = usd
-                if (!payPreviewRate || !Number.isFinite(usd) || usd <= 0) return null
+                if (!Number.isFinite(usd) || usd < 0) return null
+                if (usd === 0) {
+                  return (
+                    <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
+                      لن يُحصَّل مبلغ — سيُسجَّل كامل المستحق ({due.toLocaleString('ar-SY')} ل.س) كذمة على
+                      المريض.
+                    </p>
+                  )
+                }
+                if (!payPreviewRate) return null
                 grossSyp = Math.round(usd * payPreviewRate)
                 if (payRefundAmount.trim()) {
                   if (payRefundCurrency === 'SYP') {
@@ -1434,7 +1439,7 @@ export function BillingPage() {
               }
               if (!(grossSyp > 0) && netSyp === 0 && payCurrency !== 'MIXED') return null
 
-              if (payCurrency === 'USD' && netSyp <= 0) {
+              if (payCurrency === 'USD' && netSyp < 0) {
                 return (
                   <p style={{ marginTop: '0.45rem', color: 'var(--danger)' }}>
                     صافي المبلغ بعد الترجيع غير كافٍ — راجع المستلم بالدولار ومبلغ الترجيع.
