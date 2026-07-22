@@ -2774,8 +2774,7 @@ export function PatientRecord() {
                     المواعيد المحجوزة
                     {role === 'dermatology' ||
                     role === 'dermatology_manager' ||
-                    role === 'dermatology_assistant_manager' ||
-                    role === 'dental_branch' ? (
+                    role === 'dermatology_assistant_manager' ? (
                       <span style={{ fontWeight: 400, fontSize: '0.8rem', marginRight: '0.35rem' }}>
                         (المسجّلة باسمك كمقدّم)
                       </span>
