@@ -19,6 +19,59 @@ const FDI_VALID = new Set([
 const SURFACE_VIEWS = new Set(['buccal', 'occlusal'])
 const SURFACE_REGIONS = new Set(['M', 'D', 'O', 'B', 'L', 'I'])
 
+function normalizeTreatment(raw) {
+  const t = raw && typeof raw === 'object' ? raw : {}
+  const totalCostSyp = Math.max(0, Math.round(Number(t.totalCostSyp) || 0))
+  const payments = []
+  let paidSum = 0
+  if (Array.isArray(t.payments)) {
+    for (const p of t.payments) {
+      const amountSyp = Math.max(0, Math.round(Number(p?.amountSyp) || 0))
+      if (!(amountSyp > 0)) continue
+      if (paidSum + amountSyp > totalCostSyp && totalCostSyp > 0) {
+        const capped = Math.max(0, totalCostSyp - paidSum)
+        if (!(capped > 0)) break
+        payments.push({
+          amountSyp: capped,
+          paidAt: String(p?.paidAt || '').trim().slice(0, 32),
+          note: String(p?.note || '').trim().slice(0, 300),
+        })
+        paidSum += capped
+        break
+      }
+      payments.push({
+        amountSyp,
+        paidAt: String(p?.paidAt || '').trim().slice(0, 32),
+        note: String(p?.note || '').trim().slice(0, 300),
+      })
+      paidSum += amountSyp
+      if (payments.length >= 80) break
+    }
+  }
+  return {
+    procedureDescription: String(t.procedureDescription || '').trim().slice(0, 2000),
+    totalCostSyp,
+    doctorName: String(t.doctorName || '').trim().slice(0, 160),
+    payments,
+  }
+}
+
+function treatmentToDto(t) {
+  const n = normalizeTreatment(t)
+  const rawPays = Array.isArray(t?.payments) ? t.payments : []
+  return {
+    procedureDescription: n.procedureDescription,
+    totalCostSyp: n.totalCostSyp,
+    doctorName: n.doctorName,
+    payments: (n.payments || []).map((p, idx) => ({
+      id: rawPays[idx]?._id ? String(rawPays[idx]._id) : `p-${idx}`,
+      amountSyp: Math.round(Number(p.amountSyp) || 0),
+      paidAt: String(p.paidAt || ''),
+      note: String(p.note || ''),
+    })),
+  }
+}
+
 function emptyDentalChartDto() {
   return { teeth: [], updatedAt: null, updatedBy: null }
 }
@@ -36,6 +89,7 @@ function chartToDto(chart) {
         label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
       })),
       note: String(t.note || '').trim().slice(0, 500),
+      treatment: treatmentToDto(t.treatment),
     })),
     updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
     updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
@@ -67,12 +121,14 @@ function normalizeChartTeeth(rawTeeth) {
         })
       }
     }
+    const treatment = normalizeTreatment(row?.treatment)
     byFdi.set(fdi, {
       fdi,
       status,
       ...(status === 'implant' ? { implantColor } : {}),
       surfaces: status === 'present' ? surfaces.slice(0, 12) : [],
       note: String(row?.note || '').trim().slice(0, 500),
+      treatment,
     })
   }
   return [...byFdi.values()].sort((a, b) => a.fdi - b.fdi)

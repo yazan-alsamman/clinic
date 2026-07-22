@@ -65,6 +65,25 @@ const dentalChartSurfaceSchema = new mongoose.Schema(
   { _id: false },
 )
 
+const dentalChartPaymentSchema = new mongoose.Schema(
+  {
+    amountSyp: { type: Number, required: true, min: 0 },
+    paidAt: { type: String, default: '' },
+    note: { type: String, default: '', trim: true, maxlength: 300 },
+  },
+  { _id: true },
+)
+
+const dentalChartTreatmentSchema = new mongoose.Schema(
+  {
+    procedureDescription: { type: String, default: '', trim: true, maxlength: 2000 },
+    totalCostSyp: { type: Number, default: 0, min: 0 },
+    doctorName: { type: String, default: '', trim: true, maxlength: 160 },
+    payments: { type: [dentalChartPaymentSchema], default: [] },
+  },
+  { _id: false },
+)
+
 const dentalChartToothSchema = new mongoose.Schema(
   {
     fdi: { type: Number, required: true, min: 11, max: 48 },
@@ -72,6 +91,7 @@ const dentalChartToothSchema = new mongoose.Schema(
     implantColor: { type: String, enum: ['teal', 'red'], default: undefined },
     surfaces: { type: [dentalChartSurfaceSchema], default: [] },
     note: { type: String, default: '', trim: true, maxlength: 500 },
+    treatment: { type: dentalChartTreatmentSchema, default: () => ({}) },
   },
   { _id: false },
 )

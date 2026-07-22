@@ -9,12 +9,27 @@ export type DentalSurfaceMark = {
   label: string
 }
 
+export type DentalPayment = {
+  id: string
+  amountSyp: number
+  paidAt: string
+  note: string
+}
+
+export type DentalToothTreatment = {
+  procedureDescription: string
+  totalCostSyp: number
+  doctorName: string
+  payments: DentalPayment[]
+}
+
 export type DentalToothState = {
   fdi: number
   status: ToothStatus
   implantColor: ImplantColor | null
   surfaces: DentalSurfaceMark[]
   note: string
+  treatment: DentalToothTreatment
 }
 
 export type DentalChartDto = {
@@ -92,8 +107,62 @@ export function arabicToothName(fdi: number): string {
   return names[fdi] || `سن ${fdi}`
 }
 
+export function emptyTreatment(): DentalToothTreatment {
+  return {
+    procedureDescription: '',
+    totalCostSyp: 0,
+    doctorName: '',
+    payments: [],
+  }
+}
+
+export function normalizeTreatment(raw: Partial<DentalToothTreatment> | null | undefined): DentalToothTreatment {
+  const totalCostSyp = Math.max(0, Math.round(Number(raw?.totalCostSyp) || 0))
+  const payments: DentalPayment[] = []
+  let paid = 0
+  for (const p of raw?.payments || []) {
+    let amount = Math.max(0, Math.round(Number(p.amountSyp) || 0))
+    if (!(amount > 0)) continue
+    if (totalCostSyp > 0 && paid + amount > totalCostSyp) {
+      amount = Math.max(0, totalCostSyp - paid)
+      if (!(amount > 0)) break
+    }
+    payments.push({
+      id: String(p.id || `p-${payments.length}`),
+      amountSyp: amount,
+      paidAt: String(p.paidAt || ''),
+      note: String(p.note || ''),
+    })
+    paid += amount
+  }
+  return {
+    procedureDescription: String(raw?.procedureDescription || '').trim(),
+    totalCostSyp,
+    doctorName: String(raw?.doctorName || '').trim(),
+    payments,
+  }
+}
+
+export function treatmentHasData(t: DentalToothTreatment | undefined): boolean {
+  if (!t) return false
+  return (
+    Boolean(t.procedureDescription.trim()) ||
+    t.totalCostSyp > 0 ||
+    Boolean(t.doctorName.trim()) ||
+    t.payments.length > 0
+  )
+}
+
+export function treatmentPaidTotal(t: DentalToothTreatment): number {
+  return Math.round(t.payments.reduce((s, p) => s + (Number(p.amountSyp) || 0), 0))
+}
+
+export function treatmentRemaining(t: DentalToothTreatment): number {
+  return Math.max(0, Math.round(Number(t.totalCostSyp) || 0) - treatmentPaidTotal(t))
+}
+
 export function defaultTooth(fdi: number): DentalToothState {
-  return { fdi, status: 'present', implantColor: null, surfaces: [], note: '' }
+  return { fdi, status: 'present', implantColor: null, surfaces: [], note: '', treatment: emptyTreatment() }
 }
 
 export function teethMapFromChart(teeth: DentalToothState[] | undefined): Map<number, DentalToothState> {
@@ -107,6 +176,7 @@ export function teethMapFromChart(teeth: DentalToothState[] | undefined): Map<nu
       implantColor: t.status === 'implant' ? (t.implantColor === 'red' ? 'red' : 'teal') : null,
       surfaces: Array.isArray(t.surfaces) ? t.surfaces : [],
       note: String(t.note || ''),
+      treatment: normalizeTreatment(t.treatment),
     })
   }
   return map
@@ -118,7 +188,8 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       (t) =>
         t.status !== 'present' ||
         t.surfaces.length > 0 ||
-        Boolean(t.note.trim()),
+        Boolean(t.note.trim()) ||
+        treatmentHasData(t.treatment),
     )
     .map((t) => ({
       fdi: t.fdi,
@@ -126,6 +197,7 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       implantColor: t.status === 'implant' ? t.implantColor : null,
       surfaces: t.status === 'present' ? t.surfaces : [],
       note: t.note,
+      treatment: normalizeTreatment(t.treatment),
     }))
     .sort((a, b) => a.fdi - b.fdi)
 }
@@ -134,6 +206,15 @@ export function toothStatusLabel(t: DentalToothState): string {
   if (t.status === 'missing') return 'سن مفقود'
   if (t.status === 'implant') return t.implantColor === 'red' ? 'زراعة (حمراء)' : 'زراعة'
   if (t.surfaces.length > 0) return t.surfaces.map((s) => s.label).join(' · ')
+  if (treatmentHasData(t.treatment)) {
+    const rem = treatmentRemaining(t.treatment)
+    if (t.treatment.totalCostSyp > 0) {
+      return rem > 0
+        ? `إجراء — متبقي ${rem.toLocaleString('ar-SY')} ل.س`
+        : 'إجراء — مسدّد بالكامل'
+    }
+    return t.treatment.procedureDescription.trim().slice(0, 40) || 'إجراء مسجّل'
+  }
   if (t.note.trim()) return t.note.trim()
   return 'سليم'
 }

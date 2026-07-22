@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import { ToothCell } from './ToothSvg'
+import { ToothTreatmentModal } from './ToothTreatmentModal'
 import {
   arabicToothName,
   chartTeethPayload,
+  emptyTreatment,
   LOWER_ROW,
   teethMapFromChart,
   toothStatusLabel,
@@ -11,6 +13,7 @@ import {
   type ChartTool,
   type DentalChartDto,
   type DentalToothState,
+  type DentalToothTreatment,
   type SurfaceRegion,
   type SurfaceView,
 } from './dentalChartTypes'
@@ -21,7 +24,7 @@ type Props = {
 }
 
 const TOOLS: { id: ChartTool; label: string }[] = [
-  { id: 'select', label: 'تحديد' },
+  { id: 'select', label: 'تحديد / إجراء' },
   { id: 'healthy', label: 'سليم' },
   { id: 'missing', label: 'مفقود' },
   { id: 'implant_teal', label: 'زراعة' },
@@ -32,7 +35,8 @@ const TOOLS: { id: ChartTool; label: string }[] = [
 
 export function DentalOdontogram({ patientId, canEdit }: Props) {
   const [teethMap, setTeethMap] = useState(() => teethMapFromChart([]))
-  const [selectedFdi, setSelectedFdi] = useState<number | null>(21)
+  const [selectedFdi, setSelectedFdi] = useState<number | null>(null)
+  const [panelFdi, setPanelFdi] = useState<number | null>(null)
   const [tool, setTool] = useState<ChartTool>('select')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -43,6 +47,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   const skipNextAutosave = useRef(true)
 
   const selected = selectedFdi != null ? teethMap.get(selectedFdi) : null
+  const panelTooth = panelFdi != null ? teethMap.get(panelFdi) : null
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -104,60 +109,84 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
 
   const updateTooth = useCallback(
     (fdi: number, updater: (prev: DentalToothState) => DentalToothState) => {
-      if (!canEdit) {
-        setSelectedFdi(fdi)
-        return
-      }
       setTeethMap((prev) => {
         const next = new Map(prev)
-        const cur = next.get(fdi) || {
-          fdi,
-          status: 'present' as const,
-          implantColor: null,
-          surfaces: [],
-          note: '',
-        }
+        const cur =
+          next.get(fdi) ||
+          ({
+            fdi,
+            status: 'present' as const,
+            implantColor: null,
+            surfaces: [],
+            note: '',
+            treatment: emptyTreatment(),
+          } satisfies DentalToothState)
         next.set(fdi, updater(cur))
         return next
       })
-      setDirty(true)
+      if (canEdit) {
+        setDirty(true)
+        setOk('')
+      }
       setSelectedFdi(fdi)
-      setOk('')
     },
     [canEdit],
   )
 
+  const openTreatmentPanel = useCallback((fdi: number) => {
+    setSelectedFdi(fdi)
+    setPanelFdi(fdi)
+  }, [])
+
   const applyToolToTooth = useCallback(
     (fdi: number, view: SurfaceView, region?: SurfaceRegion) => {
       setSelectedFdi(fdi)
-      if (!canEdit || tool === 'select') return
+
+      // دائماً افتح صفحة الإجراء عند الضغط على السن
+      if (tool === 'select' || !canEdit) {
+        openTreatmentPanel(fdi)
+        return
+      }
 
       if (tool === 'healthy') {
-        updateTooth(fdi, () => ({ fdi, status: 'present', implantColor: null, surfaces: [], note: '' }))
+        updateTooth(fdi, (prev) => ({
+          ...prev,
+          status: 'present',
+          implantColor: null,
+          surfaces: [],
+          note: '',
+        }))
+        openTreatmentPanel(fdi)
         return
       }
       if (tool === 'missing') {
-        updateTooth(fdi, () => ({ fdi, status: 'missing', implantColor: null, surfaces: [], note: '' }))
+        updateTooth(fdi, (prev) => ({
+          ...prev,
+          status: 'missing',
+          implantColor: null,
+          surfaces: [],
+        }))
+        openTreatmentPanel(fdi)
         return
       }
       if (tool === 'implant_teal') {
-        updateTooth(fdi, () => ({
-          fdi,
+        updateTooth(fdi, (prev) => ({
+          ...prev,
           status: 'implant',
           implantColor: 'teal',
           surfaces: [],
-          note: '',
         }))
+        openTreatmentPanel(fdi)
         return
       }
       if (tool === 'implant_red') {
-        updateTooth(fdi, () => ({
-          fdi,
+        updateTooth(fdi, (prev) => ({
+          ...prev,
           status: 'implant',
           implantColor: 'red',
           surfaces: [],
-          note: '',
         }))
+        openTreatmentPanel(fdi)
         return
       }
       if (tool === 'filling') {
@@ -165,17 +194,17 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         updateTooth(fdi, (prev) => {
           if (prev.status !== 'present') {
             return {
-              fdi,
+              ...prev,
               status: 'present',
               implantColor: null,
               surfaces: [{ view, region: r, label: 'حشوة كومبوزيت' }],
-              note: '',
             }
           }
           const surfaces = prev.surfaces.filter((s) => !(s.view === view && s.region === r))
           surfaces.push({ view, region: r, label: 'حشوة كومبوزيت' })
           return { ...prev, status: 'present', implantColor: null, surfaces }
         })
+        openTreatmentPanel(fdi)
         return
       }
       if (tool === 'clear_surface') {
@@ -187,24 +216,60 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             surfaces: prev.surfaces.filter((s) => !(s.view === view && s.region === r)),
           }
         })
+        openTreatmentPanel(fdi)
       }
     },
-    [canEdit, tool, updateTooth],
+    [canEdit, tool, updateTooth, openTreatmentPanel],
+  )
+
+  const saveTreatment = useCallback(
+    async (treatment: DentalToothTreatment) => {
+      if (panelFdi == null) return
+      const fdi = panelFdi
+      setTeethMap((prev) => {
+        const next = new Map(prev)
+        const cur = next.get(fdi)
+        if (!cur) return prev
+        next.set(fdi, { ...cur, treatment })
+        return next
+      })
+      setDirty(true)
+      setPanelFdi(null)
+
+      // حفظ فوري لبيانات الإجراء
+      if (!canEdit) return
+      setSaving(true)
+      setErr('')
+      try {
+        const map = new Map(teethMap)
+        const cur = map.get(fdi)
+        if (cur) map.set(fdi, { ...cur, treatment })
+        const data = await api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ teeth: chartTeethPayload(map) }),
+        })
+        skipNextAutosave.current = true
+        setTeethMap(teethMapFromChart(data.chart?.teeth || []))
+        setDirty(false)
+        setOk('تم حفظ إجراء السن والدفعات')
+      } catch (e: unknown) {
+        setErr(e instanceof ApiError ? e.message : 'تعذر حفظ الإجراء')
+      } finally {
+        setSaving(false)
+      }
+    },
+    [panelFdi, canEdit, teethMap, patientId],
   )
 
   const tooltip = useMemo(() => {
-    if (!selected) return null
+    if (!selected || panelFdi != null) return null
     return {
       title: arabicToothName(selected.fdi),
       subtitle: toothStatusLabel(selected),
     }
-  }, [selected])
+  }, [selected, panelFdi])
 
-  function renderArch(
-    row: readonly number[],
-    view: SurfaceView,
-    showNumbers: boolean,
-  ) {
+  function renderArch(row: readonly number[], view: SurfaceView) {
     return (
       <div className="odontogram-arch-row">
         {row.map((fdi) => {
@@ -223,7 +288,6 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
                     : undefined
                 }
               />
-              {!showNumbers ? null : null}
             </div>
           )
         })}
@@ -262,7 +326,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         </div>
       ) : (
         <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          عرض فقط — تعديل المخطط لأطباء الأسنان ومدير النظام.
+          عرض فقط — اضغط على أي سن لعرض الإجراء والدفعات.
         </p>
       )}
 
@@ -283,23 +347,34 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           ) : null}
 
           <div className="odontogram-arch">
-            {renderArch(UPPER_ROW, 'buccal', true)}
-            {renderArch(UPPER_ROW, 'occlusal', false)}
+            {renderArch(UPPER_ROW, 'buccal')}
+            {renderArch(UPPER_ROW, 'occlusal')}
           </div>
 
           <div className="odontogram-midline" aria-hidden />
 
           <div className="odontogram-arch">
-            {renderArch(LOWER_ROW, 'occlusal', false)}
-            {renderArch(LOWER_ROW, 'buccal', true)}
+            {renderArch(LOWER_ROW, 'occlusal')}
+            {renderArch(LOWER_ROW, 'buccal')}
           </div>
         </div>
       </div>
 
       <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        اختر أداة ثم انقر على السن. لحشوة كومبوزيت: فعّل الأداة ثم انقر على السطح (أنسي/وحشي/إطباقي). يُحفظ المخطط
-        تلقائياً.
+        اضغط على أي سن لفتح صفحة الإجراء (الوصف، التكلفة، الطبيب، وجدول الدفعات). أدوات المخطط تُحدّث حالة السن
+        البصرية ثم تفتح نفس الصفحة.
       </p>
+
+      {panelTooth ? (
+        <ToothTreatmentModal
+          key={panelTooth.fdi}
+          tooth={panelTooth}
+          canEdit={canEdit}
+          saving={saving}
+          onClose={() => setPanelFdi(null)}
+          onSave={(treatment) => void saveTreatment(treatment)}
+        />
+      ) : null}
     </div>
   )
 }
