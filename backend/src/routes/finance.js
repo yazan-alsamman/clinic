@@ -16,6 +16,7 @@ import {
   finalizeDermatologyShares,
   loadDermatologyDebtSettlementLookup,
 } from '../services/dermatologyFinanceShares.js'
+import { summarizeDentalChartFinance } from '../services/dentalFinanceShares.js'
 
 export const financeRouter = Router()
 
@@ -487,9 +488,17 @@ financeRouter.get('/dashboard', async (req, res) => {
     const skinExp = expenseTotals.skin || 0
     const skinProfit = Math.round(skinRev - skinExp)
 
-    const dentalRev = revenueByDept.dental
+    const dentalChart = await summarizeDentalChartFinance({ from: range.from, to: range.to })
+    const billingDentalRev = revenueByDept.dental || 0
+    /** إيراد قسم الأسنان من مخطط الإجراءات (مصدر الحصص والمخابر) */
+    const dentalRev = dentalChart.totalRevenueSyp
     const dentalExp = expenseTotals.dental || 0
-    const dentalProfit = Math.round(dentalRev - dentalExp)
+    const dentalLabs = dentalChart.labWorksTotalSyp
+    const dentalSharesTotal = dentalChart.doctorSharesTotalSyp
+    /** الربح الصافي = المتبقي بعد حصص الأطباء − المخابر − جدول مصاريف الأسنان */
+    const dentalProfit = Math.round(dentalRev - dentalSharesTotal - dentalLabs - dentalExp)
+    revenueByDept.dental = dentalRev
+    totalRevenueSyp = Math.round(totalRevenueSyp - billingDentalRev + dentalRev)
 
     const solariumRev = revenueByDept.solarium
     const solariumExp = expenseTotals.solarium || 0
@@ -517,7 +526,7 @@ financeRouter.get('/dashboard', async (req, res) => {
       { key: 'laser', label: 'الليزر', revenueSyp: revenueByDept.laser },
       { key: 'dermatology', label: 'الجلدية', revenueSyp: revenueByDept.dermatology },
       { key: 'skin', label: 'العناية بالبشرة', revenueSyp: revenueByDept.skin },
-      { key: 'dental', label: 'الأسنان', revenueSyp: revenueByDept.dental },
+      { key: 'dental', label: 'الأسنان', revenueSyp: dentalRev },
       { key: 'solarium', label: 'السولاريوم', revenueSyp: revenueByDept.solarium },
     ].filter((r) => r.revenueSyp > 0 || !deptFilter)
 
@@ -584,8 +593,21 @@ financeRouter.get('/dashboard', async (req, res) => {
       },
       dental: {
         totalRevenueSyp: dentalRev,
-        totalExpensesSyp: dentalExp,
+        expensesTableSyp: dentalExp,
+        labWorksTotalSyp: dentalLabs,
+        totalExpensesSyp: Math.round(dentalExp + dentalLabs),
+        ayhamShareSyp: dentalChart.ayhamShareSyp,
+        iyadShareSyp: dentalChart.iyadShareSyp,
+        omarShareSyp: dentalChart.omarShareSyp,
+        otherShareSyp: dentalChart.otherShareSyp,
+        ayhamProceduresSyp: dentalChart.ayhamProceduresSyp,
+        iyadProceduresSyp: dentalChart.iyadProceduresSyp,
+        omarProceduresSyp: dentalChart.omarProceduresSyp,
+        doctorSharesTotalSyp: dentalSharesTotal,
+        clinicRemainderAfterSharesSyp: dentalChart.clinicRemainderAfterSharesSyp,
         totalProfitSyp: dentalProfit,
+        sharePercent: dentalChart.sharePercent,
+        doctors: dentalChart.doctors,
       },
       solarium: {
         totalRevenueSyp: solariumRev,

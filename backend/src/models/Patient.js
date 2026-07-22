@@ -79,6 +79,9 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
     procedureDescription: { type: String, default: '', trim: true, maxlength: 2000 },
     totalCostSyp: { type: Number, default: 0, min: 0 },
     doctorName: { type: String, default: '', trim: true, maxlength: 160 },
+    providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    /** تاريخ عمل الإجراء للتقارير المالية */
+    businessDate: { type: String, default: '' },
     payments: { type: [dentalChartPaymentSchema], default: [] },
   },
   { _id: true },
@@ -89,6 +92,7 @@ const dentalChartLabWorkSchema = new mongoose.Schema(
     labName: { type: String, default: '', trim: true, maxlength: 200 },
     procedureDescription: { type: String, default: '', trim: true, maxlength: 1000 },
     amountSyp: { type: Number, default: 0, min: 0 },
+    businessDate: { type: String, default: '' },
   },
   { _id: true },
 )

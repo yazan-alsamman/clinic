@@ -21,6 +21,8 @@ export type DentalToothTreatment = {
   procedureDescription: string
   totalCostSyp: number
   doctorName: string
+  providerUserId: string | null
+  businessDate: string
   payments: DentalPayment[]
 }
 
@@ -29,6 +31,7 @@ export type DentalLabWork = {
   labName: string
   procedureDescription: string
   amountSyp: number
+  businessDate: string
 }
 
 export type DentalToothState = {
@@ -116,12 +119,22 @@ export function arabicToothName(fdi: number): string {
   return names[fdi] || `سن ${fdi}`
 }
 
+function todayIsoDateLocal() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export function emptyTreatment(): DentalToothTreatment {
   return {
     id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     procedureDescription: '',
     totalCostSyp: 0,
     doctorName: '',
+    providerUserId: null,
+    businessDate: todayIsoDateLocal(),
     payments: [],
   }
 }
@@ -145,11 +158,19 @@ export function normalizeTreatment(raw: Partial<DentalToothTreatment> | null | u
     })
     paid += amount
   }
+  let businessDate = String(raw?.businessDate || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+    const firstPay = payments.find((p) => /^\d{4}-\d{2}-\d{2}$/.test(String(p.paidAt || '').slice(0, 10)))
+    businessDate = firstPay ? String(firstPay.paidAt).slice(0, 10) : todayIsoDateLocal()
+  }
+  const providerRaw = raw?.providerUserId != null ? String(raw.providerUserId).trim() : ''
   return {
     id: raw?.id ? String(raw.id) : undefined,
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     totalCostSyp,
     doctorName: String(raw?.doctorName || '').trim(),
+    providerUserId: providerRaw || null,
+    businessDate,
     payments,
   }
 }
@@ -160,6 +181,7 @@ export function treatmentHasData(t: DentalToothTreatment | undefined): boolean {
     Boolean(t.procedureDescription.trim()) ||
     t.totalCostSyp > 0 ||
     Boolean(t.doctorName.trim()) ||
+    Boolean(t.providerUserId) ||
     t.payments.length > 0
   )
 }
@@ -193,15 +215,19 @@ export function emptyLabWork(): DentalLabWork {
     labName: '',
     procedureDescription: '',
     amountSyp: 0,
+    businessDate: todayIsoDateLocal(),
   }
 }
 
 export function normalizeLabWork(raw: Partial<DentalLabWork> | null | undefined): DentalLabWork {
+  let businessDate = String(raw?.businessDate || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) businessDate = todayIsoDateLocal()
   return {
     id: raw?.id ? String(raw.id) : undefined,
     labName: String(raw?.labName || '').trim(),
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     amountSyp: Math.max(0, Math.round(Number(raw?.amountSyp) || 0)),
+    businessDate,
   }
 }
 

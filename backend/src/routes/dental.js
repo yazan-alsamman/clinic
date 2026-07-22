@@ -1,6 +1,8 @@
 import { Router } from 'express'
+import mongoose from 'mongoose'
 import { DentalMasterPlan } from '../models/DentalMasterPlan.js'
 import { Patient } from '../models/Patient.js'
+import { User } from '../models/User.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { writeAudit } from '../utils/audit.js'
@@ -18,6 +20,12 @@ const FDI_VALID = new Set([
 ])
 const SURFACE_VIEWS = new Set(['buccal', 'occlusal'])
 const SURFACE_REGIONS = new Set(['M', 'D', 'O', 'B', 'L', 'I'])
+
+function normalizeYmd(raw, fallback = '') {
+  const s = String(raw || '').trim().slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  return fallback
+}
 
 function normalizeTreatment(raw) {
   const t = raw && typeof raw === 'object' ? raw : {}
@@ -41,10 +49,19 @@ function normalizeTreatment(raw) {
       if (payments.length >= 80) break
     }
   }
+  let businessDate = normalizeYmd(t.businessDate)
+  if (!businessDate) {
+    const firstPay = payments.find((p) => /^\d{4}-\d{2}-\d{2}$/.test(String(p.paidAt || '').slice(0, 10)))
+    businessDate = firstPay ? String(firstPay.paidAt).slice(0, 10) : todayBusinessDate()
+  }
+  const providerRaw = t.providerUserId != null ? String(t.providerUserId).trim() : ''
+  const providerUserId = mongoose.Types.ObjectId.isValid(providerRaw) ? providerRaw : null
   const out = {
     procedureDescription: String(t.procedureDescription || '').trim().slice(0, 2000),
     totalCostSyp,
     doctorName: String(t.doctorName || '').trim().slice(0, 160),
+    providerUserId,
+    businessDate,
     payments,
   }
   if (t._id) out._id = t._id
@@ -56,6 +73,7 @@ function treatmentHasContent(n) {
     Boolean(String(n.procedureDescription || '').trim()) ||
     Number(n.totalCostSyp) > 0 ||
     Boolean(String(n.doctorName || '').trim()) ||
+    Boolean(n.providerUserId) ||
     (Array.isArray(n.payments) && n.payments.length > 0)
   )
 }
@@ -83,6 +101,8 @@ function treatmentToDto(t) {
     procedureDescription: n.procedureDescription,
     totalCostSyp: n.totalCostSyp,
     doctorName: n.doctorName,
+    providerUserId: n.providerUserId ? String(n.providerUserId) : null,
+    businessDate: n.businessDate || '',
     payments: (n.payments || []).map((p, idx) => ({
       id: rawPays[idx]?._id ? String(rawPays[idx]._id) : `p-${idx}`,
       amountSyp: Math.round(Number(p.amountSyp) || 0),
@@ -95,12 +115,14 @@ function treatmentToDto(t) {
 function normalizeLabWorks(raw) {
   if (!Array.isArray(raw)) return []
   const out = []
+  const today = todayBusinessDate()
   for (const row of raw) {
     const labName = String(row?.labName || '').trim().slice(0, 200)
     const procedureDescription = String(row?.procedureDescription || '').trim().slice(0, 1000)
     const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
     if (!labName && !procedureDescription && !(amountSyp > 0)) continue
-    const item = { labName, procedureDescription, amountSyp }
+    const businessDate = normalizeYmd(row?.businessDate, today)
+    const item = { labName, procedureDescription, amountSyp, businessDate }
     if (row?._id) item._id = row._id
     out.push(item)
     if (out.length >= 80) break
@@ -114,6 +136,7 @@ function labWorkToDto(row) {
     labName: String(row?.labName || ''),
     procedureDescription: String(row?.procedureDescription || ''),
     amountSyp: Math.max(0, Math.round(Number(row?.amountSyp) || 0)),
+    businessDate: normalizeYmd(row?.businessDate),
   }
 }
 
@@ -198,6 +221,30 @@ function planSummary(items) {
     .filter(Boolean)
     .join(' — ')
 }
+
+/** أطباء فرع الأسنان المرتبطون بحسابات المستخدمين (للمخطط والنظام المالي) */
+dentalRouter.get('/providers', async (req, res) => {
+  try {
+    if (!DENTAL_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const users = await User.find({ role: 'dental_branch', active: true })
+      .select('name role active')
+      .sort({ name: 1 })
+      .lean()
+    res.json({
+      providers: users.map((u) => ({
+        id: String(u._id),
+        name: String(u.name || '').trim(),
+        role: u.role,
+      })),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
 
 /** لوحة الأسنان: اقتراح للمدير + طابور الخطط المعتمدة لأطباء الفروع */
 dentalRouter.get('/dashboard', async (req, res) => {

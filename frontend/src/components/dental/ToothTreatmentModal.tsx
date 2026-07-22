@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   arabicToothName,
   emptyLabWork,
@@ -15,10 +15,13 @@ import {
   type DentalToothTreatment,
 } from './dentalChartTypes'
 
+export type DentalProviderOption = { id: string; name: string }
+
 type Props = {
   tooth: DentalToothState
   canEdit: boolean
   saving?: boolean
+  providers: DentalProviderOption[]
   onClose: () => void
   onSave: (payload: { treatments: DentalToothTreatment[]; labWorks: DentalLabWork[] }) => void
 }
@@ -31,7 +34,7 @@ function todayIsoDate() {
   return `${y}-${m}-${day}`
 }
 
-export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }: Props) {
+export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose, onSave }: Props) {
   const [drafts, setDrafts] = useState<DentalToothTreatment[]>(() => {
     const list = (tooth.treatments || []).map((t) => normalizeTreatment(t))
     return list.length > 0 ? list : [emptyTreatment()]
@@ -44,12 +47,32 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
   const [payDateById, setPayDateById] = useState<Record<string, string>>({})
   const [localErr, setLocalErr] = useState('')
 
+  useEffect(() => {
+    if (!providers.length) return
+    setDrafts((prev) =>
+      prev.map((row) => {
+        if (row.providerUserId) return row
+        if (!row.doctorName.trim()) return row
+        const match = providers.find((p) => p.name.trim() === row.doctorName.trim())
+        return match ? { ...row, providerUserId: match.id, doctorName: match.name } : row
+      }),
+    )
+  }, [providers])
+
   function procedureKey(t: DentalToothTreatment, idx: number) {
     return t.id || `idx-${idx}`
   }
 
   function updateProcedure(idx: number, patch: Partial<DentalToothTreatment>) {
     setDrafts((prev) => prev.map((row, i) => (i === idx ? normalizeTreatment({ ...row, ...patch }) : row)))
+  }
+
+  function selectDoctor(idx: number, providerId: string) {
+    const p = providers.find((x) => x.id === providerId)
+    updateProcedure(idx, {
+      providerUserId: p ? p.id : null,
+      doctorName: p ? p.name : '',
+    })
   }
 
   function addProcedure() {
@@ -104,6 +127,11 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
     const next = drafts.map((d) => normalizeTreatment(d))
     for (let i = 0; i < next.length; i += 1) {
       const t = next[i]
+      if (!treatmentHasData(t)) continue
+      if (t.totalCostSyp > 0 && !t.providerUserId) {
+        setLocalErr(`الإجراء ${i + 1}: اختر الطبيب المعالج من القائمة (مطلوب للنظام المالي).`)
+        return
+      }
       if (treatmentPaidTotal(t) > t.totalCostSyp && t.totalCostSyp > 0) {
         setLocalErr(`الإجراء ${i + 1}: مجموع الدفعات يتجاوز التكلفة الكلية.`)
         return
@@ -189,12 +217,39 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
                 </div>
                 <div>
                   <label className="form-label">اسم الطبيب المعالج</label>
-                  <input
+                  <select
                     className="input"
                     disabled={!canEdit}
-                    value={draft.doctorName}
-                    onChange={(e) => updateProcedure(idx, { doctorName: e.target.value })}
-                    placeholder="اسم الطبيب"
+                    value={draft.providerUserId || ''}
+                    onChange={(e) => selectDoctor(idx, e.target.value)}
+                  >
+                    <option value="">— اختر الطبيب —</option>
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                    {draft.providerUserId &&
+                    !providers.some((p) => p.id === draft.providerUserId) &&
+                    draft.doctorName ? (
+                      <option value={draft.providerUserId}>{draft.doctorName} (غير نشط)</option>
+                    ) : null}
+                  </select>
+                  {!providers.length ? (
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      لا يوجد أطباء بأدوار فرع الأسنان. أضف حسابات من إدارة المستخدمين.
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="form-label">تاريخ الإجراء</label>
+                  <input
+                    className="input"
+                    type="date"
+                    dir="ltr"
+                    disabled={!canEdit}
+                    value={draft.businessDate || todayIsoDate()}
+                    onChange={(e) => updateProcedure(idx, { businessDate: e.target.value })}
                   />
                 </div>
               </div>
@@ -348,13 +403,14 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
                   <th>اسم المخبر</th>
                   <th>وصف الإجراء</th>
                   <th>المبلغ (ل.س)</th>
+                  <th>التاريخ</th>
                   {canEdit ? <th></th> : null}
                 </tr>
               </thead>
               <tbody>
                 {labDrafts.length === 0 ? (
                   <tr>
-                    <td colSpan={canEdit ? 4 : 3} style={{ color: 'var(--text-muted)' }}>
+                    <td colSpan={canEdit ? 5 : 4} style={{ color: 'var(--text-muted)' }}>
                       لا سجلات مخابر بعد.
                     </td>
                   </tr>
@@ -415,6 +471,25 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
                           />
                         ) : (
                           <span dir="ltr">{row.amountSyp.toLocaleString('ar-SY')} ل.س</span>
+                        )}
+                      </td>
+                      <td>
+                        {canEdit ? (
+                          <input
+                            className="input"
+                            type="date"
+                            dir="ltr"
+                            value={row.businessDate || todayIsoDate()}
+                            onChange={(e) =>
+                              setLabDrafts((prev) =>
+                                prev.map((x, i) =>
+                                  i === idx ? { ...x, businessDate: e.target.value } : x,
+                                ),
+                              )
+                            }
+                          />
+                        ) : (
+                          <span dir="ltr">{row.businessDate || '—'}</span>
                         )}
                       </td>
                       {canEdit ? (

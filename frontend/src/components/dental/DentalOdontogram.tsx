@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import { ToothCell } from './ToothSvg'
-import { ToothTreatmentModal } from './ToothTreatmentModal'
+import { ToothTreatmentModal, type DentalProviderOption } from './ToothTreatmentModal'
 import {
   arabicToothName,
   chartTeethPayload,
@@ -44,6 +44,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [providers, setProviders] = useState<DentalProviderOption[]>([])
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skipNextAutosave = useRef(true)
 
@@ -54,9 +55,13 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
     setLoading(true)
     setErr('')
     try {
-      const data = await api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`)
+      const [data, providersRes] = await Promise.all([
+        api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`),
+        api<{ providers: DentalProviderOption[] }>('/api/dental/providers').catch(() => ({ providers: [] })),
+      ])
       skipNextAutosave.current = true
       setTeethMap(teethMapFromChart(data.chart?.teeth || []))
+      setProviders(providersRes.providers || [])
       setDirty(false)
     } catch (e: unknown) {
       setErr(e instanceof ApiError ? e.message : 'تعذر تحميل مخطط الأسنان')
@@ -373,6 +378,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           tooth={panelTooth}
           canEdit={canEdit}
           saving={saving}
+          providers={providers}
           onClose={() => setPanelFdi(null)}
           onSave={(payload) => void saveTreatment(payload)}
         />

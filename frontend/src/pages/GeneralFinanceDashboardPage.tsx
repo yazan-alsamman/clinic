@@ -56,7 +56,24 @@ type DashboardPayload = {
     sharePercent: number
   }
   skincare: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
-  dental: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
+  dental: {
+    totalRevenueSyp: number
+    expensesTableSyp?: number
+    labWorksTotalSyp?: number
+    totalExpensesSyp: number
+    ayhamShareSyp?: number
+    iyadShareSyp?: number
+    omarShareSyp?: number
+    otherShareSyp?: number
+    ayhamProceduresSyp?: number
+    iyadProceduresSyp?: number
+    omarProceduresSyp?: number
+    doctorSharesTotalSyp?: number
+    clinicRemainderAfterSharesSyp?: number
+    totalProfitSyp: number
+    sharePercent?: number
+    doctors?: { userId: string | null; name: string; proceduresSyp: number; shareSyp: number }[]
+  }
   solarium: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
   general: { totalExpensesSyp: number; totalProfitSyp: number }
   charts: {
@@ -496,14 +513,59 @@ export function GeneralFinanceDashboardPage() {
       </section>
 
       <section style={{ marginTop: '1.35rem' }}>
-        <h2 style={{ fontSize: '1.1rem', margin: '0 0 0.65rem' }}>أقسام إضافية</h2>
+        <h2 style={{ fontSize: '1.1rem', margin: '0 0 0.65rem' }}>قسم الأسنان</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.65rem' }}>
           <div className="card">
-            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>الأسنان</h3>
-            <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>إيراد: {fmtSyp(data?.dental.totalRevenueSyp || 0)}</p>
-            <p style={{ margin: '0.15rem 0 0', fontSize: '0.85rem' }}>مصاريف: {fmtSyp(data?.dental.totalExpensesSyp || 0)}</p>
-            <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>ربح: {fmtSyp(data?.dental.totalProfitSyp || 0)}</p>
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>إيرادات القسم</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.totalRevenueSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              مجموع تكلفة إجراءات مخطط الأسنان ضمن النطاق.
+            </p>
           </div>
+          <div className="card">
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>نسبة د. أيهم</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.ayhamShareSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              إجراءاته ({fmtSyp(data?.dental.ayhamProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
+            </p>
+          </div>
+          <div className="card">
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>نسبة د. إياد</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.iyadShareSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              إجراءاته ({fmtSyp(data?.dental.iyadProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
+            </p>
+          </div>
+          <div className="card">
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>نسبة د. عمر</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.omarShareSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              إجراءاته ({fmtSyp(data?.dental.omarProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
+            </p>
+          </div>
+          <div className="card">
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>مجموع مبالغ المخابر</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.labWorksTotalSyp || 0)}</p>
+          </div>
+          <div className="card">
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>جدول مصاريف الأسنان</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.expensesTableSyp || 0)}</p>
+          </div>
+          <div className="card" style={{ gridColumn: '1 / -1', borderColor: '#22c55e' }}>
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>الربح الصافي لقسم الأسنان</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.totalProfitSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              إيرادات القسم − حصص الأطباء ({fmtSyp(data?.dental.doctorSharesTotalSyp || 0)}) − المخابر (
+              {fmtSyp(data?.dental.labWorksTotalSyp || 0)}) − جدول المصاريف ({fmtSyp(data?.dental.expensesTableSyp || 0)}
+              ). المتبقي بعد الحصص قبل المخابر: {fmtSyp(data?.dental.clinicRemainderAfterSharesSyp || 0)}.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section style={{ marginTop: '1.35rem' }}>
+        <h2 style={{ fontSize: '1.1rem', margin: '0 0 0.65rem' }}>أقسام إضافية</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.65rem' }}>
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>السولاريوم</h3>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>إيراد: {fmtSyp(data?.solarium.totalRevenueSyp || 0)}</p>
