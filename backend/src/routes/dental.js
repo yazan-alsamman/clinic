@@ -309,7 +309,7 @@ dentalRouter.get('/dashboard', async (req, res) => {
     const approvedQueue = approvedPlans
       .filter((doc) => doc.patientId && doc.patientId.departments?.includes('dental'))
       .map((doc) => ({
-        patient: patientToDto(doc.patientId),
+        patient: patientToDto(doc.patientId, { hidePhone: req.user.role === 'dental_branch' }),
         planId: String(doc._id),
         approvedAt: doc.approvedAt,
         summary: planSummary(doc.items),

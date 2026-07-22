@@ -1,6 +1,7 @@
-export function patientToDto(p) {
+export function patientToDto(p, opts = {}) {
   if (!p) return null
   const o = p.toObject ? p.toObject() : p
+  const hidePhone = opts.hidePhone === true
   return {
     id: String(o._id),
     fileNumber: o.fileNumber ?? '',
@@ -19,7 +20,7 @@ export function patientToDto(p) {
     isotretinoinHistory: o.isotretinoinHistory ?? '',
     departments: o.departments ?? [],
     lastVisit: o.lastVisit ? o.lastVisit.toISOString().slice(0, 10) : '',
-    phone: o.phone ?? '',
+    phone: hidePhone ? '' : o.phone ?? '',
     gender: o.gender === 'male' || o.gender === 'female' ? o.gender : '',
     outstandingDebtSyp: Number(o.outstandingDebtSyp) || 0,
     outstandingDebtUsd: Number(o.outstandingDebtUsd) || 0,

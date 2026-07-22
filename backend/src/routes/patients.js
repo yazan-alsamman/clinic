@@ -28,6 +28,10 @@ import {
 } from '../services/billingPaymentReceipt.js'
 import { round6 } from '../utils/money.js'
 
+function dtoOptsForRole(role) {
+  return role === 'dental_branch' ? { hidePhone: true } : {}
+}
+
 const CLINICAL_ROLES = [
   'super_admin',
   'reception',
@@ -338,7 +342,7 @@ patientsRouter.get('/', async (req, res) => {
       req.query.page != null || req.query.pageSize != null || q.length > 0
     if (!wantPagination) {
       const list = await Patient.find(query).sort({ updatedAt: -1 }).limit(200)
-      res.json({ patients: list.map(patientToDto) })
+      res.json({ patients: list.map((p) => patientToDto(p, dtoOptsForRole(req.user.role))) })
       return
     }
     const page = Math.max(1, parseInt(String(req.query.page), 10) || 1)
@@ -350,7 +354,7 @@ patientsRouter.get('/', async (req, res) => {
     ])
     const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize)
     res.json({
-      patients: list.map(patientToDto),
+      patients: list.map((p) => patientToDto(p, dtoOptsForRole(req.user.role))),
       total,
       page,
       pageSize,
@@ -498,6 +502,12 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
 
     let dentalPlan = bundle.dentalPlan
     if (!needDentalPlan) dentalPlan = null
+
+    /** أطباء فرع الأسنان: الملف مقصور على تبويب الأسنان — لا ملخص مواعيد/خطة في الـ API */
+    if (role === 'dental_branch') {
+      appointments = []
+      dentalPlan = null
+    }
 
     res.json({
       laserSessions,
@@ -1813,7 +1823,7 @@ patientsRouter.get('/:id', async (req, res) => {
         return
       }
     }
-    res.json({ patient: patientToDto(p) })
+    res.json({ patient: patientToDto(p, dtoOptsForRole(req.user.role)) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

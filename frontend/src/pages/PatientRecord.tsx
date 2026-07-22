@@ -485,8 +485,7 @@ function showOverviewAppointments(r: Role | undefined) {
     r === 'reception' ||
     r === 'dermatology' ||
     r === 'dermatology_manager' ||
-    r === 'dermatology_assistant_manager' ||
-    r === 'dental_branch'
+    r === 'dermatology_assistant_manager'
   )
 }
 
@@ -505,7 +504,7 @@ function showOverviewDerm(r: Role | undefined) {
 }
 
 function showOverviewDentalSummary(r: Role | undefined) {
-  return r === 'super_admin' || r === 'reception' || r === 'dental_branch'
+  return r === 'super_admin' || r === 'reception'
 }
 
 function clinicalHistoryIntro(r: Role | undefined): string {
@@ -793,10 +792,14 @@ export function PatientRecord() {
   const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(canUsePaymentChannels)
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>(() => (user?.role === 'dental_branch' ? 'dental' : 'overview'))
   useEffect(() => {
     let requested = searchParams.get('tab')
     if (requested === 'solarium') requested = 'skin_care'
+    if (user?.role === 'dental_branch') {
+      setTab('dental')
+      return
+    }
     if (!requested) return
     const allowed: Tab[] = [
       'overview',
@@ -813,7 +816,7 @@ export function PatientRecord() {
     if (allowed.includes(requested as Tab)) {
       setTab(requested as Tab)
     }
-  }, [searchParams])
+  }, [searchParams, user?.role])
 
   const [laserType, setLaserType] = useState<(typeof laserTypes)[number]>('Mix')
   const [laserCatalog, setLaserCatalog] = useState<LaserCategory[]>([])
@@ -1675,6 +1678,10 @@ export function PatientRecord() {
     if (!role) {
       return allTabs.filter((t) => t.key === 'overview')
     }
+    /** أطباء فرع الأسنان: تبويب الأسنان فقط (بدون نظرة عامة أو هاتف) */
+    if (role === 'dental_branch') {
+      return [{ key: 'dental' as Tab, label: 'الأسنان' }]
+    }
     const showAccount = role === 'super_admin' || role === 'reception'
     const showSessionsTab = role === 'super_admin' || role === 'reception'
     return allTabs.filter(
@@ -1694,8 +1701,8 @@ export function PatientRecord() {
 
   useEffect(() => {
     const allowed = visibleTabs.some((t) => t.key === tab)
-    if (!allowed) setTab('overview')
-  }, [tab, visibleTabs])
+    if (!allowed) setTab(role === 'dental_branch' ? 'dental' : 'overview')
+  }, [tab, visibleTabs, role])
 
   const patientPackages: PatientPackage[] = useMemo(() => {
     if (!patient) return []
@@ -2327,17 +2334,19 @@ export function PatientRecord() {
             {patient.name}
           </h1>
           <p className="page-desc" style={{ margin: 0 }}>
-            ملف المريض — تبويبات حسب الصلاحية
+            {role === 'dental_branch' ? 'ملف المريض — تبويب الأسنان' : 'ملف المريض — تبويبات حسب الصلاحية'}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={pdfExporting}
-          onClick={() => void exportPatientPdf()}
-        >
-          {pdfExporting ? 'جاري التجهيز…' : 'تصدير الملف PDF'}
-        </button>
+        {role !== 'dental_branch' ? (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={pdfExporting}
+            onClick={() => void exportPatientPdf()}
+          >
+            {pdfExporting ? 'جاري التجهيز…' : 'تصدير الملف PDF'}
+          </button>
+        ) : null}
       </div>
 
       <div className="tabs patient-record-tabs" role="tablist">
