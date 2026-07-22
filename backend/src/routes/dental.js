@@ -26,18 +26,11 @@ function normalizeTreatment(raw) {
   let paidSum = 0
   if (Array.isArray(t.payments)) {
     for (const p of t.payments) {
-      const amountSyp = Math.max(0, Math.round(Number(p?.amountSyp) || 0))
+      let amountSyp = Math.max(0, Math.round(Number(p?.amountSyp) || 0))
       if (!(amountSyp > 0)) continue
       if (paidSum + amountSyp > totalCostSyp && totalCostSyp > 0) {
-        const capped = Math.max(0, totalCostSyp - paidSum)
-        if (!(capped > 0)) break
-        payments.push({
-          amountSyp: capped,
-          paidAt: String(p?.paidAt || '').trim().slice(0, 32),
-          note: String(p?.note || '').trim().slice(0, 300),
-        })
-        paidSum += capped
-        break
+        amountSyp = Math.max(0, totalCostSyp - paidSum)
+        if (!(amountSyp > 0)) break
       }
       payments.push({
         amountSyp,
@@ -48,18 +41,45 @@ function normalizeTreatment(raw) {
       if (payments.length >= 80) break
     }
   }
-  return {
+  const out = {
     procedureDescription: String(t.procedureDescription || '').trim().slice(0, 2000),
     totalCostSyp,
     doctorName: String(t.doctorName || '').trim().slice(0, 160),
     payments,
   }
+  if (t._id) out._id = t._id
+  return out
+}
+
+function treatmentHasContent(n) {
+  return (
+    Boolean(String(n.procedureDescription || '').trim()) ||
+    Number(n.totalCostSyp) > 0 ||
+    Boolean(String(n.doctorName || '').trim()) ||
+    (Array.isArray(n.payments) && n.payments.length > 0)
+  )
+}
+
+function normalizeTreatmentsList(row) {
+  const list = []
+  if (Array.isArray(row?.treatments) && row.treatments.length > 0) {
+    for (const item of row.treatments) {
+      const n = normalizeTreatment(item)
+      if (treatmentHasContent(n) || list.length === 0) list.push(n)
+      if (list.length >= 40) break
+    }
+  } else if (row?.treatment) {
+    const n = normalizeTreatment(row.treatment)
+    if (treatmentHasContent(n)) list.push(n)
+  }
+  return list
 }
 
 function treatmentToDto(t) {
   const n = normalizeTreatment(t)
   const rawPays = Array.isArray(t?.payments) ? t.payments : []
   return {
+    id: t?._id ? String(t._id) : undefined,
     procedureDescription: n.procedureDescription,
     totalCostSyp: n.totalCostSyp,
     doctorName: n.doctorName,
@@ -79,18 +99,25 @@ function emptyDentalChartDto() {
 function chartToDto(chart) {
   if (!chart) return emptyDentalChartDto()
   return {
-    teeth: (chart.teeth || []).map((t) => ({
-      fdi: Number(t.fdi),
-      status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
-      implantColor: t.implantColor === 'teal' || t.implantColor === 'red' ? t.implantColor : null,
-      surfaces: (t.surfaces || []).map((s) => ({
-        view: s.view === 'occlusal' ? 'occlusal' : 'buccal',
-        region: String(s.region || 'O').toUpperCase(),
-        label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
-      })),
-      note: String(t.note || '').trim().slice(0, 500),
-      treatment: treatmentToDto(t.treatment),
-    })),
+    teeth: (chart.teeth || []).map((t) => {
+      let treatmentsRaw = Array.isArray(t.treatments) ? t.treatments : []
+      if (!treatmentsRaw.length && t.treatment) treatmentsRaw = [t.treatment]
+      const treatments = treatmentsRaw.map((x) => treatmentToDto(x))
+      return {
+        fdi: Number(t.fdi),
+        status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
+        implantColor: t.implantColor === 'teal' || t.implantColor === 'red' ? t.implantColor : null,
+        surfaces: (t.surfaces || []).map((s) => ({
+          view: s.view === 'occlusal' ? 'occlusal' : 'buccal',
+          region: String(s.region || 'O').toUpperCase(),
+          label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
+        })),
+        note: String(t.note || '').trim().slice(0, 500),
+        treatments,
+        /** توافق واجهات قديمة */
+        treatment: treatments[0] || treatmentToDto({}),
+      }
+    }),
     updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
     updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
   }
@@ -121,14 +148,15 @@ function normalizeChartTeeth(rawTeeth) {
         })
       }
     }
-    const treatment = normalizeTreatment(row?.treatment)
+    const treatments = normalizeTreatmentsList(row)
     byFdi.set(fdi, {
       fdi,
       status,
       ...(status === 'implant' ? { implantColor } : {}),
       surfaces: status === 'present' ? surfaces.slice(0, 12) : [],
       note: String(row?.note || '').trim().slice(0, 500),
-      treatment,
+      treatments,
+      treatment: undefined,
     })
   }
   return [...byFdi.values()].sort((a, b) => a.fdi - b.fdi)

@@ -17,6 +17,7 @@ export type DentalPayment = {
 }
 
 export type DentalToothTreatment = {
+  id?: string
   procedureDescription: string
   totalCostSyp: number
   doctorName: string
@@ -29,7 +30,7 @@ export type DentalToothState = {
   implantColor: ImplantColor | null
   surfaces: DentalSurfaceMark[]
   note: string
-  treatment: DentalToothTreatment
+  treatments: DentalToothTreatment[]
 }
 
 export type DentalChartDto = {
@@ -109,6 +110,7 @@ export function arabicToothName(fdi: number): string {
 
 export function emptyTreatment(): DentalToothTreatment {
   return {
+    id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     procedureDescription: '',
     totalCostSyp: 0,
     doctorName: '',
@@ -136,6 +138,7 @@ export function normalizeTreatment(raw: Partial<DentalToothTreatment> | null | u
     paid += amount
   }
   return {
+    id: raw?.id ? String(raw.id) : undefined,
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     totalCostSyp,
     doctorName: String(raw?.doctorName || '').trim(),
@@ -153,6 +156,21 @@ export function treatmentHasData(t: DentalToothTreatment | undefined): boolean {
   )
 }
 
+export function normalizeTreatmentsList(
+  treatments: DentalToothTreatment[] | undefined,
+  legacy?: DentalToothTreatment | null,
+): DentalToothTreatment[] {
+  if (Array.isArray(treatments) && treatments.length > 0) {
+    return treatments.map((t) => normalizeTreatment(t))
+  }
+  if (legacy && treatmentHasData(legacy)) return [normalizeTreatment(legacy)]
+  return [emptyTreatment()]
+}
+
+export function treatmentsHaveData(list: DentalToothTreatment[] | undefined): boolean {
+  return (list || []).some(treatmentHasData)
+}
+
 export function treatmentPaidTotal(t: DentalToothTreatment): number {
   return Math.round(t.payments.reduce((s, p) => s + (Number(p.amountSyp) || 0), 0))
 }
@@ -162,10 +180,19 @@ export function treatmentRemaining(t: DentalToothTreatment): number {
 }
 
 export function defaultTooth(fdi: number): DentalToothState {
-  return { fdi, status: 'present', implantColor: null, surfaces: [], note: '', treatment: emptyTreatment() }
+  return {
+    fdi,
+    status: 'present',
+    implantColor: null,
+    surfaces: [],
+    note: '',
+    treatments: [emptyTreatment()],
+  }
 }
 
-export function teethMapFromChart(teeth: DentalToothState[] | undefined): Map<number, DentalToothState> {
+export function teethMapFromChart(
+  teeth: Array<DentalToothState & { treatment?: DentalToothTreatment }> | undefined,
+): Map<number, DentalToothState> {
   const map = new Map<number, DentalToothState>()
   for (const fdi of FDI_ALL) map.set(fdi, defaultTooth(fdi))
   for (const t of teeth || []) {
@@ -176,7 +203,7 @@ export function teethMapFromChart(teeth: DentalToothState[] | undefined): Map<nu
       implantColor: t.status === 'implant' ? (t.implantColor === 'red' ? 'red' : 'teal') : null,
       surfaces: Array.isArray(t.surfaces) ? t.surfaces : [],
       note: String(t.note || ''),
-      treatment: normalizeTreatment(t.treatment),
+      treatments: normalizeTreatmentsList(t.treatments, t.treatment),
     })
   }
   return map
@@ -189,7 +216,7 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
         t.status !== 'present' ||
         t.surfaces.length > 0 ||
         Boolean(t.note.trim()) ||
-        treatmentHasData(t.treatment),
+        treatmentsHaveData(t.treatments),
     )
     .map((t) => ({
       fdi: t.fdi,
@@ -197,7 +224,7 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       implantColor: t.status === 'implant' ? t.implantColor : null,
       surfaces: t.status === 'present' ? t.surfaces : [],
       note: t.note,
-      treatment: normalizeTreatment(t.treatment),
+      treatments: (t.treatments || []).map((x) => normalizeTreatment(x)).filter(treatmentHasData),
     }))
     .sort((a, b) => a.fdi - b.fdi)
 }
@@ -206,14 +233,19 @@ export function toothStatusLabel(t: DentalToothState): string {
   if (t.status === 'missing') return 'سن مفقود'
   if (t.status === 'implant') return t.implantColor === 'red' ? 'زراعة (حمراء)' : 'زراعة'
   if (t.surfaces.length > 0) return t.surfaces.map((s) => s.label).join(' · ')
-  if (treatmentHasData(t.treatment)) {
-    const rem = treatmentRemaining(t.treatment)
-    if (t.treatment.totalCostSyp > 0) {
-      return rem > 0
-        ? `إجراء — متبقي ${rem.toLocaleString('ar-SY')} ل.س`
-        : 'إجراء — مسدّد بالكامل'
+  const active = (t.treatments || []).filter(treatmentHasData)
+  if (active.length > 0) {
+    if (active.length === 1) {
+      const one = active[0]
+      const rem = treatmentRemaining(one)
+      if (one.totalCostSyp > 0) {
+        return rem > 0
+          ? `إجراء — متبقي ${rem.toLocaleString('ar-SY')} ل.س`
+          : 'إجراء — مسدّد بالكامل'
+      }
+      return one.procedureDescription.trim().slice(0, 40) || 'إجراء مسجّل'
     }
-    return t.treatment.procedureDescription.trim().slice(0, 40) || 'إجراء مسجّل'
+    return `${active.length} إجراءات`
   }
   if (t.note.trim()) return t.note.trim()
   return 'سليم'

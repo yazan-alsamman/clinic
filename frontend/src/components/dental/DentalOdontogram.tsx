@@ -120,6 +120,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             surfaces: [],
             note: '',
             treatment: emptyTreatment(),
+            treatments: [emptyTreatment()],
           } satisfies DentalToothState)
         next.set(fdi, updater(cur))
         return next
@@ -223,27 +224,26 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   )
 
   const saveTreatment = useCallback(
-    async (treatment: DentalToothTreatment) => {
+    async (treatments: DentalToothTreatment[]) => {
       if (panelFdi == null) return
       const fdi = panelFdi
       setTeethMap((prev) => {
         const next = new Map(prev)
         const cur = next.get(fdi)
         if (!cur) return prev
-        next.set(fdi, { ...cur, treatment })
+        next.set(fdi, { ...cur, treatments })
         return next
       })
       setDirty(true)
       setPanelFdi(null)
 
-      // حفظ فوري لبيانات الإجراء
       if (!canEdit) return
       setSaving(true)
       setErr('')
       try {
         const map = new Map(teethMap)
         const cur = map.get(fdi)
-        if (cur) map.set(fdi, { ...cur, treatment })
+        if (cur) map.set(fdi, { ...cur, treatments })
         const data = await api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`, {
           method: 'PUT',
           body: JSON.stringify({ teeth: chartTeethPayload(map) }),
@@ -251,7 +251,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         skipNextAutosave.current = true
         setTeethMap(teethMapFromChart(data.chart?.teeth || []))
         setDirty(false)
-        setOk('تم حفظ إجراء السن والدفعات')
+        setOk('تم حفظ إجراءات السن والدفعات')
       } catch (e: unknown) {
         setErr(e instanceof ApiError ? e.message : 'تعذر حفظ الإجراء')
       } finally {
@@ -372,7 +372,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           canEdit={canEdit}
           saving={saving}
           onClose={() => setPanelFdi(null)}
-          onSave={(treatment) => void saveTreatment(treatment)}
+          onSave={(treatments) => void saveTreatment(treatments)}
         />
       ) : null}
     </div>

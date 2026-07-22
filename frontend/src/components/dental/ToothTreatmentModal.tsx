@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   arabicToothName,
   emptyTreatment,
   normalizeTreatment,
+  treatmentHasData,
   treatmentPaidTotal,
   treatmentRemaining,
   type DentalPayment,
@@ -15,7 +16,7 @@ type Props = {
   canEdit: boolean
   saving?: boolean
   onClose: () => void
-  onSave: (treatment: DentalToothTreatment) => void
+  onSave: (treatments: DentalToothTreatment[]) => void
 }
 
 function todayIsoDate() {
@@ -27,81 +28,98 @@ function todayIsoDate() {
 }
 
 export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }: Props) {
-  const [draft, setDraft] = useState<DentalToothTreatment>(() =>
-    normalizeTreatment(tooth.treatment || emptyTreatment()),
-  )
-  const [payAmount, setPayAmount] = useState('')
-  const [payNote, setPayNote] = useState('')
-  const [payDate, setPayDate] = useState(todayIsoDate)
+  const [drafts, setDrafts] = useState<DentalToothTreatment[]>(() => {
+    const list = (tooth.treatments || []).map((t) => normalizeTreatment(t))
+    return list.length > 0 ? list : [emptyTreatment()]
+  })
+  const [payAmountById, setPayAmountById] = useState<Record<string, string>>({})
+  const [payNoteById, setPayNoteById] = useState<Record<string, string>>({})
+  const [payDateById, setPayDateById] = useState<Record<string, string>>({})
   const [localErr, setLocalErr] = useState('')
 
-  const paid = useMemo(() => treatmentPaidTotal(draft), [draft])
-  const remaining = useMemo(() => treatmentRemaining(draft), [draft])
+  function procedureKey(t: DentalToothTreatment, idx: number) {
+    return t.id || `idx-${idx}`
+  }
 
-  function addPayment() {
+  function updateProcedure(idx: number, patch: Partial<DentalToothTreatment>) {
+    setDrafts((prev) => prev.map((row, i) => (i === idx ? normalizeTreatment({ ...row, ...patch }) : row)))
+  }
+
+  function addProcedure() {
+    setDrafts((prev) => [...prev, emptyTreatment()])
+  }
+
+  function removeProcedure(idx: number) {
+    setDrafts((prev) => {
+      if (prev.length <= 1) return [emptyTreatment()]
+      return prev.filter((_, i) => i !== idx)
+    })
+  }
+
+  function addPayment(idx: number) {
     setLocalErr('')
-    const amount = Math.max(0, Math.round(Number(payAmount) || 0))
+    const row = drafts[idx]
+    if (!row) return
+    const key = procedureKey(row, idx)
+    const amount = Math.max(0, Math.round(Number(payAmountById[key] || '') || 0))
+    const remaining = treatmentRemaining(row)
     if (!(amount > 0)) {
-      setLocalErr('أدخل مبلغ دفعة أكبر من صفر.')
+      setLocalErr(`الإجراء ${idx + 1}: أدخل مبلغ دفعة أكبر من صفر.`)
       return
     }
-    if (!(draft.totalCostSyp > 0)) {
-      setLocalErr('حدد التكلفة الكلية أولاً قبل تسجيل الدفعات.')
+    if (!(row.totalCostSyp > 0)) {
+      setLocalErr(`الإجراء ${idx + 1}: حدد التكلفة الكلية أولاً.`)
       return
     }
     if (amount > remaining) {
-      setLocalErr(`المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`)
+      setLocalErr(`الإجراء ${idx + 1}: المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`)
       return
     }
-    const row: DentalPayment = {
-      id: `p-${Date.now()}`,
+    const payment: DentalPayment = {
+      id: `p-${Date.now()}-${idx}`,
       amountSyp: amount,
-      paidAt: payDate || todayIsoDate(),
-      note: payNote.trim(),
+      paidAt: payDateById[key] || todayIsoDate(),
+      note: (payNoteById[key] || '').trim(),
     }
-    setDraft((prev) => normalizeTreatment({ ...prev, payments: [...prev.payments, row] }))
-    setPayAmount('')
-    setPayNote('')
+    updateProcedure(idx, { payments: [...row.payments, payment] })
+    setPayAmountById((p) => ({ ...p, [key]: '' }))
+    setPayNoteById((p) => ({ ...p, [key]: '' }))
   }
 
-  function removePayment(id: string) {
-    setDraft((prev) =>
-      normalizeTreatment({
-        ...prev,
-        payments: prev.payments.filter((p) => p.id !== id),
-      }),
-    )
+  function removePayment(procIdx: number, paymentId: string) {
+    const row = drafts[procIdx]
+    if (!row) return
+    updateProcedure(procIdx, { payments: row.payments.filter((p) => p.id !== paymentId) })
   }
 
   function handleSave() {
     setLocalErr('')
-    const next = normalizeTreatment(draft)
-    if (treatmentPaidTotal(next) > next.totalCostSyp && next.totalCostSyp > 0) {
-      setLocalErr('مجموع الدفعات يتجاوز التكلفة الكلية.')
-      return
+    const next = drafts.map((d) => normalizeTreatment(d))
+    for (let i = 0; i < next.length; i += 1) {
+      const t = next[i]
+      if (treatmentPaidTotal(t) > t.totalCostSyp && t.totalCostSyp > 0) {
+        setLocalErr(`الإجراء ${i + 1}: مجموع الدفعات يتجاوز التكلفة الكلية.`)
+        return
+      }
     }
-    onSave(next)
+    const kept = next.filter(treatmentHasData)
+    onSave(kept.length > 0 ? kept : [])
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <div
         className="modal"
-        style={{ maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto' }}
+        style={{ maxWidth: 680, width: '100%', maxHeight: '90vh', overflow: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
           <div>
             <h3 className="card-title" style={{ margin: 0 }}>
-              إجراء السن {tooth.fdi}
+              إجراءات السن {tooth.fdi}
             </h3>
             <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              {arabicToothName(tooth.fdi)}
+              {arabicToothName(tooth.fdi)} — يمكن إضافة أكثر من إجراء (لكل إجراء طبيب وتكلفة ودفعات).
             </p>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -109,156 +127,197 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
           </button>
         </div>
 
-        <label className="form-label" style={{ marginTop: '1rem' }}>
-          وصف الإجراء
-        </label>
-        <textarea
-          className="textarea"
-          value={draft.procedureDescription}
-          disabled={!canEdit}
-          onChange={(e) => setDraft((p) => ({ ...p, procedureDescription: e.target.value }))}
-          rows={4}
-          placeholder="مثال: حشوة كومبوزيت — عصب — تاج…"
-        />
-
-        <div className="grid-2" style={{ marginTop: '0.85rem', gap: '0.75rem' }}>
-          <div>
-            <label className="form-label">التكلفة الكلية (ل.س)</label>
-            <input
-              className="input"
-              inputMode="numeric"
-              dir="ltr"
-              disabled={!canEdit}
-              value={draft.totalCostSyp ? String(draft.totalCostSyp) : ''}
-              onChange={(e) => {
-                const n = Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0))
-                setDraft((p) => normalizeTreatment({ ...p, totalCostSyp: n }))
+        {drafts.map((draft, idx) => {
+          const key = procedureKey(draft, idx)
+          const paid = treatmentPaidTotal(draft)
+          const remaining = treatmentRemaining(draft)
+          return (
+            <section
+              key={key}
+              style={{
+                marginTop: '1rem',
+                padding: '0.85rem',
+                border: '1px solid var(--border)',
+                borderRadius: 12,
+                background: 'var(--surface-solid)',
               }}
-              placeholder="0"
-            />
-          </div>
-          <div>
-            <label className="form-label">اسم الطبيب المعالج</label>
-            <input
-              className="input"
-              disabled={!canEdit}
-              value={draft.doctorName}
-              onChange={(e) => setDraft((p) => ({ ...p, doctorName: e.target.value }))}
-              placeholder="اسم الطبيب"
-            />
-          </div>
-        </div>
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                <strong style={{ fontSize: '0.95rem' }}>الإجراء {idx + 1}</strong>
+                {canEdit && drafts.length > 1 ? (
+                  <button type="button" className="btn btn-ghost" style={{ fontSize: '0.78rem' }} onClick={() => removeProcedure(idx)}>
+                    حذف الإجراء
+                  </button>
+                ) : null}
+              </div>
 
-        <div
-          style={{
-            marginTop: '1rem',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: '0.5rem',
-          }}
-        >
-          <div className="stat-card">
-            <div className="lbl">الكلي</div>
-            <div className="val" style={{ fontSize: '1rem' }}>
-              {draft.totalCostSyp.toLocaleString('ar-SY')} ل.س
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="lbl">المدفوع</div>
-            <div className="val" style={{ fontSize: '1rem' }}>
-              {paid.toLocaleString('ar-SY')} ل.س
-            </div>
-          </div>
-          <div className="stat-card" style={{ borderColor: remaining > 0 ? 'var(--warning)' : undefined }}>
-            <div className="lbl">المتبقي</div>
-            <div className="val" style={{ fontSize: '1rem', color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}>
-              {remaining.toLocaleString('ar-SY')} ل.س
-            </div>
-          </div>
-        </div>
+              <label className="form-label" style={{ marginTop: '0.75rem' }}>
+                وصف الإجراء
+              </label>
+              <textarea
+                className="textarea"
+                value={draft.procedureDescription}
+                disabled={!canEdit}
+                onChange={(e) => updateProcedure(idx, { procedureDescription: e.target.value })}
+                rows={3}
+                placeholder="مثال: حشوة كومبوزيت — عصب — تاج…"
+              />
 
-        <h4 style={{ margin: '1.15rem 0 0.5rem', fontSize: '0.95rem' }}>جدول الدفعات</h4>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>التاريخ</th>
-                <th>المبلغ</th>
-                <th>ملاحظة</th>
-                {canEdit ? <th></th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {draft.payments.length === 0 ? (
-                <tr>
-                  <td colSpan={canEdit ? 5 : 4} style={{ color: 'var(--text-muted)' }}>
-                    لا دفعات بعد — المتبقي = التكلفة الكلية.
-                  </td>
-                </tr>
-              ) : (
-                draft.payments.map((p, idx) => (
-                  <tr key={p.id}>
-                    <td>{idx + 1}</td>
-                    <td>{p.paidAt || '—'}</td>
-                    <td dir="ltr">{p.amountSyp.toLocaleString('ar-SY')} ل.س</td>
-                    <td>{p.note || '—'}</td>
-                    {canEdit ? (
-                      <td>
-                        <button type="button" className="btn btn-ghost" style={{ fontSize: '0.75rem' }} onClick={() => removePayment(p.id)}>
-                          حذف
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              <div className="grid-2" style={{ marginTop: '0.75rem', gap: '0.75rem' }}>
+                <div>
+                  <label className="form-label">التكلفة الكلية (ل.س)</label>
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    dir="ltr"
+                    disabled={!canEdit}
+                    value={draft.totalCostSyp ? String(draft.totalCostSyp) : ''}
+                    onChange={(e) => {
+                      const n = Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0))
+                      updateProcedure(idx, { totalCostSyp: n })
+                    }}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="form-label">اسم الطبيب المعالج</label>
+                  <input
+                    className="input"
+                    disabled={!canEdit}
+                    value={draft.doctorName}
+                    onChange={(e) => updateProcedure(idx, { doctorName: e.target.value })}
+                    placeholder="اسم الطبيب"
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: '0.85rem',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: '0.5rem',
+                }}
+              >
+                <div className="stat-card">
+                  <div className="lbl">الكلي</div>
+                  <div className="val" style={{ fontSize: '0.95rem' }}>
+                    {draft.totalCostSyp.toLocaleString('ar-SY')} ل.س
+                  </div>
+                </div>
+                <div className="stat-card">
+                  <div className="lbl">المدفوع</div>
+                  <div className="val" style={{ fontSize: '0.95rem' }}>
+                    {paid.toLocaleString('ar-SY')} ل.س
+                  </div>
+                </div>
+                <div className="stat-card" style={{ borderColor: remaining > 0 ? 'var(--warning)' : undefined }}>
+                  <div className="lbl">المتبقي</div>
+                  <div
+                    className="val"
+                    style={{ fontSize: '0.95rem', color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}
+                  >
+                    {remaining.toLocaleString('ar-SY')} ل.س
+                  </div>
+                </div>
+              </div>
+
+              <h4 style={{ margin: '0.9rem 0 0.45rem', fontSize: '0.88rem' }}>جدول دفعات هذا الإجراء</h4>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>التاريخ</th>
+                      <th>المبلغ</th>
+                      <th>ملاحظة</th>
+                      {canEdit ? <th></th> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.payments.length === 0 ? (
+                      <tr>
+                        <td colSpan={canEdit ? 5 : 4} style={{ color: 'var(--text-muted)' }}>
+                          لا دفعات بعد.
+                        </td>
+                      </tr>
+                    ) : (
+                      draft.payments.map((p, pIdx) => (
+                        <tr key={p.id}>
+                          <td>{pIdx + 1}</td>
+                          <td>{p.paidAt || '—'}</td>
+                          <td dir="ltr">{p.amountSyp.toLocaleString('ar-SY')} ل.س</td>
+                          <td>{p.note || '—'}</td>
+                          {canEdit ? (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ fontSize: '0.75rem' }}
+                                onClick={() => removePayment(idx, p.id)}
+                              >
+                                حذف
+                              </button>
+                            </td>
+                          ) : null}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {canEdit ? (
+                <div style={{ marginTop: '0.65rem' }}>
+                  <div className="grid-2" style={{ gap: '0.55rem' }}>
+                    <div>
+                      <label className="form-label">مبلغ دفعة (ل.س)</label>
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        dir="ltr"
+                        value={payAmountById[key] || ''}
+                        onChange={(e) => setPayAmountById((p) => ({ ...p, [key]: e.target.value }))}
+                        placeholder={remaining > 0 ? String(remaining) : '0'}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">تاريخ الدفع</label>
+                      <input
+                        className="input"
+                        type="date"
+                        value={payDateById[key] || todayIsoDate()}
+                        onChange={(e) => setPayDateById((p) => ({ ...p, [key]: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <label className="form-label" style={{ marginTop: '0.45rem' }}>
+                    ملاحظة (اختياري)
+                  </label>
+                  <input
+                    className="input"
+                    value={payNoteById[key] || ''}
+                    onChange={(e) => setPayNoteById((p) => ({ ...p, [key]: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ marginTop: '0.55rem', fontSize: '0.82rem' }}
+                    disabled={remaining <= 0}
+                    onClick={() => addPayment(idx)}
+                  >
+                    إضافة دفعة لهذا الإجراء
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          )
+        })}
 
         {canEdit ? (
-          <div
-            style={{
-              marginTop: '0.85rem',
-              padding: '0.75rem',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              background: 'var(--surface-solid)',
-            }}
-          >
-            <div style={{ fontWeight: 700, marginBottom: '0.5rem', fontSize: '0.88rem' }}>إضافة دفعة</div>
-            <div className="grid-2" style={{ gap: '0.55rem' }}>
-              <div>
-                <label className="form-label">المبلغ (ل.س)</label>
-                <input
-                  className="input"
-                  inputMode="numeric"
-                  dir="ltr"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  placeholder={remaining > 0 ? String(remaining) : '0'}
-                />
-              </div>
-              <div>
-                <label className="form-label">تاريخ الدفع</label>
-                <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
-              </div>
-            </div>
-            <label className="form-label" style={{ marginTop: '0.55rem' }}>
-              ملاحظة (اختياري)
-            </label>
-            <input className="input" value={payNote} onChange={(e) => setPayNote(e.target.value)} />
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ marginTop: '0.65rem' }}
-              disabled={remaining <= 0}
-              onClick={addPayment}
-            >
-              إضافة دفعة وإنقاص من المتبقي
-            </button>
-          </div>
+          <button type="button" className="btn btn-secondary" style={{ marginTop: '0.85rem', width: '100%' }} onClick={addProcedure}>
+            + إضافة إجراء آخر
+          </button>
         ) : null}
 
         {localErr ? (
@@ -271,7 +330,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
           </button>
           {canEdit ? (
             <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSave}>
-              {saving ? 'جاري الحفظ…' : 'حفظ الإجراء والدفعات'}
+              {saving ? 'جاري الحفظ…' : 'حفظ الإجراءات والدفعات'}
             </button>
           ) : null}
         </div>

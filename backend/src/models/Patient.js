@@ -81,7 +81,7 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
     doctorName: { type: String, default: '', trim: true, maxlength: 160 },
     payments: { type: [dentalChartPaymentSchema], default: [] },
   },
-  { _id: false },
+  { _id: true },
 )
 
 const dentalChartToothSchema = new mongoose.Schema(
@@ -91,7 +91,10 @@ const dentalChartToothSchema = new mongoose.Schema(
     implantColor: { type: String, enum: ['teal', 'red'], default: undefined },
     surfaces: { type: [dentalChartSurfaceSchema], default: [] },
     note: { type: String, default: '', trim: true, maxlength: 500 },
-    treatment: { type: dentalChartTreatmentSchema, default: () => ({}) },
+    /** إجراءات متعددة على نفس السن — كل إجراء بطبيب وتكلفة ودفعات */
+    treatments: { type: [dentalChartTreatmentSchema], default: [] },
+    /** توافق قديم: إجراء واحد — يُرحَّل إلى treatments عند الحفظ */
+    treatment: { type: dentalChartTreatmentSchema, default: undefined },
   },
   { _id: false },
 )
