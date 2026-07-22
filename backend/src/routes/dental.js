@@ -8,6 +8,12 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { writeAudit } from '../utils/audit.js'
 import { patientToDto } from '../utils/dto.js'
 import { todayBusinessDate } from '../utils/date.js'
+import {
+  DENTAL_ELIAS_DISPLAY_NAME,
+  DENTAL_ELIAS_PROVIDER_KEY,
+  DENTAL_ELIAS_VIRTUAL_ID,
+  resolveDentalProviderFields,
+} from '../services/dentalDoctorConstants.js'
 
 export const dentalRouter = Router()
 dentalRouter.use(authMiddleware, loadBusinessDay)
@@ -55,12 +61,23 @@ function normalizeTreatment(raw) {
     businessDate = firstPay ? String(firstPay.paidAt).slice(0, 10) : todayBusinessDate()
   }
   const providerRaw = t.providerUserId != null ? String(t.providerUserId).trim() : ''
-  const providerUserId = mongoose.Types.ObjectId.isValid(providerRaw) ? providerRaw : null
+  const resolved = resolveDentalProviderFields({
+    providerUserId: providerRaw,
+    providerKey: t.providerKey,
+    doctorName: t.doctorName,
+  })
+  let providerUserId = null
+  if (!resolved.isElias && mongoose.Types.ObjectId.isValid(providerRaw)) {
+    providerUserId = providerRaw
+  }
   const out = {
     procedureDescription: String(t.procedureDescription || '').trim().slice(0, 2000),
     totalCostSyp,
-    doctorName: String(t.doctorName || '').trim().slice(0, 160),
+    doctorName: resolved.isElias
+      ? DENTAL_ELIAS_DISPLAY_NAME
+      : String(resolved.doctorName || t.doctorName || '').trim().slice(0, 160),
     providerUserId,
+    providerKey: resolved.isElias ? DENTAL_ELIAS_PROVIDER_KEY : String(resolved.providerKey || '').trim().slice(0, 40),
     businessDate,
     payments,
   }
@@ -74,6 +91,7 @@ function treatmentHasContent(n) {
     Number(n.totalCostSyp) > 0 ||
     Boolean(String(n.doctorName || '').trim()) ||
     Boolean(n.providerUserId) ||
+    Boolean(String(n.providerKey || '').trim()) ||
     (Array.isArray(n.payments) && n.payments.length > 0)
   )
 }
@@ -96,12 +114,14 @@ function normalizeTreatmentsList(row) {
 function treatmentToDto(t) {
   const n = normalizeTreatment(t)
   const rawPays = Array.isArray(t?.payments) ? t.payments : []
+  const isElias = String(n.providerKey || '') === DENTAL_ELIAS_PROVIDER_KEY
   return {
     id: t?._id ? String(t._id) : undefined,
     procedureDescription: n.procedureDescription,
     totalCostSyp: n.totalCostSyp,
     doctorName: n.doctorName,
-    providerUserId: n.providerUserId ? String(n.providerUserId) : null,
+    providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : n.providerUserId ? String(n.providerUserId) : null,
+    providerKey: n.providerKey || '',
     businessDate: n.businessDate || '',
     payments: (n.payments || []).map((p, idx) => ({
       id: rawPays[idx]?._id ? String(rawPays[idx]._id) : `p-${idx}`,
@@ -122,7 +142,29 @@ function normalizeLabWorks(raw) {
     const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
     if (!labName && !procedureDescription && !(amountSyp > 0)) continue
     const businessDate = normalizeYmd(row?.businessDate, today)
-    const item = { labName, procedureDescription, amountSyp, businessDate }
+    const providerRaw = row?.providerUserId != null ? String(row.providerUserId).trim() : ''
+    const resolved = resolveDentalProviderFields({
+      providerUserId: providerRaw,
+      providerKey: row?.providerKey,
+      doctorName: row?.doctorName,
+    })
+    let providerUserId = null
+    if (!resolved.isElias && mongoose.Types.ObjectId.isValid(providerRaw)) {
+      providerUserId = providerRaw
+    }
+    const item = {
+      labName,
+      procedureDescription,
+      amountSyp,
+      businessDate,
+      doctorName: resolved.isElias
+        ? DENTAL_ELIAS_DISPLAY_NAME
+        : String(resolved.doctorName || row?.doctorName || '').trim().slice(0, 160),
+      providerUserId,
+      providerKey: resolved.isElias
+        ? DENTAL_ELIAS_PROVIDER_KEY
+        : String(resolved.providerKey || '').trim().slice(0, 40),
+    }
     if (row?._id) item._id = row._id
     out.push(item)
     if (out.length >= 80) break
@@ -131,12 +173,25 @@ function normalizeLabWorks(raw) {
 }
 
 function labWorkToDto(row) {
+  const n = normalizeLabWorks([row])[0] || {
+    labName: '',
+    procedureDescription: '',
+    amountSyp: 0,
+    businessDate: '',
+    doctorName: '',
+    providerUserId: null,
+    providerKey: '',
+  }
+  const isElias = String(n.providerKey || '') === DENTAL_ELIAS_PROVIDER_KEY
   return {
     id: row?._id ? String(row._id) : undefined,
-    labName: String(row?.labName || ''),
-    procedureDescription: String(row?.procedureDescription || ''),
-    amountSyp: Math.max(0, Math.round(Number(row?.amountSyp) || 0)),
-    businessDate: normalizeYmd(row?.businessDate),
+    labName: n.labName,
+    procedureDescription: n.procedureDescription,
+    amountSyp: n.amountSyp,
+    businessDate: n.businessDate || '',
+    doctorName: n.doctorName || '',
+    providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : n.providerUserId ? String(n.providerUserId) : null,
+    providerKey: n.providerKey || '',
   }
 }
 
@@ -234,11 +289,22 @@ dentalRouter.get('/providers', async (req, res) => {
       .sort({ name: 1 })
       .lean()
     res.json({
-      providers: users.map((u) => ({
-        id: String(u._id),
-        name: String(u.name || '').trim(),
-        role: u.role,
-      })),
+      providers: [
+        {
+          id: DENTAL_ELIAS_VIRTUAL_ID,
+          name: DENTAL_ELIAS_DISPLAY_NAME,
+          role: 'clinic_owner',
+          virtual: true,
+          noShare: true,
+        },
+        ...users.map((u) => ({
+          id: String(u._id),
+          name: String(u.name || '').trim(),
+          role: u.role,
+          virtual: false,
+          noShare: false,
+        })),
+      ],
     })
   } catch (e) {
     console.error(e)

@@ -1,6 +1,12 @@
 import mongoose from 'mongoose'
 import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
+import {
+  DENTAL_ELIAS_DISPLAY_NAME,
+  DENTAL_ELIAS_PROVIDER_KEY,
+  DENTAL_ELIAS_VIRTUAL_ID,
+  isEliasProviderRef,
+} from './dentalDoctorConstants.js'
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -33,8 +39,8 @@ export function providerNameMatchesOmar(name) {
 const SHARE_PERCENT = 40
 
 /**
- * يجمع إيرادات مخطط الأسنان (إجمالي تكلفة الإجراءات) وحصص الأطباء والمخابر ضمن نطاق التاريخ.
- * تاريخ الإجراء: businessDate على الإجراء/المخبر، وإلا أول دفعة paidAt، وإلا يُستبعد من الفلترة الضيقة ويُحسب إن وُجد أي تاريخ ضمن النطاق.
+ * يجمع إيرادات مخطط الأسنان وحصص الأطباء والمخابر ضمن نطاق التاريخ.
+ * د. الياس: بدون نسبة 40٪ — إجراءاته تُحسب كاملة لربح القسم بعد خصم مخابره.
  */
 export async function summarizeDentalChartFinance({ from, to }) {
   const patients = await Patient.find({ 'dentalChart.teeth.0': { $exists: true } })
@@ -46,6 +52,8 @@ export async function summarizeDentalChartFinance({ from, to }) {
 
   let totalRevenueSyp = 0
   let labWorksTotalSyp = 0
+  let eliasProceduresSyp = 0
+  let eliasLabWorksSyp = 0
   let ayhamProceduresSyp = 0
   let iyadProceduresSyp = 0
   let omarProceduresSyp = 0
@@ -54,14 +62,24 @@ export async function summarizeDentalChartFinance({ from, to }) {
 
   for (const p of patients) {
     for (const tooth of p.dentalChart?.teeth || []) {
+      const toothTreatmentsInRange = []
+
       for (const tr of tooth.treatments || []) {
         const cost = roundMoney(tr.totalCostSyp)
-        if (!(cost > 0) && !String(tr.procedureDescription || '').trim() && !String(tr.doctorName || '').trim()) {
+        if (
+          !(cost > 0) &&
+          !String(tr.procedureDescription || '').trim() &&
+          !String(tr.doctorName || '').trim() &&
+          !tr.providerUserId &&
+          !tr.providerKey
+        ) {
           continue
         }
         let bd = String(tr.businessDate || '').trim().slice(0, 10)
         if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
-          const firstPay = (tr.payments || []).find((x) => /^\d{4}-\d{2}-\d{2}$/.test(String(x.paidAt || '').slice(0, 10)))
+          const firstPay = (tr.payments || []).find((x) =>
+            /^\d{4}-\d{2}-\d{2}$/.test(String(x.paidAt || '').slice(0, 10)),
+          )
           bd = firstPay ? String(firstPay.paidAt).slice(0, 10) : ''
         }
         if (bd && !inRange(bd, from, to)) continue
@@ -70,22 +88,32 @@ export async function summarizeDentalChartFinance({ from, to }) {
         const uid = tr.providerUserId ? String(tr.providerUserId) : ''
         const name = String(tr.doctorName || userById.get(uid) || '').trim()
         const matchName = name || userById.get(uid) || ''
+        const isElias = isEliasProviderRef({
+          providerUserId: uid || tr.providerUserId,
+          providerKey: tr.providerKey,
+          doctorName: matchName,
+        })
 
         if (cost > 0) totalRevenueSyp += cost
 
-        const key = uid || name || '—'
+        const key = isElias ? DENTAL_ELIAS_PROVIDER_KEY : uid || name || '—'
         const prev = byDoctor.get(key) || {
-          userId: uid || null,
-          name: name || '—',
+          userId: isElias ? null : uid || null,
+          providerKey: isElias ? DENTAL_ELIAS_PROVIDER_KEY : '',
+          name: isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || '—',
           proceduresSyp: 0,
           shareSyp: 0,
+          noShare: isElias,
         }
         prev.proceduresSyp += cost
-        prev.name = name || prev.name
-        if (uid) prev.userId = uid
+        prev.name = isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || prev.name
+        if (uid && !isElias) prev.userId = uid
         byDoctor.set(key, prev)
 
-        if (providerNameMatchesAyham(matchName)) ayhamProceduresSyp += cost
+        toothTreatmentsInRange.push({ cost, isElias, name: matchName })
+
+        if (isElias) eliasProceduresSyp += cost
+        else if (providerNameMatchesAyham(matchName)) ayhamProceduresSyp += cost
         else if (providerNameMatchesIyad(matchName)) iyadProceduresSyp += cost
         else if (providerNameMatchesOmar(matchName)) omarProceduresSyp += cost
         else otherProceduresSyp += cost
@@ -98,26 +126,50 @@ export async function summarizeDentalChartFinance({ from, to }) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) continue
         if (!inRange(bd, from, to)) continue
         labWorksTotalSyp += amt
+
+        const labUid = lab.providerUserId ? String(lab.providerUserId) : ''
+        const labName = String(lab.doctorName || userById.get(labUid) || '').trim()
+        let labIsElias = isEliasProviderRef({
+          providerUserId: labUid || lab.providerUserId,
+          providerKey: lab.providerKey,
+          doctorName: labName,
+        })
+
+        /** إن لم يُربط المخبر بطبيب: يُنسب لد. الياس إذا كانت إجراءات هذا السن في النطاق له فقط */
+        if (!labIsElias && !labUid && !String(lab.providerKey || '').trim() && !labName) {
+          const withCost = toothTreatmentsInRange.filter((t) => t.cost > 0)
+          if (withCost.length > 0 && withCost.every((t) => t.isElias)) labIsElias = true
+        }
+
+        if (labIsElias) eliasLabWorksSyp += amt
       }
     }
   }
 
   const doctorRows = [...byDoctor.values()]
-    .map((r) => ({
-      ...r,
-      proceduresSyp: roundMoney(r.proceduresSyp),
-      shareSyp: roundMoney((r.proceduresSyp * SHARE_PERCENT) / 100),
-    }))
+    .map((r) => {
+      const noShare = r.noShare === true || r.providerKey === DENTAL_ELIAS_PROVIDER_KEY
+      return {
+        ...r,
+        proceduresSyp: roundMoney(r.proceduresSyp),
+        shareSyp: noShare ? 0 : roundMoney((r.proceduresSyp * SHARE_PERCENT) / 100),
+        noShare,
+      }
+    })
     .sort((a, b) => b.proceduresSyp - a.proceduresSyp)
 
   const ayhamShareSyp = roundMoney((ayhamProceduresSyp * SHARE_PERCENT) / 100)
   const iyadShareSyp = roundMoney((iyadProceduresSyp * SHARE_PERCENT) / 100)
   const omarShareSyp = roundMoney((omarProceduresSyp * SHARE_PERCENT) / 100)
   const otherShareSyp = roundMoney((otherProceduresSyp * SHARE_PERCENT) / 100)
+  /** د. الياس بدون نسبة */
   const doctorSharesTotalSyp = roundMoney(ayhamShareSyp + iyadShareSyp + omarShareSyp + otherShareSyp)
 
   totalRevenueSyp = roundMoney(totalRevenueSyp)
   labWorksTotalSyp = roundMoney(labWorksTotalSyp)
+  eliasProceduresSyp = roundMoney(eliasProceduresSyp)
+  eliasLabWorksSyp = roundMoney(eliasLabWorksSyp)
+  const eliasNetToClinicSyp = roundMoney(eliasProceduresSyp - eliasLabWorksSyp)
   const clinicRemainderAfterSharesSyp = roundMoney(totalRevenueSyp - doctorSharesTotalSyp)
   const netProfitBeforeExpensesSyp = roundMoney(clinicRemainderAfterSharesSyp - labWorksTotalSyp)
 
@@ -125,6 +177,9 @@ export async function summarizeDentalChartFinance({ from, to }) {
     sharePercent: SHARE_PERCENT,
     totalRevenueSyp,
     labWorksTotalSyp,
+    eliasProceduresSyp,
+    eliasLabWorksSyp,
+    eliasNetToClinicSyp,
     ayhamProceduresSyp: roundMoney(ayhamProceduresSyp),
     iyadProceduresSyp: roundMoney(iyadProceduresSyp),
     omarProceduresSyp: roundMoney(omarProceduresSyp),
@@ -142,5 +197,5 @@ export async function summarizeDentalChartFinance({ from, to }) {
 
 export function isValidProviderObjectId(raw) {
   const s = String(raw || '').trim()
-  return mongoose.Types.ObjectId.isValid(s)
+  return mongoose.Types.ObjectId.isValid(s) && s !== DENTAL_ELIAS_VIRTUAL_ID
 }

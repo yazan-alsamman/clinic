@@ -68,11 +68,14 @@ type DashboardPayload = {
     ayhamProceduresSyp?: number
     iyadProceduresSyp?: number
     omarProceduresSyp?: number
+    eliasProceduresSyp?: number
+    eliasLabWorksSyp?: number
+    eliasNetToClinicSyp?: number
     doctorSharesTotalSyp?: number
     clinicRemainderAfterSharesSyp?: number
     totalProfitSyp: number
     sharePercent?: number
-    doctors?: { userId: string | null; name: string; proceduresSyp: number; shareSyp: number }[]
+    doctors?: { userId: string | null; name: string; proceduresSyp: number; shareSyp: number; noShare?: boolean }[]
   }
   solarium: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
   general: { totalExpensesSyp: number; totalProfitSyp: number }
@@ -543,6 +546,14 @@ export function GeneralFinanceDashboardPage() {
               إجراءاته ({fmtSyp(data?.dental.omarProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
             </p>
           </div>
+          <div className="card" style={{ borderColor: '#38bdf8' }}>
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>د. الياس (بدون نسبة)</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.eliasNetToClinicSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              إجراءاته كاملة للقسم ({fmtSyp(data?.dental.eliasProceduresSyp || 0)}) − مخابره (
+              {fmtSyp(data?.dental.eliasLabWorksSyp || 0)}).
+            </p>
+          </div>
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>مجموع مبالغ المخابر</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.labWorksTotalSyp || 0)}</p>
@@ -555,9 +566,9 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>الربح الصافي لقسم الأسنان</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.totalProfitSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إيرادات القسم − حصص الأطباء ({fmtSyp(data?.dental.doctorSharesTotalSyp || 0)}) − المخابر (
+              إيرادات القسم − حصص الأطباء ذوي النسبة ({fmtSyp(data?.dental.doctorSharesTotalSyp || 0)}) − المخابر (
               {fmtSyp(data?.dental.labWorksTotalSyp || 0)}) − جدول المصاريف ({fmtSyp(data?.dental.expensesTableSyp || 0)}
-              ). المتبقي بعد الحصص قبل المخابر: {fmtSyp(data?.dental.clinicRemainderAfterSharesSyp || 0)}.
+              ). د. الياس بدون نسبة: صافي إجراءاته للقسم {fmtSyp(data?.dental.eliasNetToClinicSyp || 0)}.
             </p>
           </div>
         </div>

@@ -15,7 +15,12 @@ import {
   type DentalToothTreatment,
 } from './dentalChartTypes'
 
-export type DentalProviderOption = { id: string; name: string }
+export type DentalProviderOption = {
+  id: string
+  name: string
+  virtual?: boolean
+  noShare?: boolean
+}
 
 type Props = {
   tooth: DentalToothState
@@ -72,7 +77,24 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
     updateProcedure(idx, {
       providerUserId: p ? p.id : null,
       doctorName: p ? p.name : '',
+      providerKey: p?.id === '__elias__' || p?.noShare ? 'elias' : '',
     })
+  }
+
+  function selectLabDoctor(idx: number, providerId: string) {
+    const p = providers.find((x) => x.id === providerId)
+    setLabDrafts((prev) =>
+      prev.map((x, i) =>
+        i === idx
+          ? normalizeLabWork({
+              ...x,
+              providerUserId: p ? p.id : null,
+              doctorName: p ? p.name : '',
+              providerKey: p?.id === '__elias__' || p?.noShare ? 'elias' : '',
+            })
+          : x,
+      ),
+    )
   }
 
   function addProcedure() {
@@ -227,6 +249,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                     {providers.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
+                        {p.noShare || p.virtual ? ' (بدون نسبة — كامل للقسم)' : ''}
                       </option>
                     ))}
                     {draft.providerUserId &&
@@ -235,9 +258,9 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                       <option value={draft.providerUserId}>{draft.doctorName} (غير نشط)</option>
                     ) : null}
                   </select>
-                  {!providers.length ? (
+                  {draft.providerUserId === '__elias__' ? (
                     <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                      لا يوجد أطباء بأدوار فرع الأسنان. أضف حسابات من إدارة المستخدمين.
+                      إجراءاته تُضاف لربح قسم الأسنان بالكامل بعد خصم مخابره (بدون نسبة 40٪).
                     </p>
                   ) : null}
                 </div>
@@ -394,7 +417,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
         >
           <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>المخابر</h4>
           <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-            سجل أعمال المخابر لهذا السن: اسم المخبر، وصف الإجراء، والمبلغ.
+            سجل أعمال المخابر لهذا السن. اربط المخبر بالطبيب المعالج (مهم لحساب د. الياس).
           </p>
           <div className="table-wrap">
             <table className="data-table">
@@ -402,6 +425,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                 <tr>
                   <th>اسم المخبر</th>
                   <th>وصف الإجراء</th>
+                  <th>الطبيب</th>
                   <th>المبلغ (ل.س)</th>
                   <th>التاريخ</th>
                   {canEdit ? <th></th> : null}
@@ -410,7 +434,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
               <tbody>
                 {labDrafts.length === 0 ? (
                   <tr>
-                    <td colSpan={canEdit ? 5 : 4} style={{ color: 'var(--text-muted)' }}>
+                    <td colSpan={canEdit ? 6 : 5} style={{ color: 'var(--text-muted)' }}>
                       لا سجلات مخابر بعد.
                     </td>
                   </tr>
@@ -449,6 +473,24 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                           />
                         ) : (
                           row.procedureDescription || '—'
+                        )}
+                      </td>
+                      <td>
+                        {canEdit ? (
+                          <select
+                            className="input"
+                            value={row.providerUserId || ''}
+                            onChange={(e) => selectLabDoctor(idx, e.target.value)}
+                          >
+                            <option value="">—</option>
+                            {providers.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          row.doctorName || '—'
                         )}
                       </td>
                       <td>
@@ -515,7 +557,23 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
               type="button"
               className="btn btn-secondary"
               style={{ marginTop: '0.65rem', fontSize: '0.82rem' }}
-              onClick={() => setLabDrafts((prev) => [...prev, emptyLabWork()])}
+              onClick={() => {
+                const fromProc = drafts.find((d) => d.providerUserId)
+                const base = emptyLabWork()
+                if (fromProc) {
+                  setLabDrafts((prev) => [
+                    ...prev,
+                    normalizeLabWork({
+                      ...base,
+                      providerUserId: fromProc.providerUserId,
+                      doctorName: fromProc.doctorName,
+                      providerKey: fromProc.providerKey,
+                    }),
+                  ])
+                } else {
+                  setLabDrafts((prev) => [...prev, base])
+                }
+              }}
             >
               + إضافة سطر مخبر
             </button>

@@ -22,6 +22,7 @@ export type DentalToothTreatment = {
   totalCostSyp: number
   doctorName: string
   providerUserId: string | null
+  providerKey?: string
   businessDate: string
   payments: DentalPayment[]
 }
@@ -32,7 +33,14 @@ export type DentalLabWork = {
   procedureDescription: string
   amountSyp: number
   businessDate: string
+  doctorName?: string
+  providerUserId?: string | null
+  providerKey?: string
 }
+
+/** طبيب خاص بدون حساب مستخدم (د. الياس) */
+export const DENTAL_ELIAS_VIRTUAL_ID = '__elias__'
+export const DENTAL_ELIAS_DISPLAY_NAME = 'د. الياس'
 
 export type DentalToothState = {
   fdi: number
@@ -134,6 +142,7 @@ export function emptyTreatment(): DentalToothTreatment {
     totalCostSyp: 0,
     doctorName: '',
     providerUserId: null,
+    providerKey: '',
     businessDate: todayIsoDateLocal(),
     payments: [],
   }
@@ -164,12 +173,18 @@ export function normalizeTreatment(raw: Partial<DentalToothTreatment> | null | u
     businessDate = firstPay ? String(firstPay.paidAt).slice(0, 10) : todayIsoDateLocal()
   }
   const providerRaw = raw?.providerUserId != null ? String(raw.providerUserId).trim() : ''
+  const providerKey = String(raw?.providerKey || '').trim()
+  const isElias =
+    providerRaw === DENTAL_ELIAS_VIRTUAL_ID ||
+    providerKey === 'elias' ||
+    /الياس|إلياس|elias|elyas/i.test(String(raw?.doctorName || ''))
   return {
     id: raw?.id ? String(raw.id) : undefined,
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     totalCostSyp,
-    doctorName: String(raw?.doctorName || '').trim(),
-    providerUserId: providerRaw || null,
+    doctorName: isElias ? DENTAL_ELIAS_DISPLAY_NAME : String(raw?.doctorName || '').trim(),
+    providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : providerRaw || null,
+    providerKey: isElias ? 'elias' : providerKey,
     businessDate,
     payments,
   }
@@ -182,6 +197,7 @@ export function treatmentHasData(t: DentalToothTreatment | undefined): boolean {
     t.totalCostSyp > 0 ||
     Boolean(t.doctorName.trim()) ||
     Boolean(t.providerUserId) ||
+    Boolean(t.providerKey?.trim()) ||
     t.payments.length > 0
   )
 }
@@ -216,18 +232,30 @@ export function emptyLabWork(): DentalLabWork {
     procedureDescription: '',
     amountSyp: 0,
     businessDate: todayIsoDateLocal(),
+    doctorName: '',
+    providerUserId: null,
+    providerKey: '',
   }
 }
 
 export function normalizeLabWork(raw: Partial<DentalLabWork> | null | undefined): DentalLabWork {
   let businessDate = String(raw?.businessDate || '').trim().slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) businessDate = todayIsoDateLocal()
+  const providerRaw = raw?.providerUserId != null ? String(raw.providerUserId).trim() : ''
+  const providerKey = String(raw?.providerKey || '').trim()
+  const isElias =
+    providerRaw === DENTAL_ELIAS_VIRTUAL_ID ||
+    providerKey === 'elias' ||
+    /الياس|إلياس|elias|elyas/i.test(String(raw?.doctorName || ''))
   return {
     id: raw?.id ? String(raw.id) : undefined,
     labName: String(raw?.labName || '').trim(),
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     amountSyp: Math.max(0, Math.round(Number(raw?.amountSyp) || 0)),
     businessDate,
+    doctorName: isElias ? DENTAL_ELIAS_DISPLAY_NAME : String(raw?.doctorName || '').trim(),
+    providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : providerRaw || null,
+    providerKey: isElias ? 'elias' : providerKey,
   }
 }
 
