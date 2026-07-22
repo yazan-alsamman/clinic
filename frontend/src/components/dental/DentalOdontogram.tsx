@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, ApiError } from '../api/client'
+import { api, ApiError } from '../../api/client'
 import { ToothCell } from './ToothSvg'
 import {
   arabicToothName,
@@ -52,7 +52,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       skipNextAutosave.current = true
       setTeethMap(teethMapFromChart(data.chart?.teeth || []))
       setDirty(false)
-    } catch (e) {
+    } catch (e: unknown) {
       setErr(e instanceof ApiError ? e.message : 'تعذر تحميل مخطط الأسنان')
     } finally {
       setLoading(false)
@@ -78,7 +78,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         setTeethMap(teethMapFromChart(data.chart?.teeth || []))
         setDirty(false)
         setOk('تم حفظ المخطط')
-      } catch (e) {
+      } catch (e: unknown) {
         setErr(e instanceof ApiError ? e.message : 'تعذر حفظ المخطط')
       } finally {
         setSaving(false)
