@@ -65,7 +65,10 @@ export async function summarizeDentalChartFinance({ from, to }) {
       const toothTreatmentsInRange = []
 
       for (const tr of tooth.treatments || []) {
-        const cost = roundMoney(tr.totalCostSyp)
+        const rate = Math.max(0, Number(tr.costUsdSypRate) || 0)
+        const usdPart = Math.max(0, Number(tr.totalCostUsd) || 0)
+        const cost =
+          roundMoney(tr.totalCostSyp) + (usdPart > 0 && rate > 0 ? roundMoney(usdPart * rate) : 0)
         if (
           !(cost > 0) &&
           !String(tr.procedureDescription || '').trim() &&

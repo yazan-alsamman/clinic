@@ -68,6 +68,9 @@ const dentalChartSurfaceSchema = new mongoose.Schema(
 const dentalChartPaymentSchema = new mongoose.Schema(
   {
     amountSyp: { type: Number, required: true, min: 0 },
+    amountUsd: { type: Number, default: 0, min: 0 },
+    currency: { type: String, enum: ['syp', 'usd'], default: 'syp' },
+    usdSypRateUsed: { type: Number, default: 0, min: 0 },
     paidAt: { type: String, default: '' },
     note: { type: String, default: '', trim: true, maxlength: 300 },
   },
@@ -78,6 +81,9 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
   {
     procedureDescription: { type: String, default: '', trim: true, maxlength: 2000 },
     totalCostSyp: { type: Number, default: 0, min: 0 },
+    totalCostUsd: { type: Number, default: 0, min: 0 },
+    /** سعر الصرف المستخدم لتحويل جزء التكلفة بالدولار (ل.س لكل 1 USD) */
+    costUsdSypRate: { type: Number, default: 0, min: 0 },
     doctorName: { type: String, default: '', trim: true, maxlength: 160 },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     /** مفتاح مقدّم افتراضي بدون حساب (مثل elias) */

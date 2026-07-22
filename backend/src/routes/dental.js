@@ -8,6 +8,7 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { writeAudit } from '../utils/audit.js'
 import { patientToDto } from '../utils/dto.js'
 import { todayBusinessDate } from '../utils/date.js'
+import { round6 } from '../utils/money.js'
 import {
   DENTAL_ELIAS_DISPLAY_NAME,
   DENTAL_ELIAS_PROVIDER_KEY,
@@ -33,21 +34,58 @@ function normalizeYmd(raw, fallback = '') {
   return fallback
 }
 
+function treatmentEffectiveTotalSyp(totalCostSyp, totalCostUsd, costUsdSypRate) {
+  const syp = Math.max(0, Math.round(Number(totalCostSyp) || 0))
+  const usd = Math.max(0, Number(totalCostUsd) || 0)
+  const rate = Math.max(0, Number(costUsdSypRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? Math.round(usd * rate) : 0
+  return syp + fromUsd
+}
+
 function normalizeTreatment(raw) {
   const t = raw && typeof raw === 'object' ? raw : {}
   const totalCostSyp = Math.max(0, Math.round(Number(t.totalCostSyp) || 0))
+  const totalCostUsd = Math.max(0, round6(Number(t.totalCostUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(t.costUsdSypRate) || 0)
+  if (totalCostUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(t._fallbackUsdSypRate) || 0)
+  }
+  if (!(totalCostUsd > 0)) costUsdSypRate = 0
+  const effectiveTotal = treatmentEffectiveTotalSyp(totalCostSyp, totalCostUsd, costUsdSypRate)
+
   const payments = []
   let paidSum = 0
   if (Array.isArray(t.payments)) {
     for (const p of t.payments) {
+      const currency = String(p?.currency || '').toLowerCase() === 'usd' ? 'usd' : 'syp'
+      let amountUsd = Math.max(0, round6(Number(p?.amountUsd) || 0))
+      let rateUsed = Math.max(0, Number(p?.usdSypRateUsed) || 0)
       let amountSyp = Math.max(0, Math.round(Number(p?.amountSyp) || 0))
-      if (!(amountSyp > 0)) continue
-      if (paidSum + amountSyp > totalCostSyp && totalCostSyp > 0) {
-        amountSyp = Math.max(0, totalCostSyp - paidSum)
+
+      if (currency === 'usd') {
+        if (!(amountUsd > 0) && amountSyp > 0 && rateUsed > 0) {
+          amountUsd = round6(amountSyp / rateUsed)
+        }
+        if (!(rateUsed > 0)) rateUsed = costUsdSypRate || Math.max(0, Number(t._fallbackUsdSypRate) || 0)
+        if (amountUsd > 0 && rateUsed > 0) {
+          amountSyp = Math.round(amountUsd * rateUsed)
+        }
+      } else {
+        amountUsd = 0
+        rateUsed = 0
+      }
+
+      if (!(amountSyp > 0) && !(amountUsd > 0)) continue
+      if (paidSum + amountSyp > effectiveTotal && effectiveTotal > 0) {
+        amountSyp = Math.max(0, effectiveTotal - paidSum)
         if (!(amountSyp > 0)) break
+        if (currency === 'usd' && rateUsed > 0) amountUsd = round6(amountSyp / rateUsed)
       }
       payments.push({
         amountSyp,
+        amountUsd: currency === 'usd' ? amountUsd : 0,
+        currency,
+        usdSypRateUsed: currency === 'usd' ? rateUsed : 0,
         paidAt: String(p?.paidAt || '').trim().slice(0, 32),
         note: String(p?.note || '').trim().slice(0, 300),
       })
@@ -73,6 +111,8 @@ function normalizeTreatment(raw) {
   const out = {
     procedureDescription: String(t.procedureDescription || '').trim().slice(0, 2000),
     totalCostSyp,
+    totalCostUsd,
+    costUsdSypRate,
     doctorName: resolved.isElias
       ? DENTAL_ELIAS_DISPLAY_NAME
       : String(resolved.doctorName || t.doctorName || '').trim().slice(0, 160),
@@ -89,6 +129,7 @@ function treatmentHasContent(n) {
   return (
     Boolean(String(n.procedureDescription || '').trim()) ||
     Number(n.totalCostSyp) > 0 ||
+    Number(n.totalCostUsd) > 0 ||
     Boolean(String(n.doctorName || '').trim()) ||
     Boolean(n.providerUserId) ||
     Boolean(String(n.providerKey || '').trim()) ||
@@ -96,16 +137,18 @@ function treatmentHasContent(n) {
   )
 }
 
-function normalizeTreatmentsList(row) {
+function normalizeTreatmentsList(row, fallbackUsdSypRate = 0) {
   const list = []
+  const injectRate = (item) =>
+    item && typeof item === 'object' ? { ...item, _fallbackUsdSypRate: fallbackUsdSypRate } : item
   if (Array.isArray(row?.treatments) && row.treatments.length > 0) {
     for (const item of row.treatments) {
-      const n = normalizeTreatment(item)
+      const n = normalizeTreatment(injectRate(item))
       if (treatmentHasContent(n) || list.length === 0) list.push(n)
       if (list.length >= 40) break
     }
   } else if (row?.treatment) {
-    const n = normalizeTreatment(row.treatment)
+    const n = normalizeTreatment(injectRate(row.treatment))
     if (treatmentHasContent(n)) list.push(n)
   }
   return list
@@ -119,6 +162,8 @@ function treatmentToDto(t) {
     id: t?._id ? String(t._id) : undefined,
     procedureDescription: n.procedureDescription,
     totalCostSyp: n.totalCostSyp,
+    totalCostUsd: n.totalCostUsd,
+    costUsdSypRate: n.costUsdSypRate,
     doctorName: n.doctorName,
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : n.providerUserId ? String(n.providerUserId) : null,
     providerKey: n.providerKey || '',
@@ -126,6 +171,9 @@ function treatmentToDto(t) {
     payments: (n.payments || []).map((p, idx) => ({
       id: rawPays[idx]?._id ? String(rawPays[idx]._id) : `p-${idx}`,
       amountSyp: Math.round(Number(p.amountSyp) || 0),
+      amountUsd: round6(Number(p.amountUsd) || 0),
+      currency: p.currency === 'usd' ? 'usd' : 'syp',
+      usdSypRateUsed: Math.max(0, Number(p.usdSypRateUsed) || 0),
       paidAt: String(p.paidAt || ''),
       note: String(p.note || ''),
     })),
@@ -228,7 +276,7 @@ function chartToDto(chart) {
   }
 }
 
-function normalizeChartTeeth(rawTeeth) {
+function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
   if (!Array.isArray(rawTeeth)) return []
   const byFdi = new Map()
   for (const row of rawTeeth) {
@@ -253,7 +301,7 @@ function normalizeChartTeeth(rawTeeth) {
         })
       }
     }
-    const treatments = normalizeTreatmentsList(row)
+    const treatments = normalizeTreatmentsList(row, fallbackUsdSypRate)
     const labWorks = normalizeLabWorks(row?.labWorks)
     byFdi.set(fdi, {
       fdi,
@@ -421,7 +469,8 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    const teeth = normalizeChartTeeth(req.body?.teeth)
+    const fallbackRate = Math.max(0, Number(req.businessDay?.usdSypRate) || 0)
+    const teeth = normalizeChartTeeth(req.body?.teeth, fallbackRate)
     patient.dentalChart = {
       teeth,
       updatedAt: new Date(),

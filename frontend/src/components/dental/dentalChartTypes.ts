@@ -12,6 +12,9 @@ export type DentalSurfaceMark = {
 export type DentalPayment = {
   id: string
   amountSyp: number
+  amountUsd: number
+  currency: 'syp' | 'usd'
+  usdSypRateUsed: number
   paidAt: string
   note: string
 }
@@ -20,6 +23,8 @@ export type DentalToothTreatment = {
   id?: string
   procedureDescription: string
   totalCostSyp: number
+  totalCostUsd: number
+  costUsdSypRate: number
   doctorName: string
   providerUserId: string | null
   providerKey?: string
@@ -135,11 +140,35 @@ function todayIsoDateLocal() {
   return `${y}-${m}-${day}`
 }
 
+export function roundUsd(n: number) {
+  return Math.round(Number(n) * 1e6) / 1e6
+}
+
+export function formatUsdAmount(n: number) {
+  const v = Number(n) || 0
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(v)
+}
+
+/** التكلفة الكلية المكافئة بالليرة = ل.س + دولار×سعر الصرف */
+export function treatmentEffectiveTotalSyp(t: DentalToothTreatment, fallbackRate?: number | null): number {
+  const syp = Math.max(0, Math.round(Number(t.totalCostSyp) || 0))
+  const usd = Math.max(0, Number(t.totalCostUsd) || 0)
+  const rate =
+    Number(t.costUsdSypRate) > 0 ? Number(t.costUsdSypRate) : Math.max(0, Number(fallbackRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? Math.round(usd * rate) : 0
+  return syp + fromUsd
+}
+
 export function emptyTreatment(): DentalToothTreatment {
   return {
     id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     procedureDescription: '',
     totalCostSyp: 0,
+    totalCostUsd: 0,
+    costUsdSypRate: 0,
     doctorName: '',
     providerUserId: null,
     providerKey: '',
@@ -148,20 +177,48 @@ export function emptyTreatment(): DentalToothTreatment {
   }
 }
 
-export function normalizeTreatment(raw: Partial<DentalToothTreatment> | null | undefined): DentalToothTreatment {
+export function normalizeTreatment(
+  raw: Partial<DentalToothTreatment> | null | undefined,
+  fallbackRate?: number | null,
+): DentalToothTreatment {
   const totalCostSyp = Math.max(0, Math.round(Number(raw?.totalCostSyp) || 0))
+  const totalCostUsd = Math.max(0, roundUsd(Number(raw?.totalCostUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(raw?.costUsdSypRate) || 0)
+  if (totalCostUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(fallbackRate) || 0)
+  }
+  if (!(totalCostUsd > 0)) costUsdSypRate = 0
+  const effectiveTotal = treatmentEffectiveTotalSyp(
+    { totalCostSyp, totalCostUsd, costUsdSypRate } as DentalToothTreatment,
+    fallbackRate,
+  )
+
   const payments: DentalPayment[] = []
   let paid = 0
   for (const p of raw?.payments || []) {
+    const currency: 'syp' | 'usd' = String(p.currency || '').toLowerCase() === 'usd' ? 'usd' : 'syp'
+    let amountUsd = Math.max(0, roundUsd(Number(p.amountUsd) || 0))
+    let rateUsed = Math.max(0, Number(p.usdSypRateUsed) || 0)
     let amount = Math.max(0, Math.round(Number(p.amountSyp) || 0))
-    if (!(amount > 0)) continue
-    if (totalCostSyp > 0 && paid + amount > totalCostSyp) {
-      amount = Math.max(0, totalCostSyp - paid)
+    if (currency === 'usd') {
+      if (!(rateUsed > 0)) rateUsed = costUsdSypRate || Math.max(0, Number(fallbackRate) || 0)
+      if (amountUsd > 0 && rateUsed > 0) amount = Math.round(amountUsd * rateUsed)
+    } else {
+      amountUsd = 0
+      rateUsed = 0
+    }
+    if (!(amount > 0) && !(amountUsd > 0)) continue
+    if (effectiveTotal > 0 && paid + amount > effectiveTotal) {
+      amount = Math.max(0, effectiveTotal - paid)
       if (!(amount > 0)) break
+      if (currency === 'usd' && rateUsed > 0) amountUsd = roundUsd(amount / rateUsed)
     }
     payments.push({
       id: String(p.id || `p-${payments.length}`),
       amountSyp: amount,
+      amountUsd: currency === 'usd' ? amountUsd : 0,
+      currency,
+      usdSypRateUsed: currency === 'usd' ? rateUsed : 0,
       paidAt: String(p.paidAt || ''),
       note: String(p.note || ''),
     })
@@ -182,6 +239,8 @@ export function normalizeTreatment(raw: Partial<DentalToothTreatment> | null | u
     id: raw?.id ? String(raw.id) : undefined,
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     totalCostSyp,
+    totalCostUsd,
+    costUsdSypRate,
     doctorName: isElias ? DENTAL_ELIAS_DISPLAY_NAME : String(raw?.doctorName || '').trim(),
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : providerRaw || null,
     providerKey: isElias ? 'elias' : providerKey,
@@ -195,6 +254,7 @@ export function treatmentHasData(t: DentalToothTreatment | undefined): boolean {
   return (
     Boolean(t.procedureDescription.trim()) ||
     t.totalCostSyp > 0 ||
+    t.totalCostUsd > 0 ||
     Boolean(t.doctorName.trim()) ||
     Boolean(t.providerUserId) ||
     Boolean(t.providerKey?.trim()) ||
@@ -221,8 +281,12 @@ export function treatmentPaidTotal(t: DentalToothTreatment): number {
   return Math.round(t.payments.reduce((s, p) => s + (Number(p.amountSyp) || 0), 0))
 }
 
-export function treatmentRemaining(t: DentalToothTreatment): number {
-  return Math.max(0, Math.round(Number(t.totalCostSyp) || 0) - treatmentPaidTotal(t))
+export function treatmentPaidTotalUsd(t: DentalToothTreatment): number {
+  return roundUsd(t.payments.reduce((s, p) => s + (Number(p.amountUsd) || 0), 0))
+}
+
+export function treatmentRemaining(t: DentalToothTreatment, fallbackRate?: number | null): number {
+  return Math.max(0, treatmentEffectiveTotalSyp(t, fallbackRate) - treatmentPaidTotal(t))
 }
 
 export function emptyLabWork(): DentalLabWork {

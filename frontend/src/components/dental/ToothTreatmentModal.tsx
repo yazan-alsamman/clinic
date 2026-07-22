@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useClinic } from '../../context/ClinicContext'
 import {
   arabicToothName,
   emptyLabWork,
   emptyTreatment,
+  formatUsdAmount,
   labWorkHasData,
   normalizeLabWork,
   normalizeTreatment,
+  roundUsd,
+  treatmentEffectiveTotalSyp,
   treatmentHasData,
   treatmentPaidTotal,
+  treatmentPaidTotalUsd,
   treatmentRemaining,
   type DentalLabWork,
   type DentalPayment,
@@ -40,14 +45,18 @@ function todayIsoDate() {
 }
 
 export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose, onSave }: Props) {
+  const { usdSypRate } = useClinic()
+  const rate = usdSypRate != null && usdSypRate > 0 ? usdSypRate : null
+
   const [drafts, setDrafts] = useState<DentalToothTreatment[]>(() => {
-    const list = (tooth.treatments || []).map((t) => normalizeTreatment(t))
+    const list = (tooth.treatments || []).map((t) => normalizeTreatment(t, rate))
     return list.length > 0 ? list : [emptyTreatment()]
   })
   const [labDrafts, setLabDrafts] = useState<DentalLabWork[]>(() =>
     (tooth.labWorks || []).map((x) => normalizeLabWork(x)),
   )
   const [payAmountById, setPayAmountById] = useState<Record<string, string>>({})
+  const [payCurrencyById, setPayCurrencyById] = useState<Record<string, 'syp' | 'usd'>>({})
   const [payNoteById, setPayNoteById] = useState<Record<string, string>>({})
   const [payDateById, setPayDateById] = useState<Record<string, string>>({})
   const [localErr, setLocalErr] = useState('')
@@ -69,7 +78,23 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
   }
 
   function updateProcedure(idx: number, patch: Partial<DentalToothTreatment>) {
-    setDrafts((prev) => prev.map((row, i) => (i === idx ? normalizeTreatment({ ...row, ...patch }) : row)))
+    setDrafts((prev) =>
+      prev.map((row, i) => (i === idx ? normalizeTreatment({ ...row, ...patch }, rate) : row)),
+    )
+  }
+
+  function setCostSyp(idx: number, value: string) {
+    const n = Math.max(0, Math.round(Number(value.replace(/[^\d]/g, '')) || 0))
+    updateProcedure(idx, { totalCostSyp: n })
+  }
+
+  function setCostUsd(idx: number, value: string) {
+    const cleaned = value.replace(/[^\d.]/g, '')
+    const n = Math.max(0, roundUsd(Number(cleaned) || 0))
+    updateProcedure(idx, {
+      totalCostUsd: n,
+      costUsdSypRate: n > 0 ? rate || drafts[idx]?.costUsdSypRate || 0 : 0,
+    })
   }
 
   function selectDoctor(idx: number, providerId: string) {
@@ -113,25 +138,63 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
     const row = drafts[idx]
     if (!row) return
     const key = procedureKey(row, idx)
-    const amount = Math.max(0, Math.round(Number(payAmountById[key] || '') || 0))
-    const remaining = treatmentRemaining(row)
-    if (!(amount > 0)) {
-      setLocalErr(`الإجراء ${idx + 1}: أدخل مبلغ دفعة أكبر من صفر.`)
+    const currency = payCurrencyById[key] || 'syp'
+    const remaining = treatmentRemaining(row, rate)
+    const effectiveTotal = treatmentEffectiveTotalSyp(row, rate)
+
+    if (!(effectiveTotal > 0)) {
+      setLocalErr(`الإجراء ${idx + 1}: حدد التكلفة الكلية بالليرة أو الدولار أولاً.`)
       return
     }
-    if (!(row.totalCostSyp > 0)) {
-      setLocalErr(`الإجراء ${idx + 1}: حدد التكلفة الكلية أولاً.`)
-      return
-    }
-    if (amount > remaining) {
-      setLocalErr(`الإجراء ${idx + 1}: المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`)
-      return
-    }
-    const payment: DentalPayment = {
-      id: `p-${Date.now()}-${idx}`,
-      amountSyp: amount,
-      paidAt: payDateById[key] || todayIsoDate(),
-      note: (payNoteById[key] || '').trim(),
+
+    let payment: DentalPayment
+    if (currency === 'usd') {
+      if (!(rate != null && rate > 0)) {
+        setLocalErr('لا يوجد سعر صرف لليوم — لا يمكن تسجيل دفعة بالدولار.')
+        return
+      }
+      const amountUsd = Math.max(0, roundUsd(Number(String(payAmountById[key] || '').replace(/,/g, '')) || 0))
+      if (!(amountUsd > 0)) {
+        setLocalErr(`الإجراء ${idx + 1}: أدخل مبلغ دفعة بالدولار أكبر من صفر.`)
+        return
+      }
+      const amountSyp = Math.round(amountUsd * rate)
+      if (amountSyp > remaining) {
+        setLocalErr(
+          `الإجراء ${idx + 1}: المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`,
+        )
+        return
+      }
+      payment = {
+        id: `p-${Date.now()}-${idx}`,
+        amountSyp,
+        amountUsd,
+        currency: 'usd',
+        usdSypRateUsed: rate,
+        paidAt: payDateById[key] || todayIsoDate(),
+        note: (payNoteById[key] || '').trim(),
+      }
+    } else {
+      const amount = Math.max(0, Math.round(Number(String(payAmountById[key] || '').replace(/[^\d]/g, '')) || 0))
+      if (!(amount > 0)) {
+        setLocalErr(`الإجراء ${idx + 1}: أدخل مبلغ دفعة أكبر من صفر.`)
+        return
+      }
+      if (amount > remaining) {
+        setLocalErr(
+          `الإجراء ${idx + 1}: المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`,
+        )
+        return
+      }
+      payment = {
+        id: `p-${Date.now()}-${idx}`,
+        amountSyp: amount,
+        amountUsd: 0,
+        currency: 'syp',
+        usdSypRateUsed: 0,
+        paidAt: payDateById[key] || todayIsoDate(),
+        note: (payNoteById[key] || '').trim(),
+      }
     }
     updateProcedure(idx, { payments: [...row.payments, payment] })
     setPayAmountById((p) => ({ ...p, [key]: '' }))
@@ -146,15 +209,20 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
 
   function handleSave() {
     setLocalErr('')
-    const next = drafts.map((d) => normalizeTreatment(d))
+    const next = drafts.map((d) => normalizeTreatment(d, rate))
     for (let i = 0; i < next.length; i += 1) {
       const t = next[i]
       if (!treatmentHasData(t)) continue
-      if (t.totalCostSyp > 0 && !t.providerUserId) {
+      const effective = treatmentEffectiveTotalSyp(t, rate)
+      if (t.totalCostUsd > 0 && !(t.costUsdSypRate > 0) && !(rate != null && rate > 0)) {
+        setLocalErr(`الإجراء ${i + 1}: تكلفة بالدولار تتطلب سعر صرف لليوم النشط.`)
+        return
+      }
+      if (effective > 0 && !t.providerUserId) {
         setLocalErr(`الإجراء ${i + 1}: اختر الطبيب المعالج من القائمة (مطلوب للنظام المالي).`)
         return
       }
-      if (treatmentPaidTotal(t) > t.totalCostSyp && t.totalCostSyp > 0) {
+      if (treatmentPaidTotal(t) > effective && effective > 0) {
         setLocalErr(`الإجراء ${i + 1}: مجموع الدفعات يتجاوز التكلفة الكلية.`)
         return
       }
@@ -188,7 +256,10 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
         {drafts.map((draft, idx) => {
           const key = procedureKey(draft, idx)
           const paid = treatmentPaidTotal(draft)
-          const remaining = treatmentRemaining(draft)
+          const paidUsd = treatmentPaidTotalUsd(draft)
+          const remaining = treatmentRemaining(draft, rate)
+          const effectiveTotal = treatmentEffectiveTotalSyp(draft, rate)
+          const payCurrency = payCurrencyById[key] || 'syp'
           return (
             <section
               key={key}
@@ -230,12 +301,30 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                     dir="ltr"
                     disabled={!canEdit}
                     value={draft.totalCostSyp ? String(draft.totalCostSyp) : ''}
-                    onChange={(e) => {
-                      const n = Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0))
-                      updateProcedure(idx, { totalCostSyp: n })
-                    }}
+                    onChange={(e) => setCostSyp(idx, e.target.value)}
                     placeholder="0"
                   />
+                </div>
+                <div>
+                  <label className="form-label">التكلفة الكلية (USD)</label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    dir="ltr"
+                    disabled={!canEdit}
+                    value={draft.totalCostUsd ? String(draft.totalCostUsd) : ''}
+                    onChange={(e) => setCostUsd(idx, e.target.value)}
+                    placeholder="0"
+                  />
+                  {rate != null ? (
+                    <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      سعر اليوم: {rate.toLocaleString('ar-SY')} ل.س / USD
+                    </p>
+                  ) : (
+                    <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: 'var(--danger)' }}>
+                      لا يوجد سعر صرف لليوم — التكلفة بالدولار لن تُحسب حتى يُفتح اليوم بسعر.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="form-label">اسم الطبيب المعالج</label>
@@ -285,22 +374,33 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                 }}
               >
                 <div className="stat-card">
-                  <div className="lbl">الكلي</div>
-                  <div className="val" style={{ fontSize: '0.95rem' }}>
-                    {draft.totalCostSyp.toLocaleString('ar-SY')} ل.س
+                  <div className="lbl">الكلي (مكافئ)</div>
+                  <div className="val" style={{ fontSize: '0.9rem' }}>
+                    {effectiveTotal.toLocaleString('ar-SY')} ل.س
                   </div>
+                  {draft.totalCostUsd > 0 ? (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      منها {formatUsdAmount(draft.totalCostUsd)} USD
+                      {draft.totalCostSyp > 0 ? ` + ${draft.totalCostSyp.toLocaleString('ar-SY')} ل.س` : ''}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="stat-card">
                   <div className="lbl">المدفوع</div>
-                  <div className="val" style={{ fontSize: '0.95rem' }}>
+                  <div className="val" style={{ fontSize: '0.9rem' }}>
                     {paid.toLocaleString('ar-SY')} ل.س
                   </div>
+                  {paidUsd > 0 ? (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      منها {formatUsdAmount(paidUsd)} USD
+                    </div>
+                  ) : null}
                 </div>
                 <div className="stat-card" style={{ borderColor: remaining > 0 ? 'var(--warning)' : undefined }}>
                   <div className="lbl">المتبقي</div>
                   <div
                     className="val"
-                    style={{ fontSize: '0.95rem', color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}
+                    style={{ fontSize: '0.9rem', color: remaining > 0 ? 'var(--warning)' : 'var(--success)' }}
                   >
                     {remaining.toLocaleString('ar-SY')} ل.س
                   </div>
@@ -314,6 +414,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                     <tr>
                       <th>#</th>
                       <th>التاريخ</th>
+                      <th>العملة</th>
                       <th>المبلغ</th>
                       <th>ملاحظة</th>
                       {canEdit ? <th></th> : null}
@@ -322,7 +423,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                   <tbody>
                     {draft.payments.length === 0 ? (
                       <tr>
-                        <td colSpan={canEdit ? 5 : 4} style={{ color: 'var(--text-muted)' }}>
+                        <td colSpan={canEdit ? 6 : 5} style={{ color: 'var(--text-muted)' }}>
                           لا دفعات بعد.
                         </td>
                       </tr>
@@ -331,7 +432,12 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                         <tr key={p.id}>
                           <td>{pIdx + 1}</td>
                           <td>{p.paidAt || '—'}</td>
-                          <td dir="ltr">{p.amountSyp.toLocaleString('ar-SY')} ل.س</td>
+                          <td>{p.currency === 'usd' ? 'USD' : 'ل.س'}</td>
+                          <td dir="ltr">
+                            {p.currency === 'usd'
+                              ? `${formatUsdAmount(p.amountUsd)} USD (${p.amountSyp.toLocaleString('ar-SY')} ل.س)`
+                              : `${p.amountSyp.toLocaleString('ar-SY')} ل.س`}
+                          </td>
                           <td>{p.note || '—'}</td>
                           {canEdit ? (
                             <td>
@@ -356,14 +462,38 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                 <div style={{ marginTop: '0.65rem' }}>
                   <div className="grid-2" style={{ gap: '0.55rem' }}>
                     <div>
-                      <label className="form-label">مبلغ دفعة (ل.س)</label>
+                      <label className="form-label">عملة الدفعة</label>
+                      <select
+                        className="input"
+                        value={payCurrency}
+                        onChange={(e) =>
+                          setPayCurrencyById((p) => ({
+                            ...p,
+                            [key]: e.target.value === 'usd' ? 'usd' : 'syp',
+                          }))
+                        }
+                      >
+                        <option value="syp">ليرة سورية</option>
+                        <option value="usd">دولار USD</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">
+                        {payCurrency === 'usd' ? 'مبلغ دفعة (USD)' : 'مبلغ دفعة (ل.س)'}
+                      </label>
                       <input
                         className="input"
-                        inputMode="numeric"
+                        inputMode={payCurrency === 'usd' ? 'decimal' : 'numeric'}
                         dir="ltr"
                         value={payAmountById[key] || ''}
                         onChange={(e) => setPayAmountById((p) => ({ ...p, [key]: e.target.value }))}
-                        placeholder={remaining > 0 ? String(remaining) : '0'}
+                        placeholder={
+                          remaining > 0
+                            ? payCurrency === 'usd' && rate
+                              ? String(roundUsd(remaining / rate))
+                              : String(remaining)
+                            : '0'
+                        }
                       />
                     </div>
                     <div>
