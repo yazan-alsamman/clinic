@@ -119,7 +119,6 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             implantColor: null,
             surfaces: [],
             note: '',
-            treatment: emptyTreatment(),
             treatments: [emptyTreatment()],
           } satisfies DentalToothState)
         next.set(fdi, updater(cur))
