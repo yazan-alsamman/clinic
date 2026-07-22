@@ -24,6 +24,13 @@ export type DentalToothTreatment = {
   payments: DentalPayment[]
 }
 
+export type DentalLabWork = {
+  id?: string
+  labName: string
+  procedureDescription: string
+  amountSyp: number
+}
+
 export type DentalToothState = {
   fdi: number
   status: ToothStatus
@@ -31,6 +38,7 @@ export type DentalToothState = {
   surfaces: DentalSurfaceMark[]
   note: string
   treatments: DentalToothTreatment[]
+  labWorks: DentalLabWork[]
 }
 
 export type DentalChartDto = {
@@ -179,6 +187,33 @@ export function treatmentRemaining(t: DentalToothTreatment): number {
   return Math.max(0, Math.round(Number(t.totalCostSyp) || 0) - treatmentPaidTotal(t))
 }
 
+export function emptyLabWork(): DentalLabWork {
+  return {
+    id: `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    labName: '',
+    procedureDescription: '',
+    amountSyp: 0,
+  }
+}
+
+export function normalizeLabWork(raw: Partial<DentalLabWork> | null | undefined): DentalLabWork {
+  return {
+    id: raw?.id ? String(raw.id) : undefined,
+    labName: String(raw?.labName || '').trim(),
+    procedureDescription: String(raw?.procedureDescription || '').trim(),
+    amountSyp: Math.max(0, Math.round(Number(raw?.amountSyp) || 0)),
+  }
+}
+
+export function labWorkHasData(row: DentalLabWork | undefined): boolean {
+  if (!row) return false
+  return Boolean(row.labName.trim()) || Boolean(row.procedureDescription.trim()) || row.amountSyp > 0
+}
+
+export function normalizeLabWorksList(list: DentalLabWork[] | undefined): DentalLabWork[] {
+  return (list || []).map((x) => normalizeLabWork(x)).filter(labWorkHasData)
+}
+
 export function defaultTooth(fdi: number): DentalToothState {
   return {
     fdi,
@@ -187,6 +222,7 @@ export function defaultTooth(fdi: number): DentalToothState {
     surfaces: [],
     note: '',
     treatments: [emptyTreatment()],
+    labWorks: [],
   }
 }
 
@@ -204,6 +240,7 @@ export function teethMapFromChart(
       surfaces: Array.isArray(t.surfaces) ? t.surfaces : [],
       note: String(t.note || ''),
       treatments: normalizeTreatmentsList(t.treatments, t.treatment),
+      labWorks: Array.isArray(t.labWorks) ? t.labWorks.map((x) => normalizeLabWork(x)) : [],
     })
   }
   return map
@@ -216,7 +253,8 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
         t.status !== 'present' ||
         t.surfaces.length > 0 ||
         Boolean(t.note.trim()) ||
-        treatmentsHaveData(t.treatments),
+        treatmentsHaveData(t.treatments) ||
+        normalizeLabWorksList(t.labWorks).length > 0,
     )
     .map((t) => ({
       fdi: t.fdi,
@@ -225,6 +263,7 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       surfaces: t.status === 'present' ? t.surfaces : [],
       note: t.note,
       treatments: (t.treatments || []).map((x) => normalizeTreatment(x)).filter(treatmentHasData),
+      labWorks: normalizeLabWorksList(t.labWorks),
     }))
     .sort((a, b) => a.fdi - b.fdi)
 }

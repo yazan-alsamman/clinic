@@ -12,6 +12,7 @@ import {
   UPPER_ROW,
   type ChartTool,
   type DentalChartDto,
+  type DentalLabWork,
   type DentalToothState,
   type DentalToothTreatment,
   type SurfaceRegion,
@@ -120,6 +121,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             surfaces: [],
             note: '',
             treatments: [emptyTreatment()],
+            labWorks: [],
           } satisfies DentalToothState)
         next.set(fdi, updater(cur))
         return next
@@ -223,14 +225,15 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   )
 
   const saveTreatment = useCallback(
-    async (treatments: DentalToothTreatment[]) => {
+    async (payload: { treatments: DentalToothTreatment[]; labWorks: DentalLabWork[] }) => {
       if (panelFdi == null) return
       const fdi = panelFdi
+      const { treatments, labWorks } = payload
       setTeethMap((prev) => {
         const next = new Map(prev)
         const cur = next.get(fdi)
         if (!cur) return prev
-        next.set(fdi, { ...cur, treatments })
+        next.set(fdi, { ...cur, treatments, labWorks })
         return next
       })
       setDirty(true)
@@ -242,7 +245,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       try {
         const map = new Map(teethMap)
         const cur = map.get(fdi)
-        if (cur) map.set(fdi, { ...cur, treatments })
+        if (cur) map.set(fdi, { ...cur, treatments, labWorks })
         const data = await api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`, {
           method: 'PUT',
           body: JSON.stringify({ teeth: chartTeethPayload(map) }),
@@ -250,7 +253,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         skipNextAutosave.current = true
         setTeethMap(teethMapFromChart(data.chart?.teeth || []))
         setDirty(false)
-        setOk('تم حفظ إجراءات السن والدفعات')
+        setOk('تم حفظ إجراءات السن والمخابر')
       } catch (e: unknown) {
         setErr(e instanceof ApiError ? e.message : 'تعذر حفظ الإجراء')
       } finally {
@@ -371,7 +374,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           canEdit={canEdit}
           saving={saving}
           onClose={() => setPanelFdi(null)}
-          onSave={(treatments) => void saveTreatment(treatments)}
+          onSave={(payload) => void saveTreatment(payload)}
         />
       ) : null}
     </div>

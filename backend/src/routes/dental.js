@@ -92,6 +92,31 @@ function treatmentToDto(t) {
   }
 }
 
+function normalizeLabWorks(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const row of raw) {
+    const labName = String(row?.labName || '').trim().slice(0, 200)
+    const procedureDescription = String(row?.procedureDescription || '').trim().slice(0, 1000)
+    const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
+    if (!labName && !procedureDescription && !(amountSyp > 0)) continue
+    const item = { labName, procedureDescription, amountSyp }
+    if (row?._id) item._id = row._id
+    out.push(item)
+    if (out.length >= 80) break
+  }
+  return out
+}
+
+function labWorkToDto(row) {
+  return {
+    id: row?._id ? String(row._id) : undefined,
+    labName: String(row?.labName || ''),
+    procedureDescription: String(row?.procedureDescription || ''),
+    amountSyp: Math.max(0, Math.round(Number(row?.amountSyp) || 0)),
+  }
+}
+
 function emptyDentalChartDto() {
   return { teeth: [], updatedAt: null, updatedBy: null }
 }
@@ -103,6 +128,7 @@ function chartToDto(chart) {
       let treatmentsRaw = Array.isArray(t.treatments) ? t.treatments : []
       if (!treatmentsRaw.length && t.treatment) treatmentsRaw = [t.treatment]
       const treatments = treatmentsRaw.map((x) => treatmentToDto(x))
+      const labWorks = (Array.isArray(t.labWorks) ? t.labWorks : []).map((x) => labWorkToDto(x))
       return {
         fdi: Number(t.fdi),
         status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
@@ -114,6 +140,7 @@ function chartToDto(chart) {
         })),
         note: String(t.note || '').trim().slice(0, 500),
         treatments,
+        labWorks,
         /** توافق واجهات قديمة */
         treatment: treatments[0] || treatmentToDto({}),
       }
@@ -149,6 +176,7 @@ function normalizeChartTeeth(rawTeeth) {
       }
     }
     const treatments = normalizeTreatmentsList(row)
+    const labWorks = normalizeLabWorks(row?.labWorks)
     byFdi.set(fdi, {
       fdi,
       status,
@@ -156,6 +184,7 @@ function normalizeChartTeeth(rawTeeth) {
       surfaces: status === 'present' ? surfaces.slice(0, 12) : [],
       note: String(row?.note || '').trim().slice(0, 500),
       treatments,
+      labWorks,
       treatment: undefined,
     })
   }

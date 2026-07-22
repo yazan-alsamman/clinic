@@ -84,6 +84,15 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
   { _id: true },
 )
 
+const dentalChartLabWorkSchema = new mongoose.Schema(
+  {
+    labName: { type: String, default: '', trim: true, maxlength: 200 },
+    procedureDescription: { type: String, default: '', trim: true, maxlength: 1000 },
+    amountSyp: { type: Number, default: 0, min: 0 },
+  },
+  { _id: true },
+)
+
 const dentalChartToothSchema = new mongoose.Schema(
   {
     fdi: { type: Number, required: true, min: 11, max: 48 },
@@ -93,6 +102,8 @@ const dentalChartToothSchema = new mongoose.Schema(
     note: { type: String, default: '', trim: true, maxlength: 500 },
     /** إجراءات متعددة على نفس السن — كل إجراء بطبيب وتكلفة ودفعات */
     treatments: { type: [dentalChartTreatmentSchema], default: [] },
+    /** أعمال المخابر المرتبطة بهذا السن */
+    labWorks: { type: [dentalChartLabWorkSchema], default: [] },
     /** توافق قديم: إجراء واحد — يُرحَّل إلى treatments عند الحفظ */
     treatment: { type: dentalChartTreatmentSchema, default: undefined },
   },

@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import {
   arabicToothName,
+  emptyLabWork,
   emptyTreatment,
+  labWorkHasData,
+  normalizeLabWork,
   normalizeTreatment,
   treatmentHasData,
   treatmentPaidTotal,
   treatmentRemaining,
+  type DentalLabWork,
   type DentalPayment,
   type DentalToothState,
   type DentalToothTreatment,
@@ -16,7 +20,7 @@ type Props = {
   canEdit: boolean
   saving?: boolean
   onClose: () => void
-  onSave: (treatments: DentalToothTreatment[]) => void
+  onSave: (payload: { treatments: DentalToothTreatment[]; labWorks: DentalLabWork[] }) => void
 }
 
 function todayIsoDate() {
@@ -32,6 +36,9 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
     const list = (tooth.treatments || []).map((t) => normalizeTreatment(t))
     return list.length > 0 ? list : [emptyTreatment()]
   })
+  const [labDrafts, setLabDrafts] = useState<DentalLabWork[]>(() =>
+    (tooth.labWorks || []).map((x) => normalizeLabWork(x)),
+  )
   const [payAmountById, setPayAmountById] = useState<Record<string, string>>({})
   const [payNoteById, setPayNoteById] = useState<Record<string, string>>({})
   const [payDateById, setPayDateById] = useState<Record<string, string>>({})
@@ -103,7 +110,8 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
       }
     }
     const kept = next.filter(treatmentHasData)
-    onSave(kept.length > 0 ? kept : [])
+    const labs = labDrafts.map((x) => normalizeLabWork(x)).filter(labWorkHasData)
+    onSave({ treatments: kept.length > 0 ? kept : [], labWorks: labs })
   }
 
   return (
@@ -320,6 +328,125 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
           </button>
         ) : null}
 
+        <section
+          style={{
+            marginTop: '1.15rem',
+            padding: '0.85rem',
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            background: 'var(--bg)',
+          }}
+        >
+          <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>المخابر</h4>
+          <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            سجل أعمال المخابر لهذا السن: اسم المخبر، وصف الإجراء، والمبلغ.
+          </p>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>اسم المخبر</th>
+                  <th>وصف الإجراء</th>
+                  <th>المبلغ (ل.س)</th>
+                  {canEdit ? <th></th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {labDrafts.length === 0 ? (
+                  <tr>
+                    <td colSpan={canEdit ? 4 : 3} style={{ color: 'var(--text-muted)' }}>
+                      لا سجلات مخابر بعد.
+                    </td>
+                  </tr>
+                ) : (
+                  labDrafts.map((row, idx) => (
+                    <tr key={row.id || `lab-${idx}`}>
+                      <td>
+                        {canEdit ? (
+                          <input
+                            className="input"
+                            value={row.labName}
+                            onChange={(e) =>
+                              setLabDrafts((prev) =>
+                                prev.map((x, i) => (i === idx ? { ...x, labName: e.target.value } : x)),
+                              )
+                            }
+                            placeholder="اسم المخبر"
+                          />
+                        ) : (
+                          row.labName || '—'
+                        )}
+                      </td>
+                      <td>
+                        {canEdit ? (
+                          <input
+                            className="input"
+                            value={row.procedureDescription}
+                            onChange={(e) =>
+                              setLabDrafts((prev) =>
+                                prev.map((x, i) =>
+                                  i === idx ? { ...x, procedureDescription: e.target.value } : x,
+                                ),
+                              )
+                            }
+                            placeholder="وصف الإجراء"
+                          />
+                        ) : (
+                          row.procedureDescription || '—'
+                        )}
+                      </td>
+                      <td>
+                        {canEdit ? (
+                          <input
+                            className="input"
+                            inputMode="numeric"
+                            dir="ltr"
+                            value={row.amountSyp ? String(row.amountSyp) : ''}
+                            onChange={(e) => {
+                              const n = Math.max(
+                                0,
+                                Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0),
+                              )
+                              setLabDrafts((prev) =>
+                                prev.map((x, i) => (i === idx ? { ...x, amountSyp: n } : x)),
+                              )
+                            }}
+                            placeholder="0"
+                          />
+                        ) : (
+                          <span dir="ltr">{row.amountSyp.toLocaleString('ar-SY')} ل.س</span>
+                        )}
+                      </td>
+                      {canEdit ? (
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ fontSize: '0.75rem' }}
+                            onClick={() => setLabDrafts((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            حذف
+                          </button>
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {canEdit ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ marginTop: '0.65rem', fontSize: '0.82rem' }}
+              onClick={() => setLabDrafts((prev) => [...prev, emptyLabWork()])}
+            >
+              + إضافة سطر مخبر
+            </button>
+          ) : null}
+        </section>
+
         {localErr ? (
           <p style={{ color: 'var(--danger)', margin: '0.75rem 0 0', fontSize: '0.88rem' }}>{localErr}</p>
         ) : null}
@@ -330,7 +457,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, onClose, onSave }:
           </button>
           {canEdit ? (
             <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSave}>
-              {saving ? 'جاري الحفظ…' : 'حفظ الإجراءات والدفعات'}
+              {saving ? 'جاري الحفظ…' : 'حفظ الإجراءات والمخابر'}
             </button>
           ) : null}
         </div>
