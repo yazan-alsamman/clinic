@@ -5,16 +5,20 @@ import { ToothTreatmentModal, type DentalProviderOption } from './ToothTreatment
 import {
   arabicToothName,
   chartTeethPayload,
-  emptyTreatment,
+  defaultTooth,
   LOWER_ROW,
   teethMapFromChart,
+  toothForViewLayer,
   toothStatusLabel,
   UPPER_ROW,
+  type ChartPaintMode,
   type ChartTool,
+  type ChartViewLayer,
   type DentalChartDto,
   type DentalLabWork,
   type DentalToothState,
   type DentalToothTreatment,
+  type SurfaceOrigin,
   type SurfaceRegion,
   type SurfaceView,
 } from './dentalChartTypes'
@@ -24,21 +28,47 @@ type Props = {
   canEdit: boolean
 }
 
-const TOOLS: { id: ChartTool; label: string }[] = [
-  { id: 'select', label: 'تحديد / إجراء' },
-  { id: 'healthy', label: 'سليم' },
-  { id: 'missing', label: 'مفقود' },
-  { id: 'implant_teal', label: 'زراعة' },
-  { id: 'implant_red', label: 'زراعة حمراء' },
-  { id: 'filling', label: 'حشوة كومبوزيت' },
-  { id: 'clear_surface', label: 'مسح حشوة' },
+const VIEW_LAYERS: { id: ChartViewLayer; label: string }[] = [
+  { id: 'baseline', label: 'حالة الدخول' },
+  { id: 'clinic', label: 'عمل العيادة' },
+  { id: 'all', label: 'الكل' },
 ]
+
+const PAINT_MODES: { id: ChartPaintMode; label: string }[] = [
+  { id: 'baseline', label: 'تسجيل دخول' },
+  { id: 'clinic', label: 'تسجيل عيادة' },
+]
+
+function toolsForPaintMode(mode: ChartPaintMode): { id: ChartTool; label: string }[] {
+  if (mode === 'clinic') {
+    return [
+      { id: 'select', label: 'تحديد / إجراء' },
+      { id: 'healthy', label: 'إزالة علامة عيادة' },
+      { id: 'missing', label: 'خلع (عيادة)' },
+      { id: 'implant_teal', label: 'زراعة (عيادة)' },
+      { id: 'implant_red', label: 'زراعة حمراء (عيادة)' },
+      { id: 'filling', label: 'حشوة عيادة' },
+      { id: 'clear_surface', label: 'مسح حشوة عيادة' },
+    ]
+  }
+  return [
+    { id: 'select', label: 'تحديد / إجراء' },
+    { id: 'healthy', label: 'سليم عند القدوم' },
+    { id: 'missing', label: 'مفقود عند القدوم' },
+    { id: 'implant_teal', label: 'زراعة سابقة' },
+    { id: 'implant_red', label: 'زراعة سابقة حمراء' },
+    { id: 'filling', label: 'حشوة سابقة' },
+    { id: 'clear_surface', label: 'مسح حشوة سابقة' },
+  ]
+}
 
 export function DentalOdontogram({ patientId, canEdit }: Props) {
   const [teethMap, setTeethMap] = useState(() => teethMapFromChart([]))
   const [selectedFdi, setSelectedFdi] = useState<number | null>(null)
   const [panelFdi, setPanelFdi] = useState<number | null>(null)
   const [tool, setTool] = useState<ChartTool>('select')
+  const [viewLayer, setViewLayer] = useState<ChartViewLayer>('all')
+  const [paintMode, setPaintMode] = useState<ChartPaintMode>('baseline')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -47,6 +77,9 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   const [providers, setProviders] = useState<DentalProviderOption[]>([])
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skipNextAutosave = useRef(true)
+
+  const originForPaint: SurfaceOrigin = paintMode === 'clinic' ? 'clinic' : 'preexisting'
+  const tools = useMemo(() => toolsForPaintMode(paintMode), [paintMode])
 
   const selected = selectedFdi != null ? teethMap.get(selectedFdi) : null
   const panelTooth = panelFdi != null ? teethMap.get(panelFdi) : null
@@ -117,17 +150,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
     (fdi: number, updater: (prev: DentalToothState) => DentalToothState) => {
       setTeethMap((prev) => {
         const next = new Map(prev)
-        const cur =
-          next.get(fdi) ||
-          ({
-            fdi,
-            status: 'present' as const,
-            implantColor: null,
-            surfaces: [],
-            note: '',
-            treatments: [emptyTreatment()],
-            labWorks: [],
-          } satisfies DentalToothState)
+        const cur = next.get(fdi) || defaultTooth(fdi)
         next.set(fdi, updater(cur))
         return next
       })
@@ -156,13 +179,28 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       }
 
       if (tool === 'healthy') {
-        updateTooth(fdi, (prev) => ({
-          ...prev,
-          status: 'present',
-          implantColor: null,
-          surfaces: [],
-          note: '',
-        }))
+        updateTooth(fdi, (prev) => {
+          if (paintMode === 'clinic') {
+            // أزل علامات العيادة فقط، أبقِ حالة الدخول
+            const keepBaselineStatus =
+              prev.status !== 'present' && prev.statusOrigin === 'preexisting'
+            return {
+              ...prev,
+              status: keepBaselineStatus ? prev.status : 'present',
+              statusOrigin: 'preexisting',
+              implantColor: keepBaselineStatus && prev.status === 'implant' ? prev.implantColor : null,
+              surfaces: prev.surfaces.filter((s) => s.origin !== 'clinic'),
+            }
+          }
+          return {
+            ...prev,
+            status: 'present',
+            statusOrigin: 'preexisting',
+            implantColor: null,
+            surfaces: [],
+            note: '',
+          }
+        })
         openTreatmentPanel(fdi)
         return
       }
@@ -170,8 +208,9 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         updateTooth(fdi, (prev) => ({
           ...prev,
           status: 'missing',
+          statusOrigin: originForPaint,
           implantColor: null,
-          surfaces: [],
+          surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
         openTreatmentPanel(fdi)
         return
@@ -180,8 +219,9 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         updateTooth(fdi, (prev) => ({
           ...prev,
           status: 'implant',
+          statusOrigin: originForPaint,
           implantColor: 'teal',
-          surfaces: [],
+          surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
         openTreatmentPanel(fdi)
         return
@@ -190,25 +230,30 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         updateTooth(fdi, (prev) => ({
           ...prev,
           status: 'implant',
+          statusOrigin: originForPaint,
           implantColor: 'red',
-          surfaces: [],
+          surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
         openTreatmentPanel(fdi)
         return
       }
       if (tool === 'filling') {
         const r = region || (view === 'occlusal' ? 'O' : 'I')
+        const label = paintMode === 'clinic' ? 'حشوة عيادة' : 'حشوة سابقة'
         updateTooth(fdi, (prev) => {
           if (prev.status !== 'present') {
             return {
               ...prev,
               status: 'present',
+              statusOrigin: 'preexisting',
               implantColor: null,
-              surfaces: [{ view, region: r, label: 'حشوة كومبوزيت' }],
+              surfaces: [{ view, region: r, label, origin: originForPaint }],
             }
           }
-          const surfaces = prev.surfaces.filter((s) => !(s.view === view && s.region === r))
-          surfaces.push({ view, region: r, label: 'حشوة كومبوزيت' })
+          const surfaces = prev.surfaces.filter(
+            (s) => !(s.view === view && s.region === r && s.origin === originForPaint),
+          )
+          surfaces.push({ view, region: r, label, origin: originForPaint })
           return { ...prev, status: 'present', implantColor: null, surfaces }
         })
         openTreatmentPanel(fdi)
@@ -217,16 +262,23 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       if (tool === 'clear_surface') {
         const r = region
         updateTooth(fdi, (prev) => {
-          if (!r) return { ...prev, surfaces: [] }
+          if (!r) {
+            return {
+              ...prev,
+              surfaces: prev.surfaces.filter((s) => s.origin !== originForPaint),
+            }
+          }
           return {
             ...prev,
-            surfaces: prev.surfaces.filter((s) => !(s.view === view && s.region === r)),
+            surfaces: prev.surfaces.filter(
+              (s) => !(s.view === view && s.region === r && s.origin === originForPaint),
+            ),
           }
         })
         openTreatmentPanel(fdi)
       }
     },
-    [canEdit, tool, updateTooth, openTreatmentPanel],
+    [canEdit, tool, updateTooth, openTreatmentPanel, paintMode, originForPaint],
   )
 
   const saveTreatment = useCallback(
@@ -280,7 +332,8 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
     return (
       <div className="odontogram-arch-row">
         {row.map((fdi) => {
-          const tooth = teethMap.get(fdi)!
+          const full = teethMap.get(fdi)!
+          const tooth = toothForViewLayer(full, viewLayer)
           return (
             <div key={`${view}-${fdi}`} className="odontogram-cell-wrap">
               <ToothCell
@@ -288,6 +341,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
                 tooth={tooth}
                 view={view}
                 selected={selectedFdi === fdi}
+                showClinicBadge={viewLayer !== 'baseline'}
                 onSelect={() => applyToolToTooth(fdi, view)}
                 onSurfaceClick={
                   canEdit && (tool === 'filling' || tool === 'clear_surface')
@@ -308,34 +362,78 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
 
   return (
     <div className="odontogram">
-      {canEdit ? (
-        <div className="odontogram-toolbar">
-          {TOOLS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={`btn ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
-              onClick={() => setTool(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
+      <div className="odontogram-layers" role="tablist" aria-label="طبقة العرض">
+        {VIEW_LAYERS.map((layer) => (
           <button
+            key={layer.id}
             type="button"
-            className="btn btn-ghost"
-            style={{ fontSize: '0.78rem', marginInlineStart: 'auto' }}
-            disabled={saving || !dirty}
-            onClick={() => void persist(teethMap)}
+            role="tab"
+            aria-selected={viewLayer === layer.id}
+            className={`odontogram-layer-btn${viewLayer === layer.id ? ' is-active' : ''}`}
+            onClick={() => setViewLayer(layer.id)}
           >
-            {saving ? 'جاري الحفظ…' : dirty ? 'حفظ الآن' : 'محفوظ'}
+            {layer.label}
           </button>
-        </div>
+        ))}
+      </div>
+
+      {canEdit ? (
+        <>
+          <div className="odontogram-paint-modes" role="group" aria-label="وضع التسجيل">
+            {PAINT_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={`odontogram-paint-btn${paintMode === mode.id ? ' is-active' : ''}`}
+                onClick={() => {
+                  setPaintMode(mode.id)
+                  setTool('select')
+                }}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <div className="odontogram-toolbar">
+            {tools.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`btn ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
+                onClick={() => setTool(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '0.78rem', marginInlineStart: 'auto' }}
+              disabled={saving || !dirty}
+              onClick={() => void persist(teethMap)}
+            >
+              {saving ? 'جاري الحفظ…' : dirty ? 'حفظ الآن' : 'محفوظ'}
+            </button>
+          </div>
+        </>
       ) : (
         <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           عرض فقط — اضغط على أي سن لعرض الإجراء والدفعات.
         </p>
       )}
+
+      <div className="odontogram-legend" aria-hidden>
+        <span className="odontogram-legend-item">
+          <i className="odontogram-swatch preexisting" /> حشوة سابقة
+        </span>
+        <span className="odontogram-legend-item">
+          <i className="odontogram-swatch clinic" /> حشوة / عمل عيادة
+        </span>
+        <span className="odontogram-legend-item">
+          <i className="odontogram-swatch badge" /> إجراء مسجّل
+        </span>
+      </div>
 
       {err ? (
         <p style={{ color: 'var(--danger)', margin: '0 0 0.5rem', fontSize: '0.88rem' }}>{err}</p>
@@ -368,8 +466,8 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       </div>
 
       <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        اضغط على أي سن لفتح صفحة الإجراء (الوصف، التكلفة، الطبيب، وجدول الدفعات). أدوات المخطط تُحدّث حالة السن
-        البصرية ثم تفتح نفس الصفحة.
+        أدوات المخطط تسجّل حالة الدخول أو علامات العيادة حسب الوضع المختار. التكلفة والدفعات تُدار من صفحة
+        الإجراء عند الضغط على السن.
       </p>
 
       {panelTooth ? (

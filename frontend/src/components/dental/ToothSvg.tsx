@@ -1,12 +1,20 @@
 import type { DentalSurfaceMark, DentalToothState, ImplantColor } from './dentalChartTypes'
-import { isUpperFdi, toothKind } from './dentalChartTypes'
+import { isUpperFdi, toothHasClinicWork, toothKind, treatmentsHaveData } from './dentalChartTypes'
 
 const CROWN = '#f5f1ea'
 const CROWN_STROKE = '#c4b8a8'
 const ROOT = '#c4a574'
 const ROOT_STROKE = '#9a7b4f'
-const FILLING = '#f5d547'
+/** حشوة سابقة (عند القدوم) — محايد */
+const FILLING_PREEXISTING = '#c4b5a0'
+/** حشوة عمل العيادة */
+const FILLING_CLINIC = '#0d9488'
 const MISSING_STROKE = '#1a1a1a'
+const MISSING_CLINIC = '#0f766e'
+
+function fillingFill(origin: DentalSurfaceMark['origin'] | undefined) {
+  return origin === 'clinic' ? FILLING_CLINIC : FILLING_PREEXISTING
+}
 
 function ImplantScrew({ color, flip }: { color: ImplantColor; flip?: boolean }) {
   const fill = color === 'red' ? '#e11d2e' : '#14b8a6'
@@ -55,7 +63,7 @@ function surfaceHighlight(
       else if (m.region === 'D') d = 'M26 8 L34 8 L34 28 L26 28 Z'
       else d = 'M10 6 L30 6 L28 16 L12 16 Z'
     }
-    return <path key={`${m.region}-${i}`} d={d} fill={FILLING} opacity={0.92} />
+    return <path key={`${m.region}-${m.origin}-${i}`} d={d} fill={fillingFill(m.origin)} opacity={0.92} />
   })
 }
 
@@ -69,6 +77,8 @@ function BuccalToothArt({
   const upper = isUpperFdi(fdi)
   const kind = toothKind(fdi)
   const flip = !upper
+  const clinicStatus = tooth.statusOrigin === 'clinic'
+  const missingStroke = clinicStatus ? MISSING_CLINIC : MISSING_STROKE
 
   if (tooth.status === 'missing') {
     return (
@@ -77,7 +87,7 @@ function BuccalToothArt({
           <path
             d="M6 6 Q20 2 34 6 L36 30 Q20 36 4 30 Z M10 30 L8 78 M20 32 L20 82 M30 30 L32 78"
             fill="none"
-            stroke={MISSING_STROKE}
+            stroke={missingStroke}
             strokeWidth="1.6"
             strokeDasharray="3 2"
           />
@@ -85,7 +95,7 @@ function BuccalToothArt({
           <path
             d="M10 6 Q20 2 30 6 L32 28 Q20 34 8 28 Z M14 28 L12 76 M26 28 L28 76"
             fill="none"
-            stroke={MISSING_STROKE}
+            stroke={missingStroke}
             strokeWidth="1.6"
             strokeDasharray="3 2"
           />
@@ -93,7 +103,7 @@ function BuccalToothArt({
           <path
             d="M12 4 Q20 0 28 4 L30 26 Q20 32 10 26 Z M18 26 L18 78"
             fill="none"
-            stroke={MISSING_STROKE}
+            stroke={missingStroke}
             strokeWidth="1.6"
             strokeDasharray="3 2"
           />
@@ -144,6 +154,8 @@ function BuccalToothArt({
 
 function OcclusalToothArt({ fdi, tooth }: { fdi: number; tooth: DentalToothState }) {
   const kind = toothKind(fdi)
+  const clinicStatus = tooth.statusOrigin === 'clinic'
+  const missingStroke = clinicStatus ? MISSING_CLINIC : MISSING_STROKE
 
   if (tooth.status === 'missing') {
     return kind === 'molar' || kind === 'premolar' ? (
@@ -154,7 +166,7 @@ function OcclusalToothArt({ fdi, tooth }: { fdi: number; tooth: DentalToothState
         height="32"
         rx="6"
         fill="none"
-        stroke={MISSING_STROKE}
+        stroke={missingStroke}
         strokeWidth="1.6"
         strokeDasharray="3 2"
       />
@@ -165,7 +177,7 @@ function OcclusalToothArt({ fdi, tooth }: { fdi: number; tooth: DentalToothState
         rx="10"
         ry="14"
         fill="none"
-        stroke={MISSING_STROKE}
+        stroke={missingStroke}
         strokeWidth="1.6"
         strokeDasharray="3 2"
       />
@@ -217,6 +229,7 @@ export function ToothCell({
   selected,
   onSelect,
   onSurfaceClick,
+  showClinicBadge = false,
 }: {
   fdi: number
   tooth: DentalToothState
@@ -224,18 +237,23 @@ export function ToothCell({
   selected: boolean
   onSelect: () => void
   onSurfaceClick?: (region: DentalSurfaceMark['region']) => void
+  /** نقطة تشير لوجود إجراء/مخبر عيادة */
+  showClinicBadge?: boolean
 }) {
   const h = view === 'buccal' ? 92 : 52
+  const badge =
+    showClinicBadge && view === 'buccal' && (toothHasClinicWork(tooth) || treatmentsHaveData(tooth.treatments))
   return (
     <button
       type="button"
-      className={`odontogram-tooth${selected ? ' is-selected' : ''}`}
+      className={`odontogram-tooth${selected ? ' is-selected' : ''}${badge ? ' has-clinic-work' : ''}`}
       onClick={onSelect}
       aria-label={`سن ${fdi}`}
       style={{ width: 44, height: h + 18 }}
     >
       <svg viewBox={`0 0 40 ${h}`} width="40" height={h} aria-hidden>
         {view === 'buccal' ? <BuccalToothArt fdi={fdi} tooth={tooth} /> : <OcclusalToothArt fdi={fdi} tooth={tooth} />}
+        {badge ? <circle cx="34" cy="6" r="3.5" fill="#0d9488" stroke="#fff" strokeWidth="1" /> : null}
         {/* invisible hit zones for filling tool on occlusal/buccal */}
         {onSurfaceClick && tooth.status === 'present' ? (
           <>

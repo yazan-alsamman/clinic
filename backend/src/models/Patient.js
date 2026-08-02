@@ -61,6 +61,8 @@ const dentalChartSurfaceSchema = new mongoose.Schema(
     view: { type: String, enum: ['buccal', 'occlusal'], required: true },
     region: { type: String, enum: ['M', 'D', 'O', 'B', 'L', 'I'], required: true },
     label: { type: String, default: 'حشوة كومبوزيت', trim: true, maxlength: 120 },
+    /** preexisting = عند القدوم، clinic = نُفّذ في العيادة */
+    origin: { type: String, enum: ['preexisting', 'clinic'], default: 'preexisting' },
   },
   { _id: false },
 )
@@ -112,6 +114,8 @@ const dentalChartToothSchema = new mongoose.Schema(
   {
     fdi: { type: Number, required: true, min: 11, max: 48 },
     status: { type: String, enum: ['present', 'missing', 'implant'], default: 'present' },
+    /** preexisting = جاء هكذا، clinic = تغيّر في هذه العيادة (خلع/زراعة هنا) */
+    statusOrigin: { type: String, enum: ['preexisting', 'clinic'], default: 'preexisting' },
     implantColor: { type: String, enum: ['teal', 'red'], default: undefined },
     surfaces: { type: [dentalChartSurfaceSchema], default: [] },
     note: { type: String, default: '', trim: true, maxlength: 500 },

@@ -3,10 +3,16 @@ export type ImplantColor = 'teal' | 'red'
 export type SurfaceView = 'buccal' | 'occlusal'
 export type SurfaceRegion = 'M' | 'D' | 'O' | 'B' | 'L' | 'I'
 
+export type SurfaceOrigin = 'preexisting' | 'clinic'
+export type ChartViewLayer = 'baseline' | 'clinic' | 'all'
+export type ChartPaintMode = 'baseline' | 'clinic'
+
 export type DentalSurfaceMark = {
   view: SurfaceView
   region: SurfaceRegion
   label: string
+  /** preexisting = عند القدوم، clinic = عمل العيادة */
+  origin: SurfaceOrigin
 }
 
 export type DentalPayment = {
@@ -50,6 +56,8 @@ export const DENTAL_ELIAS_DISPLAY_NAME = 'د. الياس'
 export type DentalToothState = {
   fdi: number
   status: ToothStatus
+  /** preexisting = جاء هكذا، clinic = خلع/زراعة في العيادة */
+  statusOrigin: SurfaceOrigin
   implantColor: ImplantColor | null
   surfaces: DentalSurfaceMark[]
   note: string
@@ -336,11 +344,23 @@ export function defaultTooth(fdi: number): DentalToothState {
   return {
     fdi,
     status: 'present',
+    statusOrigin: 'preexisting',
     implantColor: null,
     surfaces: [],
     note: '',
     treatments: [emptyTreatment()],
     labWorks: [],
+  }
+}
+
+export function normalizeSurfaceMark(raw: Partial<DentalSurfaceMark> | null | undefined): DentalSurfaceMark {
+  const view = raw?.view === 'occlusal' ? 'occlusal' : 'buccal'
+  const region = String(raw?.region || 'O').toUpperCase() as SurfaceRegion
+  return {
+    view,
+    region: (['M', 'D', 'O', 'B', 'L', 'I'].includes(region) ? region : 'O') as SurfaceRegion,
+    label: String(raw?.label || 'حشوة كومبوزيت').trim() || 'حشوة كومبوزيت',
+    origin: raw?.origin === 'clinic' ? 'clinic' : 'preexisting',
   }
 }
 
@@ -354,8 +374,9 @@ export function teethMapFromChart(
     map.set(t.fdi, {
       fdi: t.fdi,
       status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
+      statusOrigin: t.statusOrigin === 'clinic' ? 'clinic' : 'preexisting',
       implantColor: t.status === 'implant' ? (t.implantColor === 'red' ? 'red' : 'teal') : null,
-      surfaces: Array.isArray(t.surfaces) ? t.surfaces : [],
+      surfaces: Array.isArray(t.surfaces) ? t.surfaces.map((s) => normalizeSurfaceMark(s)) : [],
       note: String(t.note || ''),
       treatments: normalizeTreatmentsList(t.treatments, t.treatment),
       labWorks: Array.isArray(t.labWorks) ? t.labWorks.map((x) => normalizeLabWork(x)) : [],
@@ -377,8 +398,9 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
     .map((t) => ({
       fdi: t.fdi,
       status: t.status,
+      statusOrigin: t.status === 'present' ? 'preexisting' : t.statusOrigin || 'preexisting',
       implantColor: t.status === 'implant' ? t.implantColor : null,
-      surfaces: t.status === 'present' ? t.surfaces : [],
+      surfaces: t.status === 'present' ? t.surfaces.map((s) => normalizeSurfaceMark(s)) : [],
       note: t.note,
       treatments: (t.treatments || []).map((x) => normalizeTreatment(x)).filter(treatmentHasData),
       labWorks: normalizeLabWorksList(t.labWorks),
@@ -386,24 +408,84 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
     .sort((a, b) => a.fdi - b.fdi)
 }
 
+/** عرض السن حسب طبقة العرض (حالة الدخول / عمل العيادة / الكل) */
+export function toothForViewLayer(tooth: DentalToothState, layer: ChartViewLayer): DentalToothState {
+  if (layer === 'all') return tooth
+
+  if (layer === 'baseline') {
+    const status =
+      tooth.status !== 'present' && tooth.statusOrigin === 'clinic' ? 'present' : tooth.status
+    return {
+      ...tooth,
+      status,
+      statusOrigin: 'preexisting',
+      implantColor: status === 'implant' ? tooth.implantColor : null,
+      surfaces: tooth.surfaces.filter((s) => s.origin !== 'clinic'),
+      /** أخفِ مؤشرات الإجراءات في طبقة الدخول */
+      treatments: [],
+      labWorks: [],
+    }
+  }
+
+  // clinic layer — الإجراءات دائماً عمل عيادة
+  const status =
+    tooth.status !== 'present' && tooth.statusOrigin === 'clinic'
+      ? tooth.status
+      : 'present'
+  return {
+    ...tooth,
+    status,
+    statusOrigin: status === 'present' ? 'preexisting' : 'clinic',
+    implantColor: status === 'implant' ? tooth.implantColor : null,
+    surfaces: tooth.surfaces.filter((s) => s.origin === 'clinic'),
+    treatments: tooth.treatments,
+    labWorks: tooth.labWorks,
+  }
+}
+
+export function toothHasClinicWork(t: DentalToothState): boolean {
+  return (
+    treatmentsHaveData(t.treatments) ||
+    normalizeLabWorksList(t.labWorks).length > 0 ||
+    t.surfaces.some((s) => s.origin === 'clinic') ||
+    (t.status !== 'present' && t.statusOrigin === 'clinic')
+  )
+}
+
 export function toothStatusLabel(t: DentalToothState): string {
-  if (t.status === 'missing') return 'سن مفقود'
-  if (t.status === 'implant') return t.implantColor === 'red' ? 'زراعة (حمراء)' : 'زراعة'
-  if (t.surfaces.length > 0) return t.surfaces.map((s) => s.label).join(' · ')
+  const originHint =
+    t.status !== 'present'
+      ? t.statusOrigin === 'clinic'
+        ? ' (عمل العيادة)'
+        : ' (عند القدوم)'
+      : ''
+  if (t.status === 'missing') return `سن مفقود${originHint}`
+  if (t.status === 'implant')
+    return `${t.implantColor === 'red' ? 'زراعة (حمراء)' : 'زراعة'}${originHint}`
+  const preexisting = t.surfaces.filter((s) => s.origin !== 'clinic')
+  const clinicSurf = t.surfaces.filter((s) => s.origin === 'clinic')
+  const parts: string[] = []
+  if (preexisting.length) parts.push(`دخول: ${preexisting.map((s) => s.label).join(' · ')}`)
+  if (clinicSurf.length) parts.push(`عيادة: ${clinicSurf.map((s) => s.label).join(' · ')}`)
   const active = (t.treatments || []).filter(treatmentHasData)
   if (active.length > 0) {
     if (active.length === 1) {
       const one = active[0]
       const rem = treatmentRemaining(one)
-      if (one.totalCostSyp > 0) {
-        return rem > 0
-          ? `إجراء — متبقي ${rem.toLocaleString('ar-SY')} ل.س`
-          : 'إجراء — مسدّد بالكامل'
+      if (one.totalCostSyp > 0 || one.totalCostUsd > 0) {
+        parts.push(
+          rem > 0
+            ? `إجراء — متبقي ${rem.toLocaleString('ar-SY')} ل.س`
+            : 'إجراء — مسدّد بالكامل',
+        )
+      } else {
+        parts.push(one.procedureDescription.trim().slice(0, 40) || 'إجراء مسجّل')
       }
-      return one.procedureDescription.trim().slice(0, 40) || 'إجراء مسجّل'
+    } else {
+      parts.push(`${active.length} إجراءات`)
     }
-    return `${active.length} إجراءات`
   }
+  if (parts.length) return parts.join(' · ')
   if (t.note.trim()) return t.note.trim()
   return 'سليم'
 }

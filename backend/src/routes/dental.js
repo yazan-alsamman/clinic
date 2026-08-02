@@ -259,11 +259,13 @@ function chartToDto(chart) {
       return {
         fdi: Number(t.fdi),
         status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
+        statusOrigin: t.statusOrigin === 'clinic' ? 'clinic' : 'preexisting',
         implantColor: t.implantColor === 'teal' || t.implantColor === 'red' ? t.implantColor : null,
         surfaces: (t.surfaces || []).map((s) => ({
           view: s.view === 'occlusal' ? 'occlusal' : 'buccal',
           region: String(s.region || 'O').toUpperCase(),
           label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
+          origin: s.origin === 'clinic' ? 'clinic' : 'preexisting',
         })),
         note: String(t.note || '').trim().slice(0, 500),
         treatments,
@@ -285,6 +287,7 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
     if (!FDI_VALID.has(fdi)) continue
     let status = String(row?.status || 'present').trim()
     if (status !== 'missing' && status !== 'implant') status = 'present'
+    const statusOrigin = row?.statusOrigin === 'clinic' ? 'clinic' : 'preexisting'
     let implantColor = null
     if (status === 'implant') {
       implantColor = row?.implantColor === 'red' ? 'red' : 'teal'
@@ -299,6 +302,7 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
           view,
           region,
           label: String(s?.label || 'حشوة كومبوزيت').trim().slice(0, 120) || 'حشوة كومبوزيت',
+          origin: s?.origin === 'clinic' ? 'clinic' : 'preexisting',
         })
       }
     }
@@ -307,6 +311,7 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
     byFdi.set(fdi, {
       fdi,
       status,
+      statusOrigin: status === 'present' ? 'preexisting' : statusOrigin,
       ...(status === 'implant' ? { implantColor } : {}),
       surfaces: status === 'present' ? surfaces.slice(0, 12) : [],
       note: String(row?.note || '').trim().slice(0, 500),
