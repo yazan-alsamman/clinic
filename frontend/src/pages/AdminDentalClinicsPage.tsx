@@ -40,6 +40,8 @@ type SessionRow = {
   remainingSyp?: number
   labName?: string
   amountSyp?: number
+  amountUsd?: number
+  amountSypOnly?: number
   payments?: {
     id: string
     amountSyp: number
@@ -315,7 +317,7 @@ export function AdminDentalClinicsPage() {
                   <th>الوصف</th>
                   <th>التكلفة</th>
                   <th>المدفوع</th>
-                  <th>المتبقي / المخبر</th>
+                  <th>المتبقي</th>
                 </tr>
               </thead>
               <tbody>
@@ -371,12 +373,22 @@ export function AdminDentalClinicsPage() {
                             ) : null}
                           </>
                         ) : (
-                          '—'
+                          <>
+                            {fmtSyp(r.amountSyp || 0)}
+                            {(r.amountUsd || 0) > 0 ? (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                منها {r.amountUsd} USD
+                                {(r.amountSypOnly || 0) > 0
+                                  ? ` + ${(r.amountSypOnly || 0).toLocaleString('ar-SY')} ل.س`
+                                  : ''}
+                              </div>
+                            ) : null}
+                          </>
                         )}
                       </td>
                       <td dir="ltr">{r.kind === 'treatment' ? fmtSyp(r.paidSyp || 0) : '—'}</td>
                       <td dir="ltr">
-                        {r.kind === 'treatment' ? fmtSyp(r.remainingSyp || 0) : fmtSyp(r.amountSyp || 0)}
+                        {r.kind === 'treatment' ? fmtSyp(r.remainingSyp || 0) : '—'}
                       </td>
                     </tr>
                   ))

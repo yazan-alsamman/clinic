@@ -102,6 +102,9 @@ const dentalChartLabWorkSchema = new mongoose.Schema(
     labName: { type: String, default: '', trim: true, maxlength: 200 },
     procedureDescription: { type: String, default: '', trim: true, maxlength: 1000 },
     amountSyp: { type: Number, default: 0, min: 0 },
+    amountUsd: { type: Number, default: 0, min: 0 },
+    /** سعر الصرف المستخدم لجزء التكلفة بالدولار (ل.س لكل 1 USD) */
+    usdSypRate: { type: Number, default: 0, min: 0 },
     businessDate: { type: String, default: '' },
     doctorName: { type: String, default: '', trim: true, maxlength: 160 },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

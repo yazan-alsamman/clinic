@@ -181,7 +181,7 @@ function treatmentToDto(t) {
   }
 }
 
-function normalizeLabWorks(raw) {
+function normalizeLabWorks(raw, fallbackUsdSypRate = 0) {
   if (!Array.isArray(raw)) return []
   const out = []
   const today = todayBusinessDate()
@@ -189,7 +189,13 @@ function normalizeLabWorks(raw) {
     const labName = String(row?.labName || '').trim().slice(0, 200)
     const procedureDescription = String(row?.procedureDescription || '').trim().slice(0, 1000)
     const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
-    if (!labName && !procedureDescription && !(amountSyp > 0)) continue
+    const amountUsd = Math.max(0, round6(Number(row?.amountUsd) || 0))
+    let usdSypRate = Math.max(0, Number(row?.usdSypRate) || 0)
+    if (amountUsd > 0 && !(usdSypRate > 0)) {
+      usdSypRate = Math.max(0, Number(fallbackUsdSypRate) || 0)
+    }
+    if (!(amountUsd > 0)) usdSypRate = 0
+    if (!labName && !procedureDescription && !(amountSyp > 0) && !(amountUsd > 0)) continue
     const businessDate = normalizeYmd(row?.businessDate, today)
     const providerRaw = row?.providerUserId != null ? String(row.providerUserId).trim() : ''
     const resolved = resolveDentalProviderFields({
@@ -205,6 +211,8 @@ function normalizeLabWorks(raw) {
       labName,
       procedureDescription,
       amountSyp,
+      amountUsd,
+      usdSypRate,
       businessDate,
       doctorName: resolved.isElias
         ? DENTAL_ELIAS_DISPLAY_NAME
@@ -226,6 +234,8 @@ function labWorkToDto(row) {
     labName: '',
     procedureDescription: '',
     amountSyp: 0,
+    amountUsd: 0,
+    usdSypRate: 0,
     businessDate: '',
     doctorName: '',
     providerUserId: null,
@@ -237,6 +247,8 @@ function labWorkToDto(row) {
     labName: n.labName,
     procedureDescription: n.procedureDescription,
     amountSyp: n.amountSyp,
+    amountUsd: round6(Number(n.amountUsd) || 0),
+    usdSypRate: Math.max(0, Number(n.usdSypRate) || 0),
     businessDate: n.businessDate || '',
     doctorName: n.doctorName || '',
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : n.providerUserId ? String(n.providerUserId) : null,
@@ -307,7 +319,7 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
       }
     }
     const treatments = normalizeTreatmentsList(row, fallbackUsdSypRate)
-    const labWorks = normalizeLabWorks(row?.labWorks)
+    const labWorks = normalizeLabWorks(row?.labWorks, fallbackUsdSypRate)
     byFdi.set(fdi, {
       fdi,
       status,

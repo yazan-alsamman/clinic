@@ -43,6 +43,9 @@ export type DentalLabWork = {
   labName: string
   procedureDescription: string
   amountSyp: number
+  amountUsd: number
+  /** سعر الصرف لجزء الدولار (ل.س لكل 1 USD) */
+  usdSypRate: number
   businessDate: string
   doctorName?: string
   providerUserId?: string | null
@@ -303,6 +306,8 @@ export function emptyLabWork(): DentalLabWork {
     labName: '',
     procedureDescription: '',
     amountSyp: 0,
+    amountUsd: 0,
+    usdSypRate: 0,
     businessDate: todayIsoDateLocal(),
     doctorName: '',
     providerUserId: null,
@@ -310,7 +315,20 @@ export function emptyLabWork(): DentalLabWork {
   }
 }
 
-export function normalizeLabWork(raw: Partial<DentalLabWork> | null | undefined): DentalLabWork {
+/** تكلفة المخبر المكافئة بالليرة = ل.س + دولار×سعر الصرف */
+export function labEffectiveAmountSyp(lab: DentalLabWork, fallbackRate?: number | null): number {
+  const syp = Math.max(0, Math.round(Number(lab.amountSyp) || 0))
+  const usd = Math.max(0, Number(lab.amountUsd) || 0)
+  const rate =
+    Number(lab.usdSypRate) > 0 ? Number(lab.usdSypRate) : Math.max(0, Number(fallbackRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? Math.round(usd * rate) : 0
+  return syp + fromUsd
+}
+
+export function normalizeLabWork(
+  raw: Partial<DentalLabWork> | null | undefined,
+  fallbackRate?: number | null,
+): DentalLabWork {
   let businessDate = String(raw?.businessDate || '').trim().slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) businessDate = todayIsoDateLocal()
   const providerRaw = raw?.providerUserId != null ? String(raw.providerUserId).trim() : ''
@@ -319,11 +337,20 @@ export function normalizeLabWork(raw: Partial<DentalLabWork> | null | undefined)
     providerRaw === DENTAL_ELIAS_VIRTUAL_ID ||
     providerKey === 'elias' ||
     /الياس|إلياس|elias|elyas/i.test(String(raw?.doctorName || ''))
+  const amountSyp = Math.max(0, Math.round(Number(raw?.amountSyp) || 0))
+  const amountUsd = Math.max(0, roundUsd(Number(raw?.amountUsd) || 0))
+  let usdSypRate = Math.max(0, Number(raw?.usdSypRate) || 0)
+  if (amountUsd > 0 && !(usdSypRate > 0)) {
+    usdSypRate = Math.max(0, Number(fallbackRate) || 0)
+  }
+  if (!(amountUsd > 0)) usdSypRate = 0
   return {
     id: raw?.id ? String(raw.id) : undefined,
     labName: String(raw?.labName || '').trim(),
     procedureDescription: String(raw?.procedureDescription || '').trim(),
-    amountSyp: Math.max(0, Math.round(Number(raw?.amountSyp) || 0)),
+    amountSyp,
+    amountUsd,
+    usdSypRate,
     businessDate,
     doctorName: isElias ? DENTAL_ELIAS_DISPLAY_NAME : String(raw?.doctorName || '').trim(),
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : providerRaw || null,
@@ -333,11 +360,19 @@ export function normalizeLabWork(raw: Partial<DentalLabWork> | null | undefined)
 
 export function labWorkHasData(row: DentalLabWork | undefined): boolean {
   if (!row) return false
-  return Boolean(row.labName.trim()) || Boolean(row.procedureDescription.trim()) || row.amountSyp > 0
+  return (
+    Boolean(row.labName.trim()) ||
+    Boolean(row.procedureDescription.trim()) ||
+    row.amountSyp > 0 ||
+    row.amountUsd > 0
+  )
 }
 
-export function normalizeLabWorksList(list: DentalLabWork[] | undefined): DentalLabWork[] {
-  return (list || []).map((x) => normalizeLabWork(x)).filter(labWorkHasData)
+export function normalizeLabWorksList(
+  list: DentalLabWork[] | undefined,
+  fallbackRate?: number | null,
+): DentalLabWork[] {
+  return (list || []).map((x) => normalizeLabWork(x, fallbackRate)).filter(labWorkHasData)
 }
 
 export function defaultTooth(fdi: number): DentalToothState {

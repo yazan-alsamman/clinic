@@ -5,6 +5,7 @@ import {
   emptyLabWork,
   emptyTreatment,
   formatUsdAmount,
+  labEffectiveAmountSyp,
   labWorkHasData,
   normalizeLabWork,
   normalizeTreatment,
@@ -53,7 +54,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
     return list.length > 0 ? list : [emptyTreatment()]
   })
   const [labDrafts, setLabDrafts] = useState<DentalLabWork[]>(() =>
-    (tooth.labWorks || []).map((x) => normalizeLabWork(x)),
+    (tooth.labWorks || []).map((x) => normalizeLabWork(x, rate)),
   )
   const [payAmountById, setPayAmountById] = useState<Record<string, string>>({})
   const [payCurrencyById, setPayCurrencyById] = useState<Record<string, 'syp' | 'usd'>>({})
@@ -111,12 +112,41 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
     setLabDrafts((prev) =>
       prev.map((x, i) =>
         i === idx
-          ? normalizeLabWork({
-              ...x,
-              providerUserId: p ? p.id : null,
-              doctorName: p ? p.name : '',
-              providerKey: p?.id === '__elias__' || p?.noShare ? 'elias' : '',
-            })
+          ? normalizeLabWork(
+              {
+                ...x,
+                providerUserId: p ? p.id : null,
+                doctorName: p ? p.name : '',
+                providerKey: p?.id === '__elias__' || p?.noShare ? 'elias' : '',
+              },
+              rate,
+            )
+          : x,
+      ),
+    )
+  }
+
+  function setLabAmountSyp(idx: number, value: string) {
+    const n = Math.max(0, Math.round(Number(value.replace(/[^\d]/g, '')) || 0))
+    setLabDrafts((prev) =>
+      prev.map((x, i) => (i === idx ? normalizeLabWork({ ...x, amountSyp: n }, rate) : x)),
+    )
+  }
+
+  function setLabAmountUsd(idx: number, value: string) {
+    const cleaned = value.replace(/[^\d.]/g, '')
+    const n = Math.max(0, roundUsd(Number(cleaned) || 0))
+    setLabDrafts((prev) =>
+      prev.map((x, i) =>
+        i === idx
+          ? normalizeLabWork(
+              {
+                ...x,
+                amountUsd: n,
+                usdSypRate: n > 0 ? rate || x.usdSypRate || 0 : 0,
+              },
+              rate,
+            )
           : x,
       ),
     )
@@ -228,7 +258,14 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
       }
     }
     const kept = next.filter(treatmentHasData)
-    const labs = labDrafts.map((x) => normalizeLabWork(x)).filter(labWorkHasData)
+    const labs = labDrafts.map((x) => normalizeLabWork(x, rate)).filter(labWorkHasData)
+    for (let i = 0; i < labs.length; i += 1) {
+      const lab = labs[i]
+      if (lab.amountUsd > 0 && !(lab.usdSypRate > 0) && !(rate != null && rate > 0)) {
+        setLocalErr(`المخبر ${i + 1}: تكلفة بالدولار تتطلب سعر صرف لليوم النشط.`)
+        return
+      }
+    }
     onSave({ treatments: kept.length > 0 ? kept : [], labWorks: labs })
   }
 
@@ -546,7 +583,8 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
         >
           <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>المخابر</h4>
           <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-            سجل أعمال المخابر لهذا السن. اربط المخبر بالطبيب المعالج (مهم لحساب د. الياس).
+            سجل أعمال المخابر لهذا السن بالليرة أو الدولار (أو الاثنين معاً). اربط المخبر بالطبيب المعالج
+            (مهم لحساب د. الياس).
           </p>
           <div className="table-wrap">
             <table className="data-table">
@@ -556,6 +594,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                   <th>وصف الإجراء</th>
                   <th>الطبيب</th>
                   <th>المبلغ (ل.س)</th>
+                  <th>المبلغ (USD)</th>
                   <th>التاريخ</th>
                   {canEdit ? <th></th> : null}
                 </tr>
@@ -563,12 +602,14 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
               <tbody>
                 {labDrafts.length === 0 ? (
                   <tr>
-                    <td colSpan={canEdit ? 6 : 5} style={{ color: 'var(--text-muted)' }}>
+                    <td colSpan={canEdit ? 7 : 6} style={{ color: 'var(--text-muted)' }}>
                       لا سجلات مخابر بعد.
                     </td>
                   </tr>
                 ) : (
-                  labDrafts.map((row, idx) => (
+                  labDrafts.map((row, idx) => {
+                    const effective = labEffectiveAmountSyp(row, rate)
+                    return (
                     <tr key={row.id || `lab-${idx}`}>
                       <td>
                         {canEdit ? (
@@ -629,19 +670,40 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                             inputMode="numeric"
                             dir="ltr"
                             value={row.amountSyp ? String(row.amountSyp) : ''}
-                            onChange={(e) => {
-                              const n = Math.max(
-                                0,
-                                Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0),
-                              )
-                              setLabDrafts((prev) =>
-                                prev.map((x, i) => (i === idx ? { ...x, amountSyp: n } : x)),
-                              )
-                            }}
+                            onChange={(e) => setLabAmountSyp(idx, e.target.value)}
                             placeholder="0"
                           />
                         ) : (
                           <span dir="ltr">{row.amountSyp.toLocaleString('ar-SY')} ل.س</span>
+                        )}
+                      </td>
+                      <td>
+                        {canEdit ? (
+                          <div>
+                            <input
+                              className="input"
+                              inputMode="decimal"
+                              dir="ltr"
+                              value={row.amountUsd ? String(row.amountUsd) : ''}
+                              onChange={(e) => setLabAmountUsd(idx, e.target.value)}
+                              placeholder="0"
+                            />
+                            {row.amountUsd > 0 ? (
+                              <p style={{ margin: '0.25rem 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                ≈ {effective.toLocaleString('ar-SY')} ل.س
+                                {rate != null ? ` (سعر ${rate.toLocaleString('ar-SY')})` : ''}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : row.amountUsd > 0 ? (
+                          <span dir="ltr">
+                            {formatUsdAmount(row.amountUsd)} USD
+                            <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                              ≈ {effective.toLocaleString('ar-SY')} ل.س
+                            </span>
+                          </span>
+                        ) : (
+                          '—'
                         )}
                       </td>
                       <td>
@@ -676,7 +738,8 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                         </td>
                       ) : null}
                     </tr>
-                  ))
+                    )
+                  })
                 )}
               </tbody>
             </table>
@@ -692,12 +755,15 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                 if (fromProc) {
                   setLabDrafts((prev) => [
                     ...prev,
-                    normalizeLabWork({
-                      ...base,
-                      providerUserId: fromProc.providerUserId,
-                      doctorName: fromProc.doctorName,
-                      providerKey: fromProc.providerKey,
-                    }),
+                    normalizeLabWork(
+                      {
+                        ...base,
+                        providerUserId: fromProc.providerUserId,
+                        doctorName: fromProc.doctorName,
+                        providerKey: fromProc.providerKey,
+                      },
+                      rate,
+                    ),
                   ])
                 } else {
                   setLabDrafts((prev) => [...prev, base])

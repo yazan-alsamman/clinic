@@ -12,6 +12,15 @@ function roundMoney(n) {
   return Math.round(Number(n) || 0)
 }
 
+/** تكلفة المخبر المكافئة بالليرة = ل.س + دولار×سعر الصرف */
+export function labEffectiveAmountSyp(lab) {
+  const syp = roundMoney(lab?.amountSyp)
+  const usd = Math.max(0, Number(lab?.amountUsd) || 0)
+  const rate = Math.max(0, Number(lab?.usdSypRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? roundMoney(usd * rate) : 0
+  return syp + fromUsd
+}
+
 function inRange(ymd, from, to) {
   const d = String(ymd || '').trim().slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false
@@ -123,7 +132,7 @@ export async function summarizeDentalChartFinance({ from, to }) {
       }
 
       for (const lab of tooth.labWorks || []) {
-        const amt = roundMoney(lab.amountSyp)
+        const amt = labEffectiveAmountSyp(lab)
         if (!(amt > 0)) continue
         let bd = String(lab.businessDate || '').trim().slice(0, 10)
         if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) continue
@@ -378,7 +387,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       }
 
       for (const lab of tooth.labWorks || []) {
-        const amt = roundMoney(lab.amountSyp)
+        const amt = labEffectiveAmountSyp(lab)
         if (!(amt > 0) && !String(lab.labName || '').trim() && !String(lab.procedureDescription || '').trim()) {
           continue
         }
@@ -424,6 +433,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           labName: String(lab.labName || '').trim(),
           procedureDescription: String(lab.procedureDescription || '').trim(),
           amountSyp: amt,
+          amountUsd: Math.max(0, Number(lab.amountUsd) || 0),
+          amountSypOnly: roundMoney(lab.amountSyp),
         })
       }
     }
