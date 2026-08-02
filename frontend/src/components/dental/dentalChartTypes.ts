@@ -7,12 +7,28 @@ export type SurfaceOrigin = 'preexisting' | 'clinic'
 export type ChartViewLayer = 'baseline' | 'clinic' | 'all'
 export type ChartPaintMode = 'baseline' | 'clinic'
 
+export type SurfaceMarkShape = 'fill' | 'outline' | 'cross' | 'stripe' | 'dot'
+export type ChartMarkCategory = 'baseline' | 'clinic' | 'both'
+
 export type DentalSurfaceMark = {
   view: SurfaceView
   region: SurfaceRegion
   label: string
   /** preexisting = عند القدوم، clinic = عمل العيادة */
   origin: SurfaceOrigin
+  markOptionId?: string
+  color?: string
+  shape?: SurfaceMarkShape | ''
+}
+
+export type DentalChartMarkOption = {
+  id: string
+  name: string
+  color: string
+  shape: SurfaceMarkShape
+  category: ChartMarkCategory
+  active: boolean
+  sortOrder: number
 }
 
 export type DentalPayment = {
@@ -80,8 +96,21 @@ export type ChartTool =
   | 'missing'
   | 'implant_teal'
   | 'implant_red'
-  | 'filling'
   | 'clear_surface'
+  | `mark:${string}`
+
+export function isMarkTool(tool: ChartTool): tool is `mark:${string}` {
+  return tool.startsWith('mark:')
+}
+
+export function markToolId(optionId: string): ChartTool {
+  return `mark:${optionId}`
+}
+
+export function markOptionIdFromTool(tool: ChartTool): string | null {
+  if (!isMarkTool(tool)) return null
+  return tool.slice(5) || null
+}
 
 export const FDI_ALL = [
   18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28, 48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35,
@@ -391,11 +420,17 @@ export function defaultTooth(fdi: number): DentalToothState {
 export function normalizeSurfaceMark(raw: Partial<DentalSurfaceMark> | null | undefined): DentalSurfaceMark {
   const view = raw?.view === 'occlusal' ? 'occlusal' : 'buccal'
   const region = String(raw?.region || 'O').toUpperCase() as SurfaceRegion
+  const shapeRaw = String(raw?.shape || '').trim()
+  const colorRaw = String(raw?.color || '').trim()
+  const shapes: SurfaceMarkShape[] = ['fill', 'outline', 'cross', 'stripe', 'dot']
   return {
     view,
     region: (['M', 'D', 'O', 'B', 'L', 'I'].includes(region) ? region : 'O') as SurfaceRegion,
     label: String(raw?.label || 'حشوة كومبوزيت').trim() || 'حشوة كومبوزيت',
     origin: raw?.origin === 'clinic' ? 'clinic' : 'preexisting',
+    markOptionId: String(raw?.markOptionId || '').trim() || undefined,
+    color: /^#[0-9a-fA-F]{3,8}$/.test(colorRaw) ? colorRaw.toLowerCase() : undefined,
+    shape: shapes.includes(shapeRaw as SurfaceMarkShape) ? (shapeRaw as SurfaceMarkShape) : undefined,
   }
 }
 

@@ -1,6 +1,11 @@
 import { Router } from 'express'
 import mongoose from 'mongoose'
 import { DentalMasterPlan } from '../models/DentalMasterPlan.js'
+import {
+  DentalChartMarkOption,
+  DENTAL_CHART_MARK_CATEGORIES,
+  DENTAL_CHART_MARK_SHAPES,
+} from '../models/DentalChartMarkOption.js'
 import { Patient } from '../models/Patient.js'
 import { User } from '../models/User.js'
 import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/auth.js'
@@ -28,6 +33,72 @@ const FDI_VALID = new Set([
 ])
 const SURFACE_VIEWS = new Set(['buccal', 'occlusal'])
 const SURFACE_REGIONS = new Set(['M', 'D', 'O', 'B', 'L', 'I'])
+const SURFACE_SHAPES = new Set(['fill', 'outline', 'cross', 'stripe', 'dot'])
+
+const DEFAULT_CHART_MARKS = [
+  { name: 'حشوة سابقة', color: '#c4b5a0', shape: 'fill', category: 'baseline', sortOrder: 0 },
+  { name: 'حشوة عيادة', color: '#0d9488', shape: 'fill', category: 'clinic', sortOrder: 1 },
+]
+
+function normalizeHexColor(raw, fallback = '#0d9488') {
+  const s = String(raw || '').trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase()
+  if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+    const r = s[1]
+    const g = s[2]
+    const b = s[3]
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase()
+  }
+  return fallback
+}
+
+function chartMarkOptionToDto(row) {
+  const o = row?.toObject ? row.toObject() : row
+  return {
+    id: String(o._id),
+    name: String(o.name || '').trim(),
+    color: normalizeHexColor(o.color),
+    shape: SURFACE_SHAPES.has(String(o.shape || '')) ? String(o.shape) : 'fill',
+    category: DENTAL_CHART_MARK_CATEGORIES.includes(String(o.category || ''))
+      ? String(o.category)
+      : 'both',
+    active: o.active !== false,
+    sortOrder: Number(o.sortOrder) || 0,
+  }
+}
+
+async function ensureDefaultChartMarks() {
+  for (const p of DEFAULT_CHART_MARKS) {
+    await DentalChartMarkOption.updateOne(
+      { name: p.name },
+      {
+        $setOnInsert: {
+          name: p.name,
+          color: p.color,
+          shape: p.shape,
+          category: p.category,
+          active: true,
+          sortOrder: p.sortOrder,
+        },
+      },
+      { upsert: true },
+    )
+  }
+}
+
+function surfaceMarkToDto(s) {
+  const shapeRaw = String(s?.shape || '').trim()
+  const colorRaw = String(s?.color || '').trim()
+  return {
+    view: s.view === 'occlusal' ? 'occlusal' : 'buccal',
+    region: String(s.region || 'O').toUpperCase(),
+    label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
+    origin: s.origin === 'clinic' ? 'clinic' : 'preexisting',
+    markOptionId: String(s.markOptionId || '').trim().slice(0, 40),
+    color: colorRaw ? normalizeHexColor(colorRaw, '') : '',
+    shape: SURFACE_SHAPES.has(shapeRaw) ? shapeRaw : '',
+  }
+}
 
 function normalizeYmd(raw, fallback = '') {
   const s = String(raw || '').trim().slice(0, 10)
@@ -273,12 +344,7 @@ function chartToDto(chart) {
         status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
         statusOrigin: t.statusOrigin === 'clinic' ? 'clinic' : 'preexisting',
         implantColor: t.implantColor === 'teal' || t.implantColor === 'red' ? t.implantColor : null,
-        surfaces: (t.surfaces || []).map((s) => ({
-          view: s.view === 'occlusal' ? 'occlusal' : 'buccal',
-          region: String(s.region || 'O').toUpperCase(),
-          label: String(s.label || 'حشوة كومبوزيت').trim().slice(0, 120),
-          origin: s.origin === 'clinic' ? 'clinic' : 'preexisting',
-        })),
+        surfaces: (t.surfaces || []).map((s) => surfaceMarkToDto(s)),
         note: String(t.note || '').trim().slice(0, 500),
         treatments,
         labWorks,
@@ -315,6 +381,12 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
           region,
           label: String(s?.label || 'حشوة كومبوزيت').trim().slice(0, 120) || 'حشوة كومبوزيت',
           origin: s?.origin === 'clinic' ? 'clinic' : 'preexisting',
+          markOptionId: String(s?.markOptionId || '').trim().slice(0, 40),
+          color: (() => {
+            const c = String(s?.color || '').trim()
+            return c ? normalizeHexColor(c, '') : ''
+          })(),
+          shape: SURFACE_SHAPES.has(String(s?.shape || '').trim()) ? String(s.shape).trim() : '',
         })
       }
     }
@@ -342,6 +414,120 @@ function planSummary(items) {
     .filter(Boolean)
     .join(' — ')
 }
+
+/** علامات مخطط الأسنان القابلة للتخصيص من لوحة المدير */
+dentalRouter.get('/chart-mark-options', async (req, res) => {
+  try {
+    if (!DENTAL_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    await ensureDefaultChartMarks()
+    const rows = await DentalChartMarkOption.find({ active: true }).sort({ sortOrder: 1, name: 1 }).lean()
+    res.json({ options: rows.map(chartMarkOptionToDto) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.get('/chart-mark-options/admin', requireRoles('super_admin'), async (_req, res) => {
+  try {
+    await ensureDefaultChartMarks()
+    const rows = await DentalChartMarkOption.find({}).sort({ sortOrder: 1, name: 1 }).lean()
+    res.json({ options: rows.map(chartMarkOptionToDto) })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.post('/chart-mark-options', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim().slice(0, 120)
+    if (!name) {
+      res.status(400).json({ error: 'اسم العلامة مطلوب' })
+      return
+    }
+    const color = normalizeHexColor(req.body?.color)
+    const shapeRaw = String(req.body?.shape || 'fill').trim()
+    const shape = DENTAL_CHART_MARK_SHAPES.includes(shapeRaw) ? shapeRaw : 'fill'
+    const categoryRaw = String(req.body?.category || 'both').trim()
+    const category = DENTAL_CHART_MARK_CATEGORIES.includes(categoryRaw) ? categoryRaw : 'both'
+    const sortOrder = Number.isFinite(Number(req.body?.sortOrder)) ? Number(req.body.sortOrder) : 999
+    const row = await DentalChartMarkOption.create({
+      name,
+      color,
+      shape,
+      category,
+      active: req.body?.active !== false,
+      sortOrder,
+    })
+    await writeAudit({
+      user: req.user,
+      action: 'إضافة علامة لمخطط الأسنان',
+      entityType: 'DentalChartMarkOption',
+      entityId: row._id,
+      details: { name, color, shape, category },
+    })
+    res.status(201).json({ option: chartMarkOptionToDto(row) })
+  } catch (e) {
+    if (e?.code === 11000) {
+      res.status(400).json({ error: 'اسم العلامة موجود مسبقاً' })
+      return
+    }
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.patch('/chart-mark-options/:id', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const row = await DentalChartMarkOption.findById(req.params.id)
+    if (!row) {
+      res.status(404).json({ error: 'العلامة غير موجودة' })
+      return
+    }
+    if (req.body?.name != null) row.name = String(req.body.name).trim().slice(0, 120)
+    if (req.body?.color != null) row.color = normalizeHexColor(req.body.color, row.color || '#0d9488')
+    if (req.body?.shape != null) {
+      const shapeRaw = String(req.body.shape).trim()
+      if (DENTAL_CHART_MARK_SHAPES.includes(shapeRaw)) row.shape = shapeRaw
+    }
+    if (req.body?.category != null) {
+      const categoryRaw = String(req.body.category).trim()
+      if (DENTAL_CHART_MARK_CATEGORIES.includes(categoryRaw)) row.category = categoryRaw
+    }
+    if (req.body?.active != null) row.active = req.body.active !== false
+    if (req.body?.sortOrder != null) row.sortOrder = Number(req.body.sortOrder) || 0
+    if (!String(row.name || '').trim()) {
+      res.status(400).json({ error: 'اسم العلامة مطلوب' })
+      return
+    }
+    await row.save()
+    await writeAudit({
+      user: req.user,
+      action: 'تعديل علامة مخطط الأسنان',
+      entityType: 'DentalChartMarkOption',
+      entityId: row._id,
+      details: {
+        name: row.name,
+        color: row.color,
+        shape: row.shape,
+        category: row.category,
+        active: row.active,
+      },
+    })
+    res.json({ option: chartMarkOptionToDto(row) })
+  } catch (e) {
+    if (e?.code === 11000) {
+      res.status(400).json({ error: 'اسم العلامة موجود مسبقاً' })
+      return
+    }
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
 
 /** أطباء فرع الأسنان المرتبطون بحسابات المستخدمين (للمخطط والنظام المالي) */
 dentalRouter.get('/providers', async (req, res) => {

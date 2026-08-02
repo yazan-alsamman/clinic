@@ -63,6 +63,10 @@ const dentalChartSurfaceSchema = new mongoose.Schema(
     label: { type: String, default: 'حشوة كومبوزيت', trim: true, maxlength: 120 },
     /** preexisting = عند القدوم، clinic = نُفّذ في العيادة */
     origin: { type: String, enum: ['preexisting', 'clinic'], default: 'preexisting' },
+    /** لقطة من خيار لوحة التحكم وقت الرسم */
+    markOptionId: { type: String, default: '', trim: true, maxlength: 40 },
+    color: { type: String, default: '', trim: true, maxlength: 20 },
+    shape: { type: String, enum: ['fill', 'outline', 'cross', 'stripe', 'dot', ''], default: '' },
   },
   { _id: false },
 )

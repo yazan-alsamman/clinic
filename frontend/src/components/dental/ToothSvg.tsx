@@ -1,19 +1,113 @@
-import type { DentalSurfaceMark, DentalToothState, ImplantColor } from './dentalChartTypes'
+import type { DentalSurfaceMark, DentalToothState, ImplantColor, SurfaceMarkShape } from './dentalChartTypes'
 import { isUpperFdi, toothHasClinicWork, toothKind, treatmentsHaveData } from './dentalChartTypes'
 
 const CROWN = '#f5f1ea'
 const CROWN_STROKE = '#c4b8a8'
 const ROOT = '#c4a574'
 const ROOT_STROKE = '#9a7b4f'
-/** حشوة سابقة (عند القدوم) — محايد */
 const FILLING_PREEXISTING = '#c4b5a0'
-/** حشوة عمل العيادة */
 const FILLING_CLINIC = '#0d9488'
 const MISSING_STROKE = '#1a1a1a'
 const MISSING_CLINIC = '#0f766e'
 
-function fillingFill(origin: DentalSurfaceMark['origin'] | undefined) {
-  return origin === 'clinic' ? FILLING_CLINIC : FILLING_PREEXISTING
+function markColor(m: DentalSurfaceMark) {
+  if (m.color && /^#[0-9a-fA-F]{3,8}$/.test(m.color)) return m.color
+  return m.origin === 'clinic' ? FILLING_CLINIC : FILLING_PREEXISTING
+}
+
+function regionPath(
+  view: 'buccal' | 'occlusal',
+  kind: ReturnType<typeof toothKind>,
+  region: DentalSurfaceMark['region'],
+) {
+  if (view === 'occlusal') {
+    if (kind === 'incisor' || kind === 'canine') {
+      if (region === 'I' || region === 'O') return 'M10 28 L30 28 L28 36 L12 36 Z'
+      if (region === 'M') return 'M8 14 L16 14 L16 34 L8 34 Z'
+      if (region === 'D') return 'M24 14 L32 14 L32 34 L24 34 Z'
+      return 'M12 12 L28 12 L28 28 L12 28 Z'
+    }
+    if (region === 'M') return 'M6 10 L16 10 L16 38 L6 38 Z'
+    if (region === 'D') return 'M24 10 L34 10 L34 38 L24 38 Z'
+    if (region === 'B') return 'M10 6 L30 6 L30 16 L10 16 Z'
+    if (region === 'L') return 'M10 32 L30 32 L30 42 L10 42 Z'
+    return 'M12 14 L28 14 L28 34 L12 34 Z'
+  }
+  if (region === 'I' || region === 'O') return 'M10 4 L30 4 L28 12 L12 12 Z'
+  if (region === 'M') return 'M6 8 L14 8 L14 28 L6 28 Z'
+  if (region === 'D') return 'M26 8 L34 8 L34 28 L26 28 Z'
+  return 'M10 6 L30 6 L28 16 L12 16 Z'
+}
+
+function regionCenter(d: string): { cx: number; cy: number } {
+  const nums = [...d.matchAll(/(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]))
+  if (nums.length < 2) return { cx: 20, cy: 20 }
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (let i = 0; i + 1 < nums.length; i += 2) {
+    minX = Math.min(minX, nums[i])
+    maxX = Math.max(maxX, nums[i])
+    minY = Math.min(minY, nums[i + 1])
+    maxY = Math.max(maxY, nums[i + 1])
+  }
+  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 }
+}
+
+function renderMarkShape(m: DentalSurfaceMark, d: string, i: number) {
+  const color = markColor(m)
+  const shape: SurfaceMarkShape = m.shape || 'fill'
+  const key = `${m.region}-${m.origin}-${shape}-${i}`
+  const { cx, cy } = regionCenter(d)
+
+  if (shape === 'outline') {
+    return <path key={key} d={d} fill="none" stroke={color} strokeWidth="2.2" opacity={0.95} />
+  }
+  if (shape === 'cross') {
+    return (
+      <g key={key}>
+        <path d={d} fill={color} opacity={0.25} />
+        <line x1={cx - 5} y1={cy - 5} x2={cx + 5} y2={cy + 5} stroke={color} strokeWidth="2" />
+        <line x1={cx + 5} y1={cy - 5} x2={cx - 5} y2={cy + 5} stroke={color} strokeWidth="2" />
+      </g>
+    )
+  }
+  if (shape === 'stripe') {
+    const pid = `stripe-m${i}-${m.region}-${m.origin}`
+    return (
+      <g key={key}>
+        <defs>
+          <pattern id={pid} patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+            <rect width="3" height="6" fill={color} />
+          </pattern>
+        </defs>
+        <path d={d} fill={`url(#${pid})`} opacity={0.95} />
+      </g>
+    )
+  }
+  if (shape === 'dot') {
+    return (
+      <g key={key}>
+        <path d={d} fill={color} opacity={0.2} />
+        <circle cx={cx} cy={cy} r="4" fill={color} opacity={0.95} />
+      </g>
+    )
+  }
+  return <path key={key} d={d} fill={color} opacity={0.92} />
+}
+
+function surfaceHighlight(
+  marks: DentalSurfaceMark[],
+  view: 'buccal' | 'occlusal',
+  kind: ReturnType<typeof toothKind>,
+) {
+  const relevant = marks.filter((m) => m.view === view)
+  if (!relevant.length) return null
+  return relevant.map((m, i) => {
+    const d = regionPath(view, kind, m.region)
+    return renderMarkShape(m, d, i)
+  })
 }
 
 function ImplantScrew({ color, flip }: { color: ImplantColor; flip?: boolean }) {
@@ -33,38 +127,6 @@ function ImplantScrew({ color, flip }: { color: ImplantColor; flip?: boolean }) 
       <ellipse cx="20" cy="72" rx="8" ry="3.5" fill={fill} stroke={stroke} strokeWidth="1" />
     </g>
   )
-}
-
-function surfaceHighlight(
-  marks: DentalSurfaceMark[],
-  view: 'buccal' | 'occlusal',
-  kind: ReturnType<typeof toothKind>,
-) {
-  const relevant = marks.filter((m) => m.view === view)
-  if (!relevant.length) return null
-  return relevant.map((m, i) => {
-    let d = ''
-    if (view === 'occlusal') {
-      if (kind === 'incisor' || kind === 'canine') {
-        if (m.region === 'I' || m.region === 'O') d = 'M10 28 L30 28 L28 36 L12 36 Z'
-        else if (m.region === 'M') d = 'M8 14 L16 14 L16 34 L8 34 Z'
-        else if (m.region === 'D') d = 'M24 14 L32 14 L32 34 L24 34 Z'
-        else d = 'M12 12 L28 12 L28 28 L12 28 Z'
-      } else {
-        if (m.region === 'M') d = 'M6 10 L16 10 L16 38 L6 38 Z'
-        else if (m.region === 'D') d = 'M24 10 L34 10 L34 38 L24 38 Z'
-        else if (m.region === 'B') d = 'M10 6 L30 6 L30 16 L10 16 Z'
-        else if (m.region === 'L') d = 'M10 32 L30 32 L30 42 L10 42 Z'
-        else d = 'M12 14 L28 14 L28 34 L12 34 Z'
-      }
-    } else {
-      if (m.region === 'I' || m.region === 'O') d = 'M10 4 L30 4 L28 12 L12 12 Z'
-      else if (m.region === 'M') d = 'M6 8 L14 8 L14 28 L6 28 Z'
-      else if (m.region === 'D') d = 'M26 8 L34 8 L34 28 L26 28 Z'
-      else d = 'M10 6 L30 6 L28 16 L12 16 Z'
-    }
-    return <path key={`${m.region}-${m.origin}-${i}`} d={d} fill={fillingFill(m.origin)} opacity={0.92} />
-  })
 }
 
 function BuccalToothArt({
@@ -237,7 +299,6 @@ export function ToothCell({
   selected: boolean
   onSelect: () => void
   onSurfaceClick?: (region: DentalSurfaceMark['region']) => void
-  /** نقطة تشير لوجود إجراء/مخبر عيادة */
   showClinicBadge?: boolean
 }) {
   const h = view === 'buccal' ? 92 : 52
@@ -254,7 +315,6 @@ export function ToothCell({
       <svg viewBox={`0 0 40 ${h}`} width="40" height={h} aria-hidden>
         {view === 'buccal' ? <BuccalToothArt fdi={fdi} tooth={tooth} /> : <OcclusalToothArt fdi={fdi} tooth={tooth} />}
         {badge ? <circle cx="34" cy="6" r="3.5" fill="#0d9488" stroke="#fff" strokeWidth="1" /> : null}
-        {/* invisible hit zones for filling tool on occlusal/buccal */}
         {onSurfaceClick && tooth.status === 'present' ? (
           <>
             <rect

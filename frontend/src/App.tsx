@@ -46,6 +46,10 @@ const DermatologyFinancePage = lazyPage(() => import('./pages/DermatologyFinance
 const AdminSkinProceduresPage = lazyPage(() => import('./pages/AdminSkinProceduresPage'), 'AdminSkinProceduresPage')
 const AdminClinicSessionsPage = lazyPage(() => import('./pages/AdminClinicSessionsPage'), 'AdminClinicSessionsPage')
 const AdminDentalClinicsPage = lazyPage(() => import('./pages/AdminDentalClinicsPage'), 'AdminDentalClinicsPage')
+const AdminDentalChartMarksPage = lazyPage(
+  () => import('./pages/AdminDentalChartMarksPage'),
+  'AdminDentalChartMarksPage',
+)
 
 const PatientPortalDashboard    = lazyPage(() => import('./pages/patient-portal/PatientPortalDashboard'), 'PatientPortalDashboard')
 const PatientPortalProfile      = lazyPage(() => import('./pages/patient-portal/PatientPortalProfile'), 'PatientPortalProfile')
@@ -112,6 +116,7 @@ export default function App() {
                 <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />
                 <Route path="/admin/clinic-sessions" element={<AdminClinicSessionsPage />} />
                 <Route path="/admin/dental-clinics" element={<AdminDentalClinicsPage />} />
+                <Route path="/admin/dental-chart-marks" element={<AdminDentalChartMarksPage />} />
                 <Route path="/admin/send-notifications" element={<AdminSendNotificationsPage />} />
                 <Route path="/admin/audit" element={<AdminAudit />} />
                 <Route path="/admin/rooms" element={<AdminRooms />} />
