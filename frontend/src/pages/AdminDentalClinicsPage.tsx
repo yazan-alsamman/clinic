@@ -232,7 +232,7 @@ export function AdminDentalClinicsPage() {
         <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.65rem' }}>ملخص العيادات</h2>
         {!data?.clinics?.length && !loading ? (
           <p className="page-desc" style={{ margin: 0 }}>
-            لا إجراءات ضمن هذا النطاق.
+            لا عيادات أسنان مسجّلة. أضف أطباء بدور «أسنان — فرع» من صفحة المستخدمين.
           </p>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.65rem' }}>
@@ -252,6 +252,7 @@ export function AdminDentalClinicsPage() {
                 <h3 style={{ margin: 0, fontSize: '0.95rem' }}>{c.clinicLabel}</h3>
                 <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                   {c.treatmentCount} إجراء · {c.labCount} مخبر
+                  {c.treatmentCount === 0 && c.labCount === 0 ? ' — لا بيانات في النطاق' : ''}
                 </p>
                 <p style={{ margin: '0.25rem 0 0', fontWeight: 700 }}>{fmtSyp(c.proceduresSyp)}</p>
                 <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>

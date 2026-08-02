@@ -246,6 +246,7 @@ function resolveDoctorMeta(tr, userById) {
 
 /**
  * قائمة تفصيلية بإجراءات/مخابر كل عيادة أسنان (لكل طبيب) ضمن نطاق تاريخ.
+ * العيادات تُعرض دائماً من حسابات أطباء الأسنان + د. الياس حتى بلا إجراءات في النطاق.
  * clinicKey: معرف الطبيب أو 'elias' أو فارغ للكل.
  */
 export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
@@ -253,7 +254,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
     .select('dentalChart name fileNumber')
     .lean()
 
-  const users = await User.find({ role: 'dental_branch' }).select('name active').lean()
+  const users = await User.find({ role: 'dental_branch', active: true }).select('name active').lean()
   const userById = new Map(users.map((u) => [String(u._id), String(u.name || '').trim()]))
 
   const filterKey = String(clinicKey || '').trim()
@@ -261,6 +262,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
   const rows = []
 
   function ensureClinic(meta) {
+    if (!meta.key || meta.key === '—') return null
     if (!clinicsMap.has(meta.key)) {
       clinicsMap.set(meta.key, {
         key: meta.key,
@@ -281,6 +283,30 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
     return clinicsMap.get(meta.key)
   }
 
+  /** عيادات ثابتة من الأطباء المسجّلين + د. الياس */
+  ensureClinic({
+    key: DENTAL_ELIAS_PROVIDER_KEY,
+    userId: null,
+    providerKey: DENTAL_ELIAS_PROVIDER_KEY,
+    name: DENTAL_ELIAS_DISPLAY_NAME,
+    clinicLabel: `عيادة ${DENTAL_ELIAS_DISPLAY_NAME}`,
+    noShare: true,
+    isElias: true,
+  })
+  for (const u of users) {
+    const name = String(u.name || '').trim() || '—'
+    const id = String(u._id)
+    ensureClinic({
+      key: id,
+      userId: id,
+      providerKey: '',
+      name,
+      clinicLabel: `عيادة ${name}`,
+      noShare: false,
+      isElias: false,
+    })
+  }
+
   for (const p of patients) {
     const patientId = String(p._id)
     const patientName = String(p.name || '').trim() || '—'
@@ -291,9 +317,22 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       const toothTreatmentsMeta = []
 
       for (const tr of tooth.treatments || []) {
-        const bd = treatmentBusinessDate(tr)
-        if (!bd || !inRange(bd, from, to)) continue
         const cost = treatmentCostSyp(tr)
+        const hasContent =
+          cost > 0 ||
+          Boolean(String(tr.procedureDescription || '').trim()) ||
+          Boolean(String(tr.doctorName || '').trim()) ||
+          Boolean(tr.providerUserId) ||
+          Boolean(tr.providerKey) ||
+          (Array.isArray(tr.payments) && tr.payments.length > 0)
+        if (!hasContent) continue
+
+        let bd = treatmentBusinessDate(tr)
+        const undated = !bd
+        /** بلا تاريخ: تُعرض دائماً حتى يراها المدير ويصحّح التاريخ */
+        if (!undated && !inRange(bd, from, to)) continue
+        if (undated) bd = 'بدون تاريخ'
+
         const paid = treatmentPaidSyp(tr)
         const remaining = Math.max(0, cost - paid)
         const meta = resolveDoctorMeta(tr, userById)
@@ -301,10 +340,12 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
 
         toothTreatmentsMeta.push({ cost, meta })
         const clinic = ensureClinic(meta)
-        clinic.treatmentCount += 1
-        clinic.proceduresSyp += cost
-        clinic.paidSyp += paid
-        clinic.remainingSyp += remaining
+        if (clinic) {
+          clinic.treatmentCount += 1
+          clinic.proceduresSyp += cost
+          clinic.paidSyp += paid
+          clinic.remainingSyp += remaining
+        }
 
         rows.push({
           kind: 'treatment',
@@ -314,6 +355,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           fileNumber,
           fdi,
           businessDate: bd,
+          undated,
           clinicKey: meta.key,
           clinicLabel: meta.clinicLabel,
           doctorName: meta.name,
@@ -341,12 +383,13 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           continue
         }
         let bd = String(lab.businessDate || '').trim().slice(0, 10)
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) continue
-        if (!inRange(bd, from, to)) continue
+        const undated = !/^\d{4}-\d{2}-\d{2}$/.test(bd)
+        if (!undated && !inRange(bd, from, to)) continue
+        if (undated) bd = 'بدون تاريخ'
 
         let meta = resolveDoctorMeta(lab, userById)
-        if (!meta.userId && !meta.providerKey && meta.name === '—') {
-          const withCost = toothTreatmentsMeta.filter((t) => t.cost > 0)
+        if ((!meta.userId && !meta.providerKey && (meta.name === '—' || !meta.name)) || meta.key === '—') {
+          const withCost = toothTreatmentsMeta.filter((t) => t.cost > 0 || t.meta)
           if (withCost.length > 0 && withCost.every((t) => t.meta.isElias)) {
             meta = resolveDoctorMeta(
               { providerKey: DENTAL_ELIAS_PROVIDER_KEY, doctorName: DENTAL_ELIAS_DISPLAY_NAME },
@@ -359,8 +402,10 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
 
         const clinic = ensureClinic(meta)
-        clinic.labCount += 1
-        clinic.labsSyp += amt
+        if (clinic) {
+          clinic.labCount += 1
+          clinic.labsSyp += amt
+        }
 
         rows.push({
           kind: 'lab',
@@ -370,6 +415,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           fileNumber,
           fdi,
           businessDate: bd,
+          undated,
           clinicKey: meta.key,
           clinicLabel: meta.clinicLabel,
           doctorName: meta.name,
@@ -395,9 +441,11 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         ? roundMoney(c.proceduresSyp - c.labsSyp)
         : roundMoney(c.proceduresSyp - (c.proceduresSyp * SHARE_PERCENT) / 100 - c.labsSyp),
     }))
+    .filter((c) => !filterKey || c.key === filterKey || c.userId === filterKey)
     .sort((a, b) => b.proceduresSyp - a.proceduresSyp || a.name.localeCompare(b.name, 'ar'))
 
   rows.sort((a, b) => {
+    if (a.undated !== b.undated) return a.undated ? -1 : 1
     if (a.businessDate !== b.businessDate) return a.businessDate < b.businessDate ? 1 : -1
     if (a.clinicLabel !== b.clinicLabel) return a.clinicLabel.localeCompare(b.clinicLabel, 'ar')
     return (a.patientName || '').localeCompare(b.patientName || '', 'ar')
