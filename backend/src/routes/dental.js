@@ -7,14 +7,15 @@ import { authMiddleware, requireActiveDay, requireRoles } from '../middleware/au
 import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { writeAudit } from '../utils/audit.js'
 import { patientToDto } from '../utils/dto.js'
-import { todayBusinessDate } from '../utils/date.js'
-import { round6 } from '../utils/money.js'
 import {
   DENTAL_ELIAS_DISPLAY_NAME,
   DENTAL_ELIAS_PROVIDER_KEY,
   DENTAL_ELIAS_VIRTUAL_ID,
   resolveDentalProviderFields,
 } from '../services/dentalDoctorConstants.js'
+import { listDentalClinicSessions } from '../services/dentalFinanceShares.js'
+import { isValidYmd, todayBusinessDate } from '../utils/date.js'
+import { round6 } from '../utils/money.js'
 
 export const dentalRouter = Router()
 dentalRouter.use(authMiddleware, loadBusinessDay)
@@ -354,6 +355,28 @@ dentalRouter.get('/providers', async (req, res) => {
         })),
       ],
     })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** لوحة المدير: جلسات/إجراءات كل عيادة أسنان (لكل طبيب) */
+dentalRouter.get('/admin/clinics', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const today = todayBusinessDate()
+    let from = String(req.query.from || '').trim().slice(0, 10)
+    let to = String(req.query.to || '').trim().slice(0, 10)
+    if (!isValidYmd(from)) from = `${today.slice(0, 7)}-01`
+    if (!isValidYmd(to)) to = today
+    if (from > to) {
+      const tmp = from
+      from = to
+      to = tmp
+    }
+    const clinicKey = String(req.query.clinicKey || req.query.provider || '').trim()
+    const data = await listDentalClinicSessions({ from, to, clinicKey })
+    res.json(data)
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })

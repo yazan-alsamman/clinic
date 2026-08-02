@@ -15,6 +15,7 @@ export type NavKey =
   | 'dermatology_finance'
   | 'admin_skin_procedures'
   | 'admin_clinic_sessions'
+  | 'admin_dental_clinics'
   | 'appointments_booked'
   | 'reception_appointment'
   | 'reception_walk_in_session'
