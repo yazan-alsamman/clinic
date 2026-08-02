@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { api, ApiError } from '../../api/client'
 import { ToothCell } from './ToothSvg'
 import { ToothTreatmentModal, type DentalProviderOption } from './ToothTreatmentModal'
@@ -429,21 +429,24 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           </div>
           <div className="odontogram-toolbar">
             {tools.map((t) => {
-              const color = 'color' in t ? t.color : undefined
+              const color = 'color' in t && typeof t.color === 'string' ? t.color : undefined
+              const style: CSSProperties = {
+                fontSize: '0.78rem',
+                padding: '0.35rem 0.65rem',
+              }
+              if (color && tool !== t.id) {
+                style.borderColor = color
+                style.boxShadow = `inset 0 -3px 0 ${color}`
+              } else if (color && tool === t.id) {
+                style.background = color
+                style.borderColor = color
+              }
               return (
                 <button
                   key={t.id}
                   type="button"
                   className={`btn ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{
-                    fontSize: '0.78rem',
-                    padding: '0.35rem 0.65rem',
-                    ...(color && tool !== t.id
-                      ? { borderColor: color, boxShadow: `inset 0 -3px 0 ${color}` }
-                      : color && tool === t.id
-                        ? { background: color, borderColor: color }
-                        : {}),
-                  }}
+                  style={style}
                   onClick={() => setTool(t.id)}
                 >
                   {t.label}
