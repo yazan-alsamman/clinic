@@ -332,7 +332,7 @@ export function ToothTreatmentModal({
               {arabicToothName(tooth.fdi)}
               {baselineOnly
                 ? ' — حالة الدخول: وصف فقط (بدون تكلفة أو دفعات).'
-                : ' — يمكن إضافة أكثر من إجراء (لكل إجراء طبيب وتكلفة ودفعات).'}
+                : ' — التكلفة تُرسل تلقائياً لتحصيل الاستقبال (لا دفع من هنا).'}
             </p>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -346,7 +346,6 @@ export function ToothTreatmentModal({
           const paidUsd = treatmentPaidTotalUsd(draft)
           const remaining = treatmentRemaining(draft, rate)
           const effectiveTotal = treatmentEffectiveTotalSyp(draft, rate)
-          const payCurrency = payCurrencyById[key] || 'syp'
           return (
             <section
               key={key}
@@ -475,7 +474,7 @@ export function ToothTreatmentModal({
                   ) : null}
                 </div>
                 <div className="stat-card">
-                  <div className="lbl">المدفوع</div>
+                  <div className="lbl">المحصّل (استقبال)</div>
                   <div className="val" style={{ fontSize: '0.9rem' }}>
                     {paid.toLocaleString('ar-SY')} ل.س
                   </div>
@@ -496,122 +495,40 @@ export function ToothTreatmentModal({
                 </div>
               </div>
 
-              <h4 style={{ margin: '0.9rem 0 0.45rem', fontSize: '0.88rem' }}>جدول دفعات هذا الإجراء</h4>
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>التاريخ</th>
-                      <th>العملة</th>
-                      <th>المبلغ</th>
-                      <th>ملاحظة</th>
-                      {canEdit ? <th></th> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.payments.length === 0 ? (
-                      <tr>
-                        <td colSpan={canEdit ? 6 : 5} style={{ color: 'var(--text-muted)' }}>
-                          لا دفعات بعد.
-                        </td>
-                      </tr>
-                    ) : (
-                      draft.payments.map((p, pIdx) => (
-                        <tr key={p.id}>
-                          <td>{pIdx + 1}</td>
-                          <td>{p.paidAt || '—'}</td>
-                          <td>{p.currency === 'usd' ? 'USD' : 'ل.س'}</td>
-                          <td dir="ltr">
-                            {p.currency === 'usd'
-                              ? `${formatUsdAmount(p.amountUsd)} USD (${p.amountSyp.toLocaleString('ar-SY')} ل.س)`
-                              : `${p.amountSyp.toLocaleString('ar-SY')} ل.س`}
-                          </td>
-                          <td>{p.note || '—'}</td>
-                          {canEdit ? (
-                            <td>
-                              <button
-                                type="button"
-                                className="btn btn-ghost"
-                                style={{ fontSize: '0.75rem' }}
-                                onClick={() => removePayment(idx, p.id)}
-                              >
-                                حذف
-                              </button>
-                            </td>
-                          ) : null}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {canEdit ? (
-                <div style={{ marginTop: '0.65rem' }}>
-                  <div className="grid-2" style={{ gap: '0.55rem' }}>
-                    <div>
-                      <label className="form-label">عملة الدفعة</label>
-                      <select
-                        className="input"
-                        value={payCurrency}
-                        onChange={(e) =>
-                          setPayCurrencyById((p) => ({
-                            ...p,
-                            [key]: e.target.value === 'usd' ? 'usd' : 'syp',
-                          }))
-                        }
-                      >
-                        <option value="syp">ليرة سورية</option>
-                        <option value="usd">دولار USD</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="form-label">
-                        {payCurrency === 'usd' ? 'مبلغ دفعة (USD)' : 'مبلغ دفعة (ل.س)'}
-                      </label>
-                      <input
-                        className="input"
-                        inputMode={payCurrency === 'usd' ? 'decimal' : 'numeric'}
-                        dir="ltr"
-                        value={payAmountById[key] || ''}
-                        onChange={(e) => setPayAmountById((p) => ({ ...p, [key]: e.target.value }))}
-                        placeholder={
-                          remaining > 0
-                            ? payCurrency === 'usd' && rate
-                              ? String(roundUsd(remaining / rate))
-                              : String(remaining)
-                            : '0'
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">تاريخ الدفع</label>
-                      <input
-                        className="input"
-                        type="date"
-                        value={payDateById[key] || todayIsoDate()}
-                        onChange={(e) => setPayDateById((p) => ({ ...p, [key]: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <label className="form-label" style={{ marginTop: '0.45rem' }}>
-                    ملاحظة (اختياري)
-                  </label>
-                  <input
-                    className="input"
-                    value={payNoteById[key] || ''}
-                    onChange={(e) => setPayNoteById((p) => ({ ...p, [key]: e.target.value }))}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ marginTop: '0.55rem', fontSize: '0.82rem' }}
-                    disabled={remaining <= 0}
-                    onClick={() => addPayment(idx)}
-                  >
-                    إضافة دفعة لهذا الإجراء
-                  </button>
+              {effectiveTotal > 0 ? (
+                <div
+                  style={{
+                    marginTop: '0.75rem',
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg)',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <strong>التحصيل: </strong>
+                  {draft.billingStatus === 'paid' || (paid > 0 && remaining <= 0) ? (
+                    <span style={{ color: 'var(--success)' }}>محصّل من الاستقبال</span>
+                  ) : draft.billingStatus === 'pending_payment' || draft.billingItemId ? (
+                    <span style={{ color: 'var(--warning)' }}>بانتظار التحصيل في الاستقبال</span>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      عند الحفظ يُرسل البند تلقائياً لطابور التحصيل
+                    </span>
+                  )}
+                  {draft.payments.length > 0 ? (
+                    <ul style={{ margin: '0.45rem 0 0', paddingRight: '1.1rem' }}>
+                      {draft.payments.map((p) => (
+                        <li key={p.id}>
+                          {p.paidAt || '—'} —{' '}
+                          {p.currency === 'usd'
+                            ? `${formatUsdAmount(p.amountUsd)} USD`
+                            : `${p.amountSyp.toLocaleString('ar-SY')} ل.س`}
+                          {p.note ? ` (${p.note})` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ) : null}
               </>

@@ -55,6 +55,9 @@ const clinicalSessionSchema = new mongoose.Schema(
       index: true,
       default: undefined,
     },
+    /** ربط بإجراء مخطط أسنان (معرف فرعي داخل patient.dentalChart) */
+    dentalToothFdi: { type: Number, min: 11, max: 48, default: undefined },
+    dentalTreatmentId: { type: String, default: '', trim: true, maxlength: 40 },
     isPackageSession: { type: Boolean, default: false },
     patientPackageId: { type: String, default: '' },
     patientPackageSessionId: { type: String, default: '' },

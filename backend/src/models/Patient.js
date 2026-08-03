@@ -97,6 +97,9 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
     /** تاريخ عمل الإجراء للتقارير المالية */
     businessDate: { type: String, default: '' },
     payments: { type: [dentalChartPaymentSchema], default: [] },
+    /** بند التحصيل في الاستقبال */
+    billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+    clinicalSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalSession', default: null },
   },
   { _id: true },
 )

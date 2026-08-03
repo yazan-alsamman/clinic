@@ -194,6 +194,11 @@ function normalizeTreatment(raw) {
     payments,
   }
   if (t._id) out._id = t._id
+  else if (t.id && mongoose.Types.ObjectId.isValid(String(t.id))) out._id = t.id
+  const billingRaw = t.billingItemId != null ? String(t.billingItemId).trim() : ''
+  if (billingRaw && mongoose.Types.ObjectId.isValid(billingRaw)) out.billingItemId = billingRaw
+  const csRaw = t.clinicalSessionId != null ? String(t.clinicalSessionId).trim() : ''
+  if (csRaw && mongoose.Types.ObjectId.isValid(csRaw)) out.clinicalSessionId = csRaw
   return out
 }
 
@@ -226,10 +231,12 @@ function normalizeTreatmentsList(row, fallbackUsdSypRate = 0) {
   return list
 }
 
-function treatmentToDto(t) {
+function treatmentToDto(t, billingMap) {
   const n = normalizeTreatment(t)
   const rawPays = Array.isArray(t?.payments) ? t.payments : []
   const isElias = String(n.providerKey || '') === DENTAL_ELIAS_PROVIDER_KEY
+  const billingItemId = t?.billingItemId ? String(t.billingItemId) : n.billingItemId ? String(n.billingItemId) : ''
+  const billingMeta = billingItemId && billingMap ? billingMap.get(billingItemId) : null
   return {
     id: t?._id ? String(t._id) : undefined,
     procedureDescription: n.procedureDescription,
@@ -240,6 +247,13 @@ function treatmentToDto(t) {
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : n.providerUserId ? String(n.providerUserId) : null,
     providerKey: n.providerKey || '',
     businessDate: n.businessDate || '',
+    billingItemId: billingItemId || null,
+    clinicalSessionId: t?.clinicalSessionId
+      ? String(t.clinicalSessionId)
+      : n.clinicalSessionId
+        ? String(n.clinicalSessionId)
+        : null,
+    billingStatus: billingMeta?.status || (billingItemId ? 'pending_payment' : null),
     payments: (n.payments || []).map((p, idx) => ({
       id: rawPays[idx]?._id ? String(rawPays[idx]._id) : `p-${idx}`,
       amountSyp: Math.round(Number(p.amountSyp) || 0),
@@ -331,13 +345,13 @@ function emptyDentalChartDto() {
   return { teeth: [], updatedAt: null, updatedBy: null }
 }
 
-function chartToDto(chart) {
+function chartToDto(chart, billingMap) {
   if (!chart) return emptyDentalChartDto()
   return {
     teeth: (chart.teeth || []).map((t) => {
       let treatmentsRaw = Array.isArray(t.treatments) ? t.treatments : []
       if (!treatmentsRaw.length && t.treatment) treatmentsRaw = [t.treatment]
-      const treatments = treatmentsRaw.map((x) => treatmentToDto(x))
+      const treatments = treatmentsRaw.map((x) => treatmentToDto(x, billingMap))
       const labWorks = (Array.isArray(t.labWorks) ? t.labWorks : []).map((x) => labWorkToDto(x))
       return {
         fdi: Number(t.fdi),
@@ -349,12 +363,52 @@ function chartToDto(chart) {
         treatments,
         labWorks,
         /** توافق واجهات قديمة */
-        treatment: treatments[0] || treatmentToDto({}),
+        treatment: treatments[0] || treatmentToDto({}, billingMap),
       }
     }),
     updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
     updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
   }
+}
+
+async function chartToDtoEnriched(chart) {
+  const ids = []
+  for (const t of chart?.teeth || []) {
+    for (const tr of t.treatments || []) {
+      if (tr.billingItemId) ids.push(String(tr.billingItemId))
+    }
+    if (t.treatment?.billingItemId) ids.push(String(t.treatment.billingItemId))
+  }
+  const { billingStatusByItemIds } = await import('../services/dentalChartBilling.js')
+  const billingMap = await billingStatusByItemIds(ids)
+  return chartToDto(chart, billingMap)
+}
+
+function mergePreviousBillingLinks(prevTeeth, nextTeeth) {
+  const prevById = new Map()
+  for (const tooth of prevTeeth || []) {
+    for (const tr of tooth.treatments || []) {
+      if (tr._id) prevById.set(String(tr._id), tr)
+    }
+  }
+  for (const tooth of nextTeeth || []) {
+    for (const tr of tooth.treatments || []) {
+      const id = tr._id ? String(tr._id) : ''
+      const prev = id ? prevById.get(id) : null
+      if (prev?.billingItemId) {
+        tr.billingItemId = prev.billingItemId
+        tr.clinicalSessionId = prev.clinicalSessionId || tr.clinicalSessionId
+        if (Array.isArray(prev.payments) && prev.payments.length > 0) {
+          tr.payments = prev.payments
+        }
+      }
+      const effective = treatmentEffectiveTotalSyp(tr.totalCostSyp, tr.totalCostUsd, tr.costUsdSypRate)
+      if (effective > 0 && !tr.billingItemId) {
+        tr.payments = []
+      }
+    }
+  }
+  return nextTeeth
 }
 
 function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
@@ -677,7 +731,7 @@ dentalRouter.get('/chart/:patientId', async (req, res) => {
       res.status(404).json({ error: 'المريض غير موجود' })
       return
     }
-    res.json({ chart: chartToDto(patient.dentalChart) })
+    res.json({ chart: await chartToDtoEnriched(patient.dentalChart) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -696,7 +750,9 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       return
     }
     const fallbackRate = Math.max(0, Number(req.businessDay?.usdSypRate) || 0)
-    const teeth = normalizeChartTeeth(req.body?.teeth, fallbackRate)
+    const prevTeeth = patient.dentalChart?.teeth ? JSON.parse(JSON.stringify(patient.dentalChart.teeth)) : []
+    let teeth = normalizeChartTeeth(req.body?.teeth, fallbackRate)
+    teeth = mergePreviousBillingLinks(prevTeeth, teeth)
     patient.dentalChart = {
       teeth,
       updatedAt: new Date(),
@@ -706,6 +762,14 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       patient.departments = [...new Set([...patient.departments, 'dental'])]
     }
     await patient.save()
+
+    const { syncDentalChartBilling } = await import('../services/dentalChartBilling.js')
+    await syncDentalChartBilling(patient, {
+      actorUserId: req.user._id,
+      businessDateFallback: req.businessDate || todayBusinessDate(),
+    })
+    await patient.save()
+
     await writeAudit({
       user: req.user,
       action: 'تحديث مخطط الأسنان',
@@ -713,10 +777,10 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       entityId: patient._id,
       details: { toothCount: teeth.length },
     })
-    res.json({ chart: chartToDto(patient.dentalChart) })
+    res.json({ chart: await chartToDtoEnriched(patient.dentalChart) })
   } catch (e) {
     console.error(e)
-    res.status(500).json({ error: 'خطأ في الخادم' })
+    res.status(500).json({ error: e?.message ? String(e.message).slice(0, 200) : 'خطأ في الخادم' })
   }
 })
 

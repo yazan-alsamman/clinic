@@ -518,7 +518,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       </div>
 
       <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        في حالة الدخول يظهر وصف الإجراء فقط بدون تكلفة أو دفعات. التكلفة والدفعات من وضع «تسجيل عيادة».
+        في حالة الدخول يظهر وصف فقط. في عمل العيادة تُحفظ التكلفة وتُرسل تلقائياً لتحصيل الاستقبال.
       </p>
 
       {panelTooth ? (

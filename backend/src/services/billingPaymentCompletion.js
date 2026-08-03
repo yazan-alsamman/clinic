@@ -370,6 +370,15 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     }
   }
 
+  if (bi.department === 'dental') {
+    try {
+      const { applyDentalBillingPaymentToChart } = await import('./dentalChartBilling.js')
+      await applyDentalBillingPaymentToChart(bi, payment)
+    } catch (dentalSyncErr) {
+      console.error('applyDentalBillingPaymentToChart:', dentalSyncErr)
+    }
+  }
+
   return {
     paymentId: String(payment._id),
     billingItemId: String(bi._id),

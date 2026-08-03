@@ -52,6 +52,9 @@ export type DentalToothTreatment = {
   providerKey?: string
   businessDate: string
   payments: DentalPayment[]
+  billingItemId?: string | null
+  clinicalSessionId?: string | null
+  billingStatus?: 'pending_payment' | 'paid' | 'cancelled' | null
 }
 
 export type DentalLabWork = {
@@ -286,6 +289,9 @@ export function normalizeTreatment(
     providerKey: isElias ? 'elias' : providerKey,
     businessDate,
     payments,
+    billingItemId: raw?.billingItemId ? String(raw.billingItemId) : null,
+    clinicalSessionId: raw?.clinicalSessionId ? String(raw.clinicalSessionId) : null,
+    billingStatus: raw?.billingStatus || null,
   }
 }
 
