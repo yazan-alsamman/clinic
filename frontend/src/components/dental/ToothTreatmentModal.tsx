@@ -33,6 +33,8 @@ type Props = {
   canEdit: boolean
   saving?: boolean
   providers: DentalProviderOption[]
+  /** حالة الدخول: وصف فقط بدون تكلفة/دفعات/مخابر */
+  baselineOnly?: boolean
   onClose: () => void
   onSave: (payload: { treatments: DentalToothTreatment[]; labWorks: DentalLabWork[] }) => void
 }
@@ -45,12 +47,27 @@ function todayIsoDate() {
   return `${y}-${m}-${day}`
 }
 
-export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose, onSave }: Props) {
+export function ToothTreatmentModal({
+  tooth,
+  canEdit,
+  saving,
+  providers,
+  baselineOnly = false,
+  onClose,
+  onSave,
+}: Props) {
   const { usdSypRate } = useClinic()
   const rate = usdSypRate != null && usdSypRate > 0 ? usdSypRate : null
 
   const [drafts, setDrafts] = useState<DentalToothTreatment[]>(() => {
     const list = (tooth.treatments || []).map((t) => normalizeTreatment(t, rate))
+    if (baselineOnly) {
+      const docs = list.filter(
+        (t) =>
+          !(t.totalCostSyp > 0 || t.totalCostUsd > 0 || t.payments.length > 0 || Boolean(t.providerUserId)),
+      )
+      return docs.length > 0 ? docs : [emptyTreatment()]
+    }
     return list.length > 0 ? list : [emptyTreatment()]
   })
   const [labDrafts, setLabDrafts] = useState<DentalLabWork[]>(() =>
@@ -239,6 +256,36 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
 
   function handleSave() {
     setLocalErr('')
+    if (baselineOnly) {
+      const financial = (tooth.treatments || [])
+        .map((t) => normalizeTreatment(t, rate))
+        .filter(
+          (t) =>
+            t.totalCostSyp > 0 ||
+            t.totalCostUsd > 0 ||
+            t.payments.length > 0 ||
+            Boolean(t.providerUserId),
+        )
+      const docs = drafts
+        .map((d) =>
+          normalizeTreatment(
+            {
+              ...emptyTreatment(),
+              id: d.id,
+              procedureDescription: d.procedureDescription,
+            },
+            rate,
+          ),
+        )
+        .filter((t) => Boolean(t.procedureDescription.trim()))
+      const finIds = new Set(financial.map((t) => String(t.id || '')).filter(Boolean))
+      const docsOnly = docs.filter((d) => !d.id || !finIds.has(String(d.id)))
+      onSave({
+        treatments: [...financial, ...docsOnly],
+        labWorks: (tooth.labWorks || []).map((x) => normalizeLabWork(x, rate)).filter(labWorkHasData),
+      })
+      return
+    }
     const next = drafts.map((d) => normalizeTreatment(d, rate))
     for (let i = 0; i < next.length; i += 1) {
       const t = next[i]
@@ -282,7 +329,10 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
               إجراءات السن {tooth.fdi}
             </h3>
             <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              {arabicToothName(tooth.fdi)} — يمكن إضافة أكثر من إجراء (لكل إجراء طبيب وتكلفة ودفعات).
+              {arabicToothName(tooth.fdi)}
+              {baselineOnly
+                ? ' — حالة الدخول: وصف فقط (بدون تكلفة أو دفعات).'
+                : ' — يمكن إضافة أكثر من إجراء (لكل إجراء طبيب وتكلفة ودفعات).'}
             </p>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -329,6 +379,8 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                 placeholder="مثال: حشوة كومبوزيت — عصب — تاج…"
               />
 
+              {!baselineOnly ? (
+              <>
               <div className="grid-2" style={{ marginTop: '0.75rem', gap: '0.75rem' }}>
                 <div>
                   <label className="form-label">التكلفة الكلية (ل.س)</label>
@@ -562,16 +614,25 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
                   </button>
                 </div>
               ) : null}
+              </>
+              ) : null}
             </section>
           )
         })}
 
-        {canEdit ? (
+        {canEdit && !baselineOnly ? (
           <button type="button" className="btn btn-secondary" style={{ marginTop: '0.85rem', width: '100%' }} onClick={addProcedure}>
             + إضافة إجراء آخر
           </button>
         ) : null}
 
+        {canEdit && baselineOnly && drafts.length < 5 ? (
+          <button type="button" className="btn btn-secondary" style={{ marginTop: '0.85rem', width: '100%' }} onClick={addProcedure}>
+            + إضافة وصف آخر
+          </button>
+        ) : null}
+
+        {!baselineOnly ? (
         <section
           style={{
             marginTop: '1.15rem',
@@ -774,6 +835,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
             </button>
           ) : null}
         </section>
+        ) : null}
 
         {localErr ? (
           <p style={{ color: 'var(--danger)', margin: '0.75rem 0 0', fontSize: '0.88rem' }}>{localErr}</p>
@@ -785,7 +847,7 @@ export function ToothTreatmentModal({ tooth, canEdit, saving, providers, onClose
           </button>
           {canEdit ? (
             <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSave}>
-              {saving ? 'جاري الحفظ…' : 'حفظ الإجراءات والمخابر'}
+              {saving ? 'جاري الحفظ…' : baselineOnly ? 'حفظ الوصف' : 'حفظ الإجراءات والمخابر'}
             </button>
           ) : null}
         </div>

@@ -53,6 +53,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   const [markOptions, setMarkOptions] = useState<DentalChartMarkOption[]>([])
   const [selectedFdi, setSelectedFdi] = useState<number | null>(null)
   const [panelFdi, setPanelFdi] = useState<number | null>(null)
+  const [panelBaselineOnly, setPanelBaselineOnly] = useState(false)
   const [tool, setTool] = useState<ChartTool>('select')
   const [viewLayer, setViewLayer] = useState<ChartViewLayer>('all')
   const [paintMode, setPaintMode] = useState<ChartPaintMode>('baseline')
@@ -187,8 +188,9 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
     [canEdit],
   )
 
-  const openTreatmentPanel = useCallback((fdi: number) => {
+  const openTreatmentPanel = useCallback((fdi: number, baseline = false) => {
     setSelectedFdi(fdi)
+    setPanelBaselineOnly(baseline)
     setPanelFdi(fdi)
   }, [])
 
@@ -197,13 +199,13 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       setSelectedFdi(fdi)
 
       if (tool === 'select' || !canEdit) {
-        openTreatmentPanel(fdi)
+        openTreatmentPanel(fdi, paintMode === 'baseline')
         return
       }
 
-      // حالة الدخول: علامات بصرية فقط — لا تكلفة ولا دفعات (المريض لم يُجرِ العمل هنا)
-      // (أداة select فتحت اللوحة أعلاه)
-      const openMoneyPanel = paintMode === 'clinic'
+      // حالة الدخول: وصف فقط بدون تكلفة/دفعات
+      const openPanel = true
+      const asBaseline = paintMode === 'baseline'
 
       if (tool === 'healthy') {
         updateTooth(fdi, (prev) => {
@@ -227,7 +229,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             note: '',
           }
         })
-        if (openMoneyPanel) openTreatmentPanel(fdi)
+        if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
       if (tool === 'missing') {
@@ -238,7 +240,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           implantColor: null,
           surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
-        if (openMoneyPanel) openTreatmentPanel(fdi)
+        if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
       if (tool === 'implant_teal') {
@@ -249,7 +251,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           implantColor: 'teal',
           surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
-        if (openMoneyPanel) openTreatmentPanel(fdi)
+        if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
       if (tool === 'implant_red') {
@@ -260,7 +262,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           implantColor: 'red',
           surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
-        if (openMoneyPanel) openTreatmentPanel(fdi)
+        if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
       if (isMarkTool(tool)) {
@@ -293,7 +295,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           surfaces.push(mark)
           return { ...prev, status: 'present' as const, implantColor: null, surfaces }
         })
-        if (openMoneyPanel) openTreatmentPanel(fdi)
+        if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
       if (tool === 'clear_surface') {
@@ -312,7 +314,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             ),
           }
         })
-        if (openMoneyPanel) openTreatmentPanel(fdi)
+        if (openPanel) openTreatmentPanel(fdi, asBaseline)
       }
     },
     [canEdit, tool, updateTooth, openTreatmentPanel, paintMode, originForPaint, markOptions],
@@ -516,17 +518,17 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       </div>
 
       <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        تسجيل الدخول يحدّث المخطط فقط بدون تكلفة أو دفعات. التكلفة والدفعات من «تحديد / إجراء» أو وضع «تسجيل
-        عيادة».
+        في حالة الدخول يظهر وصف الإجراء فقط بدون تكلفة أو دفعات. التكلفة والدفعات من وضع «تسجيل عيادة».
       </p>
 
       {panelTooth ? (
         <ToothTreatmentModal
-          key={panelTooth.fdi}
+          key={`${panelTooth.fdi}-${panelBaselineOnly ? 'b' : 'c'}`}
           tooth={panelTooth}
           canEdit={canEdit}
           saving={saving}
           providers={providers}
+          baselineOnly={panelBaselineOnly}
           onClose={() => setPanelFdi(null)}
           onSave={(payload) => void saveTreatment(payload)}
         />
