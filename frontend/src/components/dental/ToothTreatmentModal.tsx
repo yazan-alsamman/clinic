@@ -16,7 +16,6 @@ import {
   treatmentPaidTotalUsd,
   treatmentRemaining,
   type DentalLabWork,
-  type DentalPayment,
   type DentalToothState,
   type DentalToothTreatment,
 } from './dentalChartTypes'
@@ -73,10 +72,6 @@ export function ToothTreatmentModal({
   const [labDrafts, setLabDrafts] = useState<DentalLabWork[]>(() =>
     (tooth.labWorks || []).map((x) => normalizeLabWork(x, rate)),
   )
-  const [payAmountById, setPayAmountById] = useState<Record<string, string>>({})
-  const [payCurrencyById, setPayCurrencyById] = useState<Record<string, 'syp' | 'usd'>>({})
-  const [payNoteById, setPayNoteById] = useState<Record<string, string>>({})
-  const [payDateById, setPayDateById] = useState<Record<string, string>>({})
   const [localErr, setLocalErr] = useState('')
 
   useEffect(() => {
@@ -178,80 +173,6 @@ export function ToothTreatmentModal({
       if (prev.length <= 1) return [emptyTreatment()]
       return prev.filter((_, i) => i !== idx)
     })
-  }
-
-  function addPayment(idx: number) {
-    setLocalErr('')
-    const row = drafts[idx]
-    if (!row) return
-    const key = procedureKey(row, idx)
-    const currency = payCurrencyById[key] || 'syp'
-    const remaining = treatmentRemaining(row, rate)
-    const effectiveTotal = treatmentEffectiveTotalSyp(row, rate)
-
-    if (!(effectiveTotal > 0)) {
-      setLocalErr(`الإجراء ${idx + 1}: حدد التكلفة الكلية بالليرة أو الدولار أولاً.`)
-      return
-    }
-
-    let payment: DentalPayment
-    if (currency === 'usd') {
-      if (!(rate != null && rate > 0)) {
-        setLocalErr('لا يوجد سعر صرف لليوم — لا يمكن تسجيل دفعة بالدولار.')
-        return
-      }
-      const amountUsd = Math.max(0, roundUsd(Number(String(payAmountById[key] || '').replace(/,/g, '')) || 0))
-      if (!(amountUsd > 0)) {
-        setLocalErr(`الإجراء ${idx + 1}: أدخل مبلغ دفعة بالدولار أكبر من صفر.`)
-        return
-      }
-      const amountSyp = Math.round(amountUsd * rate)
-      if (amountSyp > remaining) {
-        setLocalErr(
-          `الإجراء ${idx + 1}: المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`,
-        )
-        return
-      }
-      payment = {
-        id: `p-${Date.now()}-${idx}`,
-        amountSyp,
-        amountUsd,
-        currency: 'usd',
-        usdSypRateUsed: rate,
-        paidAt: payDateById[key] || todayIsoDate(),
-        note: (payNoteById[key] || '').trim(),
-      }
-    } else {
-      const amount = Math.max(0, Math.round(Number(String(payAmountById[key] || '').replace(/[^\d]/g, '')) || 0))
-      if (!(amount > 0)) {
-        setLocalErr(`الإجراء ${idx + 1}: أدخل مبلغ دفعة أكبر من صفر.`)
-        return
-      }
-      if (amount > remaining) {
-        setLocalErr(
-          `الإجراء ${idx + 1}: المبلغ أكبر من المتبقي (${remaining.toLocaleString('ar-SY')} ل.س).`,
-        )
-        return
-      }
-      payment = {
-        id: `p-${Date.now()}-${idx}`,
-        amountSyp: amount,
-        amountUsd: 0,
-        currency: 'syp',
-        usdSypRateUsed: 0,
-        paidAt: payDateById[key] || todayIsoDate(),
-        note: (payNoteById[key] || '').trim(),
-      }
-    }
-    updateProcedure(idx, { payments: [...row.payments, payment] })
-    setPayAmountById((p) => ({ ...p, [key]: '' }))
-    setPayNoteById((p) => ({ ...p, [key]: '' }))
-  }
-
-  function removePayment(procIdx: number, paymentId: string) {
-    const row = drafts[procIdx]
-    if (!row) return
-    updateProcedure(procIdx, { payments: row.payments.filter((p) => p.id !== paymentId) })
   }
 
   function handleSave() {
