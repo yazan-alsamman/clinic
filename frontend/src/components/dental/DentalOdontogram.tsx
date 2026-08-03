@@ -202,7 +202,8 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       }
 
       // حالة الدخول: علامات بصرية فقط — لا تكلفة ولا دفعات (المريض لم يُجرِ العمل هنا)
-      const openMoneyPanel = paintMode === 'clinic' || tool === 'select'
+      // (أداة select فتحت اللوحة أعلاه)
+      const openMoneyPanel = paintMode === 'clinic'
 
       if (tool === 'healthy') {
         updateTooth(fdi, (prev) => {
