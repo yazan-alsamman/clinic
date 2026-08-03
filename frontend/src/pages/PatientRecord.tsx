@@ -13,6 +13,7 @@ import {
 } from '../components/PaymentChannelFields'
 import { BillingPaymentModal } from '../components/BillingPaymentModal'
 import { DentalOdontogram } from '../components/dental/DentalOdontogram'
+import { DentalTreatmentPlan } from '../components/dental/DentalTreatmentPlan'
 import {
   netCollectedSypFromPayment,
   type BillingPaymentRequestBody,
@@ -475,6 +476,7 @@ function formatClinicDate(iso: string | undefined) {
 
 type ClinicalDentalSummary = {
   status: 'draft' | 'approved'
+  notes?: string
   items: { label?: string; note?: string; tooth?: number }[]
   approvedAt?: string | null
 } | null
@@ -722,11 +724,16 @@ function buildPatientRecordPrintHtml(opts: {
       if (dp) {
         const status = dp.status === 'approved' ? 'معتمدة' : 'مسودّة'
         const approved = dp.approvedAt ? ` — ${escapeHtmlPdf(formatClinicDate(dp.approvedAt))}` : ''
+        const notesHtml = dp.notes?.trim()
+          ? `<p style="white-space:pre-wrap">${escapeHtmlPdf(dp.notes.trim())}</p>`
+          : ''
         const items =
           dp.items?.length ?
             `<ul>${dp.items.map((it) => `<li>${escapeHtmlPdf(it.label || it.note || `سن ${it.tooth ?? '—'}`)}</li>`).join('')}</ul>`
-          : '<p class="muted">لا بنود في الخطة.</p>'
-        inner = `<p><strong>الحالة:</strong> ${status}${approved}</p>${items}`
+          : notesHtml
+            ? ''
+            : '<p class="muted">لا بنود في الخطة.</p>'
+        inner = `<p><strong>الحالة:</strong> ${status}${approved}</p>${notesHtml}${items}`
       }
       parts.push(`<h2>خطة الأسنان (ملخص)</h2>${inner}`)
     }
@@ -2978,6 +2985,11 @@ export function PatientRecord() {
                           ? ` — ${formatClinicDate(clinicalHistory.dentalPlan.approvedAt)}`
                           : null}
                       </p>
+                      {clinicalHistory.dentalPlan.notes?.trim() ? (
+                        <p style={{ margin: '0 0 0.5rem', whiteSpace: 'pre-wrap' }}>
+                          {clinicalHistory.dentalPlan.notes.trim()}
+                        </p>
+                      ) : null}
                       {clinicalHistory.dentalPlan.items?.length ? (
                         <ul style={{ margin: 0, paddingRight: '1.25rem' }}>
                           {clinicalHistory.dentalPlan.items.map((it, idx) => (
@@ -2986,9 +2998,9 @@ export function PatientRecord() {
                             </li>
                           ))}
                         </ul>
-                      ) : (
+                      ) : !clinicalHistory.dentalPlan.notes?.trim() ? (
                         <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا بنود في الخطة.</p>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -5134,18 +5146,29 @@ export function PatientRecord() {
 
       {tab === 'dental' &&
         (canAccessTab(role, 'dental') ? (
-          <div className="card">
-            <h2 className="card-title">مخطط الأسنان</h2>
-            <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              مخطط FDI تفاعلي — يُحفظ تلقائياً على ملف المريض.
-            </p>
-            {id ? (
-              <DentalOdontogram
-                patientId={id}
-                canEdit={role === 'super_admin' || role === 'dental_branch'}
-              />
-            ) : null}
-          </div>
+          <>
+            <div className="card" style={{ marginBottom: '1rem' }}>
+              {id ? (
+                <DentalTreatmentPlan
+                  patientId={id}
+                  canEdit={role === 'super_admin' || role === 'dental_branch'}
+                  canApprove={role === 'super_admin'}
+                />
+              ) : null}
+            </div>
+            <div className="card">
+              <h2 className="card-title">مخطط الأسنان</h2>
+              <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                مخطط FDI تفاعلي — يُحفظ تلقائياً على ملف المريض.
+              </p>
+              {id ? (
+                <DentalOdontogram
+                  patientId={id}
+                  canEdit={role === 'super_admin' || role === 'dental_branch'}
+                />
+              ) : null}
+            </div>
+          </>
         ) : (
           <div className="no-access">
             <strong>لا تملك صلاحية ملف الأسنان</strong>

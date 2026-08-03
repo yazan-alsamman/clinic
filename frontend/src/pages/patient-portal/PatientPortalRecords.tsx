@@ -28,7 +28,7 @@ type Clinical = {
     providerName: string
     notes: string
   }[]
-  dentalPlan: { status: string; items: { label?: string; note?: string }[] } | null
+  dentalPlan: { status: string; notes?: string; items: { label?: string; note?: string }[] } | null
 }
 
 export function PatientPortalRecords() {
@@ -152,13 +152,22 @@ export function PatientPortalRecords() {
                 {data.dentalPlan.status === 'approved' ? 'معتمدة' : data.dentalPlan.status === 'draft' ? 'مسودة' : data.dentalPlan.status}
               </strong>
             </p>
-            <ul style={{ margin: 0, paddingRight: '1.25rem', fontSize: '0.9rem' }}>
-              {(data.dentalPlan.items || []).map((it, i) => (
-                <li key={i} style={{ marginBottom: '0.35rem' }}>
-                  {it.label || it.note || 'بند'}
-                </li>
-              ))}
-            </ul>
+            {data.dentalPlan.notes?.trim() ? (
+              <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>
+                {data.dentalPlan.notes.trim()}
+              </p>
+            ) : null}
+            {(data.dentalPlan.items || []).length > 0 ? (
+              <ul style={{ margin: 0, paddingRight: '1.25rem', fontSize: '0.9rem' }}>
+                {(data.dentalPlan.items || []).map((it, i) => (
+                  <li key={i} style={{ marginBottom: '0.35rem' }}>
+                    {it.label || it.note || 'بند'}
+                  </li>
+                ))}
+              </ul>
+            ) : !data.dentalPlan.notes?.trim() ? (
+              <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا بنود في الخطة.</p>
+            ) : null}
           </>
         )}
       </div>

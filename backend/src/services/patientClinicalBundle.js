@@ -109,6 +109,7 @@ export async function getClinicalBundleForPatientId(pid) {
   if (planDoc) {
     dentalPlan = {
       status: planDoc.status,
+      notes: String(planDoc.notes || ''),
       items: Array.isArray(planDoc.items) ? planDoc.items : [],
       approvedAt: planDoc.approvedAt,
     }

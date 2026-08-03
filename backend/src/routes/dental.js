@@ -736,6 +736,7 @@ dentalRouter.get('/plans/:patientId', async (req, res) => {
         id: String(plan._id),
         patientId: String(plan.patientId),
         status: plan.status,
+        notes: String(plan.notes || ''),
         items: plan.items,
         approvedAt: plan.approvedAt,
       },
@@ -758,12 +759,25 @@ dentalRouter.put('/plans/:patientId', requireActiveDay, async (req, res) => {
       return
     }
     const body = req.body ?? {}
+    const notes =
+      body.notes != null ? String(body.notes).trim().slice(0, 20000) : undefined
+    const items = Array.isArray(body.items)
+      ? body.items
+          .map((it) => ({
+            label: String(it?.label || '').trim().slice(0, 500),
+            note: String(it?.note || '').trim().slice(0, 2000),
+            tooth: Number.isFinite(Number(it?.tooth)) ? Math.round(Number(it.tooth)) : undefined,
+          }))
+          .filter((it) => it.label || it.note || it.tooth)
+          .slice(0, 80)
+      : undefined
     let plan = await DentalMasterPlan.findOne({ patientId: patient._id })
     if (!plan) {
       plan = await DentalMasterPlan.create({
         patientId: patient._id,
         status: 'draft',
-        items: body.items ?? [],
+        notes: notes ?? '',
+        items: items ?? [],
         createdBy: req.user._id,
       })
     } else {
@@ -771,7 +785,8 @@ dentalRouter.put('/plans/:patientId', requireActiveDay, async (req, res) => {
         res.status(400).json({ error: 'الخطة معتمدة — تعديل المدير فقط' })
         return
       }
-      plan.items = body.items ?? plan.items
+      if (notes !== undefined) plan.notes = notes
+      if (items !== undefined) plan.items = items
       await plan.save()
     }
     if (!patient.departments.includes('dental')) {
@@ -788,6 +803,7 @@ dentalRouter.put('/plans/:patientId', requireActiveDay, async (req, res) => {
       plan: {
         id: String(plan._id),
         status: plan.status,
+        notes: String(plan.notes || ''),
         items: plan.items,
         approvedAt: plan.approvedAt,
       },
@@ -809,6 +825,7 @@ dentalRouter.post(
         plan = await DentalMasterPlan.create({
           patientId: req.params.patientId,
           status: 'draft',
+          notes: String(req.body?.notes || '').trim().slice(0, 20000),
           items: req.body?.items ?? [],
           createdBy: req.user._id,
         })
@@ -816,6 +833,7 @@ dentalRouter.post(
       plan.status = 'approved'
       plan.approvedBy = req.user._id
       plan.approvedAt = new Date()
+      if (req.body?.notes != null) plan.notes = String(req.body.notes).trim().slice(0, 20000)
       if (req.body?.items) plan.items = req.body.items
       await plan.save()
       await writeAudit({
@@ -828,6 +846,7 @@ dentalRouter.post(
         plan: {
           id: String(plan._id),
           status: plan.status,
+          notes: String(plan.notes || ''),
           items: plan.items,
           approvedAt: plan.approvedAt,
         },

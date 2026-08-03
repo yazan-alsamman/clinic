@@ -4,6 +4,8 @@ const dentalMasterPlanSchema = new mongoose.Schema(
   {
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true, unique: true },
     status: { type: String, enum: ['draft', 'approved'], default: 'draft' },
+    /** نص حر لخطة العلاج */
+    notes: { type: String, default: '', trim: true, maxlength: 20000 },
     items: [
       {
         label: String,
