@@ -201,6 +201,9 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         return
       }
 
+      // حالة الدخول: علامات بصرية فقط — لا تكلفة ولا دفعات (المريض لم يُجرِ العمل هنا)
+      const openMoneyPanel = paintMode === 'clinic' || tool === 'select'
+
       if (tool === 'healthy') {
         updateTooth(fdi, (prev) => {
           if (paintMode === 'clinic') {
@@ -223,7 +226,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             note: '',
           }
         })
-        openTreatmentPanel(fdi)
+        if (openMoneyPanel) openTreatmentPanel(fdi)
         return
       }
       if (tool === 'missing') {
@@ -234,7 +237,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           implantColor: null,
           surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
-        openTreatmentPanel(fdi)
+        if (openMoneyPanel) openTreatmentPanel(fdi)
         return
       }
       if (tool === 'implant_teal') {
@@ -245,7 +248,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           implantColor: 'teal',
           surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
-        openTreatmentPanel(fdi)
+        if (openMoneyPanel) openTreatmentPanel(fdi)
         return
       }
       if (tool === 'implant_red') {
@@ -256,7 +259,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           implantColor: 'red',
           surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
         }))
-        openTreatmentPanel(fdi)
+        if (openMoneyPanel) openTreatmentPanel(fdi)
         return
       }
       if (isMarkTool(tool)) {
@@ -289,7 +292,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           surfaces.push(mark)
           return { ...prev, status: 'present' as const, implantColor: null, surfaces }
         })
-        openTreatmentPanel(fdi)
+        if (openMoneyPanel) openTreatmentPanel(fdi)
         return
       }
       if (tool === 'clear_surface') {
@@ -308,7 +311,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             ),
           }
         })
-        openTreatmentPanel(fdi)
+        if (openMoneyPanel) openTreatmentPanel(fdi)
       }
     },
     [canEdit, tool, updateTooth, openTreatmentPanel, paintMode, originForPaint, markOptions],
@@ -512,8 +515,8 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       </div>
 
       <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        علامات السطح تُدار من لوحة التحكم (الاسم واللون والشكل). التكلفة والدفعات من صفحة الإجراء عند الضغط على
-        السن.
+        تسجيل الدخول يحدّث المخطط فقط بدون تكلفة أو دفعات. التكلفة والدفعات من «تحديد / إجراء» أو وضع «تسجيل
+        عيادة».
       </p>
 
       {panelTooth ? (
