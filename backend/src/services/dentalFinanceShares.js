@@ -479,3 +479,121 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
     },
   }
 }
+
+/**
+ * لوحة المدير: كل مرضى الأسنان مع الحساب الكامل والإجراءات والطبيب لكل إجراء.
+ */
+export async function listDentalPatientsAccounts({ q = '' } = {}) {
+  const patients = await Patient.find({
+    $or: [
+      { 'dentalChart.teeth.0': { $exists: true } },
+      { departments: 'dental' },
+    ],
+  })
+    .select('name fileNumber phone dentalChart departments')
+    .lean()
+
+  const users = await User.find({ role: 'dental_branch' }).select('name').lean()
+  const userById = new Map(users.map((u) => [String(u._id), String(u.name || '').trim()]))
+  const needle = String(q || '').trim().toLowerCase()
+
+  const rows = []
+  for (const p of patients) {
+    const procedures = []
+    let totalCostSyp = 0
+    let paidSyp = 0
+
+    for (const tooth of p.dentalChart?.teeth || []) {
+      const fdi = Number(tooth.fdi) || 0
+      for (const tr of tooth.treatments || []) {
+        const cost = treatmentCostSyp(tr)
+        const paid = treatmentPaidSyp(tr)
+        const desc = String(tr.procedureDescription || '').trim()
+        const hasDoctor =
+          Boolean(tr.providerUserId) ||
+          Boolean(String(tr.providerKey || '').trim()) ||
+          Boolean(String(tr.doctorName || '').trim())
+        if (!(cost > 0) && !desc && !hasDoctor && !(paid > 0)) continue
+
+        const meta = resolveDoctorMeta(tr, userById)
+        const remaining = Math.max(0, cost - paid)
+        const bd = treatmentBusinessDate(tr) || '—'
+        totalCostSyp += cost
+        paidSyp += paid
+
+        procedures.push({
+          id: tr._id ? String(tr._id) : `t-${String(p._id)}-${fdi}-${procedures.length}`,
+          fdi,
+          businessDate: bd,
+          procedureDescription: desc || 'إجراء',
+          doctorName: meta.name,
+          providerUserId: meta.userId,
+          noShare: meta.noShare,
+          totalCostSyp: cost,
+          totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
+          paidSyp: paid,
+          remainingSyp: remaining,
+          billingStatus: tr.billingItemId
+            ? paid >= cost && cost > 0
+              ? 'paid'
+              : 'pending_payment'
+            : paid >= cost && cost > 0
+              ? 'paid'
+              : cost > 0
+                ? 'unlinked'
+                : null,
+        })
+      }
+    }
+
+    if (procedures.length === 0 && !(Array.isArray(p.departments) && p.departments.includes('dental'))) {
+      continue
+    }
+
+    const name = String(p.name || '').trim() || '—'
+    const fileNumber = String(p.fileNumber || '').trim()
+    if (needle) {
+      const hay = `${name} ${fileNumber} ${p.phone || ''}`.toLowerCase()
+      if (!hay.includes(needle)) continue
+    }
+
+    procedures.sort((a, b) => {
+      if (a.businessDate !== b.businessDate) {
+        if (a.businessDate === '—') return 1
+        if (b.businessDate === '—') return -1
+        return a.businessDate < b.businessDate ? 1 : -1
+      }
+      return a.fdi - b.fdi
+    })
+
+    const remainingSyp = Math.max(0, totalCostSyp - paidSyp)
+    rows.push({
+      patientId: String(p._id),
+      patientName: name,
+      fileNumber,
+      phone: String(p.phone || '').trim(),
+      procedureCount: procedures.length,
+      totalCostSyp: roundMoney(totalCostSyp),
+      paidSyp: roundMoney(paidSyp),
+      remainingSyp: roundMoney(remainingSyp),
+      procedures,
+    })
+  }
+
+  rows.sort((a, b) => {
+    if (b.remainingSyp !== a.remainingSyp) return b.remainingSyp - a.remainingSyp
+    return a.patientName.localeCompare(b.patientName, 'ar')
+  })
+
+  return {
+    patients: rows,
+    totals: {
+      patientCount: rows.length,
+      procedureCount: rows.reduce((s, r) => s + r.procedureCount, 0),
+      totalCostSyp: roundMoney(rows.reduce((s, r) => s + r.totalCostSyp, 0)),
+      paidSyp: roundMoney(rows.reduce((s, r) => s + r.paidSyp, 0)),
+      remainingSyp: roundMoney(rows.reduce((s, r) => s + r.remainingSyp, 0)),
+    },
+  }
+}
+

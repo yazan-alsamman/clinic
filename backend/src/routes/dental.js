@@ -18,7 +18,7 @@ import {
   DENTAL_ELIAS_VIRTUAL_ID,
   resolveDentalProviderFields,
 } from '../services/dentalDoctorConstants.js'
-import { listDentalClinicSessions } from '../services/dentalFinanceShares.js'
+import { listDentalClinicSessions, listDentalPatientsAccounts } from '../services/dentalFinanceShares.js'
 import { isValidYmd, todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
 
@@ -633,6 +633,18 @@ dentalRouter.get('/admin/clinics', requireRoles('super_admin'), async (req, res)
     }
     const clinicKey = String(req.query.clinicKey || req.query.provider || '').trim()
     const data = await listDentalClinicSessions({ from, to, clinicKey })
+    res.json(data)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** لوحة المدير: مرضى الأسنان — الحساب الكامل والإجراءات والأطباء */
+dentalRouter.get('/admin/patients', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim()
+    const data = await listDentalPatientsAccounts({ q })
     res.json(data)
   } catch (e) {
     console.error(e)
