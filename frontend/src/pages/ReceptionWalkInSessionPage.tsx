@@ -5,6 +5,10 @@ import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import type { Patient } from '../types'
 import { APPOINTMENT_PROCEDURE_OPTIONS } from '../utils/procedureCategory'
+import {
+  LaserOpenPackagesDetails,
+  type LaserBookingContext,
+} from '../components/LaserOpenPackagesDetails'
 
 import { APPOINTMENT_GRID_START_MIN, APPOINTMENT_GRID_END_MIN } from '../utils/scheduleTime'
 
@@ -111,6 +115,8 @@ export function ReceptionWalkInSessionPage() {
   const [patientHits, setPatientHits] = useState<Patient[]>([])
   const [patientSearchLoading, setPatientSearchLoading] = useState(false)
   const [picked, setPicked] = useState<Patient | null>(null)
+  const [laserBookingContext, setLaserBookingContext] = useState<LaserBookingContext | null>(null)
+  const [laserBookingContextLoading, setLaserBookingContextLoading] = useState(false)
   const [declinedNewPatientForName, setDeclinedNewPatientForName] = useState<string | null>(null)
   const [newPatientGenderPending, setNewPatientGenderPending] = useState<'' | 'male' | 'female'>('')
   const [newPatientPhoneForCreate, setNewPatientPhoneForCreate] = useState('')
@@ -147,6 +153,31 @@ export function ReceptionWalkInSessionPage() {
   useEffect(() => {
     void loadSlots()
   }, [loadSlots])
+
+  useEffect(() => {
+    if (!picked?.id) {
+      setLaserBookingContext(null)
+      setLaserBookingContextLoading(false)
+      return
+    }
+    let cancelled = false
+    setLaserBookingContextLoading(true)
+    ;(async () => {
+      try {
+        const data = await api<LaserBookingContext>(
+          `/api/patients/${encodeURIComponent(picked.id)}/laser-booking-context`,
+        )
+        if (!cancelled) setLaserBookingContext(data)
+      } catch {
+        if (!cancelled) setLaserBookingContext(null)
+      } finally {
+        if (!cancelled) setLaserBookingContextLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [picked?.id])
 
   useEffect(() => {
     if (!canUse) return
@@ -621,6 +652,7 @@ export function ReceptionWalkInSessionPage() {
               style={{ fontSize: '0.8rem' }}
               onClick={() => {
                 setPicked(null)
+                setLaserBookingContext(null)
                 setNewPatientGenderPending('')
                 setNewPatientPhoneForCreate('')
               }}
@@ -741,6 +773,57 @@ export function ReceptionWalkInSessionPage() {
               </>
             ) : null}
           </p>
+        ) : null}
+
+        {picked ? (
+          <div style={{ marginTop: '0.85rem' }}>
+            {laserBookingContextLoading ? (
+              <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                جاري التحقق من باكج الليزر…
+              </p>
+            ) : laserBookingContext?.hasOpenPackage && (laserBookingContext.openPackages || []).length > 0 ? (
+              <div
+                style={{
+                  padding: '0.65rem 0.75rem',
+                  borderRadius: 8,
+                  border: laserBookingContext.partialVisit
+                    ? '1px solid var(--amber)'
+                    : '1px solid var(--border)',
+                  background: laserBookingContext.partialVisit
+                    ? 'var(--warning-dim)'
+                    : 'var(--surface-1, var(--bg))',
+                }}
+              >
+                <p style={{ margin: '0 0 0.45rem', fontWeight: 700, fontSize: '0.9rem' }}>
+                  المريض لديه باكج ليزر فعّال
+                </p>
+                <LaserOpenPackagesDetails packages={laserBookingContext.openPackages || []} />
+                {laserBookingContext.partialVisit ? (
+                  <>
+                    <p style={{ margin: '0 0 0.35rem', fontSize: '0.86rem', color: 'var(--amber)' }}>
+                      جلسة ناقصة المناطق ({laserBookingContext.partialVisit.packageTitle}
+                      {laserBookingContext.partialVisit.packageSessionLabel
+                        ? ` — ${laserBookingContext.partialVisit.packageSessionLabel}`
+                        : ''}
+                      )
+                    </p>
+                    <p style={{ margin: '0 0 0.25rem', fontSize: '0.84rem' }}>
+                      <span style={{ color: 'var(--success)', fontWeight: 600 }}>تمّت: </span>
+                      {(laserBookingContext.partialVisit.doneAreas || []).join('، ') || '—'}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.84rem' }}>
+                      <span style={{ color: 'var(--amber)', fontWeight: 600 }}>متبقية: </span>
+                      {(laserBookingContext.partialVisit.remainingAreas || []).join('، ') || '—'}
+                    </p>
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                لا يوجد باكج ليزر فعّال لهذا المريض.
+              </p>
+            )}
+          </div>
         ) : null}
       </div>
 
