@@ -1272,6 +1272,8 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.odontogram-tooth):not(
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 1.25rem 0.75rem 1rem;
+  /* أسنان FDI تُعرض دائماً LTR: يمين المريض يسار الشاشة (18→11 | 21→28) */
+  direction: ltr;
 }
 
 .odontogram-arch {
@@ -1282,8 +1284,10 @@ button:not(.sidebar-menu-btn):not(.sidebar-backdrop):not(.odontogram-tooth):not(
 
 .odontogram-arch-row {
   display: flex;
+  flex-direction: row;
   justify-content: center;
   gap: 2px;
+  direction: ltr;
 }
 
 .odontogram-midline {

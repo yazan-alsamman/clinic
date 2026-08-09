@@ -372,7 +372,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
 
   function renderArch(row: readonly number[], view: SurfaceView) {
     return (
-      <div className="odontogram-arch-row">
+      <div className="odontogram-arch-row" dir="ltr">
         {row.map((fdi) => {
           const full = teethMap.get(fdi)!
           const tooth = toothForViewLayer(full, viewLayer)
@@ -498,7 +498,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       ) : null}
 
       <div className="odontogram-scroll">
-        <div className="odontogram-board">
+        <div className="odontogram-board" dir="ltr">
           {tooltip && selectedFdi != null ? (
             <div className="odontogram-tooltip" role="status">
               <strong>{tooltip.title}</strong>
@@ -506,14 +506,14 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             </div>
           ) : null}
 
-          <div className="odontogram-arch">
+          <div className="odontogram-arch" dir="ltr">
             {renderArch(UPPER_ROW, 'buccal')}
             {renderArch(UPPER_ROW, 'occlusal')}
           </div>
 
           <div className="odontogram-midline" aria-hidden />
 
-          <div className="odontogram-arch">
+          <div className="odontogram-arch" dir="ltr">
             {renderArch(LOWER_ROW, 'occlusal')}
             {renderArch(LOWER_ROW, 'buccal')}
           </div>
