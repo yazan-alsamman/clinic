@@ -97,6 +97,51 @@ systemRouter.post(
   },
 )
 
+/** تحديث سعر صرف الدولار في أي وقت خلال يوم العمل — مدير النظام فقط */
+systemRouter.post(
+  '/usd-syp-rate',
+  authMiddleware,
+  loadBusinessDay,
+  requireRoles('super_admin'),
+  async (req, res) => {
+    try {
+      const usdSypRate = Number(req.body?.usdSypRate)
+      if (!Number.isFinite(usdSypRate) || usdSypRate <= 0) {
+        res.status(400).json({
+          error: 'أدخل سعر صرف الدولار مقابل الليرة السورية (ليرة لكل 1 USD، رقم أكبر من صفر).',
+        })
+        return
+      }
+      const d = req.businessDay
+      if (!d) {
+        res.status(404).json({ error: 'يوم العمل غير موجود' })
+        return
+      }
+      const previousRate =
+        d.usdSypRate != null && Number.isFinite(Number(d.usdSypRate)) && Number(d.usdSypRate) > 0
+          ? Number(d.usdSypRate)
+          : null
+      d.usdSypRate = usdSypRate
+      await d.save()
+      await writeAudit({
+        user: req.user,
+        action: 'تحديث سعر صرف الدولار',
+        entityType: 'BusinessDay',
+        entityId: d.businessDate,
+        details: { previousRate, usdSypRate, dayActive: Boolean(d.active) },
+      })
+      res.json({
+        businessDate: d.businessDate,
+        dayActive: Boolean(d.active),
+        usdSypRate: d.usdSypRate,
+      })
+    } catch (e) {
+      console.error(e)
+      res.status(500).json({ error: 'خطأ في الخادم' })
+    }
+  },
+)
+
 systemRouter.post(
   '/close-day',
   authMiddleware,

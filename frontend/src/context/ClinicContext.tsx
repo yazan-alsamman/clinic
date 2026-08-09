@@ -14,7 +14,7 @@ interface SystemStatus {
   businessDate: string
   dayActive: boolean
   dayClosed: boolean
-  /** ليرة سورية لكل 1 USD — يُحدَّد عند بدء يوم العمل */
+  /** ليرة سورية لكل 1 USD — يُحدَّد عند بدء يوم العمل ويمكن لمدير النظام تحديثه لاحقاً */
   usdSypRate: number | null
   room1MeterStart: number | null
   room2MeterStart: number | null
@@ -41,6 +41,8 @@ interface ClinicContextValue {
     room2MeterStart: number
     usdSypRate: number
   }) => Promise<void>
+  /** تحديث سعر الصرف في أي وقت (مدير النظام) */
+  updateUsdSypRate: (usdSypRate: number) => Promise<void>
   endDay: (input: {
     room1MeterEnd: number
     room2MeterEnd: number
@@ -95,6 +97,17 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
     [refreshSystem],
   )
 
+  const updateUsdSypRate = useCallback(
+    async (usdSypRate: number) => {
+      await api('/api/system/usd-syp-rate', {
+        method: 'POST',
+        body: JSON.stringify({ usdSypRate }),
+      })
+      await refreshSystem()
+    },
+    [refreshSystem],
+  )
+
   const endDay = useCallback(
     async (input: {
       room1MeterEnd: number
@@ -128,6 +141,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       systemLoading,
       refreshSystem,
       startDay,
+      updateUsdSypRate,
       endDay,
     }),
     [
@@ -140,6 +154,7 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
       systemLoading,
       refreshSystem,
       startDay,
+      updateUsdSypRate,
       endDay,
     ],
   )

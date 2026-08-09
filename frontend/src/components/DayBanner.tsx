@@ -7,14 +7,18 @@ import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 export function DayBanner() {
   const { user, sessionMinutesLeft } = useAuth()
   const role = user?.role
-  const { dayActive, startDay, systemLoading } = useClinic()
+  const { dayActive, usdSypRate, startDay, updateUsdSypRate, systemLoading } = useClinic()
   const [showStart, setShowStart] = useState(false)
+  const [showRateEdit, setShowRateEdit] = useState(false)
   const [room1Input, setRoom1Input] = useState('')
   const [room2Input, setRoom2Input] = useState('')
   /** ليرة سورية لكل 1 دولار */
   const [usdSypRateInput, setUsdSypRateInput] = useState('')
+  const [rateEditInput, setRateEditInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [startErr, setStartErr] = useState('')
+  const [rateErr, setRateErr] = useState('')
+  const [rateOk, setRateOk] = useState('')
 
   useEffect(() => {
     if (!showStart) {
@@ -25,8 +29,19 @@ export function DayBanner() {
     }
   }, [showStart])
 
+  useEffect(() => {
+    if (!showRateEdit) {
+      setRateErr('')
+      setRateEditInput('')
+    } else {
+      setRateEditInput(usdSypRate != null && usdSypRate > 0 ? String(usdSypRate) : '')
+      setRateOk('')
+    }
+  }, [showRateEdit, usdSypRate])
+
   const isReception = role === 'reception'
-  const canStartDay = role === 'super_admin' || role === 'reception'
+  const isSuperAdmin = role === 'super_admin'
+  const canStartDay = isSuperAdmin || isReception
 
   if (systemLoading && !dayActive) {
     return (
@@ -190,15 +205,129 @@ export function DayBanner() {
   }
 
   return (
-    <div className="day-banner active" role="status">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <span className="chip chip-day-live">يوم العمل قيد التنفيذ</span>
+    <>
+      <div className="day-banner active" role="status">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span className="chip chip-day-live">يوم العمل قيد التنفيذ</span>
+          {usdSypRate != null && usdSypRate > 0 ? (
+            <span style={{ fontSize: '0.86rem' }} dir="ltr">
+              سعر الصرف: {usdSypRate.toLocaleString('ar-SY')} ل.س / USD
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.86rem', color: 'var(--amber)' }}>سعر الصرف غير محدد</span>
+          )}
+          {isSuperAdmin ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '0.8rem', padding: '0.25rem 0.55rem' }}
+              onClick={() => {
+                setRateErr('')
+                setRateOk('')
+                setShowRateEdit(true)
+              }}
+            >
+              تغيير سعر الصرف
+            </button>
+          ) : null}
+          {rateOk ? (
+            <span style={{ fontSize: '0.82rem', color: 'var(--success)' }}>{rateOk}</span>
+          ) : null}
+        </div>
+        {isReception && sessionMinutesLeft != null && (
+          <span className="session-hint">
+            تنتهي جلسة الاستقبال تلقائياً خلال ~{sessionMinutesLeft} دقيقة
+          </span>
+        )}
       </div>
-      {isReception && sessionMinutesLeft != null && (
-        <span className="session-hint">
-          تنتهي جلسة الاستقبال تلقائياً خلال ~{sessionMinutesLeft} دقيقة
-        </span>
-      )}
-    </div>
+
+      {showRateEdit && isSuperAdmin ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-rate-title"
+        >
+          <div className="modal">
+            <h3 id="edit-rate-title">تغيير سعر صرف الدولار</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.55 }}>
+              يمكنك تحديث السعر في أي وقت خلال يوم العمل. يُطبَّق على العمليات الجديدة (تحصيل، مصاريف،
+              مخابر…) — العمليات المسجّلة سابقاً تحتفظ بسعرها الأصلي.
+            </p>
+            {usdSypRate != null && usdSypRate > 0 ? (
+              <p style={{ margin: '0 0 0.65rem', fontSize: '0.88rem' }}>
+                السعر الحالي:{' '}
+                <strong dir="ltr">{usdSypRate.toLocaleString('ar-SY')} ل.س / 1 USD</strong>
+              </p>
+            ) : null}
+            <label className="form-label" htmlFor="usd-syp-rate-edit">
+              السعر الجديد: ليرة سورية لكل 1 دولار (USD)
+            </label>
+            <input
+              id="usd-syp-rate-edit"
+              className="input"
+              inputMode="decimal"
+              dir="ltr"
+              value={rateEditInput}
+              onChange={(e) => {
+                setRateErr('')
+                setRateEditInput(e.target.value)
+              }}
+              placeholder="مثال: 13500"
+              autoFocus
+            />
+            {rateErr ? (
+              <p style={{ color: 'var(--danger)', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>{rateErr}</p>
+            ) : null}
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginTop: '1rem',
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setRateErr('')
+                  setShowRateEdit(false)
+                }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={async () => {
+                  setRateErr('')
+                  const rate = parseFloat(normalizeDecimalDigits(rateEditInput))
+                  if (!Number.isFinite(rate) || rate <= 0) {
+                    setRateErr('أدخل سعر صرف صالحاً (ليرة لكل 1 USD، رقم أكبر من صفر).')
+                    return
+                  }
+                  setBusy(true)
+                  try {
+                    await updateUsdSypRate(rate)
+                    setShowRateEdit(false)
+                    setRateOk('تم تحديث سعر الصرف')
+                    window.setTimeout(() => setRateOk(''), 4000)
+                  } catch (e) {
+                    setRateErr(e instanceof ApiError ? e.message : 'تعذر تحديث سعر الصرف')
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                {busy ? 'جاري الحفظ…' : 'حفظ السعر'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }
