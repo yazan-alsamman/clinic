@@ -10,8 +10,18 @@ type ExpenseEntry = {
   category: ExpenseCategory
   reason: string
   amountSyp: number
+  amountUsd: number
+  usdSypRate: number
+  effectiveAmountSyp: number
   businessDate: string
   createdAt?: string
+}
+
+type DraftRow = {
+  reason: string
+  amountSyp: string
+  amountUsd: string
+  businessDate: string
 }
 
 const CATEGORY_META: { key: ExpenseCategory; title: string }[] = [
@@ -22,6 +32,10 @@ const CATEGORY_META: { key: ExpenseCategory; title: string }[] = [
   { key: 'dental', title: 'مصاريف الأسنان' },
   { key: 'general', title: 'مصاريف عامة' },
 ]
+
+function emptyDraft(businessDate: string): DraftRow {
+  return { reason: '', amountSyp: '', amountUsd: '', businessDate: businessDate || '' }
+}
 
 function monthStartYmd(businessDate: string) {
   const d = String(businessDate || '').slice(0, 10)
@@ -34,9 +48,24 @@ function fmtSyp(n: number) {
   return `${new Intl.NumberFormat('ar-SY', { maximumFractionDigits: 0 }).format(Math.round(n || 0))} ل.س`
 }
 
+function fmtUsd(n: number) {
+  return `${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} USD`
+}
+
+function formatAmountCell(row: ExpenseEntry) {
+  const parts: string[] = []
+  if (row.amountSyp > 0) parts.push(fmtSyp(row.amountSyp))
+  if (row.amountUsd > 0) parts.push(fmtUsd(row.amountUsd))
+  if (parts.length === 0) return '—'
+  return parts.join(' + ')
+}
+
 export function AdminExpensesPage() {
   const { user } = useAuth()
-  const { businessDate } = useClinic()
+  const { businessDate, usdSypRate } = useClinic()
   const allowed = user?.role === 'super_admin'
 
   const [from, setFrom] = useState('')
@@ -45,18 +74,16 @@ export function AdminExpensesPage() {
   const [err, setErr] = useState('')
   const [entries, setEntries] = useState<ExpenseEntry[]>([])
 
-  const [draftByCat, setDraftByCat] = useState<
-    Record<ExpenseCategory, { reason: string; amount: string; businessDate: string }>
-  >(() =>
-    Object.fromEntries(
-      CATEGORY_META.map(({ key }) => [
-        key,
-        { reason: '', amount: '', businessDate: businessDate || '' },
-      ]),
-    ) as Record<ExpenseCategory, { reason: string; amount: string; businessDate: string }>,
+  const [draftByCat, setDraftByCat] = useState<Record<ExpenseCategory, DraftRow>>(() =>
+    Object.fromEntries(CATEGORY_META.map(({ key }) => [key, emptyDraft(businessDate || '')])) as Record<
+      ExpenseCategory,
+      DraftRow
+    >,
   )
 
   const [editing, setEditing] = useState<ExpenseEntry | null>(null)
+  const [editSyp, setEditSyp] = useState('')
+  const [editUsd, setEditUsd] = useState('')
 
   useEffect(() => {
     if (!from && businessDate) setFrom(monthStartYmd(businessDate))
@@ -68,7 +95,7 @@ export function AdminExpensesPage() {
     setDraftByCat((prev) => {
       const next = { ...prev }
       for (const { key } of CATEGORY_META) {
-        if (!next[key]?.businessDate) next[key] = { ...next[key], businessDate: businessDate }
+        if (!next[key]?.businessDate) next[key] = { ...next[key], businessDate }
       }
       return next
     })
@@ -86,7 +113,17 @@ export function AdminExpensesPage() {
         const data = await api<{ entries: ExpenseEntry[] }>(
           `/api/finance/expenses?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
         )
-        setEntries(data.entries || [])
+        setEntries(
+          (data.entries || []).map((e) => ({
+            ...e,
+            amountUsd: Number(e.amountUsd) || 0,
+            usdSypRate: Number(e.usdSypRate) || 0,
+            effectiveAmountSyp:
+              Number(e.effectiveAmountSyp) ||
+              Math.round(Number(e.amountSyp) || 0) +
+                Math.round((Number(e.amountUsd) || 0) * (Number(e.usdSypRate) || 0)),
+          })),
+        )
         if (!silent) setErr('')
       } catch (e) {
         if (!silent) {
@@ -130,17 +167,31 @@ export function AdminExpensesPage() {
   }, [entries])
 
   const totalFor = (cat: ExpenseCategory) =>
-    Math.round((byCategory[cat] || []).reduce((a, r) => a + (Number(r.amountSyp) || 0), 0))
+    Math.round((byCategory[cat] || []).reduce((a, r) => a + (Number(r.effectiveAmountSyp) || 0), 0))
+
+  const openEdit = (row: ExpenseEntry) => {
+    setEditing(row)
+    setEditSyp(row.amountSyp > 0 ? String(row.amountSyp) : '')
+    setEditUsd(row.amountUsd > 0 ? String(row.amountUsd) : '')
+  }
 
   const saveEdit = async () => {
     if (!editing) return
+    const amountSyp = Math.round(Number(editSyp) || 0)
+    const amountUsd = Math.round((Number(editUsd) || 0) * 100) / 100
+    if (!(amountSyp > 0 || amountUsd > 0)) {
+      setErr('أدخل مبلغاً بالليرة أو بالدولار على الأقل')
+      return
+    }
     try {
       await api(`/api/finance/expenses/${editing.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           reason: editing.reason,
-          amountSyp: Math.round(Number(editing.amountSyp) || 0),
+          amountSyp,
+          amountUsd,
           businessDate: editing.businessDate,
+          usdSypRate: amountUsd > 0 ? usdSypRate || editing.usdSypRate || undefined : 0,
         }),
       })
       setEditing(null)
@@ -153,13 +204,14 @@ export function AdminExpensesPage() {
   const addRow = async (cat: ExpenseCategory) => {
     const d = draftByCat[cat]
     const reason = String(d.reason || '').trim()
-    const amountSyp = Math.round(Number(d.amount))
+    const amountSyp = Math.round(Number(d.amountSyp) || 0)
+    const amountUsd = Math.round((Number(d.amountUsd) || 0) * 100) / 100
     if (!reason) {
       setErr('أدخل سبب المصروف')
       return
     }
-    if (!Number.isFinite(amountSyp) || amountSyp < 0) {
-      setErr('المبلغ غير صالح')
+    if (!(amountSyp > 0 || amountUsd > 0)) {
+      setErr('أدخل مبلغاً بالليرة أو بالدولار على الأقل')
       return
     }
     try {
@@ -169,12 +221,14 @@ export function AdminExpensesPage() {
           category: cat,
           reason,
           amountSyp,
+          amountUsd,
           businessDate: d.businessDate || businessDate,
+          usdSypRate: amountUsd > 0 ? usdSypRate || undefined : 0,
         }),
       })
       setDraftByCat((prev) => ({
         ...prev,
-        [cat]: { reason: '', amount: '', businessDate: businessDate || prev[cat].businessDate },
+        [cat]: emptyDraft(businessDate || prev[cat].businessDate),
       }))
       setErr('')
       await load()
@@ -206,10 +260,15 @@ export function AdminExpensesPage() {
     <>
       <h1 className="page-title">المصاريف</h1>
       <p className="page-desc">
-        سجلات مصاريف الأقسام الستة. تُحدَّث القيم تلقائياً مع التحصيل والتعديلات. المبالغ بالليرة السورية.
+        سجلات مصاريف الأقسام الستة. يمكن إدخال المبلغ بالليرة السورية أو بالدولار (أو الاثنين معاً). دولار يُحوَّل
+        للتقارير بسعر صرف يوم العمل
+        {usdSypRate != null ? ` (حالياً ${usdSypRate.toLocaleString('ar-SY')} ل.س)` : ''}.
       </p>
 
-      <div className="toolbar" style={{ marginTop: '0.9rem', display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+      <div
+        className="toolbar"
+        style={{ marginTop: '0.9rem', display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}
+      >
         <label style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
           <span>من</span>
           <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -245,8 +304,22 @@ export function AdminExpensesPage() {
                 type="number"
                 min={0}
                 style={{ width: '100%' }}
-                value={editing.amountSyp}
-                onChange={(e) => setEditing({ ...editing, amountSyp: Number(e.target.value) })}
+                value={editSyp}
+                onChange={(e) => setEditSyp(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label>
+              المبلغ (USD)
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={0.01}
+                style={{ width: '100%' }}
+                value={editUsd}
+                onChange={(e) => setEditUsd(e.target.value)}
+                placeholder="0.00"
               />
             </label>
             <label>
@@ -273,18 +346,27 @@ export function AdminExpensesPage() {
       <div style={{ marginTop: '1.25rem', display: 'grid', gap: '1.25rem' }}>
         {CATEGORY_META.map(({ key, title }) => (
           <section key={key} className="card" style={{ overflow: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+              }}
+            >
               <h2 style={{ margin: 0, fontSize: '1.05rem' }}>{title}</h2>
               <div style={{ fontWeight: 800, color: 'var(--accent-strong, #0d9488)' }}>
-                الإجمالي: {fmtSyp(totalFor(key))}
+                الإجمالي (مكافئ ل.س): {fmtSyp(totalFor(key))}
               </div>
             </div>
 
-            <table className="table" style={{ marginTop: '0.75rem', minWidth: 480 }}>
+            <table className="table" style={{ marginTop: '0.75rem', minWidth: 560 }}>
               <thead>
                 <tr>
                   <th>سبب المصروف</th>
                   <th>المبلغ</th>
+                  <th>مكافئ ل.س</th>
                   <th>التاريخ</th>
                   <th style={{ width: 140 }}>إجراءات</th>
                 </tr>
@@ -292,7 +374,7 @@ export function AdminExpensesPage() {
               <tbody>
                 {(byCategory[key] || []).length === 0 ? (
                   <tr>
-                    <td colSpan={4} style={{ color: 'var(--text-muted)' }}>
+                    <td colSpan={5} style={{ color: 'var(--text-muted)' }}>
                       لا توجد سجلات في النطاق.
                     </td>
                   </tr>
@@ -300,13 +382,31 @@ export function AdminExpensesPage() {
                   (byCategory[key] || []).map((row) => (
                     <tr key={row.id}>
                       <td>{row.reason}</td>
-                      <td>{fmtSyp(row.amountSyp)}</td>
+                      <td>
+                        {formatAmountCell(row)}
+                        {row.amountUsd > 0 && row.usdSypRate > 0 ? (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            سعر الصرف: {row.usdSypRate.toLocaleString('ar-SY')}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>{fmtSyp(row.effectiveAmountSyp)}</td>
                       <td>{row.businessDate}</td>
                       <td>
-                        <button type="button" className="btn btn-ghost" style={{ fontSize: '0.8rem' }} onClick={() => setEditing(row)}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '0.8rem' }}
+                          onClick={() => openEdit(row)}
+                        >
                           تعديل
                         </button>{' '}
-                        <button type="button" className="btn btn-ghost" style={{ fontSize: '0.8rem' }} onClick={() => void del(row.id)}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '0.8rem' }}
+                          onClick={() => void del(row.id)}
+                        >
                           حذف
                         </button>
                       </td>
@@ -322,7 +422,7 @@ export function AdminExpensesPage() {
                 paddingTop: '0.85rem',
                 borderTop: '1px solid var(--border, #e5e7eb)',
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
                 gap: '0.5rem',
                 alignItems: 'end',
               }}
@@ -343,10 +443,25 @@ export function AdminExpensesPage() {
                   className="input"
                   type="number"
                   min={0}
-                  value={draftByCat[key].amount}
+                  value={draftByCat[key].amountSyp}
                   onChange={(e) =>
-                    setDraftByCat((p) => ({ ...p, [key]: { ...p[key], amount: e.target.value } }))
+                    setDraftByCat((p) => ({ ...p, [key]: { ...p[key], amountSyp: e.target.value } }))
                   }
+                  placeholder="0"
+                />
+              </label>
+              <label style={{ display: 'grid', gap: '0.25rem' }}>
+                <span>مبلغ (USD)</span>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={draftByCat[key].amountUsd}
+                  onChange={(e) =>
+                    setDraftByCat((p) => ({ ...p, [key]: { ...p[key], amountUsd: e.target.value } }))
+                  }
+                  placeholder="0.00"
                 />
               </label>
               <label style={{ display: 'grid', gap: '0.25rem' }}>

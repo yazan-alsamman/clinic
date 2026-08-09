@@ -5,7 +5,8 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
-import { ExpenseEntry, EXPENSE_CATEGORIES } from '../models/ExpenseEntry.js'
+import { BusinessDay } from '../models/BusinessDay.js'
+import { ExpenseEntry, EXPENSE_CATEGORIES, expenseEffectiveAmountSyp } from '../models/ExpenseEntry.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
@@ -58,16 +59,49 @@ function parseObjectId(raw) {
   return new mongoose.Types.ObjectId(s)
 }
 
-async function sumExpensesByCategory({ from, to }) {
-  const rows = await ExpenseEntry.aggregate([
-    { $match: { businessDate: { $gte: from, $lte: to } } },
-    { $group: { _id: '$category', totalSyp: { $sum: '$amountSyp' } } },
-  ])
-  const map = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c, 0]))
-  for (const r of rows) {
-    const k = r._id
-    if (k && map[k] != null) map[k] = Math.round(Number(r.totalSyp) || 0)
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100
+}
+
+function serializeExpenseEntry(e) {
+  const amountSyp = Math.round(Number(e.amountSyp) || 0)
+  const amountUsd = round2(e.amountUsd)
+  const usdSypRate = Math.max(0, Number(e.usdSypRate) || 0)
+  return {
+    id: String(e._id),
+    category: e.category,
+    reason: e.reason,
+    amountSyp,
+    amountUsd,
+    usdSypRate,
+    effectiveAmountSyp: expenseEffectiveAmountSyp({ amountSyp, amountUsd, usdSypRate }),
+    businessDate: e.businessDate,
+    createdAt: e.createdAt,
   }
+}
+
+async function resolveUsdSypRate({ businessDate, bodyRate, fallbackRate }) {
+  const fromBody = Math.max(0, Number(bodyRate) || 0)
+  if (fromBody > 0) return fromBody
+  const fromFallback = Math.max(0, Number(fallbackRate) || 0)
+  if (fromFallback > 0) return fromFallback
+  const ymd = parseYmd(businessDate)
+  if (!ymd) return 0
+  const day = await BusinessDay.findOne({ businessDate: ymd }).select('usdSypRate').lean()
+  const fromDay = Math.max(0, Number(day?.usdSypRate) || 0)
+  return fromDay > 0 ? fromDay : 0
+}
+
+async function sumExpensesByCategory({ from, to }) {
+  const entries = await ExpenseEntry.find({ businessDate: { $gte: from, $lte: to } })
+    .select('category amountSyp amountUsd usdSypRate')
+    .lean()
+  const map = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c, 0]))
+  for (const e of entries) {
+    const k = e.category
+    if (k && map[k] != null) map[k] += expenseEffectiveAmountSyp(e)
+  }
+  for (const k of Object.keys(map)) map[k] = Math.round(map[k] || 0)
   return map
 }
 
@@ -267,19 +301,15 @@ financeRouter.get('/expenses', async (req, res) => {
     if (cat && EXPENSE_CATEGORIES.includes(cat)) q.category = cat
 
     const entries = await ExpenseEntry.find(q).sort({ businessDate: -1, createdAt: -1 }).lean()
-    const totalSyp = entries.reduce((a, e) => a + Math.round(Number(e.amountSyp) || 0), 0)
+    const mapped = entries.map(serializeExpenseEntry)
+    const totalSyp = mapped.reduce((a, e) => a + e.effectiveAmountSyp, 0)
+    const totalUsd = round2(mapped.reduce((a, e) => a + e.amountUsd, 0))
     res.json({
       from: range.from,
       to: range.to,
-      entries: entries.map((e) => ({
-        id: String(e._id),
-        category: e.category,
-        reason: e.reason,
-        amountSyp: Math.round(Number(e.amountSyp) || 0),
-        businessDate: e.businessDate,
-        createdAt: e.createdAt,
-      })),
+      entries: mapped,
       totalSyp: Math.round(totalSyp),
+      totalUsd,
     })
   } catch (e) {
     console.error(e)
@@ -300,17 +330,36 @@ financeRouter.post('/expenses', async (req, res) => {
       res.status(400).json({ error: 'سبب المصروف مطلوب' })
       return
     }
-    const amountSyp = Math.round(Number(body.amountSyp))
-    if (!Number.isFinite(amountSyp) || amountSyp < 0) {
+    const amountSyp = Math.round(Number(body.amountSyp) || 0)
+    const amountUsd = round2(body.amountUsd)
+    if (!Number.isFinite(amountSyp) || amountSyp < 0 || !Number.isFinite(amountUsd) || amountUsd < 0) {
       res.status(400).json({ error: 'المبلغ غير صالح' })
       return
     }
+    if (!(amountSyp > 0 || amountUsd > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغاً بالليرة أو بالدولار على الأقل' })
+      return
+    }
     const businessDate = parseYmd(body.businessDate) || req.businessDate || todayBusinessDate()
+    let usdSypRate = 0
+    if (amountUsd > 0) {
+      usdSypRate = await resolveUsdSypRate({
+        businessDate,
+        bodyRate: body.usdSypRate,
+        fallbackRate: req.businessDay?.usdSypRate,
+      })
+      if (!(usdSypRate > 0)) {
+        res.status(400).json({ error: 'سعر صرف الدولار غير متوفر لهذا التاريخ — أدخل السعر أو ابدأ يوم العمل' })
+        return
+      }
+    }
 
     const doc = await ExpenseEntry.create({
       category,
       reason: reason.slice(0, 2000),
       amountSyp,
+      amountUsd,
+      usdSypRate,
       businessDate,
       createdByUserId: req.user._id,
     })
@@ -319,18 +368,9 @@ financeRouter.post('/expenses', async (req, res) => {
       action: 'إضافة مصروف',
       entityType: 'ExpenseEntry',
       entityId: doc._id,
-      details: { category, amountSyp, businessDate },
+      details: { category, amountSyp, amountUsd, usdSypRate, businessDate },
     })
-    res.status(201).json({
-      entry: {
-        id: String(doc._id),
-        category: doc.category,
-        reason: doc.reason,
-        amountSyp: Math.round(Number(doc.amountSyp) || 0),
-        businessDate: doc.businessDate,
-        createdAt: doc.createdAt,
-      },
-    })
+    res.status(201).json({ entry: serializeExpenseEntry(doc) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
@@ -354,12 +394,20 @@ financeRouter.patch('/expenses/:id', async (req, res) => {
       doc.reason = r.slice(0, 2000)
     }
     if (body.amountSyp != null) {
-      const amountSyp = Math.round(Number(body.amountSyp))
+      const amountSyp = Math.round(Number(body.amountSyp) || 0)
       if (!Number.isFinite(amountSyp) || amountSyp < 0) {
         res.status(400).json({ error: 'المبلغ غير صالح' })
         return
       }
       doc.amountSyp = amountSyp
+    }
+    if (body.amountUsd != null) {
+      const amountUsd = round2(body.amountUsd)
+      if (!Number.isFinite(amountUsd) || amountUsd < 0) {
+        res.status(400).json({ error: 'المبلغ بالدولار غير صالح' })
+        return
+      }
+      doc.amountUsd = amountUsd
     }
     if (body.businessDate != null) {
       const bd = parseYmd(body.businessDate)
@@ -377,6 +425,28 @@ financeRouter.patch('/expenses/:id', async (req, res) => {
       }
       doc.category = category
     }
+
+    const nextUsd = Math.max(0, Number(doc.amountUsd) || 0)
+    const nextSyp = Math.round(Number(doc.amountSyp) || 0)
+    if (!(nextSyp > 0 || nextUsd > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغاً بالليرة أو بالدولار على الأقل' })
+      return
+    }
+    if (nextUsd > 0) {
+      const rate = await resolveUsdSypRate({
+        businessDate: doc.businessDate,
+        bodyRate: body.usdSypRate != null ? body.usdSypRate : doc.usdSypRate,
+        fallbackRate: req.businessDay?.usdSypRate,
+      })
+      if (!(rate > 0)) {
+        res.status(400).json({ error: 'سعر صرف الدولار غير متوفر لهذا التاريخ — أدخل السعر أو ابدأ يوم العمل' })
+        return
+      }
+      doc.usdSypRate = rate
+    } else {
+      doc.usdSypRate = 0
+    }
+
     await doc.save()
     await writeAudit({
       user: req.user,
@@ -384,16 +454,7 @@ financeRouter.patch('/expenses/:id', async (req, res) => {
       entityType: 'ExpenseEntry',
       entityId: doc._id,
     })
-    res.json({
-      entry: {
-        id: String(doc._id),
-        category: doc.category,
-        reason: doc.reason,
-        amountSyp: Math.round(Number(doc.amountSyp) || 0),
-        businessDate: doc.businessDate,
-        createdAt: doc.createdAt,
-      },
-    })
+    res.json({ entry: serializeExpenseEntry(doc) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'خطأ في الخادم' })
