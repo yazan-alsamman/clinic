@@ -19,6 +19,7 @@ type SlotRow = {
   arrivedAt?: string | null
   assignedSpecialistName?: string
   laserPackageBookingMode?: '' | 'use_package' | 'outside_package' | 'continue_package' | 'continue_package_with_addon' | 'use_package_with_addon'
+  laserAddonProcedureOptionIds?: string[]
 }
 
 function todayYmd() {
@@ -122,6 +123,9 @@ export function LaserCreateSessionPage() {
                   const pkgMode = isFullBodyLaserBookingText(proc)
                     ? 'outside_package'
                     : String(s.laserPackageBookingMode || '')
+                  const addonIds = Array.isArray(s.laserAddonProcedureOptionIds)
+                    ? s.laserAddonProcedureOptionIds.filter(Boolean)
+                    : []
                   return (
                   <tr
                     key={s.id}
@@ -131,7 +135,11 @@ export function LaserCreateSessionPage() {
                           proc,
                         )}&laserSlotId=${encodeURIComponent(String(s.id))}&laserRoom=${encodeURIComponent(String(s.roomNumber || ''))}&laserSlotPkgMode=${encodeURIComponent(
                           pkgMode,
-                        )}`,
+                        )}${
+                          addonIds.length
+                            ? `&laserAddonIds=${encodeURIComponent(addonIds.join(','))}`
+                            : ''
+                        }`,
                       )
                     }
                     style={{ cursor: 'pointer' }}

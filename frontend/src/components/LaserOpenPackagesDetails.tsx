@@ -9,6 +9,7 @@ export type LaserBookingOpenPackage = {
   sessionsRemaining: number
   areaCount: number
   areaLabels: string[]
+  procedureOptionIds?: string[]
   packageTotalSyp: number
   paidAmountSyp: number
   isPartial: boolean

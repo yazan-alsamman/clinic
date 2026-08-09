@@ -38,6 +38,11 @@ const scheduleSlotSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    /**
+     * مناطق/عروض خارج الباكج عند الحجز مع with_addon — معرّفات LaserProcedureOption.
+     * تُستخدم لاستعادة التصنيف دون الاعتماد على نص procedureType فقط.
+     */
+    laserAddonProcedureOptionIds: [{ type: String, trim: true }],
     /** تُملأ عند إنشاء جلسة ليزر لهذا الموعد لمنع إنشاء جلسة ثانية لنفسه */
     laserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null, index: true },
   },

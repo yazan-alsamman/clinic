@@ -503,7 +503,12 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
             }
             const pkgRows = Array.isArray(p?.sessionPackages) ? p.sessionPackages : []
             const pkg = pkgRows.find((x) => String(x._id) === String(b.patientPackageId))
-            const expected = Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0))
+            const pkgIds = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
+            const expected = Math.max(
+              1,
+              Math.trunc(Number(pkg?.areaCount) || 0),
+              pkgIds.length,
+            )
             const pkgSessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
             const pSess = pkgSessions.find((s) => String(s._id) === String(b.patientPackageSessionId))
             const ack = Math.max(0, Math.trunc(Number(pSess?.packagePartialAreasAcknowledgedByReception) || 0))

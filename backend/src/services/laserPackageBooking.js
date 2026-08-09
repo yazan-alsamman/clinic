@@ -273,6 +273,7 @@ export async function getLaserBookingContextForPatient(patientDoc) {
       sessionsRemaining: Math.max(0, sessionsCount - sessionsCompleted),
       areaCount,
       areaLabels,
+      procedureOptionIds: ids,
       packageTotalSyp: Math.round(Number(pkg.packageTotalSyp) || 0),
       paidAmountSyp: Math.round(Number(pkg.paidAmountSyp) || 0),
       isPartial: Boolean(partialVisit) && String(partialVisit.packageId) === String(pkg._id),

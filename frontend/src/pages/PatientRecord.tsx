@@ -841,6 +841,12 @@ export function PatientRecord() {
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
   /** من جدول المواعيد — يحدد إن كان الحجز كجلسة ضمن الباكج */
   const bookedLaserSlotPkgMode = (searchParams.get('laserSlotPkgMode') || '').trim()
+  /** معرّفات المناطق خارج الباكج من الحجز (موثوقة أكثر من نص procedureType) */
+  const bookedLaserAddonIdsFromQuery = useMemo(() => {
+    const raw = (searchParams.get('laserAddonIds') || '').trim()
+    if (!raw) return [] as string[]
+    return [...new Set(raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean))]
+  }, [searchParams])
   const bookedDermProcedureText = (searchParams.get('dermProc') || '').trim()
   const bookedDermSlotId = (searchParams.get('dermSlotId') || '').trim()
   const roomFromQuery = String(searchParams.get('laserRoom') || '').trim()
@@ -1246,47 +1252,6 @@ export function PatientRecord() {
     [combinedLaserSaveIds, laserItemById],
   )
 
-  useEffect(() => {
-    if (laserPackageSkipLineAutosyncOnceRef.current) {
-      laserPackageSkipLineAutosyncOnceRef.current = false
-      return
-    }
-    setLaserLineItems((prev) => {
-      const mappedPrev = new Map<string, LaserSessionLineInput>(
-        prev
-          .filter((row) => row.procedureOptionId)
-          .map((row) => [
-            `${row.procedureOptionId}|${row.isAddon ? 1 : 0}|${row.optionInstance || 1}` as string,
-            row,
-          ]),
-      )
-      const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
-        const isAddon = selectedLaserAddonItemIds.includes(item.id)
-        const parsedNames = item.kind === 'offer' ? splitLaserOfferAreaLabels(item.name) : []
-        const neededRowsFromOffer =
-          item.kind === 'offer' && isFullBodyLaserBookingText(item.name)
-            ? FULL_BODY_SESSION_AREA_COUNT
-            : Math.max(1, Math.trunc(Number(item.areaCount) || 1))
-        const neededRows =
-          item.kind === 'offer' ? Math.max(neededRowsFromOffer, parsedNames.length || 1) : 1
-        return Array.from({ length: neededRows }, (_, idx) => {
-          const optionInstance = idx + 1
-          const key = `${item.id}|${isAddon ? 1 : 0}|${optionInstance}`
-          const parsedLabel = parsedNames[idx] || ''
-          const fallbackLabel = neededRows > 1 ? `${item.name} (${optionInstance})` : item.name
-          return createLaserLineRow({
-            ...(mappedPrev.get(key) || {}),
-            procedureOptionId: item.id,
-            optionInstance,
-            areaLabel: parsedLabel || fallbackLabel,
-            isAddon,
-          })
-        })
-      })
-      return nextMappedRows
-    })
-  }, [combinedLaserSaveItems, selectedLaserAddonItemIds])
-
   const toggleLaserMainArea = useCallback((itemId: string) => {
     setSelectedLaserItemIds((prev) => (prev.includes(itemId) ? prev.filter((x) => x !== itemId) : [...prev, itemId]))
     setSelectedLaserAddonItemIds((prev) => prev.filter((x) => x !== itemId))
@@ -1441,12 +1406,17 @@ export function PatientRecord() {
           setLaserCoverPriceSyp(Math.max(0, Math.round(Number(pricingData.laserCoverSyp) || 0)))
           setSelectedLaserItemIds((prev) => {
             const validPrev = prev.filter((id) => (procData.groups || []).some((g) => g.items.some((x) => x.id === id)))
-            if (
+            const isWithAddonMode =
               bookedLaserSlotPkgMode === 'continue_package_with_addon' ||
               bookedLaserSlotPkgMode === 'use_package_with_addon'
-            ) {
-              return validPrev
-            }
+            const isPackageMode =
+              isWithAddonMode ||
+              bookedLaserSlotPkgMode === 'use_package' ||
+              bookedLaserSlotPkgMode === 'continue_package' ||
+              bookedLaserProcedureText.startsWith('جلسة ضمن باكج ليزر') ||
+              bookedLaserProcedureText.startsWith('استكمال باكج')
+            // مناطق الباكج تُعبَّأ لاحقاً من procedureOptionIds — لا تفسّر نص الموعد كمناطق رئيسية
+            if (isPackageMode) return validPrev
             if (!bookedLaserProcedureText) return validPrev
 
             const byName = new Map<string, string>()
@@ -1494,7 +1464,7 @@ export function PatientRecord() {
     return () => {
       cancelled = true
     }
-  }, [tab, role, bookedLaserProcedureText])
+  }, [tab, role, bookedLaserProcedureText, bookedLaserSlotPkgMode])
 
   useEffect(() => {
     if (tab !== 'dermatology' || !bookedDermProcedureText) return
@@ -1781,12 +1751,74 @@ export function PatientRecord() {
     return undefined
   }, [patientPackages, clinicalHistory])
 
-  /** جلسة ضمن باكج — لا تُطبَّق عند موعد «جسم كامل» (يُعامل كخارج الباكج) */
+  /** جلسة ضمن باكج — فقط عند وضع حجز باكج صريح (أو نص حجز باكج)، وليس لمجرد وجود باكج فعّال */
   const sessionInPackageMode = useMemo(() => {
     if (bookedLaserIsFullBody) return false
     if (bookedLaserSlotPkgMode === 'outside_package') return false
-    return Boolean(activeLaserPackage)
-  }, [bookedLaserIsFullBody, bookedLaserSlotPkgMode, activeLaserPackage])
+    if (!activeLaserPackage) return false
+    const explicitModes = new Set([
+      'use_package',
+      'use_package_with_addon',
+      'continue_package',
+      'continue_package_with_addon',
+    ])
+    if (explicitModes.has(bookedLaserSlotPkgMode)) return true
+    const proc = bookedLaserProcedureText
+    if (proc.startsWith('جلسة ضمن باكج ليزر') || proc.startsWith('استكمال باكج')) return true
+    return false
+  }, [bookedLaserIsFullBody, bookedLaserSlotPkgMode, activeLaserPackage, bookedLaserProcedureText])
+
+  useEffect(() => {
+    if (laserPackageSkipLineAutosyncOnceRef.current) {
+      laserPackageSkipLineAutosyncOnceRef.current = false
+      return
+    }
+    setLaserLineItems((prev) => {
+      const mappedPrev = new Map<string, LaserSessionLineInput>(
+        prev
+          .filter((row) => row.procedureOptionId)
+          .map((row) => [
+            `${row.procedureOptionId}|${row.isAddon ? 1 : 0}|${row.optionInstance || 1}` as string,
+            row,
+          ]),
+      )
+      const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
+        const packageIds = new Set((activeLaserPackage?.procedureOptionIds || []).map(String))
+        let isAddon = selectedLaserAddonItemIds.includes(item.id)
+        if (sessionInPackageMode) {
+          // أي منطقة ليست من مناطق الباكج تُصنَّف خارج الباكج
+          if (!packageIds.has(item.id)) isAddon = true
+          if (selectedLaserAddonItemIds.includes(item.id)) isAddon = true
+        }
+        const parsedNames = item.kind === 'offer' ? splitLaserOfferAreaLabels(item.name) : []
+        const neededRowsFromOffer =
+          item.kind === 'offer' && isFullBodyLaserBookingText(item.name)
+            ? FULL_BODY_SESSION_AREA_COUNT
+            : Math.max(1, Math.trunc(Number(item.areaCount) || 1))
+        const neededRows =
+          item.kind === 'offer' ? Math.max(neededRowsFromOffer, parsedNames.length || 1) : 1
+        return Array.from({ length: neededRows }, (_, idx) => {
+          const optionInstance = idx + 1
+          const key = `${item.id}|${isAddon ? 1 : 0}|${optionInstance}`
+          const parsedLabel = parsedNames[idx] || ''
+          const fallbackLabel = neededRows > 1 ? `${item.name} (${optionInstance})` : item.name
+          return createLaserLineRow({
+            ...(mappedPrev.get(key) || {}),
+            procedureOptionId: item.id,
+            optionInstance,
+            areaLabel: parsedLabel || fallbackLabel,
+            isAddon,
+          })
+        })
+      })
+      return nextMappedRows
+    })
+  }, [
+    combinedLaserSaveItems,
+    selectedLaserAddonItemIds,
+    sessionInPackageMode,
+    activeLaserPackage?.procedureOptionIds,
+  ])
 
   const partialPackageLaserSession = useMemo(() => {
     if (bookedLaserIsFullBody) return null
@@ -1937,7 +1969,9 @@ export function PatientRecord() {
     const wantsFullPackage =
       bookedLaserSlotPkgMode === 'use_package' ||
       bookedLaserSlotPkgMode === 'use_package_with_addon' ||
-      (!bookedLaserSlotPkgMode && bookedLaserProcedureText === 'جلسة ضمن باكج ليزر')
+      (!bookedLaserSlotPkgMode &&
+        (bookedLaserProcedureText === 'جلسة ضمن باكج ليزر' ||
+          bookedLaserProcedureText.startsWith('جلسة ضمن باكج ليزر')))
 
     if (!wantsContinueOnly && !wantsFullPackage) return
 
@@ -1983,11 +2017,13 @@ export function PatientRecord() {
 
     if (
       bookedLaserSlotPkgMode !== 'continue_package_with_addon' &&
-      bookedLaserSlotPkgMode !== 'use_package_with_addon'
+      bookedLaserSlotPkgMode !== 'use_package_with_addon' &&
+      bookedLaserAddonIdsFromQuery.length === 0
     ) {
       setSelectedLaserAddonItemIds([])
     }
-    setSelectedLaserItemIds((prev) => (prev.length > 0 ? prev : [...ids]))
+    // فرض مناطق الباكج كمواضع رئيسية (لا تُترك إن مُلئت خطأً من نص الموعد)
+    setSelectedLaserItemIds([...ids])
   }, [
     tab,
     id,
@@ -1997,6 +2033,7 @@ export function PatientRecord() {
     bookedLaserSlotPkgMode,
     bookedLaserProcedureText,
     bookedLaserSlotId,
+    bookedLaserAddonIdsFromQuery,
     activeLaserPackage?.id,
     (activeLaserPackage?.procedureOptionIds || []).join(','),
     clinicalHistory,
@@ -2006,49 +2043,105 @@ export function PatientRecord() {
 
   useEffect(() => {
     if (tab !== 'laser' || bookedLaserIsFullBody) return
-    if (
-      bookedLaserSlotPkgMode !== 'continue_package_with_addon' &&
-      bookedLaserSlotPkgMode !== 'use_package_with_addon'
-    ) {
-      return
-    }
+    const withAddonMode =
+      bookedLaserSlotPkgMode === 'continue_package_with_addon' ||
+      bookedLaserSlotPkgMode === 'use_package_with_addon' ||
+      bookedLaserAddonIdsFromQuery.length > 0 ||
+      Boolean(
+        parseBookedLaserAddonSegment(
+          bookedLaserProcedureText,
+          bookedLaserSlotPkgMode ||
+            (bookedLaserProcedureText.includes(' + ') ? 'use_package_with_addon' : ''),
+        ),
+      )
+    if (!withAddonMode) return
     if (laserProcedureLoading || !laserProcedureGroups.length) return
-    const addonSegment = parseBookedLaserAddonSegment(bookedLaserProcedureText, bookedLaserSlotPkgMode)
-    if (!addonSegment) return
-    const byName = new Map<string, string>()
-    for (const g of laserProcedureGroups) {
-      for (const item of g.items || []) {
-        byName.set(String(item.name || '').trim().toLowerCase(), String(item.id))
+
+    const packageIds = new Set((activeLaserPackage?.procedureOptionIds || []).map(String))
+    let matchedIds: string[] = []
+
+    if (bookedLaserAddonIdsFromQuery.length > 0) {
+      matchedIds = bookedLaserAddonIdsFromQuery.filter((id) => laserItemById.has(id) && !packageIds.has(id))
+    }
+
+    if (matchedIds.length === 0) {
+      const addonSegment = parseBookedLaserAddonSegment(
+        bookedLaserProcedureText,
+        bookedLaserSlotPkgMode || 'use_package_with_addon',
+      )
+      if (addonSegment) {
+        const byName = new Map<string, string>()
+        for (const g of laserProcedureGroups) {
+          for (const item of g.items || []) {
+            byName.set(String(item.name || '').trim().toLowerCase(), String(item.id))
+          }
+        }
+        matchedIds = addonSegment
+          .split(/\s*(?:\+|،|,|\/|\\|\||-)\s*/g)
+          .map((x) => normalizeLaserBookingText(x))
+          .filter(Boolean)
+          .map((name) => byName.get(name))
+          .filter((id): id is string => Boolean(id) && !packageIds.has(String(id)))
       }
     }
-    const matchedIds = addonSegment
-      .split(/\s*(?:\+|،|,|\/|\\|\||-)\s*/g)
-      .map((x) => normalizeLaserBookingText(x))
-      .filter(Boolean)
-      .map((name) => byName.get(name))
-      .filter((id): id is string => Boolean(id))
+
     if (matchedIds.length > 0) {
-      setSelectedLaserAddonItemIds([...new Set(matchedIds)])
+      const unique = [...new Set(matchedIds)]
+      setSelectedLaserAddonItemIds(unique)
+      setSelectedLaserItemIds((prev) => prev.filter((id) => !unique.includes(id)))
     }
   }, [
     tab,
     bookedLaserIsFullBody,
     bookedLaserSlotPkgMode,
     bookedLaserProcedureText,
+    bookedLaserAddonIdsFromQuery,
     laserProcedureLoading,
     laserProcedureGroups,
+    activeLaserPackage?.id,
+    (activeLaserPackage?.procedureOptionIds || []).join(','),
   ])
+
+  useEffect(() => {
+    if (tab !== 'laser' || !bookedLaserSlotId) return
+    if (bookedLaserAddonIdsFromQuery.length > 0) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api<{
+          slots: Array<{ id: string; laserAddonProcedureOptionIds?: string[] }>
+        }>('/api/schedule/booked')
+        if (cancelled) return
+        const slot = (data.slots || []).find((s) => String(s.id) === bookedLaserSlotId)
+        const ids = (slot?.laserAddonProcedureOptionIds || []).map(String).filter(Boolean)
+        if (ids.length > 0) {
+          const packageIds = new Set((activeLaserPackage?.procedureOptionIds || []).map(String))
+          const addonOnly = ids.filter((id) => !packageIds.has(id))
+          if (addonOnly.length > 0) {
+            setSelectedLaserAddonItemIds((prev) => [...new Set([...prev, ...addonOnly])])
+            setSelectedLaserItemIds((prev) => prev.filter((id) => !addonOnly.includes(id)))
+          }
+        }
+      } catch {
+        /* اختياري */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [tab, bookedLaserSlotId, bookedLaserAddonIdsFromQuery.length, activeLaserPackage?.procedureOptionIds])
 
   useEffect(() => {
     if (sessionInPackageMode) return
     if (
       bookedLaserSlotPkgMode === 'continue_package_with_addon' ||
-      bookedLaserSlotPkgMode === 'use_package_with_addon'
+      bookedLaserSlotPkgMode === 'use_package_with_addon' ||
+      bookedLaserAddonIdsFromQuery.length > 0
     ) {
       return
     }
     setSelectedLaserAddonItemIds([])
-  }, [sessionInPackageMode, bookedLaserSlotPkgMode])
+  }, [sessionInPackageMode, bookedLaserSlotPkgMode, bookedLaserAddonIdsFromQuery.length])
 
   function addDermMaterialRow() {
     setDermSelectedMaterials((prev) => [...prev, { inventoryItemId: '', quantity: '1' }])
@@ -4678,6 +4771,10 @@ export function PatientRecord() {
                                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                   {g.items.map((item) => {
                                     const selected = selectedLaserAddonItemIds.includes(item.id)
+                                    const inPackage = (activeLaserPackage?.procedureOptionIds || []).includes(
+                                      item.id,
+                                    )
+                                    if (inPackage) return null
                                     return (
                                       <button
                                         key={`addon-${item.id}`}

@@ -1418,9 +1418,43 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       const snap = Array.isArray(packageMatch?.pkg?.procedureOptionIds) ? packageMatch.pkg.procedureOptionIds : []
       effectiveMainOptionIds = parseUniqueStringIds(snap)
     }
-    const addonProcedureOptionIds = addonProcedureOptionIdsEarly.filter(
+    let addonProcedureOptionIds = addonProcedureOptionIdsEarly.filter(
       (id) => !effectiveMainOptionIds.includes(id),
     )
+    const packageOptionIdSet = new Set(
+      Array.isArray(packageMatch?.pkg?.procedureOptionIds)
+        ? packageMatch.pkg.procedureOptionIds.map((x) => String(x || '').trim()).filter(Boolean)
+        : [],
+    )
+    // إعادة تصنيف isAddon وفق عضوية الباكج + قائمة الإضافات — لا نثق بعلم الواجهة وحده
+    if (packageMatch && packageOptionIdSet.size > 0) {
+      // افصل أي معرّف خارج مناطق الباكج من القائمة الرئيسية إلى الإضافات
+      const leakedFromMain = effectiveMainOptionIds.filter((id) => !packageOptionIdSet.has(id))
+      effectiveMainOptionIds = effectiveMainOptionIds.filter((id) => packageOptionIdSet.has(id))
+      for (const id of leakedFromMain) {
+        if (!addonProcedureOptionIds.includes(id)) addonProcedureOptionIds.push(id)
+      }
+      for (const id of addonProcedureOptionIdsEarly) {
+        if (!packageOptionIdSet.has(id) && !addonProcedureOptionIds.includes(id)) {
+          addonProcedureOptionIds.push(id)
+        }
+      }
+      if (rawLineItems.length > 0) {
+        const addonIdSet = new Set(addonProcedureOptionIds)
+        rawLineItems = rawLineItems.map((row) => {
+          const oid = String(row.procedureOptionId || '').trim()
+          if (!oid) return row
+          const isAddon = addonIdSet.has(oid) || !packageOptionIdSet.has(oid)
+          return { ...row, isAddon }
+        })
+        for (const row of rawLineItems) {
+          const oid = String(row.procedureOptionId || '').trim()
+          if (row.isAddon && oid && !addonProcedureOptionIds.includes(oid)) {
+            addonProcedureOptionIds.push(oid)
+          }
+        }
+      }
+    }
     const allProcedureOptionIds = [...new Set([...effectiveMainOptionIds, ...addonProcedureOptionIds])]
     const procedureOptionsById = new Map()
     if (allProcedureOptionIds.length > 0) {

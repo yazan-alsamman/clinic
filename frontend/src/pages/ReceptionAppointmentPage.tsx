@@ -636,6 +636,16 @@ export function ReceptionAppointmentPage() {
     [selectedLaserItemIds, laserItemById],
   )
 
+  const openLaserPackageAreaIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const pkg of laserBookingContext?.openPackages || []) {
+      for (const oid of pkg.procedureOptionIds || []) {
+        if (oid) ids.add(String(oid))
+      }
+    }
+    return ids
+  }, [laserBookingContext?.openPackages])
+
   const selectedGenderForLaserPricing: '' | 'male' | 'female' =
     picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderPending
 
@@ -850,7 +860,12 @@ export function ReceptionAppointmentPage() {
           procedureType: proc.slice(0, 200),
           patientId: picked.id,
           ...(selectedService === 'laser' && laserIntent
-            ? { laserPackageBookingMode: laserIntent }
+            ? {
+                laserPackageBookingMode: laserIntent,
+                ...(isLaserPackageWithAddonIntent(laserIntent)
+                  ? { laserAddonProcedureOptionIds: selectedLaserItemIds }
+                  : { laserAddonProcedureOptionIds: [] }),
+              }
             : {}),
         }),
       })
@@ -1525,8 +1540,8 @@ export function ReceptionAppointmentPage() {
               ) : null}
               {selectedService === 'laser' &&
               picked &&
-              laserPackageBookingIntent === 'continue_package' ||
-              laserPackageBookingIntent === 'continue_package_with_addon' ? (
+              (laserPackageBookingIntent === 'continue_package' ||
+                laserPackageBookingIntent === 'continue_package_with_addon') ? (
                 <p
                   style={{
                     margin: '0 0 0.65rem',
@@ -1616,6 +1631,12 @@ export function ReceptionAppointmentPage() {
                                 <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
                                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                   {g.items.map((item) => {
+                                    if (
+                                      isLaserPackageWithAddonIntent(laserPackageBookingIntent) &&
+                                      openLaserPackageAreaIds.has(item.id)
+                                    ) {
+                                      return null
+                                    }
                                     const selected = selectedLaserItemIds.includes(item.id)
                                     return (
                                       <button

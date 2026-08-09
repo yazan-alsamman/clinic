@@ -561,6 +561,9 @@ function slotToDto(s) {
     ].includes(String(o.laserPackageBookingMode || '').trim())
       ? String(o.laserPackageBookingMode).trim()
       : '',
+    laserAddonProcedureOptionIds: Array.isArray(o.laserAddonProcedureOptionIds)
+      ? [...new Set(o.laserAddonProcedureOptionIds.map((x) => String(x || '').trim()).filter(Boolean))]
+      : [],
   }
 }
 
@@ -616,6 +619,18 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
       ].includes(laserPkgRaw)
         ? laserPkgRaw
         : ''
+    const laserAddonProcedureOptionIds =
+      serviceType === 'laser' &&
+      (laserPackageBookingMode === 'use_package_with_addon' ||
+        laserPackageBookingMode === 'continue_package_with_addon')
+        ? [
+            ...new Set(
+              (Array.isArray(body.laserAddonProcedureOptionIds) ? body.laserAddonProcedureOptionIds : [])
+                .map((x) => String(x || '').trim())
+                .filter(Boolean),
+            ),
+          ].slice(0, 40)
+        : []
     const patientId = body.patientId
     if (!time || !endTime || !providerName || !patientId) {
       res.status(400).json({ error: 'وقت البداية ووقت النهاية والمقدّم والمريض مطلوبان' })
@@ -623,6 +638,14 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     }
     if (!procedureType) {
       res.status(400).json({ error: 'نوع الإجراء مطلوب' })
+      return
+    }
+    if (
+      (laserPackageBookingMode === 'use_package_with_addon' ||
+        laserPackageBookingMode === 'continue_package_with_addon') &&
+      laserAddonProcedureOptionIds.length === 0
+    ) {
+      res.status(400).json({ error: 'اختر منطقة واحدة على الأقل خارج الباكج' })
       return
     }
     const startMin = hmToMinutes(time)
@@ -660,6 +683,32 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
             'لا توجد جلسة باكج جديدة متاحة — استخدم «إكمال المنطقة المتبقية» إن وُجدت جلسة ناقصة، أو «خارج الباكج».',
         })
         return
+      }
+      // لا تُحفظ مناطق الباكج نفسها كـ «خارج الباكج»
+      if (laserAddonProcedureOptionIds.length > 0) {
+        const packageAreaIds = new Set()
+        for (const pkg of patient.sessionPackages || []) {
+          if (String(pkg.department || '') !== 'laser' || pkg.suspended === true) continue
+          for (const oid of pkg.procedureOptionIds || []) {
+            const s = String(oid || '').trim()
+            if (s) packageAreaIds.add(s)
+          }
+        }
+        for (let i = laserAddonProcedureOptionIds.length - 1; i >= 0; i -= 1) {
+          if (packageAreaIds.has(laserAddonProcedureOptionIds[i])) {
+            laserAddonProcedureOptionIds.splice(i, 1)
+          }
+        }
+        if (
+          (laserPackageBookingMode === 'use_package_with_addon' ||
+            laserPackageBookingMode === 'continue_package_with_addon') &&
+          laserAddonProcedureOptionIds.length === 0
+        ) {
+          res.status(400).json({
+            error: 'المناطق المختارة خارج الباكج مطابقة لمناطق الباكج — اختر مناطق مختلفة خارج الباكج.',
+          })
+          return
+        }
       }
     }
     const resolved = await resolveProviderAssignment({
@@ -763,6 +812,7 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
           arrivedByName: '',
           laserSessionId: null,
           laserPackageBookingMode: serviceType === 'laser' ? laserPackageBookingMode : '',
+          laserAddonProcedureOptionIds: serviceType === 'laser' ? laserAddonProcedureOptionIds : [],
         },
       },
       { new: true, upsert: !existing },
