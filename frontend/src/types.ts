@@ -17,6 +17,7 @@ export type NavKey =
   | 'admin_clinic_sessions'
   | 'admin_dental_clinics'
   | 'admin_dental_patients'
+  | 'admin_dental_labs'
   | 'admin_dental_chart_marks'
   | 'appointments_booked'
   | 'reception_appointment'

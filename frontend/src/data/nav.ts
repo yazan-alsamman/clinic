@@ -20,6 +20,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'admin_clinic_sessions', path: '/admin/clinic-sessions', label: 'جلسات العيادة' },
   { key: 'admin_dental_clinics', path: '/admin/dental-clinics', label: 'عيادات الأسنان' },
   { key: 'admin_dental_patients', path: '/admin/dental-patients', label: 'مرضى الأسنان' },
+  { key: 'admin_dental_labs', path: '/admin/dental-labs', label: 'المخابر' },
   { key: 'admin_dental_chart_marks', path: '/admin/dental-chart-marks', label: 'علامات مخطط الأسنان' },
   { key: 'admin_audit', path: '/admin/audit', label: 'سجل النشاط' },
   { key: 'admin_rooms', path: '/admin/rooms', label: 'الغرف والتخصيص' },
@@ -77,7 +78,7 @@ const roleNav: Record<Role, NavKey[]> = {
     'inventory',
     'account_password',
   ],
-  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'account_password'],
+  dental_branch: ['dashboard', 'patients', 'appointments_booked', 'admin_dental_labs', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {

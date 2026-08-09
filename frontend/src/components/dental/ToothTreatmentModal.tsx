@@ -27,11 +27,17 @@ export type DentalProviderOption = {
   noShare?: boolean
 }
 
+export type DentalLabOption = {
+  id: string
+  name: string
+}
+
 type Props = {
   tooth: DentalToothState
   canEdit: boolean
   saving?: boolean
   providers: DentalProviderOption[]
+  labs?: DentalLabOption[]
   /** حالة الدخول: وصف فقط بدون تكلفة/دفعات/مخابر */
   baselineOnly?: boolean
   onClose: () => void
@@ -51,6 +57,7 @@ export function ToothTreatmentModal({
   canEdit,
   saving,
   providers,
+  labs = [],
   baselineOnly = false,
   onClose,
   onSave,
@@ -130,6 +137,24 @@ export function ToothTreatmentModal({
                 providerUserId: p ? p.id : null,
                 doctorName: p ? p.name : '',
                 providerKey: p?.id === '__elias__' || p?.noShare ? 'elias' : '',
+              },
+              rate,
+            )
+          : x,
+      ),
+    )
+  }
+
+  function selectLabCatalog(idx: number, labId: string) {
+    const lab = labs.find((x) => x.id === labId)
+    setLabDrafts((prev) =>
+      prev.map((x, i) =>
+        i === idx
+          ? normalizeLabWork(
+              {
+                ...x,
+                labId: lab ? lab.id : null,
+                labName: lab ? lab.name : '',
               },
               rate,
             )
@@ -226,22 +251,26 @@ export function ToothTreatmentModal({
       }
     }
     const kept = next.filter(treatmentHasData)
-    const labs = labDrafts.map((x) => normalizeLabWork(x, rate)).filter(labWorkHasData)
-    for (let i = 0; i < labs.length; i += 1) {
-      const lab = labs[i]
+    const labsKept = labDrafts.map((x) => normalizeLabWork(x, rate)).filter(labWorkHasData)
+    for (let i = 0; i < labsKept.length; i += 1) {
+      const lab = labsKept[i]
+      if (!lab.labId && !lab.labName.trim()) {
+        setLocalErr(`سطر المخبر ${i + 1}: اختر المخبر من القائمة.`)
+        return
+      }
       if (lab.amountUsd > 0 && !(lab.usdSypRate > 0) && !(rate != null && rate > 0)) {
-        setLocalErr(`المخبر ${i + 1}: تكلفة بالدولار تتطلب سعر صرف لليوم النشط.`)
+        setLocalErr(`سطر المخبر ${i + 1}: تكلفة بالدولار تتطلب سعر صرف لليوم النشط.`)
         return
       }
     }
-    onSave({ treatments: kept.length > 0 ? kept : [], labWorks: labs })
+    onSave({ treatments: kept.length > 0 ? kept : [], labWorks: labsKept })
   }
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <div
         className="modal"
-        style={{ maxWidth: 680, width: '100%', maxHeight: '90vh', overflow: 'auto' }}
+        style={{ maxWidth: 820, width: '100%', maxHeight: '90vh', overflow: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
@@ -474,77 +503,104 @@ export function ToothTreatmentModal({
         <section
           style={{
             marginTop: '1.15rem',
-            padding: '0.85rem',
+            padding: '0.95rem 1rem',
             border: '1px solid var(--border)',
             borderRadius: 12,
             background: 'var(--bg)',
           }}
         >
-          <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.95rem' }}>المخابر</h4>
-          <p style={{ margin: '0 0 0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-            سجل أعمال المخابر لهذا السن بالليرة أو الدولار (أو الاثنين معاً). اربط المخبر بالطبيب المعالج
-            (مهم لحساب د. الياس).
+          <h4 style={{ margin: '0 0 0.35rem', fontSize: '1rem' }}>المخابر</h4>
+          <p style={{ margin: '0 0 0.85rem', fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+            اختر المخبر من القائمة (تُدار من صفحة المخابر)، ثم سجّل وصف العمل والمبلغ بالليرة أو الدولار، واربط
+            الطبيب المعالج (مهم لحساب د. الياس).
           </p>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>اسم المخبر</th>
-                  <th>وصف الإجراء</th>
-                  <th>الطبيب</th>
-                  <th>المبلغ (ل.س)</th>
-                  <th>المبلغ (USD)</th>
-                  <th>التاريخ</th>
-                  {canEdit ? <th></th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {labDrafts.length === 0 ? (
-                  <tr>
-                    <td colSpan={canEdit ? 7 : 6} style={{ color: 'var(--text-muted)' }}>
-                      لا سجلات مخابر بعد.
-                    </td>
-                  </tr>
-                ) : (
-                  labDrafts.map((row, idx) => {
-                    const effective = labEffectiveAmountSyp(row, rate)
-                    return (
-                    <tr key={row.id || `lab-${idx}`}>
-                      <td>
+
+          {labDrafts.length === 0 ? (
+            <p style={{ margin: '0 0 0.65rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              لا سجلات مخابر بعد.
+            </p>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {labDrafts.map((row, idx) => {
+                const effective = labEffectiveAmountSyp(row, rate)
+                const selectValue =
+                  row.labId && labs.some((l) => l.id === row.labId)
+                    ? row.labId
+                    : labs.find((l) => l.name.trim() === row.labName.trim())?.id || ''
+                return (
+                  <div
+                    key={row.id || `lab-${idx}`}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      padding: '0.85rem',
+                      background: 'var(--surface-solid)',
+                      display: 'grid',
+                      gap: '0.65rem',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: '0.5rem',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <strong style={{ fontSize: '0.9rem' }}>سطر مخبر {idx + 1}</strong>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '0.78rem' }}
+                          onClick={() => setLabDrafts((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          حذف
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                        gap: '0.65rem',
+                      }}
+                    >
+                      <div>
+                        <label className="form-label">اسم المخبر</label>
                         {canEdit ? (
-                          <input
-                            className="input"
-                            value={row.labName}
-                            onChange={(e) =>
-                              setLabDrafts((prev) =>
-                                prev.map((x, i) => (i === idx ? { ...x, labName: e.target.value } : x)),
-                              )
-                            }
-                            placeholder="اسم المخبر"
-                          />
+                          labs.length > 0 ? (
+                            <select
+                              className="input"
+                              value={selectValue}
+                              onChange={(e) => selectLabCatalog(idx, e.target.value)}
+                            >
+                              <option value="">— اختر مخبر —</option>
+                              {labs.map((l) => (
+                                <option key={l.id} value={l.id}>
+                                  {l.name}
+                                </option>
+                              ))}
+                              {row.labName && !selectValue ? (
+                                <option value="" disabled>
+                                  {row.labName} (غير في القائمة)
+                                </option>
+                              ) : null}
+                            </select>
+                          ) : (
+                            <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--amber)' }}>
+                              لا مخابر في القائمة — أضفها من صفحة «المخابر» أولاً.
+                            </p>
+                          )
                         ) : (
-                          row.labName || '—'
+                          <div>{row.labName || '—'}</div>
                         )}
-                      </td>
-                      <td>
-                        {canEdit ? (
-                          <input
-                            className="input"
-                            value={row.procedureDescription}
-                            onChange={(e) =>
-                              setLabDrafts((prev) =>
-                                prev.map((x, i) =>
-                                  i === idx ? { ...x, procedureDescription: e.target.value } : x,
-                                ),
-                              )
-                            }
-                            placeholder="وصف الإجراء"
-                          />
-                        ) : (
-                          row.procedureDescription || '—'
-                        )}
-                      </td>
-                      <td>
+                      </div>
+
+                      <div>
+                        <label className="form-label">الطبيب</label>
                         {canEdit ? (
                           <select
                             className="input"
@@ -559,53 +615,12 @@ export function ToothTreatmentModal({
                             ))}
                           </select>
                         ) : (
-                          row.doctorName || '—'
+                          <div>{row.doctorName || '—'}</div>
                         )}
-                      </td>
-                      <td>
-                        {canEdit ? (
-                          <input
-                            className="input"
-                            inputMode="numeric"
-                            dir="ltr"
-                            value={row.amountSyp ? String(row.amountSyp) : ''}
-                            onChange={(e) => setLabAmountSyp(idx, e.target.value)}
-                            placeholder="0"
-                          />
-                        ) : (
-                          <span dir="ltr">{row.amountSyp.toLocaleString('ar-SY')} ل.س</span>
-                        )}
-                      </td>
-                      <td>
-                        {canEdit ? (
-                          <div>
-                            <input
-                              className="input"
-                              inputMode="decimal"
-                              dir="ltr"
-                              value={row.amountUsd ? String(row.amountUsd) : ''}
-                              onChange={(e) => setLabAmountUsd(idx, e.target.value)}
-                              placeholder="0"
-                            />
-                            {row.amountUsd > 0 ? (
-                              <p style={{ margin: '0.25rem 0 0', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                ≈ {effective.toLocaleString('ar-SY')} ل.س
-                                {rate != null ? ` (سعر ${rate.toLocaleString('ar-SY')})` : ''}
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : row.amountUsd > 0 ? (
-                          <span dir="ltr">
-                            {formatUsdAmount(row.amountUsd)} USD
-                            <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                              ≈ {effective.toLocaleString('ar-SY')} ل.س
-                            </span>
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td>
+                      </div>
+
+                      <div>
+                        <label className="form-label">التاريخ</label>
                         {canEdit ? (
                           <input
                             className="input"
@@ -621,33 +636,94 @@ export function ToothTreatmentModal({
                             }
                           />
                         ) : (
-                          <span dir="ltr">{row.businessDate || '—'}</span>
+                          <div dir="ltr">{row.businessDate || '—'}</div>
                         )}
-                      </td>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="form-label">وصف الإجراء</label>
                       {canEdit ? (
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            style={{ fontSize: '0.75rem' }}
-                            onClick={() => setLabDrafts((prev) => prev.filter((_, i) => i !== idx))}
-                          >
-                            حذف
-                          </button>
-                        </td>
-                      ) : null}
-                    </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                        <input
+                          className="input"
+                          value={row.procedureDescription}
+                          onChange={(e) =>
+                            setLabDrafts((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, procedureDescription: e.target.value } : x,
+                              ),
+                            )
+                          }
+                          placeholder="مثال: تاج خزفي / وجه تجميلي"
+                        />
+                      ) : (
+                        <div>{row.procedureDescription || '—'}</div>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                        gap: '0.65rem',
+                        alignItems: 'end',
+                      }}
+                    >
+                      <div>
+                        <label className="form-label">المبلغ (ل.س)</label>
+                        {canEdit ? (
+                          <input
+                            className="input"
+                            inputMode="numeric"
+                            dir="ltr"
+                            value={row.amountSyp ? String(row.amountSyp) : ''}
+                            onChange={(e) => setLabAmountSyp(idx, e.target.value)}
+                            placeholder="0"
+                          />
+                        ) : (
+                          <div dir="ltr">{row.amountSyp.toLocaleString('ar-SY')} ل.س</div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="form-label">المبلغ (USD)</label>
+                        {canEdit ? (
+                          <input
+                            className="input"
+                            inputMode="decimal"
+                            dir="ltr"
+                            value={row.amountUsd ? String(row.amountUsd) : ''}
+                            onChange={(e) => setLabAmountUsd(idx, e.target.value)}
+                            placeholder="0"
+                          />
+                        ) : row.amountUsd > 0 ? (
+                          <div dir="ltr">{formatUsdAmount(row.amountUsd)} USD</div>
+                        ) : (
+                          <div>—</div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="form-label">الإجمالي المكافئ</label>
+                        <div dir="ltr" style={{ fontWeight: 700, padding: '0.45rem 0' }}>
+                          {effective > 0 ? `${effective.toLocaleString('ar-SY')} ل.س` : '—'}
+                        </div>
+                        {row.amountUsd > 0 && rate != null ? (
+                          <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            سعر الصرف {rate.toLocaleString('ar-SY')}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
           {canEdit ? (
             <button
               type="button"
               className="btn btn-secondary"
-              style={{ marginTop: '0.65rem', fontSize: '0.82rem' }}
+              style={{ marginTop: '0.85rem', fontSize: '0.86rem' }}
               onClick={() => {
                 const fromProc = drafts.find((d) => d.providerUserId)
                 const base = emptyLabWork()

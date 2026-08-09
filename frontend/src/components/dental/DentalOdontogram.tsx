@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { api, ApiError } from '../../api/client'
 import { ToothCell } from './ToothSvg'
-import { ToothTreatmentModal, type DentalProviderOption } from './ToothTreatmentModal'
+import { ToothTreatmentModal, type DentalLabOption, type DentalProviderOption } from './ToothTreatmentModal'
 import {
   arabicToothName,
   chartTeethPayload,
@@ -63,6 +63,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
   const [ok, setOk] = useState('')
   const [dirty, setDirty] = useState(false)
   const [providers, setProviders] = useState<DentalProviderOption[]>([])
+  const [labs, setLabs] = useState<DentalLabOption[]>([])
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skipNextAutosave = useRef(true)
 
@@ -109,17 +110,19 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
     setLoading(true)
     setErr('')
     try {
-      const [data, providersRes, marksRes] = await Promise.all([
+      const [data, providersRes, marksRes, labsRes] = await Promise.all([
         api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`),
         api<{ providers: DentalProviderOption[] }>('/api/dental/providers').catch(() => ({ providers: [] })),
         api<{ options: DentalChartMarkOption[] }>('/api/dental/chart-mark-options').catch(() => ({
           options: [],
         })),
+        api<{ labs: DentalLabOption[] }>('/api/dental/labs').catch(() => ({ labs: [] })),
       ])
       skipNextAutosave.current = true
       setTeethMap(teethMapFromChart(data.chart?.teeth || []))
       setProviders(providersRes.providers || [])
       setMarkOptions(marksRes.options || [])
+      setLabs(labsRes.labs || [])
       setDirty(false)
     } catch (e: unknown) {
       setErr(e instanceof ApiError ? e.message : 'تعذر تحميل مخطط الأسنان')
@@ -528,6 +531,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           canEdit={canEdit}
           saving={saving}
           providers={providers}
+          labs={labs}
           baselineOnly={panelBaselineOnly}
           onClose={() => setPanelFdi(null)}
           onSave={(payload) => void saveTreatment(payload)}

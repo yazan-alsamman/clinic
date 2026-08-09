@@ -59,6 +59,8 @@ export type DentalToothTreatment = {
 
 export type DentalLabWork = {
   id?: string
+  /** معرّف المخبر من قائمة المخابر */
+  labId?: string | null
   labName: string
   procedureDescription: string
   amountSyp: number
@@ -338,6 +340,7 @@ export function treatmentRemaining(t: DentalToothTreatment, fallbackRate?: numbe
 export function emptyLabWork(): DentalLabWork {
   return {
     id: `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    labId: null,
     labName: '',
     procedureDescription: '',
     amountSyp: 0,
@@ -381,6 +384,7 @@ export function normalizeLabWork(
   if (!(amountUsd > 0)) usdSypRate = 0
   return {
     id: raw?.id ? String(raw.id) : undefined,
+    labId: raw?.labId ? String(raw.labId) : null,
     labName: String(raw?.labName || '').trim(),
     procedureDescription: String(raw?.procedureDescription || '').trim(),
     amountSyp,
@@ -396,6 +400,7 @@ export function normalizeLabWork(
 export function labWorkHasData(row: DentalLabWork | undefined): boolean {
   if (!row) return false
   return (
+    Boolean(row.labId) ||
     Boolean(row.labName.trim()) ||
     Boolean(row.procedureDescription.trim()) ||
     row.amountSyp > 0 ||

@@ -19,6 +19,13 @@ import {
   resolveDentalProviderFields,
 } from '../services/dentalDoctorConstants.js'
 import { listDentalClinicSessions, listDentalPatientsAccounts } from '../services/dentalFinanceShares.js'
+import {
+  dentalLabToAdminDto,
+  labPaymentEffectiveSyp,
+  listActiveDentalLabs,
+  listDentalLabAccounts,
+} from '../services/dentalLabs.js'
+import { DentalLab } from '../models/DentalLab.js'
 import { isValidYmd, todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
 
@@ -272,6 +279,8 @@ function normalizeLabWorks(raw, fallbackUsdSypRate = 0) {
   const today = todayBusinessDate()
   for (const row of raw) {
     const labName = String(row?.labName || '').trim().slice(0, 200)
+    const labIdRaw = row?.labId != null ? String(row.labId).trim() : ''
+    const labId = mongoose.Types.ObjectId.isValid(labIdRaw) ? labIdRaw : null
     const procedureDescription = String(row?.procedureDescription || '').trim().slice(0, 1000)
     const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
     const amountUsd = Math.max(0, round6(Number(row?.amountUsd) || 0))
@@ -280,7 +289,7 @@ function normalizeLabWorks(raw, fallbackUsdSypRate = 0) {
       usdSypRate = Math.max(0, Number(fallbackUsdSypRate) || 0)
     }
     if (!(amountUsd > 0)) usdSypRate = 0
-    if (!labName && !procedureDescription && !(amountSyp > 0) && !(amountUsd > 0)) continue
+    if (!labName && !labId && !procedureDescription && !(amountSyp > 0) && !(amountUsd > 0)) continue
     const businessDate = normalizeYmd(row?.businessDate, today)
     const providerRaw = row?.providerUserId != null ? String(row.providerUserId).trim() : ''
     const resolved = resolveDentalProviderFields({
@@ -293,6 +302,7 @@ function normalizeLabWorks(raw, fallbackUsdSypRate = 0) {
       providerUserId = providerRaw
     }
     const item = {
+      labId,
       labName,
       procedureDescription,
       amountSyp,
@@ -316,6 +326,7 @@ function normalizeLabWorks(raw, fallbackUsdSypRate = 0) {
 
 function labWorkToDto(row) {
   const n = normalizeLabWorks([row])[0] || {
+    labId: null,
     labName: '',
     procedureDescription: '',
     amountSyp: 0,
@@ -327,8 +338,12 @@ function labWorkToDto(row) {
     providerKey: '',
   }
   const isElias = String(n.providerKey || '') === DENTAL_ELIAS_PROVIDER_KEY
+  const labId =
+    n.labId ||
+    (row?.labId && mongoose.Types.ObjectId.isValid(String(row.labId)) ? String(row.labId) : null)
   return {
     id: row?._id ? String(row._id) : undefined,
+    labId: labId ? String(labId) : null,
     labName: n.labName,
     procedureDescription: n.procedureDescription,
     amountSyp: n.amountSyp,
@@ -651,6 +666,225 @@ dentalRouter.get('/admin/patients', requireRoles('super_admin'), async (req, res
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
+
+/** قائمة المخابر النشطة — لاختيار المخبر عند تسجيل إجراء على السن */
+dentalRouter.get('/labs', requireRoles('super_admin', 'dental_branch'), async (_req, res) => {
+  try {
+    const labs = await listActiveDentalLabs()
+    res.json({ labs })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** حسابات المخابر: الإجمالي / المسدّد / المتبقي + تفاصيل الأعمال والدفعات */
+dentalRouter.get('/labs/accounts', requireRoles('super_admin', 'dental_branch'), async (_req, res) => {
+  try {
+    const data = await listDentalLabAccounts({ includeInactive: true })
+    res.json(data)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.post('/labs', requireRoles('super_admin', 'dental_branch'), async (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim().slice(0, 200)
+    if (!name) {
+      res.status(400).json({ error: 'اسم المخبر مطلوب' })
+      return
+    }
+    const notes = String(req.body?.notes || '').trim().slice(0, 1000)
+    const sortOrder = Math.max(0, Math.trunc(Number(req.body?.sortOrder) || 0))
+    const existing = await DentalLab.findOne({
+      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    })
+    if (existing) {
+      res.status(409).json({ error: 'مخبر بهذا الاسم موجود مسبقاً' })
+      return
+    }
+    const doc = await DentalLab.create({ name, notes, sortOrder, active: true, payments: [] })
+    await writeAudit({
+      user: req.user,
+      action: 'dental_lab_create',
+      entityType: 'DentalLab',
+      entityId: String(doc._id),
+      details: { name },
+    })
+    res.status(201).json({ lab: dentalLabToAdminDto(doc) })
+  } catch (e) {
+    if (e?.code === 11000) {
+      res.status(409).json({ error: 'مخبر بهذا الاسم موجود مسبقاً' })
+      return
+    }
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.patch('/labs/:id', requireRoles('super_admin', 'dental_branch'), async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const doc = await DentalLab.findById(id)
+    if (!doc) {
+      res.status(404).json({ error: 'المخبر غير موجود' })
+      return
+    }
+    if (req.body?.name != null) {
+      const name = String(req.body.name || '').trim().slice(0, 200)
+      if (!name) {
+        res.status(400).json({ error: 'اسم المخبر مطلوب' })
+        return
+      }
+      const clash = await DentalLab.findOne({
+        _id: { $ne: doc._id },
+        name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+      })
+      if (clash) {
+        res.status(409).json({ error: 'مخبر بهذا الاسم موجود مسبقاً' })
+        return
+      }
+      doc.name = name
+    }
+    if (req.body?.notes != null) doc.notes = String(req.body.notes || '').trim().slice(0, 1000)
+    if (req.body?.active != null) doc.active = Boolean(req.body.active)
+    if (req.body?.sortOrder != null) doc.sortOrder = Math.max(0, Math.trunc(Number(req.body.sortOrder) || 0))
+    await doc.save()
+    await writeAudit({
+      user: req.user,
+      action: 'dental_lab_update',
+      entityType: 'DentalLab',
+      entityId: id,
+      details: { name: doc.name, active: doc.active },
+    })
+    res.json({ lab: dentalLabToAdminDto(doc) })
+  } catch (e) {
+    if (e?.code === 11000) {
+      res.status(409).json({ error: 'مخبر بهذا الاسم موجود مسبقاً' })
+      return
+    }
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** تسجيل دفعة مسدّدة للمخبر */
+dentalRouter.post('/labs/:id/payments', requireRoles('super_admin', 'dental_branch'), async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const doc = await DentalLab.findById(id)
+    if (!doc) {
+      res.status(404).json({ error: 'المخبر غير موجود' })
+      return
+    }
+    const amountSyp = Math.max(0, Math.round(Number(req.body?.amountSyp) || 0))
+    const amountUsd = Math.max(0, round6(Number(req.body?.amountUsd) || 0))
+    let usdSypRate = Math.max(0, Number(req.body?.usdSypRate) || 0)
+    if (amountUsd > 0 && !(usdSypRate > 0)) {
+      usdSypRate = Math.max(0, Number(req.businessDay?.usdSypRate) || 0)
+    }
+    if (!(amountUsd > 0)) usdSypRate = 0
+    if (!(amountSyp > 0) && !(amountUsd > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغاً بالليرة أو الدولار' })
+      return
+    }
+    if (amountUsd > 0 && !(usdSypRate > 0)) {
+      res.status(400).json({ error: 'سعر صرف الدولار غير متوفر — أدخل المبلغ بالليرة أو فعّل يوم العمل' })
+      return
+    }
+    const businessDate = isValidYmd(String(req.body?.businessDate || '').trim())
+      ? String(req.body.businessDate).trim()
+      : todayBusinessDate()
+    const note = String(req.body?.note || '').trim().slice(0, 500)
+    doc.payments.push({
+      amountSyp,
+      amountUsd,
+      usdSypRate,
+      businessDate,
+      note,
+      createdBy: req.user?._id || null,
+      createdByName: String(req.user?.name || '').trim().slice(0, 160),
+    })
+    await doc.save()
+    const pay = doc.payments[doc.payments.length - 1]
+    await writeAudit({
+      user: req.user,
+      action: 'dental_lab_payment',
+      entityType: 'DentalLab',
+      entityId: id,
+      details: {
+        paymentId: String(pay._id),
+        amountSyp,
+        amountUsd,
+        effectiveSyp: labPaymentEffectiveSyp(pay),
+      },
+    })
+    res.status(201).json({
+      payment: {
+        id: String(pay._id),
+        amountSyp,
+        amountUsd,
+        usdSypRate,
+        effectiveSyp: labPaymentEffectiveSyp(pay),
+        businessDate,
+        note,
+        createdByName: String(pay.createdByName || ''),
+        createdAt: pay.createdAt || null,
+      },
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.delete(
+  '/labs/:id/payments/:paymentId',
+  requireRoles('super_admin', 'dental_branch'),
+  async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim()
+      const paymentId = String(req.params.paymentId || '').trim()
+      if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(paymentId)) {
+        res.status(400).json({ error: 'معرّف غير صالح' })
+        return
+      }
+      const doc = await DentalLab.findById(id)
+      if (!doc) {
+        res.status(404).json({ error: 'المخبر غير موجود' })
+        return
+      }
+      const before = doc.payments.length
+      doc.payments = doc.payments.filter((p) => String(p._id) !== paymentId)
+      if (doc.payments.length === before) {
+        res.status(404).json({ error: 'الدفعة غير موجودة' })
+        return
+      }
+      await doc.save()
+      await writeAudit({
+        user: req.user,
+        action: 'dental_lab_payment_delete',
+        entityType: 'DentalLab',
+        entityId: id,
+        details: { paymentId },
+      })
+      res.json({ ok: true })
+    } catch (e) {
+      console.error(e)
+      res.status(500).json({ error: 'خطأ في الخادم' })
+    }
+  },
+)
 
 /** لوحة الأسنان: اقتراح للمدير + طابور الخطط المعتمدة لأطباء الفروع */
 dentalRouter.get('/dashboard', async (req, res) => {

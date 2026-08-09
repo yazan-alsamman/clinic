@@ -50,6 +50,7 @@ const AdminDentalPatientsPage = lazyPage(
   () => import('./pages/AdminDentalPatientsPage'),
   'AdminDentalPatientsPage',
 )
+const AdminDentalLabsPage = lazyPage(() => import('./pages/AdminDentalLabsPage'), 'AdminDentalLabsPage')
 const AdminDentalChartMarksPage = lazyPage(
   () => import('./pages/AdminDentalChartMarksPage'),
   'AdminDentalChartMarksPage',
@@ -121,6 +122,7 @@ export default function App() {
                 <Route path="/admin/clinic-sessions" element={<AdminClinicSessionsPage />} />
                 <Route path="/admin/dental-clinics" element={<AdminDentalClinicsPage />} />
                 <Route path="/admin/dental-patients" element={<AdminDentalPatientsPage />} />
+                <Route path="/admin/dental-labs" element={<AdminDentalLabsPage />} />
                 <Route path="/admin/dental-chart-marks" element={<AdminDentalChartMarksPage />} />
                 <Route path="/admin/send-notifications" element={<AdminSendNotificationsPage />} />
                 <Route path="/admin/audit" element={<AdminAudit />} />

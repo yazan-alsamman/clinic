@@ -106,6 +106,8 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
 
 const dentalChartLabWorkSchema = new mongoose.Schema(
   {
+    /** مرجع لمخبر من قائمة المخابر (اختياري للتوافق مع السجلات القديمة) */
+    labId: { type: mongoose.Schema.Types.ObjectId, ref: 'DentalLab', default: null },
     labName: { type: String, default: '', trim: true, maxlength: 200 },
     procedureDescription: { type: String, default: '', trim: true, maxlength: 1000 },
     amountSyp: { type: Number, default: 0, min: 0 },
