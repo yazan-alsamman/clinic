@@ -184,7 +184,12 @@ export async function getLaserBookingContextForPatient(patientDoc) {
     (p) => String(p?.department || '') === 'laser' && p.suspended !== true,
   )
   if (!laserPkgs.length) {
-    return { hasOpenPackage: false, partialVisit: null, hasFreshPackageSession: false }
+    return {
+      hasOpenPackage: false,
+      partialVisit: null,
+      hasFreshPackageSession: false,
+      openPackages: [],
+    }
   }
 
   const optionIds = new Set()
@@ -234,12 +239,54 @@ export async function getLaserBookingContextForPatient(patientDoc) {
     }
   }
 
+  const openPackages = []
+  for (const pkg of laserPkgs) {
+    const sessions = Array.isArray(pkg.sessions) ? pkg.sessions : []
+    const sessionsCompleted = sessions.filter((s) => s?.completedByReception === true).length
+    const sessionsLinkedOpen = sessions.filter(
+      (s) => s?.linkedLaserSessionId && s?.completedByReception !== true,
+    ).length
+    const sessionsAvailable = sessions.filter(
+      (s) => !s?.linkedLaserSessionId && s?.completedByReception !== true,
+    ).length
+    const isOpen =
+      sessionsAvailable > 0 ||
+      sessionsLinkedOpen > 0 ||
+      (partialVisit != null && String(partialVisit.packageId) === String(pkg._id))
+    if (!isOpen) continue
+
+    const ids = Array.isArray(pkg.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : []
+    const areaLabels = ids
+      .map((id) => optionMetaById.get(id)?.name || '')
+      .map((n) => String(n || '').trim())
+      .filter(Boolean)
+    const areaCount = packageExpectedAreaCount(pkg)
+    const sessionsCount = Math.max(1, Math.trunc(Number(pkg.sessionsCount) || sessions.length || 1))
+    openPackages.push({
+      id: String(pkg._id),
+      title: String(pkg.title || '').trim() || 'باكج ليزر',
+      notes: String(pkg.notes || '').trim(),
+      sessionsCount,
+      sessionsCompleted,
+      sessionsAvailable,
+      sessionsLinkedOpen,
+      sessionsRemaining: Math.max(0, sessionsCount - sessionsCompleted),
+      areaCount,
+      areaLabels,
+      packageTotalSyp: Math.round(Number(pkg.packageTotalSyp) || 0),
+      paidAmountSyp: Math.round(Number(pkg.paidAmountSyp) || 0),
+      isPartial: Boolean(partialVisit) && String(partialVisit.packageId) === String(pkg._id),
+      isFreshTarget: Boolean(fresh?.pkg) && String(fresh.pkg._id) === String(pkg._id),
+    })
+  }
+
   const hasOpenPackage =
     hasFreshPackageSession ||
     partialVisit != null ||
+    openPackages.some((p) => p.sessionsAvailable > 0 || p.sessionsLinkedOpen > 0) ||
     laserPkgs.some((pkg) =>
       (pkg.sessions || []).some((s) => !s?.completedByReception && !s?.linkedLaserSessionId),
     )
 
-  return { hasOpenPackage, partialVisit, hasFreshPackageSession }
+  return { hasOpenPackage, partialVisit, hasFreshPackageSession, openPackages }
 }
