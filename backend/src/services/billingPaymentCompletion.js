@@ -10,6 +10,7 @@ import {
   parseSypReceivedFromBody,
   paymentRecordReceivedFields,
   resolveBillingPaymentReceipt,
+  fetchUsdSypRateForBusinessDate,
 } from './billingPaymentReceipt.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
@@ -52,6 +53,43 @@ function mapDiscountError(err) {
 }
 
 export { parseSypReceivedFromBody, isZeroCollectionAllowed, assertBillingCollectionAmountValid }
+
+/** خصم الرصيد الإضافي من المستحق قبل مقارنة المبلغ النقدي المستلم */
+export function applyPrepaidCreditTowardDue({
+  dueSyp,
+  dueUsd = 0,
+  prepaidCreditSyp = 0,
+  usdSypRate = 0,
+  isUsdBilling = false,
+}) {
+  const due = Math.max(0, Math.round(Number(dueSyp) || 0))
+  let credit = Math.max(0, Math.round(Number(prepaidCreditSyp) || 0))
+  const rate = Math.max(0, Number(usdSypRate) || 0)
+  const dueUsdN = Math.max(0, round6(Number(dueUsd) || 0))
+
+  if (isUsdBilling && dueUsdN > 0 && rate > 0 && credit > 0) {
+    const creditAsUsd = round6(credit / rate)
+    const useUsd = Math.min(creditAsUsd, dueUsdN)
+    const creditAppliedSyp = Math.round(useUsd * rate)
+    credit = Math.max(0, credit - creditAppliedSyp)
+    const dueAfterCreditUsd = round6(dueUsdN - useUsd)
+    return {
+      creditAppliedSyp,
+      creditRemainingSyp: credit,
+      dueAfterCreditSyp: Math.round(dueAfterCreditUsd * rate),
+      dueAfterCreditUsd,
+    }
+  }
+
+  const creditAppliedSyp = Math.min(credit, due)
+  credit = Math.max(0, credit - creditAppliedSyp)
+  return {
+    creditAppliedSyp,
+    creditRemainingSyp: credit,
+    dueAfterCreditSyp: Math.max(0, due - creditAppliedSyp),
+    dueAfterCreditUsd: 0,
+  }
+}
 
 function netReceivedSypAfterUsdCollection(amountUsd, patientRefundSyp, patientRefundUsd, rate) {
   const u = Number(amountUsd)
@@ -125,12 +163,47 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     usdSypRateUsed,
     amountUsdRaw,
   } = receipt
-  assertBillingCollectionAmountValid({ netReceivedSyp, dueForSettlement })
+
+  /** بند مسعّر بالدولار: الذمة/الفائض يُحفظان بالدولار */
+  const isUsdBilling = String(bi.currency || 'SYP').toUpperCase() === 'USD'
+  const dueUsd = isUsdBilling
+    ? round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
+    : 0
+
+  let rateForCredit = usdSypRateUsed
+  if (isUsdBilling && !(rateForCredit > 0)) {
+    const fetched = await fetchUsdSypRateForBusinessDate(bi.businessDate)
+    if (fetched != null) rateForCredit = fetched
+  }
+
+  const patient = await Patient.findById(bi.patientId).lean()
+  let debt = Math.round(Number(patient?.outstandingDebtSyp) || 0)
+  let debtUsd = round6(Number(patient?.outstandingDebtUsd) || 0)
+  let credit = Math.round(Number(patient?.prepaidCreditSyp) || 0)
+
+  let creditAppliedSyp = 0
+  let dueAfterCreditSyp = dueForSettlement
+  let dueAfterCreditUsd = dueUsd
+  if (patient && !opts.skipPatientDebtUpdate) {
+    const applied = applyPrepaidCreditTowardDue({
+      dueSyp: dueForSettlement,
+      dueUsd,
+      prepaidCreditSyp: credit,
+      usdSypRate: rateForCredit,
+      isUsdBilling,
+    })
+    creditAppliedSyp = applied.creditAppliedSyp
+    credit = applied.creditRemainingSyp
+    dueAfterCreditSyp = applied.dueAfterCreditSyp
+    dueAfterCreditUsd = applied.dueAfterCreditUsd
+  }
+
+  assertBillingCollectionAmountValid({ netReceivedSyp, dueForSettlement: dueAfterCreditSyp })
 
   let paymentChannel
   let bankName
   try {
-    const requireBank = !isZeroCollectionAllowed(netReceivedSyp, dueForSettlement)
+    const requireBank = !isZeroCollectionAllowed(netReceivedSyp, dueAfterCreditSyp)
     ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(reqBody, { requireBank }))
   } catch (chErr) {
     if (chErr?.code === 'BANK_REQUIRED') {
@@ -142,8 +215,8 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
 
   const method = paymentChannel === 'bank' ? 'bank' : 'cash'
-  const appliedAmountSyp = Math.min(netReceivedSyp, dueForSettlement)
-  let settlementDeltaSyp = netReceivedSyp - dueForSettlement
+  const appliedAmountSyp = Math.min(netReceivedSyp, dueAfterCreditSyp)
+  let settlementDeltaSyp = netReceivedSyp - dueAfterCreditSyp
   let absorbCashNetUsdQualifies = false
   if (payCurrency === 'USD' && usdSypRateUsed > 0) {
     if (patientRefundUsd > 0 && patientRefundSyp > 0) {
@@ -175,24 +248,19 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     settlementDeltaSyp = 0
   }
 
-  /** بند مسعّر بالدولار: الذمة/الفائض يُحفظان بالدولار */
-  const isUsdBilling = String(bi.currency || 'SYP').toUpperCase() === 'USD'
-  const dueUsd = isUsdBilling
-    ? round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
-    : 0
   let settlementDeltaUsd = 0
-  if (isUsdBilling && dueUsd > 0 && usdSypRateUsed > 0) {
-    const netUsd = round6(netReceivedSyp / usdSypRateUsed)
-    settlementDeltaUsd = round6(netUsd - dueUsd)
+  if (isUsdBilling && dueUsd > 0 && rateForCredit > 0) {
+    const netUsd = round6(netReceivedSyp / (usdSypRateUsed > 0 ? usdSypRateUsed : rateForCredit))
+    settlementDeltaUsd = round6(netUsd - dueAfterCreditUsd)
     if (
       payCurrency === 'USD' &&
       settlementDeltaUsd > 0 &&
-      settlementDeltaUsd * usdSypRateUsed <= usdSypRateUsed &&
+      settlementDeltaUsd * rateForCredit <= rateForCredit &&
       absorbCashNetUsdQualifies
     ) {
       settlementDeltaUsd = 0
     }
-    settlementDeltaSyp = Math.round(settlementDeltaUsd * usdSypRateUsed)
+    settlementDeltaSyp = Math.round(settlementDeltaUsd * rateForCredit)
   }
 
   const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
@@ -210,6 +278,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       receivedAmountSyp: receivedSyp,
       settlementDeltaSyp,
       settlementDeltaUsd: isUsdBilling ? settlementDeltaUsd : 0,
+      creditAppliedSyp,
       ...paymentRecordReceivedFields(receipt),
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
@@ -244,26 +313,14 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     await LaserSession.updateOne({ billingItemId: bi._id }, { $set: { status: 'completed' } })
   }
 
-  let outstandingDebtSyp = 0
-  let outstandingDebtUsd = 0
-  let prepaidCreditSyp = 0
-  const patient = await Patient.findById(bi.patientId).lean()
+  let outstandingDebtSyp = debt
+  let outstandingDebtUsd = debtUsd
+  let prepaidCreditSyp = credit
   if (patient && !opts.skipPatientDebtUpdate) {
-    let debt = Math.round(Number(patient.outstandingDebtSyp) || 0)
-    let debtUsd = round6(Number(patient.outstandingDebtUsd) || 0)
-    let credit = Math.round(Number(patient.prepaidCreditSyp) || 0)
-
+    // الرصيد الإضافي خُصم مسبقاً من المستحق؛ هنا فقط ذمة/فائض المبلغ النقدي
     if (isUsdBilling && Math.abs(settlementDeltaUsd) > 1e-9) {
       if (settlementDeltaUsd < 0) {
-        let needUsd = round6(Math.abs(settlementDeltaUsd))
-        if (credit > 0 && usdSypRateUsed > 0) {
-          const creditAsUsd = round6(credit / usdSypRateUsed)
-          const useCreditUsd = Math.min(creditAsUsd, needUsd)
-          const useCreditSyp = Math.round(useCreditUsd * usdSypRateUsed)
-          credit = Math.max(0, credit - useCreditSyp)
-          needUsd = round6(needUsd - useCreditUsd)
-        }
-        debtUsd = round6(debtUsd + needUsd)
+        debtUsd = round6(debtUsd + Math.abs(settlementDeltaUsd))
       } else if (settlementDeltaUsd > 0) {
         let extraUsd = round6(settlementDeltaUsd)
         const settleUsdDebt = Math.min(debtUsd, extraUsd)
@@ -273,14 +330,10 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
         const settleSypDebt = Math.min(debt, extraSyp)
         debt -= settleSypDebt
         extraSyp -= settleSypDebt
-        credit += extraSyp
+        credit += Math.max(0, extraSyp)
       }
     } else if (settlementDeltaSyp < 0) {
-      let need = Math.abs(settlementDeltaSyp)
-      const useCredit = Math.min(credit, need)
-      credit -= useCredit
-      need -= useCredit
-      debt += need
+      debt += Math.abs(settlementDeltaSyp)
     } else if (settlementDeltaSyp > 0) {
       let extra = settlementDeltaSyp
       const settleDebt = Math.min(debt, extra)
@@ -357,6 +410,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
           payCurrency,
           appliedAmountSyp,
           settlementDeltaSyp,
+          creditAppliedSyp,
           paymentChannel,
           bankName: paymentChannel === 'bank' ? bankName : undefined,
           patientRefundSyp,
@@ -384,12 +438,19 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     billingItemId: String(bi._id),
     posting,
     postingError: postingError ? String(postingError?.message || postingError) : null,
-    patientSettlement: { outstandingDebtSyp, outstandingDebtUsd, prepaidCreditSyp },
+    patientSettlement: {
+      outstandingDebtSyp,
+      outstandingDebtUsd,
+      prepaidCreditSyp,
+      creditAppliedSyp,
+      dueAfterCreditSyp,
+    },
     payment: {
       amountSyp: payment.amountSyp,
       receivedAmountSyp: payment.receivedAmountSyp,
       settlementDeltaSyp: payment.settlementDeltaSyp,
       settlementDeltaUsd: payment.settlementDeltaUsd,
+      creditAppliedSyp: payment.creditAppliedSyp,
       payCurrency: payment.payCurrency,
       receivedAmountUsd: payment.receivedAmountUsd,
       patientRefundSyp: payment.patientRefundSyp,

@@ -386,7 +386,7 @@ async function getOrCreatePaymentSettings() {
   return doc
 }
 
-function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = null) {
+function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = null, patientBalances = null) {
   const patientIdRaw =
     b?.patientId && typeof b.patientId === 'object' && b.patientId._id ? b.patientId._id : b?.patientId
   const providerIdRaw =
@@ -396,6 +396,25 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
   const rateNum = Number(usdSypBusinessDayRate)
   const usdRate =
     usdSypBusinessDayRate != null && Number.isFinite(rateNum) && rateNum > 0 ? rateNum : null
+  const fromPop =
+    b?.patientId && typeof b.patientId === 'object'
+      ? {
+          prepaidCreditSyp: Math.round(Number(b.patientId.prepaidCreditSyp) || 0),
+          outstandingDebtSyp: Math.round(Number(b.patientId.outstandingDebtSyp) || 0),
+          outstandingDebtUsd: round6(Number(b.patientId.outstandingDebtUsd) || 0),
+        }
+      : null
+  const bal = patientBalances || fromPop || {
+    prepaidCreditSyp: 0,
+    outstandingDebtSyp: 0,
+    outstandingDebtUsd: 0,
+  }
+  const prepaidCreditSyp = Math.max(0, Math.round(Number(bal.prepaidCreditSyp) || 0))
+  const outstandingDebtSyp = Math.max(0, Math.round(Number(bal.outstandingDebtSyp) || 0))
+  const outstandingDebtUsd = Math.max(0, round6(Number(bal.outstandingDebtUsd) || 0))
+  const effectiveDue = Math.round(Number(b.effectiveAmountDueSyp || b.amountDueSyp || 0))
+  const creditTowardDueSyp = Math.min(prepaidCreditSyp, Math.max(0, effectiveDue))
+  const cashDueAfterCreditSyp = Math.max(0, effectiveDue - creditTowardDueSyp)
   return {
     id: String(b._id),
     clinicalSessionId: String(b.clinicalSessionId),
@@ -407,7 +426,7 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
     procedureLabel: b.procedureLabel || '—',
     listAmountDueSyp: Math.round(Number(b.listAmountDueSyp || b.amountDueSyp || 0)),
     discountPercent: Number(b.discountPercent) || 0,
-    effectiveAmountDueSyp: Math.round(Number(b.effectiveAmountDueSyp || b.amountDueSyp || 0)),
+    effectiveAmountDueSyp: effectiveDue,
     amountDueSyp: b.amountDueSyp,
     listAmountDueUsd: round6(Number(b.listAmountDueUsd) || 0),
     effectiveAmountDueUsd: round6(Number(b.effectiveAmountDueUsd || b.amountDueUsd) || 0),
@@ -420,6 +439,11 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
     isPackagePrepaid: b.isPackagePrepaid === true,
     patientPackageId: String(b.patientPackageId || ''),
     patientPackageSessionId: String(b.patientPackageSessionId || ''),
+    prepaidCreditSyp,
+    outstandingDebtSyp,
+    outstandingDebtUsd,
+    creditTowardDueSyp,
+    cashDueAfterCreditSyp,
     createdAt: b.createdAt,
   }
 }
@@ -434,7 +458,7 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
         businessDate: date,
       })
         .sort({ createdAt: 1 })
-        .populate('patientId', 'name')
+        .populate('patientId', 'name prepaidCreditSyp outstandingDebtSyp outstandingDebtUsd')
         .populate('providerUserId', 'name')
         .lean(),
       BusinessDay.findOne({ businessDate: date }).lean(),
@@ -528,7 +552,7 @@ billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) 
     const items = await BillingItem.find({ status: 'pending_payment' })
       .sort({ businessDate: -1, createdAt: 1 })
       .limit(limit)
-      .populate('patientId', 'name')
+      .populate('patientId', 'name prepaidCreditSyp outstandingDebtSyp outstandingDebtUsd')
       .populate('providerUserId', 'name')
       .lean()
     const dates = [...new Set(items.map((b) => String(b.businessDate || '')).filter(Boolean))]

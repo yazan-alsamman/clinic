@@ -37,6 +37,12 @@ type Item = {
   packageExpectedAreaCount?: number
   laserRecordedPackageAreaCount?: number
   packagePartialAreasAcknowledgedByReception?: number
+  /** رصيد إضافي مخزّن على المريض */
+  prepaidCreditSyp?: number
+  outstandingDebtSyp?: number
+  outstandingDebtUsd?: number
+  creditTowardDueSyp?: number
+  cashDueAfterCreditSyp?: number
 }
 
 const BILLING_ROLES = ['super_admin', 'reception'] as const
@@ -110,6 +116,31 @@ function formatItemDueLabel(item: Item): string {
   return `${due.toLocaleString('ar-SY')} ل.س`
 }
 
+function itemPrepaidCreditSyp(item: Item | null): number {
+  if (!item) return 0
+  return Math.max(0, Math.round(Number(item.prepaidCreditSyp) || 0))
+}
+
+function itemCashDueAfterCreditSyp(item: Item | null, dueOverride?: number): number {
+  if (!item) return 0
+  const due = Math.max(0, Math.round(dueOverride ?? itemEffectiveDueSyp(item)))
+  const credit = itemPrepaidCreditSyp(item)
+  if (item.cashDueAfterCreditSyp != null && dueOverride == null) {
+    return Math.max(0, Math.round(Number(item.cashDueAfterCreditSyp) || 0))
+  }
+  return Math.max(0, due - Math.min(credit, due))
+}
+
+function itemCreditTowardDueSyp(item: Item | null, dueOverride?: number): number {
+  if (!item) return 0
+  const due = Math.max(0, Math.round(dueOverride ?? itemEffectiveDueSyp(item)))
+  const credit = itemPrepaidCreditSyp(item)
+  if (item.creditTowardDueSyp != null && dueOverride == null) {
+    return Math.max(0, Math.round(Number(item.creditTowardDueSyp) || 0))
+  }
+  return Math.min(credit, due)
+}
+
 function openPayModalForItem(
   item: Item,
   setters: {
@@ -127,8 +158,9 @@ function openPayModalForItem(
   },
 ) {
   const isUsdPriced = itemBillingCurrency(item) === 'USD'
+  const cashDue = itemCashDueAfterCreditSyp(item)
   setters.setPayItem(item)
-  setters.setPaySyp(String(itemEffectiveDueSyp(item)))
+  setters.setPaySyp(String(cashDue))
   setters.setPayUsd(isUsdPriced ? String(itemEffectiveDueUsd(item)) : '')
   setters.setPayCurrency('SYP')
   setters.setPayChannel('cash')
@@ -222,6 +254,16 @@ export function BillingPage() {
     return effectiveDueFromListAndPct(list, pct)
   }, [payItem, payDiscountEnabled, payDiscountPercent])
 
+  const creditTowardDueSyp = useMemo(() => {
+    if (!payItem) return 0
+    return itemCreditTowardDueSyp(payItem, effectiveDueSyp)
+  }, [payItem, effectiveDueSyp])
+
+  const cashDueAfterCreditSyp = useMemo(() => {
+    if (!payItem) return 0
+    return itemCashDueAfterCreditSyp(payItem, effectiveDueSyp)
+  }, [payItem, effectiveDueSyp])
+
   const payPreviewRate = useMemo(() => {
     const fromItem = payItem?.usdSypBusinessDayRate != null ? Number(payItem.usdSypBusinessDayRate) : NaN
     if (payItem && Number.isFinite(fromItem) && fromItem > 0) return fromItem
@@ -243,9 +285,9 @@ export function BillingPage() {
       if (!(dueUsd > 0)) return null
       return { usdFieldValue: String(dueUsd), impliedRefundSyp: 0 }
     }
-    if (!payPreviewRate || !(effectiveDueSyp > 0)) return null
-    return usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate)
-  }, [payItem, payPreviewRate, effectiveDueSyp])
+    if (!payPreviewRate || !(cashDueAfterCreditSyp > 0)) return null
+    return usdRoundedUpCashOffer(cashDueAfterCreditSyp, payPreviewRate)
+  }, [payItem, payPreviewRate, cashDueAfterCreditSyp])
 
   /** عند الدفع بالدولار: إعادة اقتراح المستلم والترجيع عند تغيّر المستحق (خصم، بند، سعر). */
   useEffect(() => {
@@ -719,7 +761,10 @@ export function BillingPage() {
   return (
     <>
       <h1 className="page-title">بنود بانتظار التحصيل</h1>
-      <p className="page-desc">بعد تأكيد استلام الدفع يُنشأ الترحيل المحاسبي تلقائياً.</p>
+      <p className="page-desc">
+        بعد تأكيد استلام الدفع يُنشأ الترحيل المحاسبي تلقائياً. إن وُجد رصيد إضافي للمريض يظهر في البطاقة ويُخصم
+        تلقائياً من المستحق عند التحصيل.
+      </p>
       <div
         style={{
           display: 'flex',
@@ -790,6 +835,30 @@ export function BillingPage() {
                   <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }} dir={itemBillingCurrency(b) === 'USD' ? 'ltr' : undefined}>
                     {formatItemDueLabel(b)}
                   </p>
+                  {itemPrepaidCreditSyp(b) > 0 ? (
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--success)' }}>
+                      رصيد إضافي للمريض: {itemPrepaidCreditSyp(b).toLocaleString('ar-SY')} ل.س
+                      {itemCreditTowardDueSyp(b) > 0 ? (
+                        <>
+                          {' '}
+                          — يُخصم {itemCreditTowardDueSyp(b).toLocaleString('ar-SY')} ل.س من المستحق → متبقي للتحصيل:{' '}
+                          <strong>{itemCashDueAfterCreditSyp(b).toLocaleString('ar-SY')} ل.س</strong>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {(b.outstandingDebtSyp || 0) > 0 || (b.outstandingDebtUsd || 0) > 0 ? (
+                    <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--warning)' }}>
+                      ذمة قائمة:{' '}
+                      {(b.outstandingDebtSyp || 0) > 0
+                        ? `${(b.outstandingDebtSyp || 0).toLocaleString('ar-SY')} ل.س`
+                        : ''}
+                      {(b.outstandingDebtSyp || 0) > 0 && (b.outstandingDebtUsd || 0) > 0 ? ' + ' : ''}
+                      {(b.outstandingDebtUsd || 0) > 0
+                        ? `${Number(b.outstandingDebtUsd).toLocaleString('en-US', { maximumFractionDigits: 6 })} USD`
+                        : ''}
+                    </p>
+                  ) : null}
                   {itemBillingCurrency(b) === 'USD' && itemEffectiveDueSyp(b) > 0 ? (
                     <p style={{ margin: '0.15rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                       يعادل تقريباً {itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س عند سعر اليوم المحفوظ
@@ -967,6 +1036,48 @@ export function BillingPage() {
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }} dir={itemBillingCurrency(payItem) === 'USD' ? 'ltr' : undefined}>
               المستحق: {formatItemDueLabel(payItem)}
             </p>
+            {itemPrepaidCreditSyp(payItem) > 0 ? (
+              <div
+                style={{
+                  margin: '0.35rem 0 0.15rem',
+                  padding: '0.55rem 0.65rem',
+                  borderRadius: 8,
+                  background: 'color-mix(in srgb, var(--success) 12%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
+                  fontSize: '0.9rem',
+                  lineHeight: 1.55,
+                }}
+              >
+                <div>
+                  رصيد إضافي للمريض:{' '}
+                  <strong>{itemPrepaidCreditSyp(payItem).toLocaleString('ar-SY')} ل.س</strong>
+                </div>
+                {creditTowardDueSyp > 0 ? (
+                  <div>
+                    يُخصم تلقائياً من المستحق:{' '}
+                    <strong>{creditTowardDueSyp.toLocaleString('ar-SY')} ل.س</strong>
+                  </div>
+                ) : null}
+                <div>
+                  المتبقي للتحصيل نقداً/بنكاً:{' '}
+                  <strong>{cashDueAfterCreditSyp.toLocaleString('ar-SY')} ل.س</strong>
+                  {cashDueAfterCreditSyp === 0 ? ' — يكفي الرصيد لتسديد البند بالكامل' : null}
+                </div>
+              </div>
+            ) : null}
+            {(payItem.outstandingDebtSyp || 0) > 0 || (payItem.outstandingDebtUsd || 0) > 0 ? (
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--warning)' }}>
+                تنبيه: على المريض ذمة قائمة
+                {(payItem.outstandingDebtSyp || 0) > 0
+                  ? ` ${(payItem.outstandingDebtSyp || 0).toLocaleString('ar-SY')} ل.س`
+                  : ''}
+                {(payItem.outstandingDebtSyp || 0) > 0 && (payItem.outstandingDebtUsd || 0) > 0 ? ' و' : ''}
+                {(payItem.outstandingDebtUsd || 0) > 0
+                  ? ` ${Number(payItem.outstandingDebtUsd).toLocaleString('en-US', { maximumFractionDigits: 6 })} USD`
+                  : ''}
+                .
+              </p>
+            ) : null}
             {itemBillingCurrency(payItem) === 'SYP' && payPreviewRate && itemEffectiveDueSyp(payItem) > 0 ? (
               <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }} dir="ltr">
                 يعادل المستحق المحفوظ للبند:{' '}
@@ -1040,7 +1151,9 @@ export function BillingPage() {
                       pct = 0
                     }
                     const eff = effectiveDueFromListAndPct(list, pct)
-                    if (payCurrency === 'SYP') setPaySyp(String(eff))
+                    if (payCurrency === 'SYP' && payItem) {
+                      setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
+                    }
                   }}
                 />
                 تطبيق خصم (نسبة مئوية على المستحق)
@@ -1073,7 +1186,8 @@ export function BillingPage() {
                           setPayDiscountPercent(String(p))
                           if (payCurrency === 'SYP' && payItem) {
                             const list = itemListDueSyp(payItem)
-                            setPaySyp(String(effectiveDueFromListAndPct(list, p)))
+                            const eff = effectiveDueFromListAndPct(list, p)
+                            setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
                           }
                         }}
                       >
@@ -1094,7 +1208,8 @@ export function BillingPage() {
                       const pct = parseDiscountPercentInput(true, e.target.value)
                       if (payCurrency === 'SYP' && payItem) {
                         const list = itemListDueSyp(payItem)
-                        setPaySyp(String(effectiveDueFromListAndPct(list, pct)))
+                        const eff = effectiveDueFromListAndPct(list, pct)
+                        setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
                       }
                     }}
                     placeholder="مثال: 10 أو 12.5"
@@ -1128,7 +1243,7 @@ export function BillingPage() {
                     checked={payCurrency === 'SYP'}
                     onChange={() => {
                       setPayCurrency('SYP')
-                      setPaySyp(String(effectiveDueSyp))
+                      setPaySyp(String(cashDueAfterCreditSyp))
                       setPayRefundCurrency('SYP')
                       setPayRefundAmount('')
                     }}
@@ -1144,8 +1259,8 @@ export function BillingPage() {
                       setPayCurrency('USD')
                       if (itemBillingCurrency(payItem) === 'USD') {
                         setPayUsd(String(itemEffectiveDueUsd(payItem)))
-                      } else if (payPreviewRate && effectiveDueSyp > 0) {
-                        const o = usdRoundedUpCashOffer(effectiveDueSyp, payPreviewRate)
+                      } else if (payPreviewRate && cashDueAfterCreditSyp > 0) {
+                        const o = usdRoundedUpCashOffer(cashDueAfterCreditSyp, payPreviewRate)
                         if (o) {
                           setPayUsd(o.usdFieldValue)
                           setPayRefundCurrency('SYP')
@@ -1169,7 +1284,7 @@ export function BillingPage() {
                     checked={payCurrency === 'MIXED'}
                     onChange={() => {
                       setPayCurrency('MIXED')
-                      setPaySyp(String(effectiveDueSyp))
+                      setPaySyp(String(cashDueAfterCreditSyp))
                       setPayUsd('')
                       setPayRefundCurrency('SYP')
                       setPayRefundAmount('')
@@ -1371,8 +1486,9 @@ export function BillingPage() {
               )}
             </div>
             {(() => {
-              const due = effectiveDueSyp
-              if (!(due > 0)) return null
+              const due = cashDueAfterCreditSyp
+              const fullDue = effectiveDueSyp
+              if (!(fullDue > 0)) return null
               let grossSyp = 0
               let netSyp = 0
               let refSyp = 0
@@ -1384,10 +1500,18 @@ export function BillingPage() {
                 grossSyp = Math.round(syp)
                 netSyp = grossSyp
                 if (grossSyp === 0) {
+                  if (due === 0 && creditTowardDueSyp > 0) {
+                    return (
+                      <p style={{ marginTop: '0.45rem', color: 'var(--success)' }}>
+                        يكفي الرصيد الإضافي ({creditTowardDueSyp.toLocaleString('ar-SY')} ل.س) لتسديد المستحق بالكامل
+                        — لن يُحصَّل نقداً وتُصفّى الحساب للبند.
+                      </p>
+                    )
+                  }
                   return (
                     <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
-                      لن يُحصَّل مبلغ — سيُسجَّل كامل المستحق ({due.toLocaleString('ar-SY')} ل.س) كذمة على
-                      المريض.
+                      لن يُحصَّل مبلغ — سيُخصم الرصيد الإضافي إن وُجد، ويُسجَّل الباقي كذمة (
+                      {due.toLocaleString('ar-SY')} ل.س).
                     </p>
                   )
                 }
@@ -1399,10 +1523,17 @@ export function BillingPage() {
                 netSyp = mixedNetReceivedSyp(syp, usd, payPreviewRate || 0)
                 grossSyp = netSyp
                 if (netSyp === 0 && syp === 0 && usd === 0) {
+                  if (due === 0 && creditTowardDueSyp > 0) {
+                    return (
+                      <p style={{ marginTop: '0.45rem', color: 'var(--success)' }}>
+                        يكفي الرصيد الإضافي لتسديد المستحق بالكامل — تُصفّى الحساب للبند دون قبض نقدي.
+                      </p>
+                    )
+                  }
                   return (
                     <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
-                      لن يُحصَّل مبلغ — سيُسجَّل كامل المستحق ({due.toLocaleString('ar-SY')} ل.س) كذمة على
-                      المريض.
+                      لن يُحصَّل مبلغ — سيُخصم الرصيد الإضافي إن وُجد، ويُسجَّل الباقي كذمة (
+                      {due.toLocaleString('ar-SY')} ل.س).
                     </p>
                   )
                 }
@@ -1412,10 +1543,17 @@ export function BillingPage() {
                 usdParsed = usd
                 if (!Number.isFinite(usd) || usd < 0) return null
                 if (usd === 0) {
+                  if (due === 0 && creditTowardDueSyp > 0) {
+                    return (
+                      <p style={{ marginTop: '0.45rem', color: 'var(--success)' }}>
+                        يكفي الرصيد الإضافي لتسديد المستحق بالكامل — تُصفّى الحساب للبند دون قبض نقدي.
+                      </p>
+                    )
+                  }
                   return (
                     <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
-                      لن يُحصَّل مبلغ — سيُسجَّل كامل المستحق ({due.toLocaleString('ar-SY')} ل.س) كذمة على
-                      المريض.
+                      لن يُحصَّل مبلغ — سيُخصم الرصيد الإضافي إن وُجد، ويُسجَّل الباقي كذمة (
+                      {due.toLocaleString('ar-SY')} ل.س).
                     </p>
                   )
                 }
@@ -1462,22 +1600,43 @@ export function BillingPage() {
               if (delta < 0) {
                 return (
                   <p style={{ marginTop: '0.45rem', color: 'var(--warning)' }}>
-                    الصافي بعد الترجيع أقل من المستحق — سيتم تسجيل الباقي كذمة على المريض (
-                    {Math.abs(delta).toLocaleString('ar-SY')} ل.س).
+                    {creditTowardDueSyp > 0 ? (
+                      <>
+                        بعد خصم الرصيد الإضافي ({creditTowardDueSyp.toLocaleString('ar-SY')} ل.س من أصل مستحق{' '}
+                        {fullDue.toLocaleString('ar-SY')} ل.س): الصافي أقل من المتبقي — ذمة{' '}
+                        {Math.abs(delta).toLocaleString('ar-SY')} ل.س.
+                      </>
+                    ) : (
+                      <>
+                        الصافي بعد الترجيع أقل من المستحق — سيتم تسجيل الباقي كذمة على المريض (
+                        {Math.abs(delta).toLocaleString('ar-SY')} ل.س).
+                      </>
+                    )}
                   </p>
                 )
               }
               if (delta > 0) {
                 return (
                   <p style={{ marginTop: '0.45rem', color: 'var(--success)' }}>
-                    الصافي بعد الترجيع أعلى من المستحق — سيتم تسجيل الزيادة كرصيد إضافي للمريض (
-                    {delta.toLocaleString('ar-SY')} ل.س).
+                    {creditTowardDueSyp > 0 ? (
+                      <>
+                        بعد خصم الرصيد الإضافي: الصافي أعلى من المتبقي — زيادة{' '}
+                        {delta.toLocaleString('ar-SY')} ل.س تُضاف للرصيد الإضافي (بعد تسديد أي ذمة قائمة).
+                      </>
+                    ) : (
+                      <>
+                        الصافي بعد الترجيع أعلى من المستحق — سيتم تسجيل الزيادة كرصيد إضافي للمريض (
+                        {delta.toLocaleString('ar-SY')} ل.س).
+                      </>
+                    )}
                   </p>
                 )
               }
               return (
                 <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)' }}>
-                  الصافي بعد الترجيع مطابق للمستحق{payDiscountEnabled ? ' بعد الخصم' : ''} (محاسبياً بالليرة).
+                  {creditTowardDueSyp > 0
+                    ? `تصفية تامة للبند: رصيد إضافي ${creditTowardDueSyp.toLocaleString('ar-SY')} ل.س + صافي مستلم مطابق للمتبقي.`
+                    : `الصافي بعد الترجيع مطابق للمستحق${payDiscountEnabled ? ' بعد الخصم' : ''} (محاسبياً بالليرة).`}
                 </p>
               )
             })()}

@@ -36,6 +36,8 @@ const billingPaymentSchema = new mongoose.Schema(
     listAmountDueSyp: { type: Number, default: 0, min: 0 },
     /** المستحق الفعلي بعد الخصم — يُقارن به الصافي المستلم */
     effectiveAmountDueSyp: { type: Number, default: 0, min: 0 },
+    /** ما خُصم من الرصيد الإضافي للمريض عند هذا التحصيل (ل.س) */
+    creditAppliedSyp: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 )
