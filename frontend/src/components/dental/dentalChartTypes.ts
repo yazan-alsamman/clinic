@@ -282,7 +282,8 @@ export function normalizeTreatment(
     /الياس|إلياس|elias|elyas/i.test(String(raw?.doctorName || ''))
   return {
     id: raw?.id ? String(raw.id) : undefined,
-    procedureDescription: String(raw?.procedureDescription || '').trim(),
+    /** لا نستخدم trim هنا — يُستدعى عند كل حرف أثناء الكتابة ويمنع المسافات بين الكلمات */
+    procedureDescription: String(raw?.procedureDescription || ''),
     totalCostSyp,
     totalCostUsd,
     costUsdSypRate,
@@ -386,7 +387,8 @@ export function normalizeLabWork(
     id: raw?.id ? String(raw.id) : undefined,
     labId: raw?.labId ? String(raw.labId) : null,
     labName: String(raw?.labName || '').trim(),
-    procedureDescription: String(raw?.procedureDescription || '').trim(),
+    /** لا نستخدم trim هنا — يُستدعى عند كل حرف أثناء الكتابة ويمنع المسافات بين الكلمات */
+    procedureDescription: String(raw?.procedureDescription || ''),
     amountSyp,
     amountUsd,
     usdSypRate,
@@ -483,8 +485,20 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       implantColor: t.status === 'implant' ? t.implantColor : null,
       surfaces: t.status === 'present' ? t.surfaces.map((s) => normalizeSurfaceMark(s)) : [],
       note: t.note,
-      treatments: (t.treatments || []).map((x) => normalizeTreatment(x)).filter(treatmentHasData),
-      labWorks: normalizeLabWorksList(t.labWorks),
+      treatments: (t.treatments || [])
+        .map((x) =>
+          normalizeTreatment({
+            ...x,
+            procedureDescription: String(x.procedureDescription || '').trim(),
+          }),
+        )
+        .filter(treatmentHasData),
+      labWorks: normalizeLabWorksList(t.labWorks).map((x) =>
+        normalizeLabWork({
+          ...x,
+          procedureDescription: String(x.procedureDescription || '').trim(),
+        }),
+      ),
     }))
     .sort((a, b) => a.fdi - b.fdi)
 }

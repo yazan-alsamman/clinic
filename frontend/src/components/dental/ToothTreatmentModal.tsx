@@ -218,7 +218,7 @@ export function ToothTreatmentModal({
             {
               ...emptyTreatment(),
               id: d.id,
-              procedureDescription: d.procedureDescription,
+              procedureDescription: String(d.procedureDescription || '').trim(),
             },
             rate,
           ),
@@ -232,7 +232,12 @@ export function ToothTreatmentModal({
       })
       return
     }
-    const next = drafts.map((d) => normalizeTreatment(d, rate))
+    const next = drafts.map((d) =>
+      normalizeTreatment(
+        { ...d, procedureDescription: String(d.procedureDescription || '').trim() },
+        rate,
+      ),
+    )
     for (let i = 0; i < next.length; i += 1) {
       const t = next[i]
       if (!treatmentHasData(t)) continue
@@ -251,7 +256,14 @@ export function ToothTreatmentModal({
       }
     }
     const kept = next.filter(treatmentHasData)
-    const labsKept = labDrafts.map((x) => normalizeLabWork(x, rate)).filter(labWorkHasData)
+    const labsKept = labDrafts
+      .map((x) =>
+        normalizeLabWork(
+          { ...x, procedureDescription: String(x.procedureDescription || '').trim() },
+          rate,
+        ),
+      )
+      .filter(labWorkHasData)
     for (let i = 0; i < labsKept.length; i += 1) {
       const lab = labsKept[i]
       if (!lab.labId && !lab.labName.trim()) {
