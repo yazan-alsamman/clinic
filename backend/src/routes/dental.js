@@ -32,8 +32,8 @@ import { round6 } from '../utils/money.js'
 export const dentalRouter = Router()
 dentalRouter.use(authMiddleware, loadBusinessDay)
 
-const DENTAL_READ = ['super_admin', 'dental_branch', 'reception']
-const DENTAL_CHART_WRITE = ['super_admin', 'dental_branch']
+const DENTAL_READ = ['super_admin', 'dental_branch', 'dental_assistant', 'reception']
+const DENTAL_CHART_WRITE = ['super_admin', 'dental_branch', 'dental_assistant']
 const FDI_VALID = new Set([
   11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45,
   46, 47, 48,
@@ -656,7 +656,7 @@ dentalRouter.get('/admin/clinics', requireRoles('super_admin'), async (req, res)
 })
 
 /** لوحة المدير: مرضى الأسنان — الحساب الكامل والإجراءات والأطباء */
-dentalRouter.get('/admin/patients', requireRoles('super_admin'), async (req, res) => {
+dentalRouter.get('/admin/patients', requireRoles('super_admin', 'dental_assistant'), async (req, res) => {
   try {
     const q = String(req.query.q || '').trim()
     const data = await listDentalPatientsAccounts({ q })
@@ -889,7 +889,7 @@ dentalRouter.delete(
 /** لوحة الأسنان: اقتراح للمدير + طابور الخطط المعتمدة لأطباء الفروع */
 dentalRouter.get('/dashboard', async (req, res) => {
   try {
-    if (!['super_admin', 'dental_branch'].includes(req.user.role)) {
+    if (!['super_admin', 'dental_branch', 'dental_assistant'].includes(req.user.role)) {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
@@ -949,7 +949,9 @@ dentalRouter.get('/dashboard', async (req, res) => {
     const approvedQueue = approvedPlans
       .filter((doc) => doc.patientId && doc.patientId.departments?.includes('dental'))
       .map((doc) => ({
-        patient: patientToDto(doc.patientId, { hidePhone: req.user.role === 'dental_branch' }),
+        patient: patientToDto(doc.patientId, {
+          hidePhone: req.user.role === 'dental_branch' || req.user.role === 'dental_assistant',
+        }),
         planId: String(doc._id),
         approvedAt: doc.approvedAt,
         summary: planSummary(doc.items),
@@ -1059,7 +1061,7 @@ dentalRouter.get('/plans/:patientId', async (req, res) => {
 
 dentalRouter.put('/plans/:patientId', requireActiveDay, async (req, res) => {
   try {
-    if (!['super_admin', 'dental_branch'].includes(req.user.role)) {
+    if (!['super_admin', 'dental_branch', 'dental_assistant'].includes(req.user.role)) {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }

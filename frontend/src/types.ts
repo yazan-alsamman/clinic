@@ -6,6 +6,7 @@ export type Role =
   | 'dermatology_manager'
   | 'dermatology_assistant_manager'
   | 'dental_branch'
+  | 'dental_assistant'
 
 export type NavKey =
   | 'dashboard'

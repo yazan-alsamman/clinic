@@ -46,7 +46,7 @@ function fmtSyp(n: number) {
 
 export function AdminDentalPatientsPage() {
   const { user } = useAuth()
-  const allowed = user?.role === 'super_admin'
+  const allowed = user?.role === 'super_admin' || user?.role === 'dental_assistant'
 
   const [q, setQ] = useState('')
   const [qDraft, setQDraft] = useState('')
@@ -97,7 +97,7 @@ export function AdminDentalPatientsPage() {
     return (
       <>
         <h1 className="page-title">مرضى الأسنان</h1>
-        <p className="page-desc">هذه الصفحة لمدير النظام فقط.</p>
+        <p className="page-desc">هذه الصفحة لمدير النظام ومساعدي الأسنان.</p>
       </>
     )
   }

@@ -28,7 +28,7 @@ function initials(name: string) {
 }
 
 function canRegisterPatients(role: string | undefined) {
-  return role === 'super_admin' || role === 'reception'
+  return role === 'super_admin' || role === 'reception' || role === 'dental_assistant'
 }
 
 const PAGE_SIZE = 10

@@ -79,6 +79,13 @@ const roleNav: Record<Role, NavKey[]> = {
     'account_password',
   ],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'admin_dental_labs', 'account_password'],
+  dental_assistant: [
+    'dashboard',
+    'patients',
+    'appointments_booked',
+    'admin_dental_patients',
+    'account_password',
+  ],
 }
 
 export function visibleNavForRole(role: Role) {
@@ -101,6 +108,7 @@ export function roleLabel(role: Role): string {
     dermatology_manager: 'مدير قسم الجلدية',
     dermatology_assistant_manager: 'مساعد رئيس قسم الجلدية',
     dental_branch: 'أسنان — فرع',
+    dental_assistant: 'مساعدين أسنان',
   }
   return map[role] ?? 'مستخدم'
 }
@@ -113,7 +121,7 @@ export function canAccessTab(role: Role, tab: 'laser' | 'dermatology' | 'dental'
   if (role === 'dermatology' || role === 'dermatology_manager' || role === 'dermatology_assistant_manager') {
     return tab === 'dermatology'
   }
-  if (role === 'dental_branch') return tab === 'dental'
+  if (role === 'dental_branch' || role === 'dental_assistant') return tab === 'dental'
   return false
 }
 

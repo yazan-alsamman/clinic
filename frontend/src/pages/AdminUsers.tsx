@@ -12,6 +12,7 @@ const ROLES: Role[] = [
   'dermatology_manager',
   'dermatology_assistant_manager',
   'dental_branch',
+  'dental_assistant',
 ]
 
 type Row = {

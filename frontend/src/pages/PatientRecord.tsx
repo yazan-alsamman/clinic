@@ -515,8 +515,8 @@ function clinicalHistoryIntro(r: Role | undefined): string {
     return 'مواعيدك وإجراءاتك الجلدية المسجّلة لهذا المريض (حسب اسمك كمقدّم في النظام).'
   if (r === 'dermatology_manager' || r === 'dermatology_assistant_manager')
     return 'عرض المواعيد وإجراءات الجلدية لهذا المريض ضمن صلاحيات إدارة القسم.'
-  if (r === 'dental_branch')
-    return 'مواعيدك المحجوزة وملخص خطة الأسنان لهذا المريض (حسب اسمك كمقدّم).'
+  if (r === 'dental_branch' || r === 'dental_assistant')
+    return 'مواعيد الأسنان وملخص خطة الأسنان لهذا المريض.'
   return 'مواعيد محجوزة، جلسات ليزر، إجراءات جلدية، وخطة أسنان إن وُجدت.'
 }
 
@@ -799,11 +799,13 @@ export function PatientRecord() {
   const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(canUsePaymentChannels)
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
-  const [tab, setTab] = useState<Tab>(() => (user?.role === 'dental_branch' ? 'dental' : 'overview'))
+  const [tab, setTab] = useState<Tab>(() =>
+    user?.role === 'dental_branch' || user?.role === 'dental_assistant' ? 'dental' : 'overview',
+  )
   useEffect(() => {
     let requested = searchParams.get('tab')
     if (requested === 'solarium') requested = 'skin_care'
-    if (user?.role === 'dental_branch') {
+    if (user?.role === 'dental_branch' || user?.role === 'dental_assistant') {
       setTab('dental')
       return
     }
@@ -1655,8 +1657,8 @@ export function PatientRecord() {
     if (!role) {
       return allTabs.filter((t) => t.key === 'overview')
     }
-    /** أطباء فرع الأسنان: تبويب الأسنان فقط (بدون نظرة عامة أو هاتف) */
-    if (role === 'dental_branch') {
+    /** أطباء/مساعدو الأسنان: تبويب الأسنان فقط (بدون نظرة عامة أو هاتف) */
+    if (role === 'dental_branch' || role === 'dental_assistant') {
       return [{ key: 'dental' as Tab, label: 'الأسنان' }]
     }
     const showAccount = role === 'super_admin' || role === 'reception'
@@ -1678,7 +1680,9 @@ export function PatientRecord() {
 
   useEffect(() => {
     const allowed = visibleTabs.some((t) => t.key === tab)
-    if (!allowed) setTab(role === 'dental_branch' ? 'dental' : 'overview')
+    if (!allowed) {
+      setTab(role === 'dental_branch' || role === 'dental_assistant' ? 'dental' : 'overview')
+    }
   }, [tab, visibleTabs, role])
 
   const patientPackages: PatientPackage[] = useMemo(() => {
@@ -2434,10 +2438,12 @@ export function PatientRecord() {
             {patient.name}
           </h1>
           <p className="page-desc" style={{ margin: 0 }}>
-            {role === 'dental_branch' ? 'ملف المريض — تبويب الأسنان' : 'ملف المريض — تبويبات حسب الصلاحية'}
+            {role === 'dental_branch' || role === 'dental_assistant'
+              ? 'ملف المريض — تبويب الأسنان'
+              : 'ملف المريض — تبويبات حسب الصلاحية'}
           </p>
         </div>
-        {role !== 'dental_branch' ? (
+        {role !== 'dental_branch' && role !== 'dental_assistant' ? (
           <button
             type="button"
             className="btn btn-secondary"
@@ -5248,7 +5254,9 @@ export function PatientRecord() {
               {id ? (
                 <DentalTreatmentPlan
                   patientId={id}
-                  canEdit={role === 'super_admin' || role === 'dental_branch'}
+                  canEdit={
+                    role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
+                  }
                   canApprove={role === 'super_admin'}
                 />
               ) : null}
@@ -5261,7 +5269,9 @@ export function PatientRecord() {
               {id ? (
                 <DentalOdontogram
                   patientId={id}
-                  canEdit={role === 'super_admin' || role === 'dental_branch'}
+                  canEdit={
+                    role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
+                  }
                 />
               ) : null}
             </div>

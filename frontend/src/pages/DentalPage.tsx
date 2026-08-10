@@ -32,7 +32,10 @@ const gradientBtn: CSSProperties = {
 
 export function DentalPage() {
   const { user } = useAuth()
-  const canView = user?.role === 'super_admin' || user?.role === 'dental_branch'
+  const canView =
+    user?.role === 'super_admin' ||
+    user?.role === 'dental_branch' ||
+    user?.role === 'dental_assistant'
 
   const [data, setData] = useState<DashboardPayload | null>(null)
   const [loading, setLoading] = useState(true)

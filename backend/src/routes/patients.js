@@ -29,7 +29,7 @@ import {
 import { round6 } from '../utils/money.js'
 
 function dtoOptsForRole(role) {
-  return role === 'dental_branch' ? { hidePhone: true } : {}
+  return role === 'dental_branch' || role === 'dental_assistant' ? { hidePhone: true } : {}
 }
 
 const CLINICAL_ROLES = [
@@ -40,12 +40,13 @@ const CLINICAL_ROLES = [
   'dermatology_manager',
   'dermatology_assistant_manager',
   'dental_branch',
+  'dental_assistant',
 ]
 
 const FIN_BALANCE_FILTER_DEPTS = ['laser', 'dermatology', 'dental']
 
-/** إنشاء ملف مريض جديد — استقبال، مدير النظام، مدير قسم الجلدية */
-const PATIENT_CREATE_ROLES = ['super_admin', 'reception', 'dermatology_manager']
+/** إنشاء ملف مريض جديد — استقبال، مدير النظام، مدير قسم الجلدية، مساعدين أسنان */
+const PATIENT_CREATE_ROLES = ['super_admin', 'reception', 'dermatology_manager', 'dental_assistant']
 
 function parseFinancialBalanceDept(raw) {
   const v = String(raw || '').trim()
@@ -415,7 +416,7 @@ patientsRouter.get('/financial-balances', async (req, res) => {
 /** الرقم التالي لإضبارة جديدة — أكبر قيمة رقمية محضة بين أرقام الإضبارات الحالية + ١ */
 patientsRouter.get('/next-file-number', async (req, res) => {
   try {
-    if (!['super_admin', 'reception'].includes(req.user.role)) {
+    if (!['super_admin', 'reception', 'dental_assistant'].includes(req.user.role)) {
       res.status(403).json({ error: 'لا صلاحية' })
       return
     }
@@ -475,8 +476,9 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
       role === 'dermatology' ||
       role === 'dermatology_manager' ||
       role === 'dermatology_assistant_manager' ||
-      role === 'dental_branch'
-    const needDentalPlan = fullAccess || role === 'dental_branch'
+      role === 'dental_branch' ||
+      role === 'dental_assistant'
+    const needDentalPlan = fullAccess || role === 'dental_branch' || role === 'dental_assistant'
 
     const bundle = await getClinicalBundleForPatientId(pid)
 
@@ -503,8 +505,8 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
     let dentalPlan = bundle.dentalPlan
     if (!needDentalPlan) dentalPlan = null
 
-    /** أطباء فرع الأسنان: الملف مقصور على تبويب الأسنان — لا ملخص مواعيد/خطة في الـ API */
-    if (role === 'dental_branch') {
+    /** أطباء/مساعدو الأسنان: الملف مقصور على تبويب الأسنان — لا ملخص مواعيد/خطة في الـ API */
+    if (role === 'dental_branch' || role === 'dental_assistant') {
       appointments = []
       dentalPlan = null
     }
