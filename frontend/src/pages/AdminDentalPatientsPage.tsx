@@ -47,6 +47,7 @@ function fmtSyp(n: number) {
 export function AdminDentalPatientsPage() {
   const { user } = useAuth()
   const allowed = user?.role === 'super_admin' || user?.role === 'dental_assistant'
+  const showFinancialSummary = user?.role === 'super_admin'
 
   const [q, setQ] = useState('')
   const [qDraft, setQDraft] = useState('')
@@ -106,7 +107,9 @@ export function AdminDentalPatientsPage() {
     <>
       <h1 className="page-title">مرضى الأسنان</h1>
       <p className="page-desc">
-        حساب كل مريض أسنان: الإجمالي، المسدّد، المتبقي، وجميع الإجراءات مع الطبيب المعالج.
+        {showFinancialSummary
+          ? 'حساب كل مريض أسنان: الإجمالي، المسدّد، المتبقي، وجميع الإجراءات مع الطبيب المعالج.'
+          : 'قائمة مرضى الأسنان وإجراءاتهم مع الطبيب المعالج.'}
       </p>
 
       <div className="card" style={{ marginBottom: '1rem' }}>
@@ -144,7 +147,7 @@ export function AdminDentalPatientsPage() {
 
       {err ? <p style={{ color: 'var(--danger)' }}>{err}</p> : null}
 
-      {totals ? (
+      {showFinancialSummary && totals ? (
         <div
           style={{
             display: 'grid',
