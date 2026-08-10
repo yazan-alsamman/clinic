@@ -264,7 +264,6 @@ scheduleRouter.get(
     'dermatology_manager',
     'dermatology_assistant_manager',
     'dental_branch',
-    'dental_assistant',
   ),
   async (req, res) => {
     try {
@@ -307,9 +306,6 @@ scheduleRouter.get(
       }
       if (isDermatologyLeadership) {
         filter.serviceType = 'dermatology'
-      }
-      if (role === 'dental_assistant') {
-        filter.serviceType = 'dental'
       }
       let scopedToProvider = false
       if (isProvider) {
