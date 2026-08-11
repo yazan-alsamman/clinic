@@ -29,7 +29,7 @@ import {
 import { round6 } from '../utils/money.js'
 
 function dtoOptsForRole(role) {
-  return role === 'dental_branch' || role === 'dental_assistant' ? { hidePhone: true } : {}
+  return role === 'dental_branch' ? { hidePhone: true } : {}
 }
 
 const CLINICAL_ROLES = [

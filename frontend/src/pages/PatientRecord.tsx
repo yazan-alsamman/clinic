@@ -506,7 +506,7 @@ function showOverviewDerm(r: Role | undefined) {
 }
 
 function showOverviewDentalSummary(r: Role | undefined) {
-  return r === 'super_admin' || r === 'reception'
+  return r === 'super_admin' || r === 'reception' || r === 'dental_assistant'
 }
 
 function clinicalHistoryIntro(r: Role | undefined): string {
@@ -799,13 +799,11 @@ export function PatientRecord() {
   const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(canUsePaymentChannels)
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadErr, setLoadErr] = useState('')
-  const [tab, setTab] = useState<Tab>(() =>
-    user?.role === 'dental_branch' || user?.role === 'dental_assistant' ? 'dental' : 'overview',
-  )
+  const [tab, setTab] = useState<Tab>(() => (user?.role === 'dental_branch' ? 'dental' : 'overview'))
   useEffect(() => {
     let requested = searchParams.get('tab')
     if (requested === 'solarium') requested = 'skin_care'
-    if (user?.role === 'dental_branch' || user?.role === 'dental_assistant') {
+    if (user?.role === 'dental_branch') {
       setTab('dental')
       return
     }
@@ -1657,9 +1655,16 @@ export function PatientRecord() {
     if (!role) {
       return allTabs.filter((t) => t.key === 'overview')
     }
-    /** أطباء/مساعدو الأسنان: تبويب الأسنان فقط (بدون نظرة عامة أو هاتف) */
-    if (role === 'dental_branch' || role === 'dental_assistant') {
+    /** أطباء فرع الأسنان: تبويب الأسنان فقط */
+    if (role === 'dental_branch') {
       return [{ key: 'dental' as Tab, label: 'الأسنان' }]
+    }
+    /** مساعدو الأسنان: نظرة عامة + الأسنان */
+    if (role === 'dental_assistant') {
+      return [
+        { key: 'overview' as Tab, label: 'نظرة عامة' },
+        { key: 'dental' as Tab, label: 'الأسنان' },
+      ]
     }
     const showAccount = role === 'super_admin' || role === 'reception'
     const showSessionsTab = role === 'super_admin' || role === 'reception'
