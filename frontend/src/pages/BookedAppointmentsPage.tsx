@@ -440,23 +440,26 @@ export function BookedAppointmentsPage() {
 
   async function submitProviderChange(slot: SlotRow) {
     setActionErr('')
-    if (provService === 'laser' && !provLaserUserId) {
-      setActionErr('اختر أخصائي الليزر')
+    if (provService === 'laser' && !String(provLaserUserId || '').trim()) {
+      const msg = 'اختر أخصائي الليزر من القائمة'
+      setActionErr(msg)
+      window.alert(msg)
       return
     }
     if (provService !== 'laser' && !provName.trim()) {
-      setActionErr('أدخل اسم المقدم')
+      const msg = 'أدخل اسم المقدم'
+      setActionErr(msg)
+      window.alert(msg)
       return
     }
-    const selectedLaser = laserProviders.find((x) => x.userId === provLaserUserId)
-    const roomNumber = Math.max(1, Number(provLaserRoom) || selectedLaser?.roomNumber || parseRoomNumber(slot) || 1)
+    const roomNumber = Math.max(1, Number(provLaserRoom) || parseRoomNumber(slot) || 1)
     const payload =
       provService === 'laser'
         ? {
             serviceType: 'laser',
             roomNumber,
             providerName: `Laser Room ${roomNumber}`,
-            assignedSpecialistUserId: provLaserUserId,
+            assignedSpecialistUserId: String(provLaserUserId).trim(),
           }
         : { serviceType: provService, providerName: provName.trim() }
     setActionBusy(true)
@@ -468,7 +471,9 @@ export function BookedAppointmentsPage() {
       await Promise.all([load(), loadArrived()])
       setActionSlot(null)
     } catch (e) {
-      setActionErr(e instanceof ApiError ? e.message : 'تعذر تغيير المقدم')
+      const msg = e instanceof ApiError ? e.message : 'تعذر تغيير المقدم'
+      setActionErr(msg)
+      window.alert(msg)
     } finally {
       setActionBusy(false)
     }
@@ -925,7 +930,25 @@ export function BookedAppointmentsPage() {
                   disabled={actionBusy}
                   onClick={() => {
                     setActionErr('')
-                    setActionMode('provider')
+                    void (async () => {
+                      if (normalizeService(actionSlot) === 'laser' || provService === 'laser') {
+                        const list = await loadLaserProviders(actionSlot.time || '09:00', true)
+                        const slotRoom = parseRoomNumber(actionSlot) || 1
+                        setProvLaserRoom(slotRoom)
+                        const bySpecialist = list.find(
+                          (x) =>
+                            actionSlot.assignedSpecialistUserId &&
+                            x.userId === String(actionSlot.assignedSpecialistUserId),
+                        )
+                        const byName = list.find(
+                          (x) =>
+                            x.name.trim() ===
+                            String(actionSlot.assignedSpecialistName || '').trim(),
+                        )
+                        setProvLaserUserId(bySpecialist?.userId || byName?.userId || '')
+                      }
+                      setActionMode('provider')
+                    })()
                   }}
                 >
                   👨‍⚕️ تغيير المقدم
@@ -1072,7 +1095,11 @@ export function BookedAppointmentsPage() {
                     type="button"
                     className="btn btn-primary"
                     disabled={actionBusy}
-                    onClick={() => void submitProviderChange(actionSlot)}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      void submitProviderChange(actionSlot)
+                    }}
                   >
                     {actionBusy ? 'جاري الحفظ…' : 'حفظ المقدم'}
                   </button>

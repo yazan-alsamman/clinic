@@ -1071,6 +1071,183 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
     }
     const body = req.body ?? {}
     const serviceType = normalizeServiceType(body.serviceType || slot.serviceType)
+
+    /** ليزر: تحديث الأخصائي مباشرة (بدون إعادة فرض وردية الغرفة)، ونقل الموعد لغرفة أخرى عبر خانة الهدف */
+    if (serviceType === 'laser') {
+      const bodyRoom = Number(body.roomNumber)
+      const roomNumber =
+        Number.isFinite(bodyRoom) && bodyRoom > 0
+          ? Math.trunc(bodyRoom)
+          : Number(slot.roomNumber) > 0
+            ? Number(slot.roomNumber)
+            : inferRoomNumber(slot.providerName) || inferRoomNumber(body.providerName) || 0
+      if (!roomNumber) {
+        res.status(400).json({ error: 'رقم غرفة الليزر مطلوب' })
+        return
+      }
+
+      let specialistId = String(body.assignedSpecialistUserId || '').trim()
+      const nameHint = String(body.providerName || '').trim()
+      if (!specialistId && nameHint && !/^laser\s*room\s*\d+/i.test(nameHint)) {
+        const byName = await User.findOne({
+          role: 'laser',
+          active: { $ne: false },
+          name: nameHint,
+        })
+          .select('_id name')
+          .lean()
+        if (byName?._id) specialistId = String(byName._id)
+      }
+      if (!specialistId) {
+        res.status(400).json({ error: 'اختر أخصائي الليزر' })
+        return
+      }
+
+      const specialist = await User.findById(specialistId).select('name role active').lean()
+      if (!specialist || specialist.active === false || String(specialist.role || '') !== 'laser') {
+        res.status(400).json({ error: 'أخصائي الليزر المختار غير صالح أو غير نشط' })
+        return
+      }
+
+      const targetProviderName = `Laser Room ${roomNumber}`
+      const assignedSpecialistName = String(specialist.name || '').trim()
+      const endTime = normalizeHm(slot.endTime || defaultEndFromStart(slot.time))
+      const currentRoom =
+        Number(slot.roomNumber) > 0 ? Number(slot.roomNumber) : inferRoomNumber(slot.providerName)
+      const sameRoom = currentRoom === roomNumber
+
+      if (sameRoom) {
+        slot.serviceType = 'laser'
+        slot.roomNumber = roomNumber
+        slot.providerName = targetProviderName
+        slot.assignedSpecialistUserId = specialist._id
+        slot.assignedSpecialistName = assignedSpecialistName
+        await slot.save()
+        await writeAudit({
+          user: req.user,
+          action: 'تغيير مقدم الموعد',
+          entityType: 'ScheduleSlot',
+          entityId: slot._id,
+          details: {
+            providerName: targetProviderName,
+            serviceType: 'laser',
+            roomNumber,
+            assignedSpecialistName,
+          },
+        })
+        await deleteSkinBillingForScheduleSlotId(slot._id)
+        res.json({ slot: slotToDto(slot) })
+        return
+      }
+
+      const overlapCheck = await assertNoOverlapForProvider({
+        businessDate: slot.businessDate,
+        providerName: targetProviderName,
+        startTime: slot.time,
+        endTime,
+        ignoreId: slot._id,
+      })
+      if (overlapCheck.error) {
+        res.status(409).json({ error: overlapCheck.error })
+        return
+      }
+
+      let target = await ScheduleSlot.findOne({
+        businessDate: slot.businessDate,
+        time: slot.time,
+        providerName: targetProviderName,
+      })
+      if (target && target.patientId && String(target._id) !== String(slot._id)) {
+        res.status(409).json({ error: 'الخانة في الغرفة المطلوبة محجوزة لمريض آخر' })
+        return
+      }
+
+      const patientPayload = {
+        serviceType: 'laser',
+        roomNumber,
+        providerName: targetProviderName,
+        assignedSpecialistUserId: specialist._id,
+        assignedSpecialistName,
+        endTime: slot.endTime || endTime,
+        procedureType: slot.procedureType || '',
+        patientId: slot.patientId,
+        patientName: slot.patientName || '',
+        arrivedAt: slot.arrivedAt || null,
+        arrivedByUserId: slot.arrivedByUserId || null,
+        arrivedByName: slot.arrivedByName || '',
+        laserPackageBookingMode: slot.laserPackageBookingMode || '',
+        laserAddonProcedureOptionIds: Array.isArray(slot.laserAddonProcedureOptionIds)
+          ? [...slot.laserAddonProcedureOptionIds]
+          : [],
+        laserSessionId: slot.laserSessionId || null,
+      }
+
+      if (target && String(target._id) !== String(slot._id)) {
+        Object.assign(target, patientPayload)
+        await target.save()
+        slot.patientId = null
+        slot.patientName = ''
+        slot.arrivedAt = null
+        slot.arrivedByUserId = null
+        slot.arrivedByName = ''
+        slot.procedureType = ''
+        slot.assignedSpecialistUserId = null
+        slot.assignedSpecialistName = ''
+        slot.laserSessionId = null
+        slot.laserPackageBookingMode = ''
+        slot.laserAddonProcedureOptionIds = []
+        await slot.save()
+        await writeAudit({
+          user: req.user,
+          action: 'تغيير مقدم الموعد',
+          entityType: 'ScheduleSlot',
+          entityId: target._id,
+          details: {
+            providerName: targetProviderName,
+            serviceType: 'laser',
+            roomNumber,
+            assignedSpecialistName,
+            movedFromSlotId: String(slot._id),
+          },
+        })
+        await deleteSkinBillingForScheduleSlotId(target._id)
+        res.json({ slot: slotToDto(target) })
+        return
+      }
+
+      slot.serviceType = 'laser'
+      slot.roomNumber = roomNumber
+      slot.providerName = targetProviderName
+      slot.assignedSpecialistUserId = specialist._id
+      slot.assignedSpecialistName = assignedSpecialistName
+      try {
+        await slot.save()
+      } catch (saveErr) {
+        if (saveErr?.code === 11000) {
+          res.status(409).json({
+            error: 'تعذر نقل الموعد للغرفة — الخانة موجودة مسبقاً. اختر غرفة/وقت آخر.',
+          })
+          return
+        }
+        throw saveErr
+      }
+      await writeAudit({
+        user: req.user,
+        action: 'تغيير مقدم الموعد',
+        entityType: 'ScheduleSlot',
+        entityId: slot._id,
+        details: {
+          providerName: targetProviderName,
+          serviceType: 'laser',
+          roomNumber,
+          assignedSpecialistName,
+        },
+      })
+      await deleteSkinBillingForScheduleSlotId(slot._id)
+      res.json({ slot: slotToDto(slot) })
+      return
+    }
+
     const requestedProvider = String(body.providerName || slot.providerName || '').trim()
     const resolved = await resolveProviderAssignment({
       serviceType,
@@ -1121,6 +1298,10 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
     res.json({ slot: slotToDto(slot) })
   } catch (e) {
     console.error(e)
+    if (e?.code === 11000) {
+      res.status(409).json({ error: 'تعذر حفظ المقدم بسبب تعارض في الجدول' })
+      return
+    }
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
