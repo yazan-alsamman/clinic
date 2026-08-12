@@ -242,3 +242,40 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
+
+/** حذف مادة من المستودع (جلدية خاصة / بشرة / أي قسم للمدير) */
+inventoryRouter.delete(
+  '/items/:id',
+  requireRoles('super_admin', 'dermatology_manager', 'reception'),
+  async (req, res) => {
+    try {
+      const item = await InventoryItem.findById(req.params.id)
+      if (!item) {
+        res.status(404).json({ error: 'المادة غير موجودة' })
+        return
+      }
+      if (isDermWarehouseManagerRole(req.user.role) && item.department !== 'dermatology_private') {
+        res.status(403).json({ error: 'لا صلاحية لحذف هذا الصنف' })
+        return
+      }
+      if (req.user.role === 'reception' && item.department !== 'skin') {
+        res.status(403).json({ error: 'لا صلاحية لحذف هذا الصنف' })
+        return
+      }
+
+      const snapshot = { sku: item.sku, name: item.name, department: item.department }
+      await InventoryItem.deleteOne({ _id: item._id })
+      await writeAudit({
+        user: req.user,
+        action: 'حذف مادة من المستودع',
+        entityType: 'InventoryItem',
+        entityId: item._id,
+        details: snapshot,
+      })
+      res.json({ ok: true })
+    } catch (e) {
+      console.error(e)
+      res.status(500).json({ error: 'خطأ في الخادم' })
+    }
+  },
+)

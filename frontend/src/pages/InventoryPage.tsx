@@ -42,6 +42,9 @@ export function InventoryPage() {
   const canRead = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
   const canCreate = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
   const canEdit = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
+  /** حذف المادة: مدير الجلدية / المدير / الاستقبال (بشرة) — ليس مساعد المدير */
+  const canDelete =
+    user?.role === 'super_admin' || isDermWarehouseManager || isReceptionSkinWarehouse
 
   const [rows, setRows] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,6 +64,7 @@ export function InventoryPage() {
   })
   const [formErr, setFormErr] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!canRead) {
@@ -100,6 +104,23 @@ export function InventoryPage() {
       active: r.active !== false,
       department: r.department,
     })
+  }
+
+  async function deleteItem(r: Item) {
+    if (!canDelete || deletingId) return
+    const ok = window.confirm(`حذف المادة «${r.name}» من المستودع؟\nلا يمكن التراجع عن هذا الإجراء.`)
+    if (!ok) return
+    setDeletingId(r.id)
+    setFormErr('')
+    try {
+      await api(`/api/inventory/items/${encodeURIComponent(r.id)}`, { method: 'DELETE' })
+      if (editItem?.id === r.id) setEditItem(null)
+      await load()
+    } catch (e) {
+      window.alert(e instanceof ApiError ? e.message : 'تعذر حذف المادة')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   if (!canRead) {
@@ -249,14 +270,27 @@ export function InventoryPage() {
                   ) : null}
                   {canEdit ? (
                     <td>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.8rem' }}
-                        onClick={() => openEdit(r)}
-                      >
-                        تعديل
-                      </button>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem' }}
+                          onClick={() => openEdit(r)}
+                        >
+                          تعديل
+                        </button>
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ fontSize: '0.8rem', color: 'var(--danger)' }}
+                            disabled={deletingId === r.id}
+                            onClick={() => void deleteItem(r)}
+                          >
+                            {deletingId === r.id ? 'جاري الحذف…' : 'حذف'}
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   ) : null}
                 </tr>
@@ -720,7 +754,27 @@ export function InventoryPage() {
                 <p style={{ margin: 0, color: 'var(--danger)', fontSize: '0.85rem' }}>{formErr}</p>
               ) : null}
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.25rem', justifyContent: 'flex-end' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginTop: '1.25rem',
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+              }}
+            >
+              {canDelete && editItem ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ color: 'var(--danger)', marginInlineEnd: 'auto' }}
+                  disabled={saving || deletingId === editItem.id}
+                  onClick={() => void deleteItem(editItem)}
+                >
+                  {deletingId === editItem.id ? 'جاري الحذف…' : 'حذف المادة'}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn btn-secondary"
