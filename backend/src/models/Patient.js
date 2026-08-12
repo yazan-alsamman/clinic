@@ -144,6 +144,8 @@ const dentalChartToothSchema = new mongoose.Schema(
 const dentalChartSchema = new mongoose.Schema(
   {
     teeth: { type: [dentalChartToothSchema], default: [] },
+    /** إجراءات عامة (تنظيف، تبييض، …) — ليست مرتبطة بسن محدد */
+    generalTreatments: { type: [dentalChartTreatmentSchema], default: [] },
     updatedAt: { type: Date, default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },

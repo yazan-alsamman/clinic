@@ -91,6 +91,8 @@ export type DentalToothState = {
 
 export type DentalChartDto = {
   teeth: DentalToothState[]
+  /** إجراءات عامة غير مرتبطة بسن (تنظيف، تبييض، …) */
+  generalTreatments?: DentalToothTreatment[]
   updatedAt: string | null
   updatedBy: string | null
 }

@@ -357,7 +357,7 @@ function labWorkToDto(row) {
 }
 
 function emptyDentalChartDto() {
-  return { teeth: [], updatedAt: null, updatedBy: null }
+  return { teeth: [], generalTreatments: [], updatedAt: null, updatedBy: null }
 }
 
 function chartToDto(chart, billingMap) {
@@ -381,6 +381,9 @@ function chartToDto(chart, billingMap) {
         treatment: treatments[0] || treatmentToDto({}, billingMap),
       }
     }),
+    generalTreatments: (Array.isArray(chart.generalTreatments) ? chart.generalTreatments : []).map((x) =>
+      treatmentToDto(x, billingMap),
+    ),
     updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
     updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
   }
@@ -393,6 +396,9 @@ async function chartToDtoEnriched(chart) {
       if (tr.billingItemId) ids.push(String(tr.billingItemId))
     }
     if (t.treatment?.billingItemId) ids.push(String(t.treatment.billingItemId))
+  }
+  for (const tr of chart?.generalTreatments || []) {
+    if (tr.billingItemId) ids.push(String(tr.billingItemId))
   }
   const { billingStatusByItemIds } = await import('../services/dentalChartBilling.js')
   const billingMap = await billingStatusByItemIds(ids)
@@ -424,6 +430,43 @@ function mergePreviousBillingLinks(prevTeeth, nextTeeth) {
     }
   }
   return nextTeeth
+}
+
+function mergePreviousGeneralBillingLinks(prevList, nextList) {
+  const prevById = new Map()
+  for (const tr of prevList || []) {
+    if (tr._id) prevById.set(String(tr._id), tr)
+  }
+  for (const tr of nextList || []) {
+    const id = tr._id ? String(tr._id) : ''
+    const prev = id ? prevById.get(id) : null
+    if (prev?.billingItemId) {
+      tr.billingItemId = prev.billingItemId
+      tr.clinicalSessionId = prev.clinicalSessionId || tr.clinicalSessionId
+      if (Array.isArray(prev.payments) && prev.payments.length > 0) {
+        tr.payments = prev.payments
+      }
+    }
+    const effective = treatmentEffectiveTotalSyp(tr.totalCostSyp, tr.totalCostUsd, tr.costUsdSypRate)
+    if (effective > 0 && !tr.billingItemId) {
+      tr.payments = []
+    }
+  }
+  return nextList
+}
+
+function normalizeGeneralTreatments(raw, fallbackUsdSypRate = 0) {
+  if (!Array.isArray(raw)) return []
+  const list = []
+  const injectRate = (item) =>
+    item && typeof item === 'object' ? { ...item, _fallbackUsdSypRate: fallbackUsdSypRate } : item
+  for (const item of raw) {
+    const n = normalizeTreatment(injectRate(item))
+    if (!treatmentHasContent(n)) continue
+    list.push(n)
+    if (list.length >= 80) break
+  }
+  return list
 }
 
 function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
@@ -999,10 +1042,26 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
     }
     const fallbackRate = Math.max(0, Number(req.businessDay?.usdSypRate) || 0)
     const prevTeeth = patient.dentalChart?.teeth ? JSON.parse(JSON.stringify(patient.dentalChart.teeth)) : []
-    let teeth = normalizeChartTeeth(req.body?.teeth, fallbackRate)
-    teeth = mergePreviousBillingLinks(prevTeeth, teeth)
+    const prevGeneral = patient.dentalChart?.generalTreatments
+      ? JSON.parse(JSON.stringify(patient.dentalChart.generalTreatments))
+      : []
+
+    const bodyHasTeeth = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'teeth')
+    const bodyHasGeneral = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'generalTreatments')
+
+    let teeth = bodyHasTeeth ? normalizeChartTeeth(req.body?.teeth, fallbackRate) : prevTeeth
+    if (bodyHasTeeth) teeth = mergePreviousBillingLinks(prevTeeth, teeth)
+
+    let generalTreatments = bodyHasGeneral
+      ? normalizeGeneralTreatments(req.body?.generalTreatments, fallbackRate)
+      : prevGeneral
+    if (bodyHasGeneral) {
+      generalTreatments = mergePreviousGeneralBillingLinks(prevGeneral, generalTreatments)
+    }
+
     patient.dentalChart = {
       teeth,
+      generalTreatments,
       updatedAt: new Date(),
       updatedBy: req.user._id,
     }
@@ -1023,7 +1082,10 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       action: 'تحديث مخطط الأسنان',
       entityType: 'Patient',
       entityId: patient._id,
-      details: { toothCount: teeth.length },
+      details: {
+        toothCount: teeth.length,
+        generalTreatmentCount: generalTreatments.length,
+      },
     })
     res.json({ chart: await chartToDtoEnriched(patient.dentalChart) })
   } catch (e) {

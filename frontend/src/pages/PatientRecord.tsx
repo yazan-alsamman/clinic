@@ -14,6 +14,7 @@ import {
 import { BillingPaymentModal } from '../components/BillingPaymentModal'
 import { DentalOdontogram } from '../components/dental/DentalOdontogram'
 import { DentalTreatmentPlan } from '../components/dental/DentalTreatmentPlan'
+import { DentalGeneralProcedures } from '../components/dental/DentalGeneralProcedures'
 import {
   netCollectedSypFromPayment,
   type BillingPaymentRequestBody,
@@ -1685,9 +1686,7 @@ export function PatientRecord() {
 
   useEffect(() => {
     const allowed = visibleTabs.some((t) => t.key === tab)
-    if (!allowed) {
-      setTab(role === 'dental_branch' || role === 'dental_assistant' ? 'dental' : 'overview')
-    }
+    if (!allowed) setTab(role === 'dental_branch' ? 'dental' : 'overview')
   }, [tab, visibleTabs, role])
 
   const patientPackages: PatientPackage[] = useMemo(() => {
@@ -2443,12 +2442,14 @@ export function PatientRecord() {
             {patient.name}
           </h1>
           <p className="page-desc" style={{ margin: 0 }}>
-            {role === 'dental_branch' || role === 'dental_assistant'
+            {role === 'dental_branch'
               ? 'ملف المريض — تبويب الأسنان'
-              : 'ملف المريض — تبويبات حسب الصلاحية'}
+              : role === 'dental_assistant'
+                ? 'ملف المريض — نظرة عامة والأسنان'
+                : 'ملف المريض — تبويبات حسب الصلاحية'}
           </p>
         </div>
-        {role !== 'dental_branch' && role !== 'dental_assistant' ? (
+        {role !== 'dental_branch' ? (
           <button
             type="button"
             className="btn btn-secondary"
@@ -5266,6 +5267,14 @@ export function PatientRecord() {
                 />
               ) : null}
             </div>
+            {id ? (
+              <DentalGeneralProcedures
+                patientId={id}
+                canEdit={
+                  role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
+                }
+              />
+            ) : null}
             <div className="card">
               <h2 className="card-title">مخطط الأسنان</h2>
               <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
