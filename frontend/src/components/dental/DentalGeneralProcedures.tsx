@@ -145,7 +145,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
     if (ok) resetForm()
   }
 
-  async function removeRow(id: string | undefined, idx: number) {
+  async function removeRow(idx: number) {
     if (!canEdit || saving) return
     if (rows[idx]?.billingStatus === 'paid') {
       setErr('لا يمكن حذف إجراء محصّل')
@@ -235,7 +235,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                               className="btn btn-ghost"
                               style={{ fontSize: '0.78rem' }}
                               disabled={saving || t.billingStatus === 'paid'}
-                              onClick={() => void removeRow(t.id, idx)}
+                              onClick={() => void removeRow(idx)}
                             >
                               حذف
                             </button>
