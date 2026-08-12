@@ -96,7 +96,13 @@ function pickAssignedForTime(room, timeStr) {
   return null
 }
 
-async function resolveProviderAssignment({ serviceType, providerName, roomNumberRaw, timeStr }) {
+async function resolveProviderAssignment({
+  serviceType,
+  providerName,
+  roomNumberRaw,
+  timeStr,
+  assignedSpecialistUserIdRaw = null,
+}) {
   let effectiveProviderName = String(providerName || '').trim()
   let roomNumber = null
   let assignedSpecialistUserId = null
@@ -111,13 +117,24 @@ async function resolveProviderAssignment({ serviceType, providerName, roomNumber
       .populate('assignedUserId', 'name')
       .populate('morningAssignedUserId', 'name')
       .populate('eveningAssignedUserId', 'name')
-    const assignedForShift = pickAssignedForTime(room, timeStr)
-    if (!assignedForShift) {
-      return { error: 'لا يوجد أخصائي مخصص لهذه الغرفة في وقت الموعد. عدّل الورديات من لوحة المدير.' }
+    const overrideId = assignedSpecialistUserIdRaw != null ? String(assignedSpecialistUserIdRaw).trim() : ''
+    if (overrideId) {
+      const specialist = await User.findById(overrideId).select('name role active').lean()
+      if (!specialist || specialist.active === false || String(specialist.role || '') !== 'laser') {
+        return { error: 'أخصائي الليزر المختار غير صالح أو غير نشط' }
+      }
+      effectiveProviderName = `Laser Room ${roomNumber}`
+      assignedSpecialistUserId = specialist._id
+      assignedSpecialistName = String(specialist.name || '').trim()
+    } else {
+      const assignedForShift = pickAssignedForTime(room, timeStr)
+      if (!assignedForShift) {
+        return { error: 'لا يوجد أخصائي مخصص لهذه الغرفة في وقت الموعد. عدّل الورديات من لوحة المدير.' }
+      }
+      effectiveProviderName = `Laser Room ${roomNumber}`
+      assignedSpecialistUserId = assignedForShift._id
+      assignedSpecialistName = assignedForShift.name || ''
     }
-    effectiveProviderName = `Laser Room ${roomNumber}`
-    assignedSpecialistUserId = assignedForShift._id
-    assignedSpecialistName = assignedForShift.name || ''
   } else if (serviceType === 'dermatology') {
     const boards = await ensureDermatologyBoards()
     const board = boards.find((b) => String(b.title || '').trim() === effectiveProviderName)
@@ -490,6 +507,41 @@ scheduleRouter.get('/providers', async (_req, res) => {
 /** خيارات أخصائيي الليزر المعيّنين على الغرف (للاستقبال/المدير) */
 scheduleRouter.get('/laser-provider-options', async (_req, res) => {
   try {
+    const allSpecialists = String(_req.query.all || '').trim() === '1'
+    if (allSpecialists) {
+      const users = await User.find({ role: 'laser', active: { $ne: false } })
+        .select('name')
+        .sort({ name: 1 })
+        .lean()
+      const rooms = await Room.find({})
+        .populate('morningAssignedUserId', 'name')
+        .populate('eveningAssignedUserId', 'name')
+        .populate('assignedUserId', 'name')
+        .sort({ number: 1 })
+        .lean()
+      const roomByUserId = new Map()
+      for (const r of rooms) {
+        for (const key of ['morningAssignedUserId', 'eveningAssignedUserId', 'assignedUserId']) {
+          const u = r[key]
+          if (u?._id) {
+            const id = String(u._id)
+            if (!roomByUserId.has(id)) roomByUserId.set(id, Number(r.number) || 1)
+          }
+        }
+      }
+      res.json({
+        providers: users.map((u) => ({
+          roomNumber: roomByUserId.get(String(u._id)) || 1,
+          userId: String(u._id),
+          name: String(u.name || '').trim(),
+        })),
+        rooms: rooms.map((r) => ({
+          roomNumber: Number(r.number) || 0,
+          label: `Laser Room ${r.number}`,
+        })),
+      })
+      return
+    }
     const slotTime = normalizeHm(_req.query.time) || '09:00'
     const rooms = await Room.find({
       $or: [{ morningAssignedUserId: { $ne: null } }, { eveningAssignedUserId: { $ne: null } }, { assignedUserId: { $ne: null } }],
@@ -1025,6 +1077,7 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
       providerName: requestedProvider,
       roomNumberRaw: body.roomNumber ?? slot.roomNumber,
       timeStr: slot.time,
+      assignedSpecialistUserIdRaw: body.assignedSpecialistUserId ?? null,
     })
     if (resolved.error) {
       res.status(400).json({ error: resolved.error })

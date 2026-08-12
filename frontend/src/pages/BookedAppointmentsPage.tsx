@@ -18,6 +18,7 @@ type SlotRow = {
   endTime?: string
   providerName: string
   assignedSpecialistName?: string
+  assignedSpecialistUserId?: string | null
   serviceType?: string
   roomNumber?: number | null
   arrivedAt?: string | null
@@ -168,10 +169,13 @@ export function BookedAppointmentsPage() {
   const [arrivedSlots, setArrivedSlots] = useState<SlotRow[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const [actionErr, setActionErr] = useState('')
+  const [actionBusy, setActionBusy] = useState(false)
   const [actionSlot, setActionSlot] = useState<SlotRow | null>(null)
   const [actionMode, setActionMode] = useState<'menu' | 'reschedule' | 'provider'>('menu')
   const [providers, setProviders] = useState<string[]>([])
   const [laserProviders, setLaserProviders] = useState<LaserProviderOption[]>([])
+  const [laserRooms, setLaserRooms] = useState<Array<{ roomNumber: number; label: string }>>([])
   const [dermatologyBoards, setDermatologyBoards] = useState<DermatologyBoard[]>([])
   const [resDate, setResDate] = useState(todayYmd)
   const [resTime, setResTime] = useState('09:00')
@@ -179,6 +183,7 @@ export function BookedAppointmentsPage() {
   const [resProcedure, setResProcedure] = useState('')
   const [provService, setProvService] = useState<ServiceKey>('other')
   const [provLaserUserId, setProvLaserUserId] = useState('')
+  const [provLaserRoom, setProvLaserRoom] = useState(1)
   const [provName, setProvName] = useState('')
 
   useEffect(() => {
@@ -230,13 +235,23 @@ export function BookedAppointmentsPage() {
     }
   }, [fullView])
 
-  const loadLaserProviders = useCallback(async (slotTime?: string) => {
+  const loadLaserProviders = useCallback(async (slotTime?: string, all = false) => {
     if (!fullView) return [] as LaserProviderOption[]
     try {
-      const q = slotTime ? `?time=${encodeURIComponent(slotTime)}` : ''
-      const data = await api<{ providers: LaserProviderOption[] }>(`/api/schedule/laser-provider-options${q}`)
+      const q = all
+        ? '?all=1'
+        : slotTime
+          ? `?time=${encodeURIComponent(slotTime)}`
+          : ''
+      const data = await api<{
+        providers: LaserProviderOption[]
+        rooms?: Array<{ roomNumber: number; label: string }>
+      }>(`/api/schedule/laser-provider-options${q}`)
       const providers = data.providers || []
       setLaserProviders(providers)
+      if (Array.isArray(data.rooms) && data.rooms.length > 0) {
+        setLaserRooms(data.rooms.filter((r) => r.roomNumber > 0))
+      }
       return providers
     } catch {
       setLaserProviders([])
@@ -345,9 +360,10 @@ export function BookedAppointmentsPage() {
 
   async function openActionMenu(slot: SlotRow) {
     if (!fullView) return
+    setActionErr('')
     let byTime: LaserProviderOption[] = laserProviders
     if (normalizeService(slot) === 'laser') {
-      byTime = await loadLaserProviders(slot.time || '09:00')
+      byTime = await loadLaserProviders(slot.time || '09:00', true)
     }
     setActionSlot(slot)
     setActionMode('menu')
@@ -357,59 +373,105 @@ export function BookedAppointmentsPage() {
     setResProcedure(slot.procedureType || '')
     const svc = normalizeService(slot)
     setProvService(svc)
-    const matchedLaser = byTime.find((x) => x.roomNumber === (parseRoomNumber(slot) || 0))
-    setProvLaserUserId(matchedLaser?.userId || '')
+    const slotRoom = parseRoomNumber(slot) || 1
+    setProvLaserRoom(slotRoom)
+    const bySpecialist = byTime.find(
+      (x) => slot.assignedSpecialistUserId && x.userId === String(slot.assignedSpecialistUserId),
+    )
+    const byRoom = byTime.find((x) => x.roomNumber === slotRoom)
+    setProvLaserUserId(bySpecialist?.userId || byRoom?.userId || '')
     setProvName(slot.assignedSpecialistName?.trim() || slot.providerName || '')
   }
 
   async function markArrived(slot: SlotRow) {
-    await api(`/api/schedule/arrive/${slot.id}`, { method: 'POST' })
-    await Promise.all([load(), loadArrived()])
-    setActionSlot(null)
+    setActionErr('')
+    setActionBusy(true)
+    try {
+      await api(`/api/schedule/arrive/${slot.id}`, { method: 'POST' })
+      await Promise.all([load(), loadArrived()])
+      setActionSlot(null)
+    } catch (e) {
+      setActionErr(e instanceof ApiError ? e.message : 'تعذر تسجيل الوصول')
+    } finally {
+      setActionBusy(false)
+    }
   }
 
   async function cancelSlot(slot: SlotRow) {
-    await api(`/api/schedule/cancel/${slot.id}`, { method: 'DELETE' })
-    await Promise.all([load(), loadArrived()])
-    setActionSlot(null)
+    setActionErr('')
+    setActionBusy(true)
+    try {
+      await api(`/api/schedule/cancel/${slot.id}`, { method: 'DELETE' })
+      await Promise.all([load(), loadArrived()])
+      setActionSlot(null)
+    } catch (e) {
+      setActionErr(e instanceof ApiError ? e.message : 'تعذر إلغاء الموعد')
+    } finally {
+      setActionBusy(false)
+    }
   }
 
   async function submitReschedule(slot: SlotRow) {
     const end = addMinutesHm(resTime, resDuration)
     if (!end) {
-      setErr('وقت غير صالح')
+      setActionErr('وقت غير صالح')
       return
     }
-    await api(`/api/schedule/reschedule/${slot.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        businessDate: resDate,
-        time: resTime,
-        endTime: end,
-        procedureType: resProcedure,
-      }),
-    })
-    await Promise.all([load(), loadArrived()])
-    setActionSlot(null)
+    setActionErr('')
+    setActionBusy(true)
+    try {
+      await api(`/api/schedule/reschedule/${slot.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          businessDate: resDate,
+          time: resTime,
+          endTime: end,
+          procedureType: resProcedure,
+        }),
+      })
+      await Promise.all([load(), loadArrived()])
+      setActionSlot(null)
+    } catch (e) {
+      setActionErr(e instanceof ApiError ? e.message : 'تعذر إعادة الجدولة')
+    } finally {
+      setActionBusy(false)
+    }
   }
 
   async function submitProviderChange(slot: SlotRow) {
+    setActionErr('')
+    if (provService === 'laser' && !provLaserUserId) {
+      setActionErr('اختر أخصائي الليزر')
+      return
+    }
+    if (provService !== 'laser' && !provName.trim()) {
+      setActionErr('أدخل اسم المقدم')
+      return
+    }
     const selectedLaser = laserProviders.find((x) => x.userId === provLaserUserId)
-    const slotRoom = parseRoomNumber(slot)
+    const roomNumber = Math.max(1, Number(provLaserRoom) || selectedLaser?.roomNumber || parseRoomNumber(slot) || 1)
     const payload =
       provService === 'laser'
         ? {
             serviceType: 'laser',
-            roomNumber: selectedLaser?.roomNumber ?? slotRoom ?? 1,
-            providerName: selectedLaser ? selectedLaser.name : `Laser Room ${slotRoom ?? 1}`,
+            roomNumber,
+            providerName: `Laser Room ${roomNumber}`,
+            assignedSpecialistUserId: provLaserUserId,
           }
-        : { serviceType: provService, providerName: provName }
-    await api(`/api/schedule/provider/${slot.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    })
-    await Promise.all([load(), loadArrived()])
-    setActionSlot(null)
+        : { serviceType: provService, providerName: provName.trim() }
+    setActionBusy(true)
+    try {
+      await api(`/api/schedule/provider/${slot.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      })
+      await Promise.all([load(), loadArrived()])
+      setActionSlot(null)
+    } catch (e) {
+      setActionErr(e instanceof ApiError ? e.message : 'تعذر تغيير المقدم')
+    } finally {
+      setActionBusy(false)
+    }
   }
 
   if (!allowed) {
@@ -832,19 +894,48 @@ export function BookedAppointmentsPage() {
               {actionSlot.patientName} — {toDisplay12h(actionSlot.time)}
               {actionSlot.endTime ? ` إلى ${toDisplay12h(actionSlot.endTime)}` : ''}
             </p>
+            {actionErr ? (
+              <p style={{ color: 'var(--danger)', margin: '0 0 0.65rem', fontSize: '0.88rem' }}>{actionErr}</p>
+            ) : null}
 
             {actionMode === 'menu' ? (
               <div style={{ display: 'grid', gap: '0.55rem' }}>
-                <button type="button" className="btn btn-primary" onClick={() => void markArrived(actionSlot)}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={actionBusy}
+                  onClick={() => void markArrived(actionSlot)}
+                >
                   ✅ وصل المريض
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={() => setActionMode('reschedule')}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={actionBusy}
+                  onClick={() => {
+                    setActionErr('')
+                    setActionMode('reschedule')
+                  }}
+                >
                   🕒 تغيير وقت الموعد
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={() => setActionMode('provider')}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={actionBusy}
+                  onClick={() => {
+                    setActionErr('')
+                    setActionMode('provider')
+                  }}
+                >
                   👨‍⚕️ تغيير المقدم
                 </button>
-                <button type="button" className="btn btn-ghost" onClick={() => void cancelSlot(actionSlot)}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={actionBusy}
+                  onClick={() => void cancelSlot(actionSlot)}
+                >
                   ❌ إلغاء الموعد
                 </button>
               </div>
@@ -874,11 +965,24 @@ export function BookedAppointmentsPage() {
                   placeholder="الإجراء / المناطق"
                 />
                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setActionMode('menu')}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={actionBusy}
+                    onClick={() => {
+                      setActionErr('')
+                      setActionMode('menu')
+                    }}
+                  >
                     رجوع
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={() => void submitReschedule(actionSlot)}>
-                    حفظ الوقت الجديد
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={actionBusy}
+                    onClick={() => void submitReschedule(actionSlot)}
+                  >
+                    {actionBusy ? 'جاري الحفظ…' : 'حفظ الوقت الجديد'}
                   </button>
                 </div>
               </div>
@@ -886,7 +990,15 @@ export function BookedAppointmentsPage() {
 
             {actionMode === 'provider' ? (
               <div style={{ display: 'grid', gap: '0.6rem' }}>
-                <select className="select" value={provService} onChange={(e) => setProvService(e.target.value as ServiceKey)}>
+                <label className="form-label">نوع الخدمة</label>
+                <select
+                  className="select"
+                  value={provService}
+                  onChange={(e) => {
+                    setActionErr('')
+                    setProvService(e.target.value as ServiceKey)
+                  }}
+                >
                   <option value="laser">{SERVICE_LABELS.laser}</option>
                   <option value="dental">{SERVICE_LABELS.dental}</option>
                   <option value="dermatology">{SERVICE_LABELS.dermatology}</option>
@@ -894,26 +1006,50 @@ export function BookedAppointmentsPage() {
                   <option value="other">{SERVICE_LABELS.other}</option>
                 </select>
                 {provService === 'laser' ? (
-                  <select
-                    className="select"
-                    value={provLaserUserId}
-                    onChange={(e) => setProvLaserUserId(e.target.value)}
-                  >
-                    <option value="">— اختر أخصائي الليزر —</option>
-                    {laserProviders.map((p) => (
-                      <option key={p.userId} value={p.userId}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <label className="form-label">غرفة الليزر</label>
+                    <select
+                      className="select"
+                      value={String(provLaserRoom)}
+                      onChange={(e) => setProvLaserRoom(Math.max(1, Number(e.target.value) || 1))}
+                    >
+                      {(laserRooms.length > 0
+                        ? laserRooms
+                        : [
+                            { roomNumber: 1, label: 'Laser Room 1' },
+                            { roomNumber: 2, label: 'Laser Room 2' },
+                          ]
+                      ).map((r) => (
+                        <option key={r.roomNumber} value={r.roomNumber}>
+                          {r.label || `Laser Room ${r.roomNumber}`}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="form-label">أخصائي الليزر</label>
+                    <select
+                      className="select"
+                      value={provLaserUserId}
+                      onChange={(e) => setProvLaserUserId(e.target.value)}
+                    >
+                      <option value="">— اختر أخصائي الليزر —</option>
+                      {laserProviders.map((p) => (
+                        <option key={p.userId} value={p.userId}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
                 ) : (
-                  <input
-                    className="input"
-                    value={provName}
-                    onChange={(e) => setProvName(e.target.value)}
-                    placeholder="اسم المقدم"
-                    list="provider-suggestions"
-                  />
+                  <>
+                    <label className="form-label">اسم المقدم</label>
+                    <input
+                      className="input"
+                      value={provName}
+                      onChange={(e) => setProvName(e.target.value)}
+                      placeholder="اسم المقدم"
+                      list="provider-suggestions"
+                    />
+                  </>
                 )}
                 <datalist id="provider-suggestions">
                   {providers.map((p) => (
@@ -921,11 +1057,24 @@ export function BookedAppointmentsPage() {
                   ))}
                 </datalist>
                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setActionMode('menu')}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={actionBusy}
+                    onClick={() => {
+                      setActionErr('')
+                      setActionMode('menu')
+                    }}
+                  >
                     رجوع
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={() => void submitProviderChange(actionSlot)}>
-                    حفظ المقدم
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={actionBusy}
+                    onClick={() => void submitProviderChange(actionSlot)}
+                  >
+                    {actionBusy ? 'جاري الحفظ…' : 'حفظ المقدم'}
                   </button>
                 </div>
               </div>
