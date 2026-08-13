@@ -84,7 +84,7 @@ export function LaserOpenPackagesDetails({
           </div>
           {(pkg.remainingAreas || []).length > 0 ? (
             <div style={{ color: 'var(--amber)', fontWeight: 600 }}>
-              مناطق متبقية من الباكج: {pkg.remainingAreas.join('، ')}
+              مناطق متبقية من الباكج: {(pkg.remainingAreas || []).join('، ')}
             </div>
           ) : null}
           {!compact ? (
