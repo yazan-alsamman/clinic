@@ -198,12 +198,12 @@ solariumRouter.post(
         sessionMinutes === 12
           ? Math.round(Number(settings.price12MinSyp) || 0)
           : Math.round(Number(settings.price6MinSyp) || 0)
-      if (!(fee > 0)) {
+      if (!(fee >= 0) || !Number.isFinite(fee)) {
         res.status(400).json({
           error:
             sessionMinutes === 12
-              ? 'سعر جلسة 12 دقيقة غير محدد أو صفر — يحدده مدير النظام من نفس الصفحة.'
-              : 'سعر جلسة 6 دقائق غير محدد أو صفر — يحدده مدير النظام من نفس الصفحة.',
+              ? 'سعر جلسة 12 دقيقة غير صالح — يحدده مدير النظام من نفس الصفحة.'
+              : 'سعر جلسة 6 دقائق غير صالح — يحدده مدير النظام من نفس الصفحة.',
         })
         return
       }
@@ -229,35 +229,38 @@ solariumRouter.post(
         createdByReceptionUserId: req.user._id,
       })
 
-      const bi = await BillingItem.create({
-        clinicalSessionId: cs._id,
-        patientId,
-        providerUserId,
-        department: 'solarium',
-        procedureLabel: procedureDescription,
-        listAmountDueSyp: fee,
-        discountPercent: 0,
-        effectiveAmountDueSyp: fee,
-        amountDueSyp: fee,
-        currency: 'SYP',
-        businessDate,
-        status: 'pending_payment',
-      })
-
-      cs.billingItemId = bi._id
-      await cs.save()
-
-      let payResult
-      try {
-        payResult = await completeBillingItemPayment(bi, body, req.user, {
-          skipPatientDebtUpdate: true,
+      let bi = null
+      let payResult = { paymentId: null }
+      if (fee > 0) {
+        bi = await BillingItem.create({
+          clinicalSessionId: cs._id,
+          patientId,
+          providerUserId,
+          department: 'solarium',
+          procedureLabel: procedureDescription,
+          listAmountDueSyp: fee,
+          discountPercent: 0,
+          effectiveAmountDueSyp: fee,
+          amountDueSyp: fee,
+          currency: 'SYP',
+          businessDate,
+          status: 'pending_payment',
         })
-      } catch (payErr) {
-        await BillingItem.deleteMany({ clinicalSessionId: cs._id })
-        await ClinicalSession.findByIdAndDelete(cs._id)
-        cs = null
-        res.status(400).json({ error: String(payErr?.message || payErr) })
-        return
+
+        cs.billingItemId = bi._id
+        await cs.save()
+
+        try {
+          payResult = await completeBillingItemPayment(bi, body, req.user, {
+            skipPatientDebtUpdate: true,
+          })
+        } catch (payErr) {
+          await BillingItem.deleteMany({ clinicalSessionId: cs._id })
+          await ClinicalSession.findByIdAndDelete(cs._id)
+          cs = null
+          res.status(400).json({ error: String(payErr?.message || payErr) })
+          return
+        }
       }
 
       const payCurrency = String(body.payCurrency || payResult?.payment?.payCurrency || 'SYP')
@@ -267,16 +270,16 @@ solariumRouter.post(
 
       await writeAudit({
         user: req.user,
-        action: 'سولاريوم: تسجيل جلسة وتحصيل فوري',
+        action: fee > 0 ? 'سولاريوم: تسجيل جلسة وتحصيل فوري' : 'سولاريوم: تسجيل جلسة مجانية',
         entityType: 'ClinicalSession',
         entityId: cs._id,
         details: {
           displayName,
           sessionMinutes,
           feeSyp: fee,
-          payCurrency,
+          payCurrency: fee > 0 ? payCurrency : 'SYP',
           amountUsd: amountUsd > 0 ? amountUsd : undefined,
-          billingItemId: String(bi._id),
+          billingItemId: bi?._id ? String(bi._id) : null,
           paymentId: payResult.paymentId,
         },
       })
@@ -284,11 +287,11 @@ solariumRouter.post(
       res.status(201).json({
         ok: true,
         clinicalSessionId: String(cs._id),
-        billingItemId: String(bi._id),
+        billingItemId: bi?._id ? String(bi._id) : null,
         paymentId: payResult.paymentId,
         amountSyp: fee,
-        payCurrency,
-        amountUsd,
+        payCurrency: fee > 0 ? payCurrency : 'SYP',
+        amountUsd: fee > 0 ? amountUsd : 0,
         procedureLabel: procedureDescription,
       })
     } catch (e) {

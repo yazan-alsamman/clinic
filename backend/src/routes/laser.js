@@ -1936,34 +1936,42 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
       })
 
-      bi = await BillingItem.create({
-        clinicalSessionId: cs._id,
-        patientId: patient._id,
-        providerUserId: req.user._id,
-        department: 'laser',
-        procedureLabel: procedureLabel || 'ليزر',
-        amountDueSyp,
-        currency: 'SYP',
-        businessDate,
-        status: 'pending_payment',
-        isPackagePrepaid: isPackageSession,
-        patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
-        patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
-      })
+      const createBilling = isPackageSession || amountDueSyp > 0
+      if (createBilling) {
+        bi = await BillingItem.create({
+          clinicalSessionId: cs._id,
+          patientId: patient._id,
+          providerUserId: req.user._id,
+          department: 'laser',
+          procedureLabel: procedureLabel || 'ليزر',
+          amountDueSyp,
+          currency: 'SYP',
+          businessDate,
+          status: 'pending_payment',
+          isPackagePrepaid: isPackageSession,
+          patientPackageId: isPackageSession ? String(packageMatch?.pkg?._id || '') : '',
+          patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
+        })
 
-      cs.billingItemId = bi._id
-      await cs.save()
+        cs.billingItemId = bi._id
+        await cs.save()
 
-      s.billingItemId = bi._id
-      s.clinicalSessionId = cs._id
-      await s.save()
+        s.billingItemId = bi._id
+        s.clinicalSessionId = cs._id
+        await s.save()
+      } else {
+        s.clinicalSessionId = cs._id
+        await s.save()
+      }
       if (isPackageSession && packageMatch?.pkg?._id && packageMatch?.session?._id) {
         await Patient.updateOne(
           { _id: patient._id },
           {
             $set: {
               'sessionPackages.$[pkg].sessions.$[sess].linkedLaserSessionId': s._id,
-              'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': bi._id,
+              ...(bi?._id
+                ? { 'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': bi._id }
+                : {}),
             },
           },
           {
@@ -1987,11 +1995,11 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     try {
       await writeAudit({
         user: req.user,
-        action: 'إنشاء جلسة ليزر وبند فوترة معلّق',
+        action: bi?._id ? 'إنشاء جلسة ليزر وبند فوترة معلّق' : 'إنشاء جلسة ليزر مجانية',
         entityType: 'LaserSession',
         entityId: String(s._id),
         details: {
-          billingItemId: String(bi._id),
+          billingItemId: bi?._id ? String(bi._id) : null,
           amountDueSyp,
           laserCoverSyp: laserCoverAppliedSyp,
         },
@@ -2010,12 +2018,14 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
 
     res.status(201).json({
       session: typeof s.toJSON === 'function' ? s.toJSON() : s,
-      billingItem: {
-        id: String(bi._id),
-        status: bi.status,
-        amountDueSyp: bi.amountDueSyp,
-        isPackagePrepaid: bi.isPackagePrepaid === true,
-      },
+      billingItem: bi
+        ? {
+            id: String(bi._id),
+            status: bi.status,
+            amountDueSyp: bi.amountDueSyp,
+            isPackagePrepaid: bi.isPackagePrepaid === true,
+          }
+        : null,
       packageInfo: isPackageSession
         ? {
             packageId: String(packageMatch?.pkg?._id || ''),

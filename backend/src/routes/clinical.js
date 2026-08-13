@@ -380,23 +380,26 @@ clinicalRouter.post(
           createdByReceptionUserId: req.user._id,
         })
 
-        const bi = await BillingItem.create({
-          clinicalSessionId: cs._id,
-          patientId: patient._id,
-          providerUserId,
-          department,
-          procedureLabel: procedureDescription,
-          listAmountDueSyp: amountDueSyp,
-          discountPercent: 0,
-          effectiveAmountDueSyp: amountDueSyp,
-          amountDueSyp,
-          currency: 'SYP',
-          businessDate,
-          status: 'pending_payment',
-        })
+        let bi = null
+        if (amountDueSyp > 0) {
+          bi = await BillingItem.create({
+            clinicalSessionId: cs._id,
+            patientId: patient._id,
+            providerUserId,
+            department,
+            procedureLabel: procedureDescription,
+            listAmountDueSyp: amountDueSyp,
+            discountPercent: 0,
+            effectiveAmountDueSyp: amountDueSyp,
+            amountDueSyp,
+            currency: 'SYP',
+            businessDate,
+            status: 'pending_payment',
+          })
 
-        cs.billingItemId = bi._id
-        await cs.save()
+          cs.billingItemId = bi._id
+          await cs.save()
+        }
         const prevDeps = Array.isArray(patient.departments) ? patient.departments : []
         const cleaned = prevDeps.filter((d) => PATIENT_DEPARTMENT_ENUM.includes(d))
         patient.departments = [...new Set([...cleaned, department])]
@@ -405,11 +408,11 @@ clinicalRouter.post(
 
         await writeAudit({
           user: req.user,
-          action: 'استقبال: إنشاء جلسة وبند تحصيل (بدون تفاصيل طبية)',
+          action: amountDueSyp > 0 ? 'استقبال: إنشاء جلسة وبند تحصيل (بدون تفاصيل طبية)' : 'استقبال: إنشاء جلسة مجانية',
           entityType: 'ClinicalSession',
           entityId: cs._id,
           details: {
-            billingItemId: String(bi._id),
+            billingItemId: bi?._id ? String(bi._id) : null,
             amountDueSyp,
             department,
             providerUserId: String(providerUserId),
@@ -430,12 +433,14 @@ clinicalRouter.post(
             providerUserId: String(providerUserId),
             createdByReceptionUserId: String(req.user._id),
           },
-          billingItem: {
-            id: String(bi._id),
-            status: bi.status,
-            amountDueSyp: bi.amountDueSyp,
-            procedureLabel: bi.procedureLabel,
-          },
+          billingItem: bi
+            ? {
+                id: String(bi._id),
+                status: bi.status,
+                amountDueSyp: bi.amountDueSyp,
+                procedureLabel: bi.procedureLabel,
+              }
+            : null,
         })
       } catch (inner) {
         if (cs?._id) {
@@ -601,26 +606,30 @@ clinicalRouter.post(
           ...(scheduleSlotIdToSave ? { scheduleSlotId: scheduleSlotIdToSave } : {}),
         })
 
-        const bi = await BillingItem.create({
-          clinicalSessionId: cs._id,
-          patientId: patient._id,
-          providerUserId,
-          department,
-          procedureLabel: procedureDescription || 'إجراء',
-          listAmountDueSyp,
-          discountPercent,
-          effectiveAmountDueSyp: amountDueSyp,
-          amountDueSyp,
-          listAmountDueUsd,
-          effectiveAmountDueUsd: amountDueUsd,
-          amountDueUsd,
-          currency: billingCurrency,
-          businessDate,
-          status: 'pending_payment',
-        })
+        const hasBillableDue = amountDueSyp > 0 || amountDueUsd > 0
+        let bi = null
+        if (hasBillableDue) {
+          bi = await BillingItem.create({
+            clinicalSessionId: cs._id,
+            patientId: patient._id,
+            providerUserId,
+            department,
+            procedureLabel: procedureDescription || 'إجراء',
+            listAmountDueSyp,
+            discountPercent,
+            effectiveAmountDueSyp: amountDueSyp,
+            amountDueSyp,
+            listAmountDueUsd,
+            effectiveAmountDueUsd: amountDueUsd,
+            amountDueUsd,
+            currency: billingCurrency,
+            businessDate,
+            status: 'pending_payment',
+          })
 
-        cs.billingItemId = bi._id
-        await cs.save()
+          cs.billingItemId = bi._id
+          await cs.save()
+        }
         const prevDeps = Array.isArray(patient.departments) ? patient.departments : []
         const cleaned = prevDeps.filter((d) => PATIENT_DEPARTMENT_ENUM.includes(d))
         patient.departments = [...new Set([...cleaned, department])]
@@ -629,10 +638,14 @@ clinicalRouter.post(
 
         await writeAudit({
           user: req.user,
-          action: 'تسجيل جلسة سريرية وبند فوترة معلّق',
+          action: hasBillableDue ? 'تسجيل جلسة سريرية وبند فوترة معلّق' : 'تسجيل جلسة سريرية مجانية',
           entityType: 'ClinicalSession',
           entityId: cs._id,
-          details: { billingItemId: String(bi._id), amountDueSyp, materialChargeSypTotal },
+          details: {
+            billingItemId: bi?._id ? String(bi._id) : null,
+            amountDueSyp,
+            materialChargeSypTotal,
+          },
         })
 
         res.status(201).json({
@@ -647,12 +660,14 @@ clinicalRouter.post(
             materialChargeSypTotal: cs.materialChargeSypTotal,
             materials: cs.materials,
           },
-          billingItem: {
-            id: String(bi._id),
-            status: bi.status,
-            amountDueSyp: bi.amountDueSyp,
-            procedureLabel: bi.procedureLabel,
-          },
+          billingItem: bi
+            ? {
+                id: String(bi._id),
+                status: bi.status,
+                amountDueSyp: bi.amountDueSyp,
+                procedureLabel: bi.procedureLabel,
+              }
+            : null,
         })
       } catch (inner) {
         if (cs?._id) {

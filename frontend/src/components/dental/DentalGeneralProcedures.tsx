@@ -117,8 +117,8 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       setErr('أدخل وصف الإجراء (مثل تنظيف أو تبييض)')
       return
     }
-    if (!(costSyp > 0) && !(costUsd > 0)) {
-      setErr('أدخل سعر الإجراء بالليرة أو الدولار')
+    if (!(costSyp >= 0) || !(costUsd >= 0)) {
+      setErr('السعر غير صالح')
       return
     }
     const p = providers.find((x) => x.id === providerId)
@@ -160,8 +160,8 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
     <div className="card" style={{ marginBottom: '1rem' }}>
       <h2 className="card-title">إجراءات عامة</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-        إجراءات على كامل الفم وليست مرتبطة بسن واحد — مثل التنظيف أو التبييض. عند إدخال السعر والطبيب يُرسل البند
-        مباشرةً إلى التحصيل.
+        إجراءات على كامل الفم وليست مرتبطة بسن واحد — مثل التنظيف أو التبييض. يمكن إدخال 0 ل.س أو 0 دولار (مجاني). عند
+        إدخال سعر أكبر من صفر مع الطبيب يُرسل البند إلى التحصيل.
       </p>
 
       {err ? (
@@ -281,7 +281,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                   <input
                     className="input"
                     inputMode="numeric"
-                    value={costSyp || ''}
+                    value={String(costSyp)}
                     onChange={(e) =>
                       setCostSyp(Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)))
                     }
@@ -293,7 +293,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                   <input
                     className="input"
                     inputMode="decimal"
-                    value={costUsd || ''}
+                    value={String(costUsd)}
                     onChange={(e) => {
                       const cleaned = e.target.value.replace(/[^\d.]/g, '')
                       setCostUsd(Math.max(0, roundUsd(Number(cleaned) || 0)))
@@ -335,7 +335,11 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                   disabled={saving}
                   onClick={() => void addProcedure()}
                 >
-                  {saving ? 'جاري الحفظ…' : 'حفظ وإرسال للتحصيل'}
+                  {saving
+                    ? 'جاري الحفظ…'
+                    : costSyp > 0 || costUsd > 0
+                      ? 'حفظ وإرسال للتحصيل'
+                      : 'حفظ'}
                 </button>
               </div>
             </div>

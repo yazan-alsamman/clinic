@@ -4147,7 +4147,11 @@ export function PatientRecord() {
                       businessDate: clinicBusinessDate ?? undefined,
                     }),
                   })
-                  setRecvOk('تم إنشاء الجلسة وبند التحصيل.')
+                  setRecvOk(
+                    feeSyp > 0
+                      ? 'تم إنشاء الجلسة وبند التحصيل.'
+                      : 'تم إنشاء الجلسة بسعر صفر — بدون بند تحصيل.',
+                  )
                   setRecvFeeSyp('')
                   await refreshClinicalSessionLists()
                 } catch (e) {
@@ -4619,7 +4623,7 @@ export function PatientRecord() {
                 setSavingLaser(true)
                 try {
                   const created = await api<{
-                    billingItem: { amountDueSyp: number; isPackagePrepaid?: boolean }
+                    billingItem: { amountDueSyp: number; isPackagePrepaid?: boolean } | null
                     packageVisitIncomplete?: boolean
                   }>('/api/laser/sessions', {
                     method: 'POST',
@@ -4683,7 +4687,9 @@ export function PatientRecord() {
                         ? due > 0.0001
                           ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع».`
                           : 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة» عند عدم وجود إضافات.'
-                        : `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`,
+                        : due > 0.0001
+                          ? `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`
+                          : 'تم حفظ الجلسة بسعر صفر — بدون بند تحصيل.',
                     )
                     setLaserNotes('')
                     setLaserCoverSelected(false)
@@ -5122,7 +5128,7 @@ export function PatientRecord() {
                 setDermSaving(true)
                 try {
                   const created = await api<{
-                    billingItem: { amountDueSyp: number; id: string }
+                    billingItem: { amountDueSyp: number; id: string } | null
                   }>('/api/clinical/sessions', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -5154,10 +5160,15 @@ export function PatientRecord() {
                   setDermSessionFeeUsd('')
                   setDermDiscountPercent('')
                   setDermSelectedMaterials([])
+                  const dueSyp = Number(created.billingItem?.amountDueSyp || 0)
                   setDermOk(
-                    payloadMaterials.length > 0
-                      ? `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`
-                      : `تم حفظ الجلسة وإنشاء بند تحصيل بقيمة ${Number(created.billingItem.amountDueSyp).toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`,
+                    created.billingItem
+                      ? payloadMaterials.length > 0
+                        ? `تم حفظ الجلسة وخصم المواد وإنشاء بند تحصيل بقيمة ${dueSyp.toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`
+                        : `تم حفظ الجلسة وإنشاء بند تحصيل بقيمة ${dueSyp.toLocaleString('ar-SY')} ل.س. يظهر في صفحة التحصيل للاستقبال.`
+                      : payloadMaterials.length > 0
+                        ? 'تم حفظ الجلسة وخصم المواد بسعر صفر — بدون بند تحصيل.'
+                        : 'تم حفظ الجلسة بسعر صفر — بدون بند تحصيل.',
                   )
                 } catch (e) {
                   setDermErr(e instanceof ApiError ? e.message : 'تعذر حفظ جلسة الجلدية')

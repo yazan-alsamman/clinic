@@ -160,13 +160,21 @@ export function ReceptionSolariumPage() {
       return
     }
     const currentPrice = sessionMinutes === 12 ? price12 : price6
-    if (!(currentPrice > 0)) {
-      setErr('سعر الجلسة غير محدد — يحدده مدير النظام.')
+    if (!(currentPrice >= 0) || !Number.isFinite(currentPrice)) {
+      setErr('سعر الجلسة غير صالح — يحدده مدير النظام.')
       return
     }
     setErr('')
     setOk('')
     setPayModalErr('')
+    if (!(currentPrice > 0)) {
+      void confirmSession({
+        payCurrency: 'SYP',
+        paymentChannel: 'cash',
+        amountSyp: 0,
+      })
+      return
+    }
     setPayModalOpen(true)
   }
 

@@ -350,7 +350,7 @@ export function ToothTreatmentModal({
                     inputMode="numeric"
                     dir="ltr"
                     disabled={!canEdit}
-                    value={draft.totalCostSyp ? String(draft.totalCostSyp) : ''}
+                    value={String(Math.max(0, Number(draft.totalCostSyp) || 0))}
                     onChange={(e) => setCostSyp(idx, e.target.value)}
                     placeholder="0"
                   />
@@ -362,7 +362,7 @@ export function ToothTreatmentModal({
                     inputMode="decimal"
                     dir="ltr"
                     disabled={!canEdit}
-                    value={draft.totalCostUsd ? String(draft.totalCostUsd) : ''}
+                    value={String(Math.max(0, Number(draft.totalCostUsd) || 0))}
                     onChange={(e) => setCostUsd(idx, e.target.value)}
                     placeholder="0"
                   />
@@ -688,7 +688,7 @@ export function ToothTreatmentModal({
                             className="input"
                             inputMode="numeric"
                             dir="ltr"
-                            value={row.amountSyp ? String(row.amountSyp) : ''}
+                            value={String(Math.max(0, Number(row.amountSyp) || 0))}
                             onChange={(e) => setLabAmountSyp(idx, e.target.value)}
                             placeholder="0"
                           />
@@ -703,7 +703,7 @@ export function ToothTreatmentModal({
                             className="input"
                             inputMode="decimal"
                             dir="ltr"
-                            value={row.amountUsd ? String(row.amountUsd) : ''}
+                            value={String(Math.max(0, Number(row.amountUsd) || 0))}
                             onChange={(e) => setLabAmountUsd(idx, e.target.value)}
                             placeholder="0"
                           />

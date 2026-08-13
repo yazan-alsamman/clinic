@@ -171,8 +171,9 @@ async function syncSkinAppointmentBillingForSlot(slot, reqUser) {
   const proc = String(slot.procedureType || '').trim()
   if (!proc) return { ok: true }
   const opt = await SkinProcedureOption.findOne({ name: proc, active: { $ne: false } }).lean()
-  const amount = Math.round(Number(opt?.priceSyp) || 0)
-  if (!(amount > 0)) return { error: 'نوع إجراء البشرة غير معرّف أو بلا سعر' }
+  if (!opt) return { error: 'نوع إجراء البشرة غير معرّف' }
+  const amount = Math.round(Number(opt.priceSyp) || 0)
+  if (!(amount > 0)) return { ok: true }
   const patient = await Patient.findById(slot.patientId)
   if (!patient) return { error: 'المريض غير موجود' }
   let cs = null
@@ -778,11 +779,9 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
         name: procedureType.trim(),
         active: { $ne: false },
       }).lean()
-      const amount = Math.round(Number(opt?.priceSyp) || 0)
-      if (!(amount > 0)) {
+      if (!opt) {
         res.status(400).json({
-          error:
-            'نوع إجراء البشرة غير معرّف أو بلا سعر — اختر من القائمة أو أضِف السعر من إدارة إجراءات البشرة',
+          error: 'نوع إجراء البشرة غير معرّف — اختر من القائمة أو أضِف الإجراء من إدارة إجراءات البشرة',
         })
         return
       }
@@ -1004,11 +1003,9 @@ scheduleRouter.patch('/reschedule/:id', loadBusinessDay, requireActiveDay, async
         name: procedureType.trim(),
         active: { $ne: false },
       }).lean()
-      const amount = Math.round(Number(opt?.priceSyp) || 0)
-      if (!(amount > 0)) {
+      if (!opt) {
         res.status(400).json({
-          error:
-            'نوع إجراء البشرة غير معرّف أو بلا سعر — اختر من القائمة أو أضِف السعر من إدارة إجراءات البشرة',
+          error: 'نوع إجراء البشرة غير معرّف — اختر من القائمة أو أضِف الإجراء من إدارة إجراءات البشرة',
         })
         return
       }
