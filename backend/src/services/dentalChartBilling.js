@@ -312,7 +312,10 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
   }
   if (!tr) return false
 
-  const amountSyp = roundMoney(payment?.amountSyp ?? bi.amountDueSyp)
+  const cashSyp = roundMoney(payment?.amountSyp)
+  const creditSyp = roundMoney(payment?.creditAppliedSyp)
+  const amountSyp =
+    cashSyp + creditSyp > 0 ? cashSyp + creditSyp : roundMoney(payment?.amountSyp ?? bi.amountDueSyp)
   const amountUsd = Math.max(0, Number(payment?.receivedAmountUsd) || Number(bi.amountDueUsd) || 0)
   const currency =
     String(payment?.payCurrency || bi.currency || 'SYP').toUpperCase() === 'USD' ? 'usd' : 'syp'
@@ -330,7 +333,10 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
       currency,
       usdSypRateUsed: currency === 'usd' ? rateUsed : 0,
       paidAt,
-      note: 'تحصيل استقبال',
+      note:
+        creditSyp > 0
+          ? `تحصيل استقبال — رصيد إضافي ${creditSyp.toLocaleString('en-US')} ل.س`
+          : 'تحصيل استقبال',
     },
   ]
   if (!tr.billingItemId) tr.billingItemId = bi._id

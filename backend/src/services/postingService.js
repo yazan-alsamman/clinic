@@ -250,13 +250,19 @@ export async function postBillingPayment(paymentId, postedBy) {
   const pay = await BillingPayment.findById(paymentId).lean()
   if (!pay) throw new Error('دفعة غير موجودة')
 
-  const appliedSyp = round2(Number(pay.amountSyp) || 0)
+  const bi = await BillingItem.findById(pay.billingItemId).lean()
+  if (!bi || bi.status !== 'paid') throw new Error('بند الفوترة غير مؤكد كمسدد')
+  if (bi.isCreditTopUp === true) {
+    return { skipped: true, reason: 'credit_topup' }
+  }
+
+  const cashSyp = round2(Number(pay.amountSyp) || 0)
+  const creditSyp = round2(Number(pay.creditAppliedSyp) || 0)
+  /** حصة الطبيب على كامل ما سُدّد للإجراء (نقد + رصيد إضافي) */
+  const appliedSyp = round2(cashSyp + creditSyp)
   if (!(appliedSyp > 0)) {
     return { skipped: true, reason: 'zero_applied_amount' }
   }
-
-  const bi = await BillingItem.findById(pay.billingItemId).lean()
-  if (!bi || bi.status !== 'paid') throw new Error('بند الفوترة غير مؤكد كمسدد')
 
   const cs = await ClinicalSession.findById(bi.clinicalSessionId).lean()
   if (!cs) throw new Error('الجلسة السريرية غير موجودة')
@@ -302,6 +308,8 @@ export async function postBillingPayment(paymentId, postedBy) {
     billingPaymentId: String(pay._id),
     billingItemId: String(bi._id),
     clinicalSessionId: String(cs._id),
+    creditAppliedSyp: creditSyp,
+    cashAppliedSyp: cashSyp,
   }
 
   const revenueGl =
