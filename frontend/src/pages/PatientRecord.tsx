@@ -15,6 +15,7 @@ import { BillingPaymentModal } from '../components/BillingPaymentModal'
 import { DentalOdontogram } from '../components/dental/DentalOdontogram'
 import { DentalTreatmentPlan } from '../components/dental/DentalTreatmentPlan'
 import { DentalGeneralProcedures } from '../components/dental/DentalGeneralProcedures'
+import { DentalExtraCredit } from '../components/dental/DentalExtraCredit'
 import {
   netCollectedSypFromPayment,
   type BillingPaymentRequestBody,
@@ -5278,6 +5279,18 @@ export function PatientRecord() {
                 />
               ) : null}
             </div>
+            {id ? (
+              <DentalExtraCredit
+                patientId={id}
+                canEdit={
+                  role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
+                }
+                prepaidCreditSyp={Number(patient?.prepaidCreditSyp) || 0}
+                onCreditChange={(prepaidCreditSyp) =>
+                  setPatient((prev) => (prev ? { ...prev, prepaidCreditSyp } : prev))
+                }
+              />
+            ) : null}
             {id ? (
               <DentalGeneralProcedures
                 patientId={id}

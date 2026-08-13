@@ -413,7 +413,8 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
   const outstandingDebtSyp = Math.max(0, Math.round(Number(bal.outstandingDebtSyp) || 0))
   const outstandingDebtUsd = Math.max(0, round6(Number(bal.outstandingDebtUsd) || 0))
   const effectiveDue = Math.round(Number(b.effectiveAmountDueSyp || b.amountDueSyp || 0))
-  const creditTowardDueSyp = Math.min(prepaidCreditSyp, Math.max(0, effectiveDue))
+  const isCreditTopUp = b.isCreditTopUp === true
+  const creditTowardDueSyp = isCreditTopUp ? 0 : Math.min(prepaidCreditSyp, Math.max(0, effectiveDue))
   const cashDueAfterCreditSyp = Math.max(0, effectiveDue - creditTowardDueSyp)
   return {
     id: String(b._id),
@@ -437,6 +438,7 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
     usdSypBusinessDayRate: usdRate,
     status: b.status,
     isPackagePrepaid: b.isPackagePrepaid === true,
+    isCreditTopUp,
     patientPackageId: String(b.patientPackageId || ''),
     patientPackageSessionId: String(b.patientPackageSessionId || ''),
     prepaidCreditSyp,
@@ -1045,7 +1047,7 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         })
         return
       }
-      if (code === 'DISCOUNT' || code === 'INVALID_AMOUNT' || code === 'INVALID_USD' || code === 'INVALID_REFUND' || code === 'INVALID_NET' || code === 'NO_RATE' || code === 'BANK_REQUIRED' || code === 'DUPLICATE') {
+      if (code === 'DISCOUNT' || code === 'INVALID_AMOUNT' || code === 'INVALID_USD' || code === 'INVALID_REFUND' || code === 'INVALID_NET' || code === 'NO_RATE' || code === 'BANK_REQUIRED' || code === 'DUPLICATE' || code === 'CREDIT_TOPUP_PARTIAL') {
         res.status(400).json({ error: msg })
         return
       }

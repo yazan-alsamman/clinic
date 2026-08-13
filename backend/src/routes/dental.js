@@ -26,6 +26,8 @@ import {
   listDentalLabAccounts,
 } from '../services/dentalLabs.js'
 import { DentalLab } from '../models/DentalLab.js'
+import { BillingItem } from '../models/BillingItem.js'
+import { ClinicalSession } from '../models/ClinicalSession.js'
 import { isValidYmd, todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
 
@@ -1231,3 +1233,186 @@ dentalRouter.post(
     }
   },
 )
+
+function creditTopUpDto(bi) {
+  return {
+    id: String(bi._id),
+    clinicalSessionId: bi.clinicalSessionId ? String(bi.clinicalSessionId) : null,
+    procedureLabel: String(bi.procedureLabel || 'رصيد إضافي'),
+    amountDueSyp: Math.round(Number(bi.amountDueSyp) || 0),
+    amountDueUsd: round6(Number(bi.amountDueUsd) || 0),
+    currency: String(bi.currency || 'SYP'),
+    status: bi.status,
+    businessDate: String(bi.businessDate || ''),
+    createdAt: bi.createdAt || null,
+  }
+}
+
+dentalRouter.get('/credit-topup/:patientId', async (req, res) => {
+  try {
+    if (!DENTAL_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const patient = await Patient.findById(req.params.patientId)
+    if (!patient) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const items = await BillingItem.find({
+      patientId: patient._id,
+      isCreditTopUp: true,
+      status: { $in: ['pending_payment', 'paid'] },
+    })
+      .sort({ createdAt: -1 })
+      .limit(40)
+      .lean()
+    res.json({
+      prepaidCreditSyp: Math.round(Number(patient.prepaidCreditSyp) || 0),
+      items: items.map(creditTopUpDto),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+dentalRouter.post('/credit-topup/:patientId', requireActiveDay, async (req, res) => {
+  try {
+    if (!DENTAL_CHART_WRITE.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية لإضافة رصيد إضافي' })
+      return
+    }
+    const patient = await Patient.findById(req.params.patientId)
+    if (!patient) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const amountSyp = Math.max(0, Math.round(Number(req.body?.amountSyp) || 0))
+    const amountUsd = Math.max(0, round6(Number(req.body?.amountUsd) || 0))
+    if (!(amountSyp > 0) && !(amountUsd > 0)) {
+      res.status(400).json({ error: 'أدخل مبلغ الرصيد بالليرة أو بالدولار' })
+      return
+    }
+    const rate = Math.max(0, Number(req.businessDay?.usdSypRate) || 0)
+    if (amountUsd > 0 && !(rate > 0)) {
+      res.status(400).json({ error: 'سعر صرف الدولار غير متوفر — أدخل المبلغ بالليرة أو فعّل يوم العمل' })
+      return
+    }
+    const fromUsd = amountUsd > 0 && rate > 0 ? Math.round(amountUsd * rate) : 0
+    const currency = amountUsd > 0 && !(amountSyp > 0) ? 'USD' : 'SYP'
+    const amountDueSyp = amountSyp + fromUsd
+    const amountDueUsd = amountUsd > 0 ? amountUsd : 0
+    const businessDate = isValidYmd(String(req.body?.businessDate || '').trim())
+      ? String(req.body.businessDate).trim()
+      : todayBusinessDate()
+    const parts = []
+    if (amountSyp > 0) parts.push(`${amountSyp.toLocaleString('en-US')} ل.س`)
+    if (amountUsd > 0) parts.push(`${amountUsd} USD`)
+    const procedureLabel = `رصيد إضافي — ${parts.join(' + ')}`.slice(0, 200)
+
+    let cs = null
+    let bi = null
+    try {
+      cs = await ClinicalSession.create({
+        patientId: patient._id,
+        providerUserId: req.user._id,
+        department: 'dental',
+        procedureDescription: procedureLabel,
+        sessionFeeSyp: amountDueSyp,
+        ...(currency === 'USD'
+          ? { sessionFeeUsd: amountDueUsd, feeCurrency: 'USD' }
+          : { feeCurrency: 'SYP' }),
+        businessDate,
+        notes: '',
+        materials: [],
+        materialCostSypTotal: 0,
+        materialChargeSypTotal: 0,
+        isCreditTopUp: true,
+      })
+      bi = await BillingItem.create({
+        clinicalSessionId: cs._id,
+        patientId: patient._id,
+        providerUserId: req.user._id,
+        department: 'dental',
+        procedureLabel,
+        listAmountDueSyp: amountDueSyp,
+        discountPercent: 0,
+        effectiveAmountDueSyp: amountDueSyp,
+        amountDueSyp,
+        listAmountDueUsd: amountDueUsd,
+        effectiveAmountDueUsd: amountDueUsd,
+        amountDueUsd,
+        currency,
+        businessDate,
+        status: 'pending_payment',
+        isCreditTopUp: true,
+      })
+      cs.billingItemId = bi._id
+      await cs.save()
+    } catch (inner) {
+      if (bi?._id) await BillingItem.deleteOne({ _id: bi._id })
+      if (cs?._id) await ClinicalSession.deleteOne({ _id: cs._id })
+      throw inner
+    }
+
+    if (!patient.departments.includes('dental')) {
+      patient.departments = [...new Set([...patient.departments, 'dental'])]
+      await patient.save()
+    }
+
+    await writeAudit({
+      user: req.user,
+      action: 'أسنان: إنشاء بند رصيد إضافي للتحصيل',
+      entityType: 'BillingItem',
+      entityId: bi._id,
+      details: { patientId: String(patient._id), amountDueSyp, amountDueUsd, currency },
+    })
+
+    res.status(201).json({
+      prepaidCreditSyp: Math.round(Number(patient.prepaidCreditSyp) || 0),
+      item: creditTopUpDto(bi),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'تعذر إنشاء بند الرصيد الإضافي' })
+  }
+})
+
+dentalRouter.delete('/credit-topup/:id', requireActiveDay, async (req, res) => {
+  try {
+    if (!DENTAL_CHART_WRITE.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية لحذف الرصيد الإضافي' })
+      return
+    }
+    const id = String(req.params.id || '').trim()
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const bi = await BillingItem.findById(id)
+    if (!bi || bi.isCreditTopUp !== true) {
+      res.status(404).json({ error: 'بند الرصيد غير موجود' })
+      return
+    }
+    if (bi.status === 'paid') {
+      res.status(400).json({ error: 'لا يمكن حذف رصيد محصّل' })
+      return
+    }
+    bi.status = 'cancelled'
+    await bi.save()
+    if (bi.clinicalSessionId) {
+      await ClinicalSession.deleteOne({ _id: bi.clinicalSessionId })
+    }
+    await writeAudit({
+      user: req.user,
+      action: 'أسنان: إلغاء بند رصيد إضافي',
+      entityType: 'BillingItem',
+      entityId: bi._id,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'تعذر إلغاء بند الرصيد' })
+  }
+})

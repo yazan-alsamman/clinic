@@ -31,6 +31,7 @@ type Item = {
   /** سعر USD لتاريخ البند من الخادم (يطابق complete-payment) */
   usdSypBusinessDayRate?: number | null
   isPackagePrepaid?: boolean
+  isCreditTopUp?: boolean
   patientPackageId?: string
   patientPackageSessionId?: string
   /** من باكج ليزر — لمنطق «إنقاص منطقة» مقابل «إنقاص جلسة» */
@@ -123,6 +124,9 @@ function itemPrepaidCreditSyp(item: Item | null): number {
 
 function itemCashDueAfterCreditSyp(item: Item | null, dueOverride?: number): number {
   if (!item) return 0
+  if (item.isCreditTopUp) {
+    return Math.max(0, Math.round(dueOverride ?? itemEffectiveDueSyp(item)))
+  }
   const due = Math.max(0, Math.round(dueOverride ?? itemEffectiveDueSyp(item)))
   const credit = itemPrepaidCreditSyp(item)
   if (item.cashDueAfterCreditSyp != null && dueOverride == null) {
@@ -133,6 +137,7 @@ function itemCashDueAfterCreditSyp(item: Item | null, dueOverride?: number): num
 
 function itemCreditTowardDueSyp(item: Item | null, dueOverride?: number): number {
   if (!item) return 0
+  if (item.isCreditTopUp) return 0
   const due = Math.max(0, Math.round(dueOverride ?? itemEffectiveDueSyp(item)))
   const credit = itemPrepaidCreditSyp(item)
   if (item.creditTowardDueSyp != null && dueOverride == null) {
@@ -832,10 +837,15 @@ export function BillingPage() {
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     {b.procedureLabel} — المقدّم: {b.providerName || '—'}
                   </p>
+                  {b.isCreditTopUp ? (
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: 'var(--success)' }}>
+                      شحن رصيد إضافي — بعد القبض يُضاف لمحفظة المريض ويُخصم لاحقاً من الإجراءات.
+                    </p>
+                  ) : null}
                   <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }} dir={itemBillingCurrency(b) === 'USD' ? 'ltr' : undefined}>
                     {formatItemDueLabel(b)}
                   </p>
-                  {itemPrepaidCreditSyp(b) > 0 ? (
+                  {itemPrepaidCreditSyp(b) > 0 && !b.isCreditTopUp ? (
                     <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--success)' }}>
                       رصيد إضافي للمريض: {itemPrepaidCreditSyp(b).toLocaleString('ar-SY')} ل.س
                       {itemCreditTowardDueSyp(b) > 0 ? (
@@ -1121,6 +1131,13 @@ export function BillingPage() {
                 لا يمكن تأكيد الدفع: المستحق صفر. أغلق النافذة وراجع تسعير الجلسة في ملف المريض.
               </p>
             ) : null}
+            {payItem.isCreditTopUp ? (
+              <p style={{ margin: '0.55rem 0 0', fontSize: '0.86rem', color: 'var(--success)', lineHeight: 1.5 }}>
+                هذا البند شحن رصيد إضافي. بعد تأكيد القبض يُضاف المبلغ لمحفظة المريض، ثم يُخصم تلقائياً عند تحصيل
+                الإجراءات حتى يصبح الرصيد صفراً.
+              </p>
+            ) : null}
+            {payItem.isCreditTopUp ? null : (
             <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid var(--border)' }}>
               <label
                 style={{
@@ -1225,6 +1242,7 @@ export function BillingPage() {
                 </>
               ) : null}
             </div>
+            )}
             <div style={{ marginTop: '0.55rem' }}>
               <span className="form-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
                 عملة التحصيل

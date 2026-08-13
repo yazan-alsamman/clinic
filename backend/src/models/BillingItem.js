@@ -36,6 +36,8 @@ const billingItemSchema = new mongoose.Schema(
     paidAt: { type: Date, default: null },
     /** جلسة ضمن باكج مدفوع مسبقاً — لا تستقبل دفعة نقدية من شاشة التحصيل */
     isPackagePrepaid: { type: Boolean, default: false, index: true },
+    /** شحن رصيد إضافي — بعد التحصيل يُضاف المبلغ لمحفظة المريض ويُخصم لاحقاً من الإجراءات */
+    isCreditTopUp: { type: Boolean, default: false, index: true },
     patientPackageId: { type: String, default: '' },
     patientPackageSessionId: { type: String, default: '' },
   },

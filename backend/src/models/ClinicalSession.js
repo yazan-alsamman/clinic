@@ -59,6 +59,8 @@ const clinicalSessionSchema = new mongoose.Schema(
     dentalToothFdi: { type: Number, min: 11, max: 48, default: undefined },
     dentalTreatmentId: { type: String, default: '', trim: true, maxlength: 40 },
     isPackageSession: { type: Boolean, default: false },
+    /** شحن رصيد إضافي (ليس إجراء سريري) */
+    isCreditTopUp: { type: Boolean, default: false },
     patientPackageId: { type: String, default: '' },
     patientPackageSessionId: { type: String, default: '' },
   },

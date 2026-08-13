@@ -151,6 +151,12 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       throw e
     }
   }
+  const isCreditTopUp = bi.isCreditTopUp === true
+  if (isCreditTopUp && discountMeta.discountPercent > 0) {
+    const err = new Error('لا يمكن تطبيق خصم على شحن الرصيد الإضافي.')
+    err.code = 'DISCOUNT'
+    throw err
+  }
   const dueForSettlement = discountMeta.effectiveAmountDueSyp
   const receipt = await resolveBillingPaymentReceipt(reqBody, bi.businessDate)
   const {
@@ -184,7 +190,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   let creditAppliedSyp = 0
   let dueAfterCreditSyp = dueForSettlement
   let dueAfterCreditUsd = dueUsd
-  if (patient && !opts.skipPatientDebtUpdate) {
+  if (patient && !opts.skipPatientDebtUpdate && !isCreditTopUp) {
     const applied = applyPrepaidCreditTowardDue({
       dueSyp: dueForSettlement,
       dueUsd,
@@ -199,6 +205,11 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
 
   assertBillingCollectionAmountValid({ netReceivedSyp, dueForSettlement: dueAfterCreditSyp })
+  if (isCreditTopUp && netReceivedSyp < dueAfterCreditSyp) {
+    const err = new Error('شحن الرصيد الإضافي يتطلب تحصيل المبلغ كاملاً.')
+    err.code = 'CREDIT_TOPUP_PARTIAL'
+    throw err
+  }
 
   let paymentChannel
   let bankName
@@ -347,6 +358,9 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       }
       credit += Math.max(0, extra)
     }
+    if (isCreditTopUp) {
+      credit += Math.max(0, dueForSettlement)
+    }
     await Patient.updateOne(
       { _id: bi.patientId },
       {
@@ -424,7 +438,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     }
   }
 
-  if (bi.department === 'dental') {
+  if (bi.department === 'dental' && !isCreditTopUp) {
     try {
       const { applyDentalBillingPaymentToChart } = await import('./dentalChartBilling.js')
       await applyDentalBillingPaymentToChart(bi, payment)
