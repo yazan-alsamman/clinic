@@ -9,6 +9,7 @@ export type LaserBookingOpenPackage = {
   sessionsRemaining: number
   areaCount: number
   areaLabels: string[]
+  remainingAreas?: string[]
   procedureOptionIds?: string[]
   packageTotalSyp: number
   paidAmountSyp: number
@@ -81,6 +82,11 @@ export function LaserOpenPackagesDetails({
             نوع الباكج / المناطق ({pkg.areaCount}):{' '}
             <strong>{pkg.areaLabels.length ? pkg.areaLabels.join('، ') : '—'}</strong>
           </div>
+          {(pkg.remainingAreas || []).length > 0 ? (
+            <div style={{ color: 'var(--amber)', fontWeight: 600 }}>
+              مناطق متبقية من الباكج: {pkg.remainingAreas.join('، ')}
+            </div>
+          ) : null}
           {!compact ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
               إجمالي الباكج: {formatSypShort(pkg.packageTotalSyp)} — المدفوع: {formatSypShort(pkg.paidAmountSyp)}

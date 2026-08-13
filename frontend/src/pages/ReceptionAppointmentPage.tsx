@@ -1417,7 +1417,9 @@ export function ReceptionAppointmentPage() {
                           lineHeight: 1.55,
                         }}
                       >
-                        اختر كيف تريدين تسجيل هذا الموعد بالنسبة للباكج أعلاه:
+                        {(laserBookingContext?.openPackages || []).some((p) => (p.remainingAreas || []).length > 0)
+                          ? 'لدى المريض مناطق متبقية من الباكج — اختاري: حجز المتبقي، خارج الباكج، أو الاثنين معاً.'
+                          : 'اختر كيف تريدين تسجيل هذا الموعد بالنسبة للباكج أعلاه:'}
                       </p>
                     )}
                   </>
@@ -1435,7 +1437,7 @@ export function ReceptionAppointmentPage() {
                           setSelectedLaserItemIds([])
                         }}
                       >
-                        إكمال المنطقة المتبقية فقط (نفس جلسة الباكج)
+                        حجز المناطق المتبقية من الباكج
                       </button>
                       <button
                         type="button"
@@ -1447,7 +1449,7 @@ export function ReceptionAppointmentPage() {
                           setSelectedLaserItemIds([])
                         }}
                       >
-                        المنطقة المتبقية ومنطقة خارج الباكج
+                        حجز المتبقي من الباكج ومناطق من خارج الباكج
                       </button>
                     </>
                   ) : null}
@@ -1465,7 +1467,7 @@ export function ReceptionAppointmentPage() {
                       >
                         {laserBookingContext?.partialVisit
                           ? 'حجز جلسة جديدة من ضمن الباكج (جلسة باكج أخرى متاحة)'
-                          : 'حجز لمناطق الباكج'}
+                          : 'حجز المناطق المتبقية من الباكج'}
                       </button>
                       <button
                         type="button"
@@ -1477,7 +1479,7 @@ export function ReceptionAppointmentPage() {
                           setSelectedLaserItemIds([])
                         }}
                       >
-                        حجز جلسة من الباكج ومناطق من خارج الباكج
+                        حجز المتبقي من الباكج ومناطق من خارج الباكج
                       </button>
                     </>
                   ) : null}
@@ -1492,7 +1494,7 @@ export function ReceptionAppointmentPage() {
                         setSelectedLaserItemIds([])
                       }}
                     >
-                      حجز لمناطق الباكج
+                      حجز المناطق المتبقية من الباكج
                     </button>
                   ) : null}
                   <button
@@ -1504,7 +1506,7 @@ export function ReceptionAppointmentPage() {
                       setLaserPackageBookingIntent('outside_package')
                     }}
                   >
-                    حجز من خارج الباكج
+                    حجز مناطق خارج الباكج
                   </button>
                 </div>
               </div>

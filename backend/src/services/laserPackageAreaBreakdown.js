@@ -172,12 +172,17 @@ export function buildPackageAreaBreakdown(sessionRow, pkg, optionMetaById) {
   const remainingAreas = slots.map((slot) => slot.label).filter(Boolean)
   const remainingProcedureOptionIds = [...new Set(slots.map((slot) => slot.optionId).filter(Boolean))]
   const expected = packageExpectedAreaCount(pkg)
+  const expandedSlotCount = expandPackageAreaSlots(packageIds, optionMetaById).length
+  const matchedPackageAreaCount = Math.max(0, expandedSlotCount - slots.length)
+  const hasUnusedPackageAreas = remainingAreas.length > 0
 
   return {
     doneAreas,
     remainingAreas,
     remainingProcedureOptionIds,
-    isPartial: doneAreas.length > 0 && slots.length > 0,
-    expectedAreaCount: expected,
+    matchedPackageAreaCount,
+    hasUnusedPackageAreas,
+    isPartial: hasUnusedPackageAreas && matchedPackageAreaCount > 0,
+    expectedAreaCount: Math.max(expected, expandedSlotCount),
   }
 }

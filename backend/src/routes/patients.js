@@ -16,6 +16,8 @@ import { todayBusinessDate } from '../utils/date.js'
 import { completeBillingItemPayment } from '../services/billingPaymentCompletion.js'
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { getLaserBookingContextForPatient, demoteAddonOnlyLinkedPackageSession } from '../services/laserPackageBooking.js'
+import { buildPackageAreaBreakdown } from '../services/laserPackageAreaBreakdown.js'
+import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
 import { buildDepartmentAllocationsForSettlement } from '../services/patientDebtSettlementAllocation.js'
@@ -505,8 +507,8 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
     let dentalPlan = bundle.dentalPlan
     if (!needDentalPlan) dentalPlan = null
 
-    /** أطباء/مساعدو الأسنان: الملف مقصور على تبويب الأسنان — لا ملخص مواعيد/خطة في الـ API */
-    if (role === 'dental_branch' || role === 'dental_assistant') {
+    /** أطباء فرع الأسنان: الملف مقصور على تبويب الأسنان — لا ملخص مواعيد/خطة في الـ API */
+    if (role === 'dental_branch') {
       appointments = []
       dentalPlan = null
     }
@@ -1734,6 +1736,36 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
         })
         return
       }
+      const optionIds = new Set((pkg.procedureOptionIds || []).map((id) => String(id)))
+      for (const li of lsForComplete?.lineItems || []) {
+        if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+      }
+      const optionRows =
+        optionIds.size > 0
+          ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+              .select('name kind')
+              .lean()
+          : []
+      const optionMetaById = new Map(
+        optionRows.map((r) => [
+          String(r._id),
+          { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+        ]),
+      )
+      const breakdown = buildPackageAreaBreakdown(lsForComplete, pkg, optionMetaById)
+      if (Number(breakdown?.matchedPackageAreaCount || 0) === 0) {
+        res.status(400).json({
+          error:
+            'لا يمكن إنقاص جلسة الباكج: المناطق المسجّلة ليست من مناطق الباكج. حصّل المبلغ كجلسة عادية دون إنقاص باكج.',
+        })
+        return
+      }
+      if (breakdown?.hasUnusedPackageAreas) {
+        res.status(400).json({
+          error: `لا يمكن إنقاص جلسة الباكج وما زالت مناطق غير منجزة: ${(breakdown.remainingAreas || []).join('، ')}`,
+        })
+        return
+      }
     }
 
     const completedAt = completed ? new Date() : null
@@ -1807,7 +1839,7 @@ patientsRouter.get('/:id', async (req, res) => {
     for (const pkg of pkgs) {
       if (String(pkg?.department || '') !== 'laser') continue
       for (const sess of pkg.sessions || []) {
-        if (!sess?.linkedLaserSessionId || sess.completedByReception === true) continue
+        if (!sess?.linkedLaserSessionId) continue
         const ok = await demoteAddonOnlyLinkedPackageSession({
           patientId: p._id,
           packageId: pkg._id,

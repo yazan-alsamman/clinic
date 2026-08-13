@@ -41,7 +41,36 @@ export async function demoteAddonOnlyLinkedPackageSession({
     ls = await LaserSession.findOne({ billingItemId: biId }).select('_id lineItems isPackageSession').lean()
   }
   if (!ls) return false
-  if (countLaserPackageNonAddonAreas(ls) > 0) return false
+
+  const patient = await Patient.findById(pid).select('sessionPackages').lean()
+  const pkg = (Array.isArray(patient?.sessionPackages) ? patient.sessionPackages : []).find(
+    (p) => String(p?._id) === pkgId,
+  )
+  let matchedPackageAreaCount = 0
+  if (pkg) {
+    const optionIds = new Set((pkg.procedureOptionIds || []).map((id) => String(id)))
+    for (const li of ls.lineItems || []) {
+      if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+    }
+    const optionRows =
+      optionIds.size > 0
+        ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+            .select('name kind')
+            .lean()
+        : []
+    const optionMetaById = new Map(
+      optionRows.map((r) => [
+        String(r._id),
+        { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+      ]),
+    )
+    const breakdown = buildPackageAreaBreakdown(ls, pkg, optionMetaById)
+    matchedPackageAreaCount = Number(breakdown?.matchedPackageAreaCount || 0)
+  } else if (countLaserPackageNonAddonAreas(ls) > 0) {
+    return false
+  }
+  /** لا تُفك الجلسة إذا استُهلكت منطقة حقيقية من الباكج */
+  if (matchedPackageAreaCount > 0) return false
 
   await Patient.updateOne(
     { _id: pid },
@@ -51,6 +80,9 @@ export async function demoteAddonOnlyLinkedPackageSession({
         'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': null,
         'sessionPackages.$[pkg].sessions.$[sess].packagePartialAreasAcknowledgedByReception': 0,
         'sessionPackages.$[pkg].sessions.$[sess].areasAdjustedOnly': false,
+        'sessionPackages.$[pkg].sessions.$[sess].completedByReception': false,
+        'sessionPackages.$[pkg].sessions.$[sess].completedAt': null,
+        'sessionPackages.$[pkg].sessions.$[sess].completedByUserId': null,
       },
     },
     {
@@ -134,7 +166,7 @@ export async function findContinueLaserPackageSession(patientLike) {
         ? await BillingItem.findById(String(session.linkedBillingItemId)).lean()
         : null
       const recorded = countLaserPackageNonAddonAreas(ls)
-      // مناطق خارج الباكج فقط — فك الربط الخاطئ ولا تُعتبر استكمالاً لجلسة باكج
+      // مناطق خارج الباكج فقط أو مناطق لا تطابق الباكج — فك الربط الخاطئ
       if (ls && recorded === 0) {
         await demoteAddonOnlyLinkedPackageSession({
           patientId: patientLike?._id || patientLike?.id,
@@ -144,6 +176,46 @@ export async function findContinueLaserPackageSession(patientLike) {
           billingItemId: session.linkedBillingItemId || ls.billingItemId,
         })
         continue
+      }
+      if (ls) {
+        const optionIds = new Set((pkg.procedureOptionIds || []).map((id) => String(id)))
+        for (const li of ls.lineItems || []) {
+          if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+        }
+        const optionRows =
+          optionIds.size > 0
+            ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+                .select('name kind')
+                .lean()
+            : []
+        const optionMetaById = new Map(
+          optionRows.map((r) => [
+            String(r._id),
+            { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+          ]),
+        )
+        const breakdown = buildPackageAreaBreakdown(ls, pkg, optionMetaById)
+        if (breakdown && Number(breakdown.matchedPackageAreaCount || 0) === 0) {
+          await demoteAddonOnlyLinkedPackageSession({
+            patientId: patientLike?._id || patientLike?.id,
+            packageId: pkg._id,
+            packageSessionId: session._id,
+            laserSessionId: session.linkedLaserSessionId,
+            billingItemId: session.linkedBillingItemId || ls.billingItemId,
+          })
+          continue
+        }
+        const leftover = Array.isArray(breakdown?.remainingAreas) ? breakdown.remainingAreas.length : 0
+        if (leftover > 0 && Number(breakdown?.matchedPackageAreaCount || 0) > 0) {
+          return {
+            pkg,
+            session,
+            mode: 'continue',
+            expectedAreas: Math.max(expectedAreas, Number(breakdown?.expectedAreaCount || 0)),
+            existingLaserSession: ls,
+            billingItem: bi,
+          }
+        }
       }
       if (ls && bi?.status === 'pending_payment' && recorded > 0 && recorded < expectedAreas) {
         return {
@@ -178,8 +250,92 @@ export async function resolveLaserPackageSessionForBooking(patientLike, slotPack
   return findFreshLaserPackageSession(patientLike)
 }
 
+async function uncompleteLaserPackageSession({ patientId, packageId, packageSessionId }) {
+  const pid = String(patientId || '').trim()
+  const pkgId = String(packageId || '').trim()
+  const sessId = String(packageSessionId || '').trim()
+  if (!pid || !pkgId || !sessId) return false
+  const r = await Patient.updateOne(
+    { _id: pid },
+    {
+      $set: {
+        'sessionPackages.$[pkg].sessions.$[sess].completedByReception': false,
+        'sessionPackages.$[pkg].sessions.$[sess].completedAt': null,
+        'sessionPackages.$[pkg].sessions.$[sess].completedByUserId': null,
+      },
+    },
+    { arrayFilters: [{ 'pkg._id': pkgId }, { 'sess._id': sessId }] },
+  )
+  return (r?.modifiedCount || 0) > 0
+}
+
+/**
+ * يعيد فتح جلسات الباكج ذات المناطق غير المُنجَزة، ويفك الربط إن لم تُستهلك أي منطقة من الباكج.
+ */
+export async function repairLaserPackageLeftoverSessions(patientLike) {
+  const pid = patientLike?._id || patientLike?.id
+  if (!pid) return { repaired: false }
+  const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
+  let repaired = false
+  for (const pkg of packages) {
+    if (String(pkg?.department || '') !== 'laser') continue
+    if (pkg.suspended === true) continue
+    for (const session of pkg.sessions || []) {
+      if (!session?.linkedLaserSessionId) continue
+      const ls = await LaserSession.findById(session.linkedLaserSessionId).lean()
+      if (!ls) continue
+      const demoted = await demoteAddonOnlyLinkedPackageSession({
+        patientId: pid,
+        packageId: pkg._id,
+        packageSessionId: session._id,
+        laserSessionId: session.linkedLaserSessionId,
+        billingItemId: session.linkedBillingItemId || ls.billingItemId,
+      })
+      if (demoted) {
+        repaired = true
+        continue
+      }
+      if (session?.completedByReception === true) {
+        const optionIds = new Set((pkg.procedureOptionIds || []).map((id) => String(id)))
+        for (const li of ls.lineItems || []) {
+          if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+        }
+        const optionRows =
+          optionIds.size > 0
+            ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+                .select('name kind')
+                .lean()
+            : []
+        const optionMetaById = new Map(
+          optionRows.map((r) => [
+            String(r._id),
+            { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+          ]),
+        )
+        const breakdown = buildPackageAreaBreakdown(ls, pkg, optionMetaById)
+        if (breakdown?.hasUnusedPackageAreas) {
+          const ok = await uncompleteLaserPackageSession({
+            patientId: pid,
+            packageId: pkg._id,
+            packageSessionId: session._id,
+          })
+          if (ok) repaired = true
+        }
+      }
+    }
+  }
+  return { repaired }
+}
+
 export async function getLaserBookingContextForPatient(patientDoc) {
-  const packages = Array.isArray(patientDoc?.sessionPackages) ? patientDoc.sessionPackages : []
+  let working = patientDoc
+  const repair = await repairLaserPackageLeftoverSessions(working)
+  if (repair.repaired && (working?._id || working?.id)) {
+    const freshDoc = await Patient.findById(working._id || working.id).lean()
+    if (freshDoc) working = freshDoc
+  }
+
+  const packages = Array.isArray(working?.sessionPackages) ? working.sessionPackages : []
   const laserPkgs = packages.filter(
     (p) => String(p?.department || '') === 'laser' && p.suspended !== true,
   )
@@ -195,8 +351,15 @@ export async function getLaserBookingContextForPatient(patientDoc) {
   const optionIds = new Set()
   for (const pkg of laserPkgs) {
     for (const id of pkg.procedureOptionIds || []) optionIds.add(String(id))
+    for (const session of pkg.sessions || []) {
+      if (!session?.linkedLaserSessionId) continue
+      const ls = await LaserSession.findById(session.linkedLaserSessionId).select('lineItems').lean()
+      for (const li of ls?.lineItems || []) {
+        if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+      }
+    }
   }
-  const continueMatch = await findContinueLaserPackageSession(patientDoc)
+  const continueMatch = await findContinueLaserPackageSession(working)
   if (continueMatch?.existingLaserSession?.lineItems) {
     for (const li of continueMatch.existingLaserSession.lineItems) {
       if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
@@ -215,7 +378,7 @@ export async function getLaserBookingContextForPatient(patientDoc) {
     ]),
   )
 
-  const fresh = findFreshLaserPackageSession(patientDoc)
+  const fresh = findFreshLaserPackageSession(working)
   const hasFreshPackageSession = Boolean(fresh)
 
   let partialVisit = null
@@ -225,7 +388,7 @@ export async function getLaserBookingContextForPatient(patientDoc) {
       continueMatch.pkg,
       optionMetaById,
     )
-    if (breakdown?.isPartial) {
+    if (breakdown?.hasUnusedPackageAreas) {
       partialVisit = {
         packageId: String(continueMatch.pkg._id),
         packageSessionId: String(continueMatch.session._id),
@@ -239,6 +402,19 @@ export async function getLaserBookingContextForPatient(patientDoc) {
     }
   }
 
+  const leftoverByPkgId = new Map()
+  for (const pkg of laserPkgs) {
+    const leftoverLabels = []
+    for (const session of pkg.sessions || []) {
+      if (!session?.linkedLaserSessionId) continue
+      const ls = await LaserSession.findById(session.linkedLaserSessionId).lean()
+      if (!ls) continue
+      const breakdown = buildPackageAreaBreakdown(ls, pkg, optionMetaById)
+      if (breakdown?.remainingAreas?.length) leftoverLabels.push(...breakdown.remainingAreas)
+    }
+    leftoverByPkgId.set(String(pkg._id), [...new Set(leftoverLabels)])
+  }
+
   const openPackages = []
   for (const pkg of laserPkgs) {
     const sessions = Array.isArray(pkg.sessions) ? pkg.sessions : []
@@ -249,9 +425,11 @@ export async function getLaserBookingContextForPatient(patientDoc) {
     const sessionsAvailable = sessions.filter(
       (s) => !s?.linkedLaserSessionId && s?.completedByReception !== true,
     ).length
+    const leftoverAreas = leftoverByPkgId.get(String(pkg._id)) || []
     const isOpen =
       sessionsAvailable > 0 ||
       sessionsLinkedOpen > 0 ||
+      leftoverAreas.length > 0 ||
       (partialVisit != null && String(partialVisit.packageId) === String(pkg._id))
     if (!isOpen) continue
 
@@ -273,6 +451,7 @@ export async function getLaserBookingContextForPatient(patientDoc) {
       sessionsRemaining: Math.max(0, sessionsCount - sessionsCompleted),
       areaCount,
       areaLabels,
+      remainingAreas: leftoverAreas,
       procedureOptionIds: ids,
       packageTotalSyp: Math.round(Number(pkg.packageTotalSyp) || 0),
       paidAmountSyp: Math.round(Number(pkg.paidAmountSyp) || 0),
@@ -284,7 +463,9 @@ export async function getLaserBookingContextForPatient(patientDoc) {
   const hasOpenPackage =
     hasFreshPackageSession ||
     partialVisit != null ||
-    openPackages.some((p) => p.sessionsAvailable > 0 || p.sessionsLinkedOpen > 0) ||
+    openPackages.some(
+      (p) => p.sessionsAvailable > 0 || p.sessionsLinkedOpen > 0 || (p.remainingAreas || []).length > 0,
+    ) ||
     laserPkgs.some((pkg) =>
       (pkg.sessions || []).some((s) => !s?.completedByReception && !s?.linkedLaserSessionId),
     )
