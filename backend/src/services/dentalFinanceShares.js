@@ -47,12 +47,43 @@ export function providerNameMatchesOmar(name) {
 
 const SHARE_PERCENT = 40
 
+const DENTAL_CHART_PATIENT_FILTER = {
+  $or: [
+    { 'dentalChart.teeth.0': { $exists: true } },
+    { 'dentalChart.generalTreatments.0': { $exists: true } },
+    { departments: 'dental' },
+  ],
+}
+
+function treatmentHasAccountContent(tr) {
+  const cost = treatmentCostSyp(tr)
+  const paid = treatmentPaidSyp(tr)
+  const desc = String(tr.procedureDescription || '').trim()
+  const hasDoctor =
+    Boolean(tr.providerUserId) ||
+    Boolean(String(tr.providerKey || '').trim()) ||
+    Boolean(String(tr.doctorName || '').trim())
+  return {
+    cost,
+    paid,
+    desc,
+    include: cost > 0 || Boolean(desc) || hasDoctor || paid > 0,
+  }
+}
+
+function generalProcedureLabel(desc) {
+  const d = String(desc || '').trim()
+  if (!d) return 'إجراء عام'
+  if (/^إجراء عام/.test(d)) return d
+  return `إجراء عام — ${d}`
+}
+
 /**
  * يجمع إيرادات مخطط الأسنان وحصص الأطباء والمخابر ضمن نطاق التاريخ.
  * د. الياس: بدون نسبة 40٪ — إجراءاته تُحسب كاملة لربح القسم بعد خصم مخابره.
  */
 export async function summarizeDentalChartFinance({ from, to }) {
-  const patients = await Patient.find({ 'dentalChart.teeth.0': { $exists: true } })
+  const patients = await Patient.find(DENTAL_CHART_PATIENT_FILTER)
     .select('dentalChart name')
     .lean()
 
@@ -155,6 +186,62 @@ export async function summarizeDentalChartFinance({ from, to }) {
 
         if (labIsElias) eliasLabWorksSyp += amt
       }
+    }
+
+    for (const tr of p.dentalChart?.generalTreatments || []) {
+      const rate = Math.max(0, Number(tr.costUsdSypRate) || 0)
+      const usdPart = Math.max(0, Number(tr.totalCostUsd) || 0)
+      const cost =
+        roundMoney(tr.totalCostSyp) + (usdPart > 0 && rate > 0 ? roundMoney(usdPart * rate) : 0)
+      if (
+        !(cost > 0) &&
+        !String(tr.procedureDescription || '').trim() &&
+        !String(tr.doctorName || '').trim() &&
+        !tr.providerUserId &&
+        !tr.providerKey
+      ) {
+        continue
+      }
+      let bd = String(tr.businessDate || '').trim().slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
+        const firstPay = (tr.payments || []).find((x) =>
+          /^\d{4}-\d{2}-\d{2}$/.test(String(x.paidAt || '').slice(0, 10)),
+        )
+        bd = firstPay ? String(firstPay.paidAt).slice(0, 10) : ''
+      }
+      if (bd && !inRange(bd, from, to)) continue
+      if (!bd) continue
+
+      const uid = tr.providerUserId ? String(tr.providerUserId) : ''
+      const name = String(tr.doctorName || userById.get(uid) || '').trim()
+      const matchName = name || userById.get(uid) || ''
+      const isElias = isEliasProviderRef({
+        providerUserId: uid || tr.providerUserId,
+        providerKey: tr.providerKey,
+        doctorName: matchName,
+      })
+
+      if (cost > 0) totalRevenueSyp += cost
+
+      const key = isElias ? DENTAL_ELIAS_PROVIDER_KEY : uid || name || '—'
+      const prev = byDoctor.get(key) || {
+        userId: isElias ? null : uid || null,
+        providerKey: isElias ? DENTAL_ELIAS_PROVIDER_KEY : '',
+        name: isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || '—',
+        proceduresSyp: 0,
+        shareSyp: 0,
+        noShare: isElias,
+      }
+      prev.proceduresSyp += cost
+      prev.name = isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || prev.name
+      if (uid && !isElias) prev.userId = uid
+      byDoctor.set(key, prev)
+
+      if (isElias) eliasProceduresSyp += cost
+      else if (providerNameMatchesAyham(matchName)) ayhamProceduresSyp += cost
+      else if (providerNameMatchesIyad(matchName)) iyadProceduresSyp += cost
+      else if (providerNameMatchesOmar(matchName)) omarProceduresSyp += cost
+      else otherProceduresSyp += cost
     }
   }
 
@@ -259,7 +346,7 @@ function resolveDoctorMeta(tr, userById) {
  * clinicKey: معرف الطبيب أو 'elias' أو فارغ للكل.
  */
 export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
-  const patients = await Patient.find({ 'dentalChart.teeth.0': { $exists: true } })
+  const patients = await Patient.find(DENTAL_CHART_PATIENT_FILTER)
     .select('dentalChart name fileNumber')
     .lean()
 
@@ -438,6 +525,66 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         })
       }
     }
+
+    for (const tr of p.dentalChart?.generalTreatments || []) {
+      const cost = treatmentCostSyp(tr)
+      const hasContent =
+        cost > 0 ||
+        Boolean(String(tr.procedureDescription || '').trim()) ||
+        Boolean(String(tr.doctorName || '').trim()) ||
+        Boolean(tr.providerUserId) ||
+        Boolean(tr.providerKey) ||
+        (Array.isArray(tr.payments) && tr.payments.length > 0)
+      if (!hasContent) continue
+
+      let bd = treatmentBusinessDate(tr)
+      const undated = !bd
+      if (!undated && !inRange(bd, from, to)) continue
+      if (undated) bd = 'بدون تاريخ'
+
+      const paid = treatmentPaidSyp(tr)
+      const remaining = Math.max(0, cost - paid)
+      const meta = resolveDoctorMeta(tr, userById)
+      if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
+
+      const clinic = ensureClinic(meta)
+      if (clinic) {
+        clinic.treatmentCount += 1
+        clinic.proceduresSyp += cost
+        clinic.paidSyp += paid
+        clinic.remainingSyp += remaining
+      }
+
+      rows.push({
+        kind: 'treatment',
+        id: tr._id ? String(tr._id) : `g-${patientId}-${bd}-${rows.length}`,
+        patientId,
+        patientName,
+        fileNumber,
+        fdi: 0,
+        isGeneral: true,
+        businessDate: bd,
+        undated,
+        clinicKey: meta.key,
+        clinicLabel: meta.clinicLabel,
+        doctorName: meta.name,
+        providerUserId: meta.userId,
+        noShare: meta.noShare,
+        procedureDescription: generalProcedureLabel(tr.procedureDescription),
+        totalCostSyp: cost,
+        totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
+        paidSyp: paid,
+        remainingSyp: remaining,
+        payments: (tr.payments || []).map((pay, idx) => ({
+          id: pay._id ? String(pay._id) : `pay-${idx}`,
+          amountSyp: roundMoney(pay.amountSyp),
+          amountUsd: Number(pay.amountUsd) || 0,
+          currency: pay.currency === 'usd' ? 'usd' : 'syp',
+          paidAt: String(pay.paidAt || ''),
+          note: String(pay.note || ''),
+        })),
+      })
+    }
   }
 
   const clinics = [...clinicsMap.values()]
@@ -484,12 +631,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
  * لوحة المدير: كل مرضى الأسنان مع الحساب الكامل والإجراءات والطبيب لكل إجراء.
  */
 export async function listDentalPatientsAccounts({ q = '' } = {}) {
-  const patients = await Patient.find({
-    $or: [
-      { 'dentalChart.teeth.0': { $exists: true } },
-      { departments: 'dental' },
-    ],
-  })
+  const patients = await Patient.find(DENTAL_CHART_PATIENT_FILTER)
     .select('name fileNumber phone dentalChart departments')
     .lean()
 
@@ -503,47 +645,47 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
     let totalCostSyp = 0
     let paidSyp = 0
 
+    const pushProcedure = (tr, { fdi, isGeneral }) => {
+      const { cost, paid, desc, include } = treatmentHasAccountContent(tr)
+      if (!include) return
+      const meta = resolveDoctorMeta(tr, userById)
+      const remaining = Math.max(0, cost - paid)
+      const bd = treatmentBusinessDate(tr) || '—'
+      totalCostSyp += cost
+      paidSyp += paid
+      procedures.push({
+        id: tr._id ? String(tr._id) : `${isGeneral ? 'g' : 't'}-${String(p._id)}-${fdi}-${procedures.length}`,
+        fdi: isGeneral ? 0 : fdi,
+        isGeneral: Boolean(isGeneral),
+        businessDate: bd,
+        procedureDescription: isGeneral ? generalProcedureLabel(desc) : desc || 'إجراء',
+        doctorName: meta.name,
+        providerUserId: meta.userId,
+        noShare: meta.noShare,
+        totalCostSyp: cost,
+        totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
+        paidSyp: paid,
+        remainingSyp: remaining,
+        billingStatus: tr.billingItemId
+          ? paid >= cost && cost > 0
+            ? 'paid'
+            : 'pending_payment'
+          : paid >= cost && cost > 0
+            ? 'paid'
+            : cost > 0
+              ? 'unlinked'
+              : null,
+      })
+    }
+
     for (const tooth of p.dentalChart?.teeth || []) {
       const fdi = Number(tooth.fdi) || 0
       for (const tr of tooth.treatments || []) {
-        const cost = treatmentCostSyp(tr)
-        const paid = treatmentPaidSyp(tr)
-        const desc = String(tr.procedureDescription || '').trim()
-        const hasDoctor =
-          Boolean(tr.providerUserId) ||
-          Boolean(String(tr.providerKey || '').trim()) ||
-          Boolean(String(tr.doctorName || '').trim())
-        if (!(cost > 0) && !desc && !hasDoctor && !(paid > 0)) continue
-
-        const meta = resolveDoctorMeta(tr, userById)
-        const remaining = Math.max(0, cost - paid)
-        const bd = treatmentBusinessDate(tr) || '—'
-        totalCostSyp += cost
-        paidSyp += paid
-
-        procedures.push({
-          id: tr._id ? String(tr._id) : `t-${String(p._id)}-${fdi}-${procedures.length}`,
-          fdi,
-          businessDate: bd,
-          procedureDescription: desc || 'إجراء',
-          doctorName: meta.name,
-          providerUserId: meta.userId,
-          noShare: meta.noShare,
-          totalCostSyp: cost,
-          totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
-          paidSyp: paid,
-          remainingSyp: remaining,
-          billingStatus: tr.billingItemId
-            ? paid >= cost && cost > 0
-              ? 'paid'
-              : 'pending_payment'
-            : paid >= cost && cost > 0
-              ? 'paid'
-              : cost > 0
-                ? 'unlinked'
-                : null,
-        })
+        pushProcedure(tr, { fdi, isGeneral: false })
       }
+    }
+    for (const tr of p.dentalChart?.generalTreatments || []) {
+      pushProcedure(tr, { fdi: 0, isGeneral: true })
     }
 
     if (procedures.length === 0 && !(Array.isArray(p.departments) && p.departments.includes('dental'))) {

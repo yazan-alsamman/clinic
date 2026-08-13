@@ -28,6 +28,7 @@ type SessionRow = {
   patientName: string
   fileNumber: string
   fdi: number
+  isGeneral?: boolean
   businessDate: string
   clinicKey: string
   clinicLabel: string
@@ -346,8 +347,8 @@ export function AdminDentalClinicsPage() {
                           </div>
                         ) : null}
                       </td>
-                      <td dir="ltr">{r.fdi || '—'}</td>
-                      <td>{r.kind === 'lab' ? 'مخبر' : 'إجراء'}</td>
+                      <td dir="ltr">{r.isGeneral ? 'عام' : r.fdi || '—'}</td>
+                      <td>{r.kind === 'lab' ? 'مخبر' : r.isGeneral ? 'إجراء عام' : 'إجراء'}</td>
                       <td>
                         {r.kind === 'lab' ? (
                           <>

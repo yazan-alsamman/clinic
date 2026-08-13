@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 type ProcedureRow = {
   id: string
   fdi: number
+  isGeneral?: boolean
   businessDate: string
   procedureDescription: string
   doctorName: string
@@ -267,7 +268,7 @@ export function AdminDentalPatientsPage() {
                     ) : null}
                     {proc && expanded[p.patientId] !== false ? (
                       <>
-                        <td dir="ltr">{proc.fdi || '—'}</td>
+                        <td dir="ltr">{proc.isGeneral ? 'عام' : proc.fdi || '—'}</td>
                         <td dir="ltr">{proc.businessDate}</td>
                         <td>{proc.procedureDescription}</td>
                         <td>
