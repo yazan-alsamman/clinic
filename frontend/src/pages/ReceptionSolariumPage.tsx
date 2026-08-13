@@ -2,13 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { api, ApiError } from '../api/client'
-import {
-  PackageCollectionFields,
-  packageCollectionBodyExtras,
-  validatePackageCollectionBeforeSubmit,
-  type PayCurrency,
-} from '../components/PackageCollectionFields'
-import { usePaymentBankOptions, type PaymentChannel } from '../components/PaymentChannelFields'
+import { BillingPaymentModal } from '../components/BillingPaymentModal'
+import { usePaymentBankOptions } from '../components/PaymentChannelFields'
+import type { BillingPaymentRequestBody } from '../utils/billingPaymentForm'
 import type { Role } from '../types'
 
 type SolariumRegisterRow = {
@@ -78,11 +74,9 @@ export function ReceptionSolariumPage() {
   const [registerRows, setRegisterRows] = useState<SolariumRegisterRow[]>([])
   const [registerLoading, setRegisterLoading] = useState(false)
   const [registerErr, setRegisterErr] = useState('')
-  const [payCurrency, setPayCurrency] = useState<PayCurrency>('SYP')
-  const [amountUsd, setAmountUsd] = useState('')
-  const [payChannel, setPayChannel] = useState<PaymentChannel>('cash')
-  const [payBankName, setPayBankName] = useState('')
-  const { banks: paymentBanks, loading: paymentBanksLoading } = usePaymentBankOptions(allowed)
+  const [payModalOpen, setPayModalOpen] = useState(false)
+  const [payModalErr, setPayModalErr] = useState('')
+  const { banks: paymentBanks } = usePaymentBankOptions(allowed)
 
   const loadRegister = useCallback(async () => {
     if (role !== 'super_admin' || !registerDate.trim()) return
@@ -159,39 +153,38 @@ export function ReceptionSolariumPage() {
     }
   }
 
-  async function confirmSession() {
+  function openPaymentModal() {
     const name = displayName.trim()
     if (name.length < 1) {
       setErr('أدخل اسم المريض')
       return
     }
     const currentPrice = sessionMinutes === 12 ? price12 : price6
-    const collectErr = validatePackageCollectionBeforeSubmit({
-      dueSyp: currentPrice,
-      payCurrency,
-      amountUsd,
-      channel: payChannel,
-      bankName: payBankName,
-      usdSypRate,
-    })
-    if (collectErr) {
-      setErr(collectErr)
+    if (!(currentPrice > 0)) {
+      setErr('سعر الجلسة غير محدد — يحدده مدير النظام.')
+      return
+    }
+    setErr('')
+    setOk('')
+    setPayModalErr('')
+    setPayModalOpen(true)
+  }
+
+  async function confirmSession(payment: BillingPaymentRequestBody) {
+    const name = displayName.trim()
+    if (name.length < 1) {
+      setPayModalErr('أدخل اسم المريض')
       return
     }
     setSaving(true)
+    setPayModalErr('')
     setErr('')
     setOk('')
     try {
       const body: Record<string, unknown> = {
         displayName: name,
         sessionMinutes,
-        ...packageCollectionBodyExtras({
-          dueSyp: currentPrice,
-          payCurrency,
-          amountUsd,
-          channel: payChannel,
-          bankName: payBankName,
-        }),
+        ...payment,
       }
       const bd = businessDate?.trim()
       if (bd) body.businessDate = bd
@@ -199,16 +192,13 @@ export function ReceptionSolariumPage() {
         method: 'POST',
         body: JSON.stringify(body),
       })
+      setPayModalOpen(false)
       setOk('تم تسجيل الجلسة والتحصيل — يظهر المبلغ في الجرد المالي اليومي.')
       setDisplayName('')
-      setPayCurrency('SYP')
-      setAmountUsd('')
-      setPayChannel('cash')
-      setPayBankName('')
       void loadSettings()
       if (role === 'super_admin') void loadRegister()
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'تعذر التأكيد')
+      setPayModalErr(e instanceof ApiError ? e.message : 'تعذر التأكيد')
     } finally {
       setSaving(false)
     }
@@ -230,8 +220,8 @@ export function ReceptionSolariumPage() {
     <>
       <h1 className="page-title">سولاريوم</h1>
       <p className="page-desc">
-        حقل الاسم للعرض في السجل فقط — غير مرتبط ببحث المرضى أو ملفاتهم. عند التأكيد يُحصّل المبلغ (ليرة أو دولار، كاش أو
-        بنك) باسم المستخدم الذي يؤكد، ويُدمج مع الجرد المالي اليومي.
+        حقل الاسم للعرض في السجل فقط — غير مرتبط ببحث المرضى أو ملفاتهم. عند التأكيد تُفتح نفس واجهة التحصيل المعتمدة في
+        النظام (كاش/بنك، ليرة أو دولار أو الاثنين، ترجيع وخصم) ويُدمج المبلغ مع الجرد المالي اليومي.
       </p>
 
       {assignBlocked ? (
@@ -374,38 +364,15 @@ export function ReceptionSolariumPage() {
             </select>
             <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
               المستحق للتحصيل: <strong>{currentPrice.toLocaleString('ar-SY')} ل.س</strong>
-              {payCurrency === 'USD' && usdSypRate != null && usdSypRate > 0 ? (
-                <>
-                  {' '}
-                  — يُحصَّل بالدولار وفق سعر اليوم ({usdSypRate.toLocaleString('ar-SY')} ل.س / USD)
-                </>
-              ) : null}
             </p>
-            <PackageCollectionFields
-              title="طريقة استلام الدفع"
-              dueSyp={currentPrice}
-              payCurrency={payCurrency}
-              onPayCurrencyChange={setPayCurrency}
-              amountUsd={amountUsd}
-              onAmountUsdChange={setAmountUsd}
-              channel={payChannel}
-              bankName={payBankName}
-              onChannelChange={setPayChannel}
-              onBankNameChange={setPayBankName}
-              usdSypRate={usdSypRate}
-              disabled={confirmBlocked}
-              namePrefix="sol-walkin"
-              banks={paymentBanks}
-              banksLoading={paymentBanksLoading}
-            />
             <button
               type="button"
               className="btn btn-primary"
               style={{ marginTop: '1rem' }}
               disabled={confirmBlocked}
-              onClick={() => void confirmSession()}
+              onClick={openPaymentModal}
             >
-              {saving ? 'جاري التأكيد…' : 'تأكيد الجلسة والتحصيل'}
+              تأكيد الجلسة والتحصيل
             </button>
           </>
         )}
@@ -413,6 +380,26 @@ export function ReceptionSolariumPage() {
 
       {err ? <p style={{ color: 'var(--danger)', marginTop: '1rem' }}>{err}</p> : null}
       {ok ? <p style={{ color: 'var(--success)', marginTop: '1rem' }}>{ok}</p> : null}
+
+      <BillingPaymentModal
+        open={payModalOpen}
+        onClose={() => {
+          if (saving) return
+          setPayModalOpen(false)
+          setPayModalErr('')
+        }}
+        onConfirm={(payment) => void confirmSession(payment)}
+        busy={saving}
+        externalError={payModalErr}
+        title="تحصيل جلسة سولاريوم"
+        subtitle={`${displayName.trim() || 'زائر'} — ${sessionMinutes} دقيقة`}
+        listDueSyp={currentPrice}
+        usdSypRate={usdSypRate}
+        clinicBusinessDate={businessDate || undefined}
+        itemBusinessDate={businessDate || undefined}
+        confirmLabel="تأكيد الجلسة والتحصيل"
+        bankOptions={paymentBanks}
+      />
     </>
   )
 }

@@ -9,8 +9,7 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { SolariumSettings } from '../models/SolariumSettings.js'
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
-import { recordBillingStraightPayment } from '../services/recordBillingStraightCashSyp.js'
-import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
+import { completeBillingItemPayment } from '../services/billingPaymentCompletion.js'
 import {
   SOLARIUM_WALKIN_FILE_NUMBER,
   isSolariumWalkInPlaceholderPatient,
@@ -171,8 +170,8 @@ solariumRouter.put('/settings', requireRoles('super_admin'), async (req, res) =>
 })
 
 /**
- * تسجيل جلسة سولاريوم باسم حرّ (غير مرتبط بملفات المرضى) + تحصيل فوري ل.س أو USD
- * يُحسب ضمن الجرد المالي اليومي مثل باقي التحصيلات (receivedBy = المستخدم الحالي).
+ * تسجيل جلسة سولاريوم باسم حرّ (غير مرتبط بملفات المرضى) + تحصيل فوري
+ * بنفس واجهة التحصيل (كاش/بنك، ليرة/دولار/مختلط، ترجيع، خصم).
  */
 solariumRouter.post(
   '/sessions/confirm',
@@ -208,9 +207,6 @@ solariumRouter.post(
         })
         return
       }
-
-      const payCurrency =
-        String(body.payCurrency || 'SYP').trim().toUpperCase() === 'USD' ? 'USD' : 'SYP'
 
       const businessDate = String(body.businessDate || '').trim() || req.businessDate || todayBusinessDate()
       const placeholder = await ensureSolariumWalkInPlaceholderPatient()
@@ -251,26 +247,23 @@ solariumRouter.post(
       cs.billingItemId = bi._id
       await cs.save()
 
-      let paymentChannel = 'cash'
-      let bankName = ''
+      let payResult
       try {
-        ;({ paymentChannel, bankName } = await resolvePaymentChannelFromBody(body))
-      } catch (chErr) {
-        res.status(400).json({ error: String(chErr?.message || chErr) })
+        payResult = await completeBillingItemPayment(bi, body, req.user, {
+          skipPatientDebtUpdate: true,
+        })
+      } catch (payErr) {
+        await BillingItem.deleteMany({ clinicalSessionId: cs._id })
+        await ClinicalSession.findByIdAndDelete(cs._id)
+        cs = null
+        res.status(400).json({ error: String(payErr?.message || payErr) })
         return
       }
 
-      const amountUsdRaw = Number(body.amountUsd)
-      const payResult = await recordBillingStraightPayment({
-        billingItemId: bi._id,
-        receivedByUser: req.user,
-        paymentChannel,
-        bankName,
-        payCurrency,
-        amountSyp: payCurrency === 'SYP' ? fee : undefined,
-        amountUsd: payCurrency === 'USD' ? amountUsdRaw : 0,
-        skipPatientDebtUpdate: true,
-      })
+      const payCurrency = String(body.payCurrency || payResult?.payment?.payCurrency || 'SYP')
+        .trim()
+        .toUpperCase()
+      const amountUsd = Math.max(0, Number(body.amountUsd ?? payResult?.payment?.receivedAmountUsd) || 0)
 
       await writeAudit({
         user: req.user,
@@ -282,7 +275,7 @@ solariumRouter.post(
           sessionMinutes,
           feeSyp: fee,
           payCurrency,
-          amountUsd: payCurrency === 'USD' ? amountUsdRaw : undefined,
+          amountUsd: amountUsd > 0 ? amountUsd : undefined,
           billingItemId: String(bi._id),
           paymentId: payResult.paymentId,
         },
@@ -295,7 +288,7 @@ solariumRouter.post(
         paymentId: payResult.paymentId,
         amountSyp: fee,
         payCurrency,
-        amountUsd: payCurrency === 'USD' ? amountUsdRaw : 0,
+        amountUsd,
         procedureLabel: procedureDescription,
       })
     } catch (e) {
