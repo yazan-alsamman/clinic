@@ -45,17 +45,24 @@ function fmtSyp(n: number) {
   return `${new Intl.NumberFormat('ar-SY', { maximumFractionDigits: 0 }).format(Math.round(n || 0))} ل.س`
 }
 
+function isMongoId(id: string) {
+  return /^[a-f0-9]{24}$/i.test(String(id || '').trim())
+}
+
 export function AdminDentalPatientsPage() {
   const { user } = useAuth()
   const allowed = user?.role === 'super_admin' || user?.role === 'dental_assistant'
   const showFinancialSummary = user?.role === 'super_admin'
+  const canDelete = user?.role === 'super_admin'
 
   const [q, setQ] = useState('')
   const [qDraft, setQDraft] = useState('')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
+  const [okMsg, setOkMsg] = useState('')
   const [data, setData] = useState<Payload | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!allowed) return
@@ -77,8 +84,33 @@ export function AdminDentalPatientsPage() {
     void load()
   }, [load])
 
+  async function deleteProcedure(patient: PatientRow, proc: ProcedureRow) {
+    if (!canDelete || !isMongoId(proc.id)) return
+    const toothLabel = proc.isGeneral ? 'إجراء عام' : `السن ${proc.fdi || '—'}`
+    const ok = window.confirm(
+      `حذف هذا الإجراء نهائياً؟\n\n${patient.patientName} — ${toothLabel}\n${proc.procedureDescription || 'إجراء'}\nالتكلفة: ${fmtSyp(proc.totalCostSyp)}\n\nسيُحذف التحصيل من الجرد اليومي واللوحة المالية، وتُزال علامته من مخطط الأسنان.`,
+    )
+    if (!ok) return
+    setDeletingId(proc.id)
+    setErr('')
+    setOkMsg('')
+    try {
+      await api(
+        `/api/dental/admin/patients/${encodeURIComponent(patient.patientId)}/treatments/${encodeURIComponent(proc.id)}`,
+        { method: 'DELETE' },
+      )
+      setOkMsg('تم حذف الإجراء وسجلاته المالية.')
+      await load()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'تعذر حذف الإجراء')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const patients = data?.patients || []
   const totals = data?.totals
+  const procedureColSpan = canDelete ? 7 : 6
 
   const flatRows = useMemo(() => {
     const out: Array<{ patient: PatientRow; procedure: ProcedureRow | null; isFirst: boolean }> = []
@@ -109,7 +141,7 @@ export function AdminDentalPatientsPage() {
       <h1 className="page-title">مرضى الأسنان</h1>
       <p className="page-desc">
         {showFinancialSummary
-          ? 'حساب كل مريض أسنان: الإجمالي، المسدّد، المتبقي، وجميع الإجراءات مع الطبيب المعالج.'
+          ? 'حساب كل مريض أسنان: الإجمالي، المسدّد، المتبقي، وجميع الإجراءات مع الطبيب المعالج. يمكن لمدير النظام حذف أي إجراء مع سجلاته المالية وعلامته على مخطط الأسنان.'
           : 'قائمة مرضى الأسنان وإجراءاتهم مع الطبيب المعالج.'}
       </p>
 
@@ -147,6 +179,7 @@ export function AdminDentalPatientsPage() {
       </div>
 
       {err ? <p style={{ color: 'var(--danger)' }}>{err}</p> : null}
+      {okMsg ? <p style={{ color: 'var(--success)' }}>{okMsg}</p> : null}
 
       {showFinancialSummary && totals ? (
         <div
@@ -206,6 +239,7 @@ export function AdminDentalPatientsPage() {
                   <th>الطبيب المعالج</th>
                   <th>تكلفة الإجراء</th>
                   <th>مسدد / متبقي</th>
+                  {canDelete ? <th>حذف</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -296,10 +330,23 @@ export function AdminDentalPatientsPage() {
                             متبقي {fmtSyp(proc.remainingSyp)}
                           </div>
                         </td>
+                        {canDelete ? (
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-danger"
+                              style={{ fontSize: '0.75rem', padding: '0.2rem 0.55rem' }}
+                              disabled={deletingId === proc.id || !isMongoId(proc.id)}
+                              onClick={() => void deleteProcedure(p, proc)}
+                            >
+                              {deletingId === proc.id ? 'جاري الحذف…' : 'حذف'}
+                            </button>
+                          </td>
+                        ) : null}
                       </>
                     ) : isFirst && (expanded[p.patientId] === false || p.procedures.length === 0) ? (
                       <>
-                        <td colSpan={6} style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                        <td colSpan={procedureColSpan} style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                           {p.procedures.length === 0 ? 'لا إجراءات مسجّلة.' : 'الإجراءات مطوية — اضغط للعرض.'}
                         </td>
                       </>

@@ -19,6 +19,7 @@ import {
   resolveDentalProviderFields,
 } from '../services/dentalDoctorConstants.js'
 import { listDentalClinicSessions, listDentalPatientsAccounts } from '../services/dentalFinanceShares.js'
+import { deleteDentalTreatmentFully } from '../services/deleteDentalTreatment.js'
 import {
   dentalLabToAdminDto,
   labPaymentEffectiveSyp,
@@ -711,6 +712,44 @@ dentalRouter.get('/admin/patients', requireRoles('super_admin', 'dental_assistan
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
+
+/** مدير النظام: حذف إجراء أسنان مع تحصيله ومستنداته وعلامته على المخطط */
+dentalRouter.delete(
+  '/admin/patients/:patientId/treatments/:treatmentId',
+  requireRoles('super_admin'),
+  async (req, res) => {
+    try {
+      const patientId = String(req.params.patientId || '').trim()
+      const treatmentId = String(req.params.treatmentId || '').trim()
+      if (!mongoose.isValidObjectId(patientId) || !treatmentId) {
+        res.status(400).json({ error: 'معرّف غير صالح' })
+        return
+      }
+      const result = await deleteDentalTreatmentFully({ patientId, treatmentId })
+      try {
+        await writeAudit({
+          user: req.user,
+          action: 'حذف إجراء أسنان وسجلاته المالية',
+          entityType: 'Patient',
+          entityId: patientId,
+          details: {
+            treatmentId,
+            ...result.snapshot,
+            finance: result.finance,
+            chartMarks: result.chartMarks,
+          },
+        })
+      } catch (auditErr) {
+        console.error('writeAudit (delete dental treatment):', auditErr)
+      }
+      res.json(result)
+    } catch (e) {
+      const status = Number(e?.status) || 500
+      if (status >= 500) console.error(e)
+      res.status(status).json({ error: String(e?.message || e) || 'تعذر حذف الإجراء' })
+    }
+  },
+)
 
 /** قائمة المخابر النشطة — لاختيار المخبر عند تسجيل إجراء على السن */
 dentalRouter.get('/labs', requireRoles('super_admin', 'dental_branch'), async (_req, res) => {
