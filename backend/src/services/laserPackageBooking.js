@@ -130,12 +130,19 @@ export async function demoteAddonOnlyLinkedPackageSession({
   return true
 }
 
+function packageIdMatches(pkg, packageId) {
+  const wanted = String(packageId || '').trim()
+  if (!wanted) return true
+  return String(pkg?._id || '') === wanted
+}
+
 /** أول جلسة باكج بلا ربط ليزر ولم تُثبَّت من الاستقبال */
-export function findFreshLaserPackageSession(patientLike) {
+export function findFreshLaserPackageSession(patientLike, packageId) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
     if (String(pkg?.department || '') !== 'laser') continue
     if (pkg.suspended === true) continue
+    if (!packageIdMatches(pkg, packageId)) continue
     const sessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
     const available = sessions.find((s) => !s?.linkedLaserSessionId && s?.completedByReception !== true)
     if (available) {
@@ -151,11 +158,12 @@ export function findFreshLaserPackageSession(patientLike) {
 }
 
 /** جلسة باكج مربوطة بليزر وما زالت مناطقها ناقصة وبند التحصيل معلّق */
-export async function findContinueLaserPackageSession(patientLike) {
+export async function findContinueLaserPackageSession(patientLike, packageId) {
   const packages = Array.isArray(patientLike?.sessionPackages) ? patientLike.sessionPackages : []
   for (const pkg of packages) {
     if (String(pkg?.department || '') !== 'laser') continue
     if (pkg.suspended === true) continue
+    if (!packageIdMatches(pkg, packageId)) continue
     const sessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
     const expectedAreas = packageExpectedAreaCount(pkg)
     for (const session of sessions) {
@@ -240,14 +248,14 @@ export function normalizeLaserSlotPackageModeForResolve(mode) {
   return m
 }
 
-export async function resolveLaserPackageSessionForBooking(patientLike, slotPackageMode) {
+export async function resolveLaserPackageSessionForBooking(patientLike, slotPackageMode, packageId) {
   const mode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
   if (mode === 'outside_package') return null
-  if (mode === 'continue_package') return findContinueLaserPackageSession(patientLike)
-  if (mode === 'use_package') return findFreshLaserPackageSession(patientLike)
-  const cont = await findContinueLaserPackageSession(patientLike)
+  if (mode === 'continue_package') return findContinueLaserPackageSession(patientLike, packageId)
+  if (mode === 'use_package') return findFreshLaserPackageSession(patientLike, packageId)
+  const cont = await findContinueLaserPackageSession(patientLike, packageId)
   if (cont) return cont
-  return findFreshLaserPackageSession(patientLike)
+  return findFreshLaserPackageSession(patientLike, packageId)
 }
 
 async function uncompleteLaserPackageSession({ patientId, packageId, packageSessionId }) {
@@ -457,6 +465,7 @@ export async function getLaserBookingContextForPatient(patientDoc) {
       paidAmountSyp: Math.round(Number(pkg.paidAmountSyp) || 0),
       isPartial: Boolean(partialVisit) && String(partialVisit.packageId) === String(pkg._id),
       isFreshTarget: Boolean(fresh?.pkg) && String(fresh.pkg._id) === String(pkg._id),
+      hasContinue: leftoverAreas.length > 0 || (Boolean(partialVisit) && String(partialVisit.packageId) === String(pkg._id)),
     })
   }
 

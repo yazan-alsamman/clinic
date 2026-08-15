@@ -12,7 +12,7 @@ import { loadBusinessDay } from '../middleware/loadBusinessDay.js'
 import { todayBusinessDate, addCalendarDaysYmd, isValidYmd } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
 import { notifyAppointmentCancelled } from '../services/scheduleCancelNotify.js'
-import { getLaserBookingContextForPatient } from '../services/laserPackageBooking.js'
+import { getLaserBookingContextForPatient, findFreshLaserPackageSession, findContinueLaserPackageSession } from '../services/laserPackageBooking.js'
 import {
   normalizeHm,
   hmToMinutes,
@@ -617,6 +617,7 @@ function slotToDto(s) {
     laserAddonProcedureOptionIds: Array.isArray(o.laserAddonProcedureOptionIds)
       ? [...new Set(o.laserAddonProcedureOptionIds.map((x) => String(x || '').trim()).filter(Boolean))]
       : [],
+    laserBookingPackageId: String(o.laserBookingPackageId || '').trim(),
   }
 }
 
@@ -715,13 +716,34 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
     }
     if (serviceType === 'laser' && laserPackageBookingMode) {
       const bookingCtx = await getLaserBookingContextForPatient(patient)
+      const usesPackage =
+        laserPackageBookingMode === 'use_package' ||
+        laserPackageBookingMode === 'use_package_with_addon' ||
+        laserPackageBookingMode === 'continue_package' ||
+        laserPackageBookingMode === 'continue_package_with_addon'
+      const openPkgs = Array.isArray(bookingCtx.openPackages) ? bookingCtx.openPackages : []
+      let laserBookingPackageId = usesPackage ? String(body.laserBookingPackageId || '').trim() : ''
+      if (usesPackage && !laserBookingPackageId && openPkgs.length === 1) {
+        laserBookingPackageId = String(openPkgs[0].id || '').trim()
+      }
+      if (usesPackage && openPkgs.length > 1 && !laserBookingPackageId) {
+        res.status(400).json({
+          error: 'لدى المريض أكثر من باكج — اختر الباكج التي ستُخصم منها هذه الجلسة.',
+        })
+        return
+      }
+      if (laserBookingPackageId && !openPkgs.some((p) => String(p.id) === laserBookingPackageId)) {
+        res.status(400).json({ error: 'الباكج المختارة غير متاحة لهذا المريض.' })
+        return
+      }
       if (
         laserPackageBookingMode === 'continue_package' ||
         laserPackageBookingMode === 'continue_package_with_addon'
       ) {
-        if (!bookingCtx.partialVisit) {
+        const cont = await findContinueLaserPackageSession(patient, laserBookingPackageId || undefined)
+        if (!cont) {
           res.status(400).json({
-            error: 'لا توجد جلسة باكج قيد الإكمال لهذا المريض — اختر «جلسة جديدة ضمن الباكج» أو «خارج الباكج».',
+            error: 'لا توجد جلسة باكج قيد الإكمال للباكج المختارة — اختر «جلسة جديدة ضمن الباكج» أو «خارج الباكج».',
           })
           return
         }
@@ -729,19 +751,21 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
       if (
         (laserPackageBookingMode === 'use_package' ||
           laserPackageBookingMode === 'use_package_with_addon') &&
-        !bookingCtx.hasFreshPackageSession
+        !findFreshLaserPackageSession(patient, laserBookingPackageId || undefined)
       ) {
         res.status(400).json({
           error:
-            'لا توجد جلسة باكج جديدة متاحة — استخدم «إكمال المنطقة المتبقية» إن وُجدت جلسة ناقصة، أو «خارج الباكج».',
+            'لا توجد جلسة باكج جديدة متاحة للباكج المختارة — استخدم «إكمال المنطقة المتبقية» إن وُجدت جلسة ناقصة، أو «خارج الباكج».',
         })
         return
       }
+      body._resolvedLaserBookingPackageId = usesPackage ? laserBookingPackageId : ''
       // لا تُحفظ مناطق الباكج نفسها كـ «خارج الباكج»
       if (laserAddonProcedureOptionIds.length > 0) {
         const packageAreaIds = new Set()
         for (const pkg of patient.sessionPackages || []) {
           if (String(pkg.department || '') !== 'laser' || pkg.suspended === true) continue
+          if (laserBookingPackageId && String(pkg._id) !== laserBookingPackageId) continue
           for (const oid of pkg.procedureOptionIds || []) {
             const s = String(oid || '').trim()
             if (s) packageAreaIds.add(s)
@@ -864,6 +888,10 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
           laserSessionId: null,
           laserPackageBookingMode: serviceType === 'laser' ? laserPackageBookingMode : '',
           laserAddonProcedureOptionIds: serviceType === 'laser' ? laserAddonProcedureOptionIds : [],
+          laserBookingPackageId:
+            serviceType === 'laser' && laserPackageBookingMode && laserPackageBookingMode !== 'outside_package'
+              ? String(body._resolvedLaserBookingPackageId || '').trim()
+              : '',
         },
       },
       { new: true, upsert: !existing },
@@ -1176,6 +1204,7 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
         laserAddonProcedureOptionIds: Array.isArray(slot.laserAddonProcedureOptionIds)
           ? [...slot.laserAddonProcedureOptionIds]
           : [],
+        laserBookingPackageId: String(slot.laserBookingPackageId || '').trim(),
         laserSessionId: slot.laserSessionId || null,
       }
 
@@ -1193,6 +1222,7 @@ scheduleRouter.patch('/provider/:id', loadBusinessDay, requireActiveDay, async (
         slot.laserSessionId = null
         slot.laserPackageBookingMode = ''
         slot.laserAddonProcedureOptionIds = []
+        slot.laserBookingPackageId = ''
         await slot.save()
         await writeAudit({
           user: req.user,

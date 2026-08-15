@@ -843,6 +843,7 @@ export function PatientRecord() {
   const bookedLaserSlotId = (searchParams.get('laserSlotId') || '').trim()
   /** من جدول المواعيد — يحدد إن كان الحجز كجلسة ضمن الباكج */
   const bookedLaserSlotPkgMode = (searchParams.get('laserSlotPkgMode') || '').trim()
+  const bookedLaserPkgId = (searchParams.get('laserPkgId') || '').trim()
   /** معرّفات المناطق خارج الباكج من الحجز (موثوقة أكثر من نص procedureType) */
   const bookedLaserAddonIdsFromQuery = useMemo(() => {
     const raw = (searchParams.get('laserAddonIds') || '').trim()
@@ -1738,8 +1739,12 @@ export function PatientRecord() {
   }, [patient])
 
   const activeLaserPackage = useMemo(() => {
-    for (const pkg of patientPackages) {
-      if (pkg.department !== 'laser' || pkg.suspended) continue
+    const wantedId = bookedLaserPkgId
+    const laserPkgs = patientPackages.filter((pkg) => pkg.department === 'laser' && !pkg.suspended)
+    const ordered = wantedId
+      ? [...laserPkgs.filter((p) => p.id === wantedId), ...laserPkgs.filter((p) => p.id !== wantedId)]
+      : laserPkgs
+    for (const pkg of ordered) {
       const expected = Math.max(
         1,
         typeof pkg.areaCount === 'number' && pkg.areaCount > 0
@@ -1748,6 +1753,13 @@ export function PatientRecord() {
       )
       const unlinked = pkg.sessions.find((s) => !s.completedByReception && !s.linkedLaserSessionId)
       if (unlinked) return pkg
+      const leftover = pkg.sessions.some((s) => {
+        if (!s.linkedLaserSessionId || !clinicalHistory) return false
+        const ls = clinicalHistory.laserSessions.find((x) => x.id === s.linkedLaserSessionId)
+        const remaining = ls?.packageAreaBreakdown?.remainingAreas || []
+        return remaining.length > 0
+      })
+      if (leftover) return pkg
       const partialOpen = pkg.sessions.some((s) => {
         if (s.completedByReception || !s.linkedLaserSessionId || !clinicalHistory) return false
         const ls = clinicalHistory.laserSessions.find((x) => x.id === s.linkedLaserSessionId)
@@ -1757,8 +1769,8 @@ export function PatientRecord() {
       })
       if (partialOpen) return pkg
     }
-    return undefined
-  }, [patientPackages, clinicalHistory])
+    return wantedId ? laserPkgs.find((p) => p.id === wantedId) : undefined
+  }, [patientPackages, clinicalHistory, bookedLaserPkgId])
 
   /** جلسة ضمن باكج — فقط عند وضع حجز باكج صريح (أو نص حجز باكج)، وليس لمجرد وجود باكج فعّال */
   const sessionInPackageMode = useMemo(() => {
@@ -4631,6 +4643,7 @@ export function PatientRecord() {
                     body: JSON.stringify({
                       patientId: id,
                       scheduleSlotId: bookedLaserSlotId || undefined,
+                      laserBookingPackageId: bookedLaserPkgId || undefined,
                       room,
                       laserType,
                       pw: laserLineItemsWithPricing.map((x) => x.pw).filter(Boolean).join(' | '),

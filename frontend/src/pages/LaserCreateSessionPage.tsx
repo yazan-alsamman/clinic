@@ -20,6 +20,7 @@ type SlotRow = {
   assignedSpecialistName?: string
   laserPackageBookingMode?: '' | 'use_package' | 'outside_package' | 'continue_package' | 'continue_package_with_addon' | 'use_package_with_addon'
   laserAddonProcedureOptionIds?: string[]
+  laserBookingPackageId?: string
 }
 
 function todayYmd() {
@@ -138,6 +139,10 @@ export function LaserCreateSessionPage() {
                         )}${
                           addonIds.length
                             ? `&laserAddonIds=${encodeURIComponent(addonIds.join(','))}`
+                            : ''
+                        }${
+                          s.laserBookingPackageId
+                            ? `&laserPkgId=${encodeURIComponent(String(s.laserBookingPackageId))}`
                             : ''
                         }`,
                       )

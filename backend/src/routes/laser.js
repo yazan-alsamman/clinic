@@ -1383,15 +1383,17 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
 
     const scheduleSlotIdEarly = String(body.scheduleSlotId || '').trim()
     let slotPackageMode = ''
+    let slotPackageId = ''
     if (scheduleSlotIdEarly) {
       const slotLean = await ScheduleSlot.findById(scheduleSlotIdEarly)
-        .select('laserPackageBookingMode procedureType')
+        .select('laserPackageBookingMode procedureType laserBookingPackageId')
         .lean()
       if (slotLean) {
         slotPackageMode = String(slotLean.laserPackageBookingMode || '').trim()
         if (!slotPackageMode && isFullBodyProcedureType(slotLean.procedureType)) {
           slotPackageMode = 'outside_package'
         }
+        slotPackageId = String(slotLean.laserBookingPackageId || '').trim()
       }
     }
     const resolvedSlotPackageMode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
@@ -1400,9 +1402,10 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       body.forceOutsidePackage === true ||
       slotPackageMode === 'outside_package'
 
+    const requestedPackageId = String(body.laserBookingPackageId || body.patientPackageId || slotPackageId || '').trim()
     const packageMatch = skipLaserPackage
       ? null
-      : await resolveLaserPackageSessionForBooking(patient, resolvedSlotPackageMode)
+      : await resolveLaserPackageSessionForBooking(patient, resolvedSlotPackageMode, requestedPackageId || undefined)
     const patientGender = normalizePatientGender(patient.gender)
 
     let effectiveMainOptionIds = parseUniqueStringIds(body.procedureOptionIds)
