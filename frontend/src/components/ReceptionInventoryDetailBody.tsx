@@ -24,32 +24,23 @@ function formatTime(iso: string | null) {
 }
 
 function displayReceivedSyp(t: TxRow) {
-  if (t.payCurrency === 'USD' || t.billingCurrency === 'USD') return '—'
+  if (t.payCurrency === 'USD') return '—'
   return t.receivedAmountSyp.toLocaleString('ar-SY')
 }
 
 function displayReceivedUsd(t: TxRow) {
-  if (t.receivedAmountUsd > 0) return t.receivedAmountUsd.toFixed(2)
-  if (
-    t.billingCurrency === 'USD' &&
-    t.payCurrency === 'SYP' &&
-    t.receivedAmountSyp > 0 &&
-    Math.abs(t.receivedAmountSyp - t.amountDueSyp) <= 1
-  ) {
-    const dueUsd = Number(t.amountDueUsd) || 0
-    if (dueUsd > 0) return dueUsd.toFixed(2)
-  }
-  return '—'
+  if (t.payCurrency === 'SYP') return '—'
+  return t.receivedAmountUsd > 0 ? t.receivedAmountUsd.toFixed(2) : '—'
 }
 
 function displayCurrencyLabel(t: TxRow) {
-  if (t.payCurrency === 'USD' || t.billingCurrency === 'USD') return 'USD'
+  if (t.payCurrency === 'USD') return 'USD'
   if (t.payCurrency === 'MIXED') return 'ل.س+USD'
   return 'ل.س'
 }
 
 function displayAmountDue(t: TxRow) {
-  if (t.payCurrency === 'USD' || t.billingCurrency === 'USD') {
+  if (t.payCurrency === 'USD') {
     const usd = Number(t.amountDueUsd) || 0
     if (usd > 0) return formatUsd(usd)
   }
@@ -58,15 +49,14 @@ function displayAmountDue(t: TxRow) {
 
 function settlementDisplay(t: TxRow) {
   const usdDelta = Number(t.settlementDeltaUsd) || 0
-  if ((t.payCurrency === 'USD' || t.billingCurrency === 'USD') && Math.abs(usdDelta) >= 0.009) {
+  if (t.payCurrency === 'USD' && Math.abs(usdDelta) >= 0.009) {
     const sign = usdDelta > 0 ? '+' : ''
     return {
       text: `${sign}${formatUsd(usdDelta)}`,
-      color:
-        usdDelta > 0 ? 'var(--success)' : usdDelta < 0 ? 'var(--danger)' : 'var(--text-muted)',
+      color: usdDelta > 0 ? 'var(--success)' : usdDelta < 0 ? 'var(--danger)' : 'var(--text-muted)',
     }
   }
-  if (t.payCurrency === 'USD' || t.billingCurrency === 'USD') {
+  if (t.payCurrency === 'USD') {
     return { text: '0', color: 'var(--text-muted)' }
   }
   return {

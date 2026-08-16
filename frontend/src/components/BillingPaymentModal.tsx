@@ -239,7 +239,8 @@ export function BillingPaymentModal({
         ) : null}
         {billingCurrency === 'USD' && effectiveDueSyp > 0 ? (
           <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-            يعادل تقريباً {effectiveDueSyp.toLocaleString('ar-SY')} ل.س في السجلات الداخلية عند سعر اليوم المحفوظ
+            السعر بالدولار — عند الاستلام بالليرة يظهر الجرد بالليرة حسب المقابل المحفوظ (
+            {effectiveDueSyp.toLocaleString('ar-SY')} ل.س)، وعند الاستلام بالدولار يظهر بالدولار.
           </p>
         ) : null}
         {form.payCurrency === 'USD' && payPreviewRate != null && usdCashOffer ? (
@@ -371,30 +372,28 @@ export function BillingPaymentModal({
           </span>
           {billingCurrency === 'USD' ? (
             <p style={{ margin: '0 0 0.45rem', fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-              البند مسعّر بالدولار — التحصيل والجرد بالدولار فقط، دون تحويل إلى ليرة ودون فرق تسوية إذا طابق المبلغ
-              المستحق.
+              السعر الأصلي بالدولار — يمكن التحصيل بالليرة أو بالدولار. الجرد يظهر عملة المبلغ المستلم فعلياً، دون فرق
+              تسوية إذا طابق المستحق.
             </p>
           ) : null}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-            {billingCurrency !== 'USD' ? (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="billing-pay-currency"
-                  checked={form.payCurrency === 'SYP'}
-                  disabled={busy}
-                  onChange={() => {
-                    patchForm({
-                      payCurrency: 'SYP',
-                      paySyp: String(effectiveDueSyp),
-                      payRefundCurrency: 'SYP',
-                      payRefundAmount: '',
-                    })
-                  }}
-                />
-                ليرة سورية
-              </label>
-            ) : null}
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="billing-pay-currency"
+                checked={form.payCurrency === 'SYP'}
+                disabled={busy}
+                onChange={() => {
+                  patchForm({
+                    payCurrency: 'SYP',
+                    paySyp: String(effectiveDueSyp),
+                    payRefundCurrency: 'SYP',
+                    payRefundAmount: '',
+                  })
+                }}
+              />
+              ليرة سورية
+            </label>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
               <input
                 type="radio"
@@ -419,26 +418,24 @@ export function BillingPaymentModal({
               />
               دولار أمريكي (USD)
             </label>
-            {billingCurrency !== 'USD' ? (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="billing-pay-currency"
-                  checked={form.payCurrency === 'MIXED'}
-                  disabled={busy}
-                  onChange={() => {
-                    patchForm({
-                      payCurrency: 'MIXED',
-                      paySyp: String(effectiveDueSyp),
-                      payUsd: '',
-                      payRefundCurrency: 'SYP',
-                      payRefundAmount: '',
-                    })
-                  }}
-                />
-                ليرة ودولار معاً
-              </label>
-            ) : null}
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="billing-pay-currency"
+                checked={form.payCurrency === 'MIXED'}
+                disabled={busy}
+                onChange={() => {
+                  patchForm({
+                    payCurrency: 'MIXED',
+                    paySyp: String(effectiveDueSyp),
+                    payUsd: '',
+                    payRefundCurrency: 'SYP',
+                    payRefundAmount: '',
+                  })
+                }}
+              />
+              ليرة ودولار معاً
+            </label>
           </div>
           {form.payCurrency === 'MIXED' && payPreviewRate ? (
             <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>

@@ -44,7 +44,6 @@ export async function repairUsdExactPaymentFalseCredit() {
       Number(pay.effectiveAmountDueSyp || bi.effectiveAmountDueSyp || bi.amountDueSyp || bi.listAmountDueSyp) || 0,
     )
     const dueUsd = round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
-    const payCur = String(pay.payCurrency || 'SYP').toUpperCase()
     const itemIsUsd = String(bi.currency || 'SYP').toUpperCase() === 'USD' && dueUsd > 0
 
     const extraIsEntireSypReceipt = receivedSyp > 0 && nearlyEqualSyp(deltaSyp, receivedSyp)
@@ -73,13 +72,6 @@ export async function repairUsdExactPaymentFalseCredit() {
 
     pay.settlementDeltaSyp = 0
     pay.settlementDeltaUsd = 0
-
-    if (itemIsUsd && payCur === 'SYP' && !(receivedUsd > 0)) {
-      pay.payCurrency = 'USD'
-      pay.receivedAmountUsd = dueUsd
-      recodedUsd += 1
-    }
-
     await pay.save()
     repaired += 1
   }

@@ -92,25 +92,12 @@ export function defaultBillingPaymentFormState(
   opts?: { billingCurrency?: 'SYP' | 'USD'; dueUsd?: number },
 ): BillingPaymentFormState {
   const dueUsd = Number(opts?.dueUsd) || 0
-  if (opts?.billingCurrency === 'USD' && dueUsd > 0) {
-    return {
-      payCurrency: 'USD',
-      payChannel: 'cash',
-      payBankName: '',
-      paySyp: '',
-      payUsd: String(dueUsd),
-      payRefundCurrency: 'SYP',
-      payRefundAmount: '',
-      payDiscountEnabled: false,
-      payDiscountPercent: '',
-    }
-  }
   return {
     payCurrency: 'SYP',
     payChannel: 'cash',
     payBankName: '',
     paySyp: String(Math.max(0, Math.round(listDueSyp))),
-    payUsd: '',
+    payUsd: opts?.billingCurrency === 'USD' && dueUsd > 0 ? String(dueUsd) : '',
     payRefundCurrency: 'SYP',
     payRefundAmount: '',
     payDiscountEnabled: false,

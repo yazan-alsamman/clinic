@@ -248,7 +248,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
   const dueForSettlement = discountMeta.effectiveAmountDueSyp
   const receipt = await resolveBillingPaymentReceipt(reqBody, bi.businessDate)
-  let {
+  const {
     payCurrency,
     netReceivedSyp,
     receivedAmountSyp: receivedSyp,
@@ -259,7 +259,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     amountUsdRaw,
   } = receipt
 
-  /** بند مسعّر بالدولار: التحصيل والجرد بالدولار فقط */
+  /** بند مسعّر بالدولار: الذمة/الفائض يُحفظان بالدولار عند الحاجة، والجرد يتبع عملة التحصيل */
   const isUsdBilling = String(bi.currency || 'SYP').toUpperCase() === 'USD'
   const dueUsd = isUsdBilling
     ? round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
@@ -269,31 +269,6 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   if (isUsdBilling && !(rateForCredit > 0)) {
     const fetched = await fetchUsdSypRateForBusinessDate(bi.businessDate)
     if (fetched != null) rateForCredit = fetched
-  }
-
-  if (isUsdBilling && dueUsd > 0 && payCurrency !== 'USD') {
-    if (payCurrency === 'MIXED') {
-      const err = new Error('هذا البند مسعّر بالدولار. يجب تحصيل المبلغ بالدولار فقط ولا يُحوَّل إلى ليرة.')
-      err.code = 'USD_COLLECTION_REQUIRED'
-      throw err
-    }
-    const rate = rateForCredit > 0 ? rateForCredit : usdSypRateUsed
-    if (netReceivedSyp > 0 && !(rate > 0)) {
-      const err = new Error(
-        'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
-      )
-      err.code = 'NO_RATE'
-      throw err
-    }
-    payCurrency = 'USD'
-    amountUsdRaw =
-      netReceivedSyp > 0 && Math.abs(netReceivedSyp - dueForSettlement) <= 1
-        ? dueUsd
-        : netReceivedSyp > 0 && rate > 0
-          ? round6(netReceivedSyp / rate)
-          : 0
-    receivedUsd = round6(amountUsdRaw)
-    usdSypRateUsed = rate > 0 ? rate : usdSypRateUsed
   }
 
   const patient = await Patient.findById(bi.patientId).lean()
@@ -394,13 +369,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       settlementDeltaSyp,
       settlementDeltaUsd: isUsdBilling ? settlementDeltaUsd : 0,
       creditAppliedSyp,
-      ...paymentRecordReceivedFields({
-        ...receipt,
-        payCurrency,
-        receivedAmountSyp: receivedSyp,
-        receivedAmountUsd: receivedUsd,
-        amountUsdRaw,
-      }),
+      ...paymentRecordReceivedFields(receipt),
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
       method,
