@@ -93,7 +93,7 @@ connectDb()
       const repair = await repairUsdExactPaymentFalseCredit()
       if (repair.repaired > 0) {
         console.log(
-          `repairUsdExactPaymentFalseCredit: repaired=${repair.repaired} scanned=${repair.scanned} creditReducedSyp=${repair.creditReducedSyp}`,
+          `repairUsdExactPaymentFalseCredit: repaired=${repair.repaired} scanned=${repair.scanned} creditReducedSyp=${repair.creditReducedSyp} recodedUsd=${repair.recodedUsd}`,
         )
       }
     } catch (repairErr) {

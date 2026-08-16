@@ -87,7 +87,24 @@ export function resolveUsdCashOffer(opts: {
   return usdRoundedUpCashOffer(opts.effectiveDueSyp, opts.payPreviewRate)
 }
 
-export function defaultBillingPaymentFormState(listDueSyp: number): BillingPaymentFormState {
+export function defaultBillingPaymentFormState(
+  listDueSyp: number,
+  opts?: { billingCurrency?: 'SYP' | 'USD'; dueUsd?: number },
+): BillingPaymentFormState {
+  const dueUsd = Number(opts?.dueUsd) || 0
+  if (opts?.billingCurrency === 'USD' && dueUsd > 0) {
+    return {
+      payCurrency: 'USD',
+      payChannel: 'cash',
+      payBankName: '',
+      paySyp: '',
+      payUsd: String(dueUsd),
+      payRefundCurrency: 'SYP',
+      payRefundAmount: '',
+      payDiscountEnabled: false,
+      payDiscountPercent: '',
+    }
+  }
   return {
     payCurrency: 'SYP',
     payChannel: 'cash',
@@ -345,6 +362,7 @@ export function computePaymentSettlementPreview(opts: {
       patientRefundUsd: refUsd,
     })
   }
+  if (Math.abs(netSyp - due) <= 1) return { kind: 'exact', delta: 0 }
   if (delta < 0) return { kind: 'under', delta }
   if (delta > 0) return { kind: 'over', delta }
   return { kind: 'exact', delta: 0 }

@@ -152,7 +152,7 @@ function openPayModalForItem(
     setPayItem: (v: Item) => void
     setPaySyp: (v: string) => void
     setPayUsd: (v: string) => void
-    setPayCurrency: (v: 'SYP' | 'USD') => void
+    setPayCurrency: (v: PayCurrency) => void
     setPayChannel: (v: 'cash' | 'bank') => void
     setPayBankName: (v: string) => void
     setPayRefundCurrency: (v: 'SYP' | 'USD') => void
@@ -165,9 +165,15 @@ function openPayModalForItem(
   const isUsdPriced = itemBillingCurrency(item) === 'USD'
   const cashDue = itemCashDueAfterCreditSyp(item)
   setters.setPayItem(item)
-  setters.setPaySyp(String(cashDue))
-  setters.setPayUsd(isUsdPriced ? String(itemEffectiveDueUsd(item)) : '')
-  setters.setPayCurrency('SYP')
+  if (isUsdPriced) {
+    setters.setPaySyp('')
+    setters.setPayUsd(String(itemEffectiveDueUsd(item)))
+    setters.setPayCurrency('USD')
+  } else {
+    setters.setPaySyp(String(cashDue))
+    setters.setPayUsd('')
+    setters.setPayCurrency('SYP')
+  }
   setters.setPayChannel('cash')
   setters.setPayBankName('')
   setters.setPayRefundCurrency('SYP')
@@ -1097,10 +1103,9 @@ export function BillingPage() {
                 USD عند سعر {payPreviewRate.toLocaleString('ar-SY')} ل.س لكل 1 USD
               </p>
             ) : null}
-            {itemBillingCurrency(payItem) === 'USD' && itemEffectiveDueSyp(payItem) > 0 ? (
+            {itemBillingCurrency(payItem) === 'USD' ? (
               <p style={{ margin: '0.2rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                يعادل تقريباً {itemEffectiveDueSyp(payItem).toLocaleString('ar-SY')} ل.س في السجلات الداخلية عند سعر
-                اليوم المحفوظ
+                يُحصَّل ويظهر في الجرد بالدولار فقط. المطابقة مع المستحق لا تُنشئ فرق تسوية ولا رصيداً إضافياً بالليرة.
               </p>
             ) : null}
             {payCurrency === 'USD' && payPreviewRate != null && usdCashOffer ? (
@@ -1249,25 +1254,27 @@ export function BillingPage() {
               </span>
               {itemBillingCurrency(payItem) === 'USD' ? (
                 <p style={{ margin: '0 0 0.45rem', fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                  السعر الأصلي بالدولار من قسم الجلدية — يمكن التحصيل بالليرة (حسب المقابل المحفوظ أعلاه) أو
-                  بالدولار.
+                  البند مسعّر بالدولار — التحصيل والجرد بالدولار فقط، دون تحويل إلى ليرة ودون فرق تسوية إذا طابق
+                  المبلغ المستحق.
                 </p>
               ) : null}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="pay-currency"
-                    checked={payCurrency === 'SYP'}
-                    onChange={() => {
-                      setPayCurrency('SYP')
-                      setPaySyp(String(cashDueAfterCreditSyp))
-                      setPayRefundCurrency('SYP')
-                      setPayRefundAmount('')
-                    }}
-                  />
-                  ليرة سورية
-                </label>
+                {itemBillingCurrency(payItem) !== 'USD' ? (
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="pay-currency"
+                      checked={payCurrency === 'SYP'}
+                      onChange={() => {
+                        setPayCurrency('SYP')
+                        setPaySyp(String(cashDueAfterCreditSyp))
+                        setPayRefundCurrency('SYP')
+                        setPayRefundAmount('')
+                      }}
+                    />
+                    ليرة سورية
+                  </label>
+                ) : null}
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
                   <input
                     type="radio"
@@ -1295,21 +1302,23 @@ export function BillingPage() {
                   />
                   دولار أمريكي (USD)
                 </label>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="pay-currency"
-                    checked={payCurrency === 'MIXED'}
-                    onChange={() => {
-                      setPayCurrency('MIXED')
-                      setPaySyp(String(cashDueAfterCreditSyp))
-                      setPayUsd('')
-                      setPayRefundCurrency('SYP')
-                      setPayRefundAmount('')
-                    }}
-                  />
-                  ليرة ودولار معاً
-                </label>
+                {itemBillingCurrency(payItem) !== 'USD' ? (
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="pay-currency"
+                      checked={payCurrency === 'MIXED'}
+                      onChange={() => {
+                        setPayCurrency('MIXED')
+                        setPaySyp(String(cashDueAfterCreditSyp))
+                        setPayUsd('')
+                        setPayRefundCurrency('SYP')
+                        setPayRefundAmount('')
+                      }}
+                    />
+                    ليرة ودولار معاً
+                  </label>
+                ) : null}
               </div>
               {payCurrency === 'MIXED' && payPreviewRate ? (
                 <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
@@ -1614,6 +1623,17 @@ export function BillingPage() {
                   patientRefundSyp: refSyp,
                   patientRefundUsd: refUsd,
                 })
+              }
+              if (Math.abs(netSyp - due) <= 1) delta = 0
+              if (
+                payCurrency === 'USD' &&
+                payItem &&
+                itemBillingCurrency(payItem) === 'USD' &&
+                !refSyp &&
+                !refUsd
+              ) {
+                const dueU = itemEffectiveDueUsd(payItem)
+                if (dueU > 0 && Math.abs(usdParsed - dueU) < 0.02) delta = 0
               }
               if (delta < 0) {
                 return (

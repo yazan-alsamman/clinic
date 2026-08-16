@@ -24,10 +24,13 @@ export type TxRow = {
   paymentChannel: 'cash' | 'bank'
   bankName: string
   payCurrency: 'SYP' | 'USD' | 'MIXED'
+  billingCurrency?: 'SYP' | 'USD'
   receivedAmountSyp: number
   receivedAmountUsd: number
   amountDueSyp: number
+  amountDueUsd?: number
   settlementDeltaSyp: number
+  settlementDeltaUsd?: number
   patientRefundSyp: number
   patientRefundUsd: number
 }

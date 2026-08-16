@@ -203,10 +203,13 @@ function aggregateReceptionPaidItems(items, payById) {
       paymentChannel: channel,
       bankName: channel === 'bank' ? String(p.bankName || '').trim() || '—' : '',
       payCurrency: payCur,
+      billingCurrency: String(bi.currency || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP',
       receivedAmountSyp: sypPart,
       receivedAmountUsd: usdPart,
       amountDueSyp: Math.round(Number(bi.amountDueSyp) || 0),
+      amountDueUsd: round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0),
       settlementDeltaSyp: Math.round(Number(p.settlementDeltaSyp) || 0),
+      settlementDeltaUsd: round6(Number(p.settlementDeltaUsd) || 0),
       patientRefundSyp: refSyp,
       patientRefundUsd: refUsd,
     })
@@ -1047,7 +1050,7 @@ billingRouter.post('/:id/complete-payment', requireRoles(...BILLING_ROLES), asyn
         })
         return
       }
-      if (code === 'DISCOUNT' || code === 'INVALID_AMOUNT' || code === 'INVALID_USD' || code === 'INVALID_REFUND' || code === 'INVALID_NET' || code === 'NO_RATE' || code === 'BANK_REQUIRED' || code === 'DUPLICATE' || code === 'CREDIT_TOPUP_PARTIAL') {
+      if (code === 'DISCOUNT' || code === 'INVALID_AMOUNT' || code === 'INVALID_USD' || code === 'INVALID_REFUND' || code === 'INVALID_NET' || code === 'NO_RATE' || code === 'BANK_REQUIRED' || code === 'DUPLICATE' || code === 'CREDIT_TOPUP_PARTIAL' || code === 'USD_COLLECTION_REQUIRED') {
         res.status(400).json({ error: msg })
         return
       }

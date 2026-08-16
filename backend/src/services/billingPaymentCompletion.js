@@ -54,6 +54,85 @@ function mapDiscountError(err) {
 
 export { parseSypReceivedFromBody, isZeroCollectionAllowed, assertBillingCollectionAmountValid }
 
+/**
+ * فرق التسوية: لا يُحوَّل دولار↔ليرة إلى رصيد إضافي إذا طابق الصافي المستحق.
+ * تطابق الليرة (±1) أو الدولار (±0.02) يلغي الفائض/الذمة الناتجين عن سعر الصرف.
+ */
+export function computeBillingSettlementDelta({
+  payCurrency,
+  netReceivedSyp,
+  dueAfterCreditSyp,
+  dueAfterCreditUsd = 0,
+  dueUsd = 0,
+  creditAppliedSyp = 0,
+  amountUsdRaw = 0,
+  usdSypRateUsed = 0,
+  rateForCredit = 0,
+  patientRefundUsd = 0,
+  absorbCashNetUsdQualifies = false,
+  isUsdBilling = false,
+}) {
+  const rate = Number(usdSypRateUsed > 0 ? usdSypRateUsed : rateForCredit) || 0
+  const remainingSyp = Math.round(Number(dueAfterCreditSyp) || 0)
+  const netSyp = Math.round(Number(netReceivedSyp) || 0)
+  const creditApplied = Math.round(Number(creditAppliedSyp) || 0)
+  const billedUsd = round6(Number(dueUsd) || 0)
+  let remainingUsd = round6(Number(dueAfterCreditUsd) || 0)
+
+  if (isUsdBilling && billedUsd > 0) {
+    if (!(remainingUsd > 0) && remainingSyp > 0 && rate > 0) {
+      remainingUsd = round6(remainingSyp / rate)
+    } else if (!(remainingUsd > 0) && remainingSyp === 0 && creditApplied === 0) {
+      remainingUsd = billedUsd
+    }
+  }
+
+  if (Math.abs(netSyp - remainingSyp) <= 1) {
+    return { settlementDeltaSyp: 0, settlementDeltaUsd: 0 }
+  }
+
+  if (isUsdBilling && billedUsd > 0 && rate > 0) {
+    const cur = String(payCurrency || 'SYP').toUpperCase()
+    let netUsd
+    if (cur === 'USD') {
+      const refundUsd = round6(Number(patientRefundUsd) || 0)
+      netUsd = round6(Math.max(0, Number(amountUsdRaw) - refundUsd))
+    } else {
+      netUsd = round6(netSyp / rate)
+    }
+
+    let settlementDeltaUsd = round6(netUsd - remainingUsd)
+    if (Math.abs(settlementDeltaUsd) < 0.02) {
+      return { settlementDeltaSyp: 0, settlementDeltaUsd: 0 }
+    }
+    if (
+      cur === 'USD' &&
+      settlementDeltaUsd > 0 &&
+      settlementDeltaUsd * rate <= rate &&
+      absorbCashNetUsdQualifies
+    ) {
+      return { settlementDeltaSyp: 0, settlementDeltaUsd: 0 }
+    }
+    return {
+      settlementDeltaUsd,
+      settlementDeltaSyp: Math.round(settlementDeltaUsd * rate),
+    }
+  }
+
+  let settlementDeltaSyp = netSyp - remainingSyp
+  if (
+    String(payCurrency || '').toUpperCase() === 'USD' &&
+    rate > 0 &&
+    settlementDeltaSyp > 0 &&
+    settlementDeltaSyp <= rate &&
+    absorbCashNetUsdQualifies
+  ) {
+    settlementDeltaSyp = 0
+  }
+  if (Math.abs(settlementDeltaSyp) <= 1) settlementDeltaSyp = 0
+  return { settlementDeltaSyp, settlementDeltaUsd: 0 }
+}
+
 /** خصم الرصيد الإضافي من المستحق قبل مقارنة المبلغ النقدي المستلم */
 export function applyPrepaidCreditTowardDue({
   dueSyp,
@@ -169,7 +248,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
   const dueForSettlement = discountMeta.effectiveAmountDueSyp
   const receipt = await resolveBillingPaymentReceipt(reqBody, bi.businessDate)
-  const {
+  let {
     payCurrency,
     netReceivedSyp,
     receivedAmountSyp: receivedSyp,
@@ -180,7 +259,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     amountUsdRaw,
   } = receipt
 
-  /** بند مسعّر بالدولار: الذمة/الفائض يُحفظان بالدولار */
+  /** بند مسعّر بالدولار: التحصيل والجرد بالدولار فقط */
   const isUsdBilling = String(bi.currency || 'SYP').toUpperCase() === 'USD'
   const dueUsd = isUsdBilling
     ? round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
@@ -190,6 +269,31 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   if (isUsdBilling && !(rateForCredit > 0)) {
     const fetched = await fetchUsdSypRateForBusinessDate(bi.businessDate)
     if (fetched != null) rateForCredit = fetched
+  }
+
+  if (isUsdBilling && dueUsd > 0 && payCurrency !== 'USD') {
+    if (payCurrency === 'MIXED') {
+      const err = new Error('هذا البند مسعّر بالدولار. يجب تحصيل المبلغ بالدولار فقط ولا يُحوَّل إلى ليرة.')
+      err.code = 'USD_COLLECTION_REQUIRED'
+      throw err
+    }
+    const rate = rateForCredit > 0 ? rateForCredit : usdSypRateUsed
+    if (netReceivedSyp > 0 && !(rate > 0)) {
+      const err = new Error(
+        'لا يتوفر سعر صرف مسجّل لتاريخ هذا البند. يجب تفعيل يوم العمل ذلك اليوم مع إدخال سعر الدولار مقابل الليرة.',
+      )
+      err.code = 'NO_RATE'
+      throw err
+    }
+    payCurrency = 'USD'
+    amountUsdRaw =
+      netReceivedSyp > 0 && Math.abs(netReceivedSyp - dueForSettlement) <= 1
+        ? dueUsd
+        : netReceivedSyp > 0 && rate > 0
+          ? round6(netReceivedSyp / rate)
+          : 0
+    receivedUsd = round6(amountUsdRaw)
+    usdSypRateUsed = rate > 0 ? rate : usdSypRateUsed
   }
 
   const patient = await Patient.findById(bi.patientId).lean()
@@ -237,7 +341,6 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
 
   const method = paymentChannel === 'bank' ? 'bank' : 'cash'
   const appliedAmountSyp = Math.min(netReceivedSyp, dueAfterCreditSyp)
-  let settlementDeltaSyp = netReceivedSyp - dueAfterCreditSyp
   let absorbCashNetUsdQualifies = false
   if (payCurrency === 'USD' && usdSypRateUsed > 0) {
     if (patientRefundUsd > 0 && patientRefundSyp > 0) {
@@ -259,41 +362,21 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
         Math.abs(amountUsdRaw - Math.round(amountUsdRaw)) < 1e-5
     }
   }
-  if (
-    payCurrency === 'USD' &&
-    usdSypRateUsed > 0 &&
-    settlementDeltaSyp > 0 &&
-    settlementDeltaSyp <= usdSypRateUsed &&
-    absorbCashNetUsdQualifies
-  ) {
-    settlementDeltaSyp = 0
-  }
 
-  let settlementDeltaUsd = 0
-  if (isUsdBilling && dueUsd > 0 && rateForCredit > 0) {
-    const rate = usdSypRateUsed > 0 ? usdSypRateUsed : rateForCredit
-    const netUsd = round6(netReceivedSyp / rate)
-    settlementDeltaUsd = round6(netUsd - dueAfterCreditUsd)
-    if (
-      payCurrency === 'USD' &&
-      settlementDeltaUsd > 0 &&
-      settlementDeltaUsd * rateForCredit <= rateForCredit &&
-      absorbCashNetUsdQualifies
-    ) {
-      settlementDeltaUsd = 0
-    }
-    const sypRemainder = netReceivedSyp - dueAfterCreditSyp
-    /**
-     * دفعة دولار مطابقة للمستحق بالليرة ليست رصيداً إضافياً.
-     * (تقليل سابق كان يصفّر dueAfterCreditUsd عند غياب رصيد، فيُحسب كامل المبلغ فائضاً.)
-     */
-    if (Math.abs(sypRemainder) <= 1) {
-      settlementDeltaUsd = 0
-      settlementDeltaSyp = 0
-    } else {
-      settlementDeltaSyp = Math.round(settlementDeltaUsd * rateForCredit)
-    }
-  }
+  const { settlementDeltaSyp, settlementDeltaUsd } = computeBillingSettlementDelta({
+    payCurrency,
+    netReceivedSyp,
+    dueAfterCreditSyp,
+    dueAfterCreditUsd,
+    dueUsd,
+    creditAppliedSyp,
+    amountUsdRaw,
+    usdSypRateUsed,
+    rateForCredit,
+    patientRefundUsd,
+    absorbCashNetUsdQualifies,
+    isUsdBilling,
+  })
 
   const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
   if (existingPay) {
@@ -311,7 +394,13 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       settlementDeltaSyp,
       settlementDeltaUsd: isUsdBilling ? settlementDeltaUsd : 0,
       creditAppliedSyp,
-      ...paymentRecordReceivedFields(receipt),
+      ...paymentRecordReceivedFields({
+        ...receipt,
+        payCurrency,
+        receivedAmountSyp: receivedSyp,
+        receivedAmountUsd: receivedUsd,
+        amountUsdRaw,
+      }),
       paymentChannel,
       bankName: paymentChannel === 'bank' ? bankName : '',
       method,
