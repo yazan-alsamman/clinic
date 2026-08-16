@@ -3,6 +3,7 @@ import cors from 'cors'
 import { config } from './config.js'
 import { connectDb } from './db.js'
 import { ensureDefaultCalculationProfiles } from './services/ensureDefaultCalculationProfiles.js'
+import { repairUsdExactPaymentFalseCredit } from './services/repairUsdExactPaymentFalseCredit.js'
 import { authRouter } from './routes/auth.js'
 import { systemRouter } from './routes/system.js'
 import { patientsRouter } from './routes/patients.js'
@@ -88,6 +89,16 @@ connectDb()
     dbConnected = true
     console.log('MongoDB connected')
     await ensureDefaultCalculationProfiles()
+    try {
+      const repair = await repairUsdExactPaymentFalseCredit()
+      if (repair.repaired > 0) {
+        console.log(
+          `repairUsdExactPaymentFalseCredit: repaired=${repair.repaired} scanned=${repair.scanned} creditReducedSyp=${repair.creditReducedSyp}`,
+        )
+      }
+    } catch (repairErr) {
+      console.error('repairUsdExactPaymentFalseCredit:', repairErr?.message || repairErr)
+    }
   })
   .catch((err) => {
     console.error('MongoDB connection failed:', err?.message || err)

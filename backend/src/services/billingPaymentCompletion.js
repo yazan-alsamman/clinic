@@ -67,7 +67,16 @@ export function applyPrepaidCreditTowardDue({
   const rate = Math.max(0, Number(usdSypRate) || 0)
   const dueUsdN = Math.max(0, round6(Number(dueUsd) || 0))
 
-  if (isUsdBilling && dueUsdN > 0 && rate > 0 && credit > 0) {
+  if (!(credit > 0)) {
+    return {
+      creditAppliedSyp: 0,
+      creditRemainingSyp: 0,
+      dueAfterCreditSyp: due,
+      dueAfterCreditUsd: isUsdBilling ? dueUsdN : 0,
+    }
+  }
+
+  if (isUsdBilling && dueUsdN > 0 && rate > 0) {
     const creditAsUsd = round6(credit / rate)
     const useUsd = Math.min(creditAsUsd, dueUsdN)
     const creditAppliedSyp = Math.round(useUsd * rate)
@@ -87,7 +96,8 @@ export function applyPrepaidCreditTowardDue({
     creditAppliedSyp,
     creditRemainingSyp: credit,
     dueAfterCreditSyp: Math.max(0, due - creditAppliedSyp),
-    dueAfterCreditUsd: 0,
+    /** بدون سعر صرف: نبقي المستحق بالدولار كما هو إن كان البند مسعّراً بالدولار */
+    dueAfterCreditUsd: isUsdBilling ? dueUsdN : 0,
   }
 }
 
@@ -261,7 +271,8 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
 
   let settlementDeltaUsd = 0
   if (isUsdBilling && dueUsd > 0 && rateForCredit > 0) {
-    const netUsd = round6(netReceivedSyp / (usdSypRateUsed > 0 ? usdSypRateUsed : rateForCredit))
+    const rate = usdSypRateUsed > 0 ? usdSypRateUsed : rateForCredit
+    const netUsd = round6(netReceivedSyp / rate)
     settlementDeltaUsd = round6(netUsd - dueAfterCreditUsd)
     if (
       payCurrency === 'USD' &&
@@ -271,7 +282,17 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     ) {
       settlementDeltaUsd = 0
     }
-    settlementDeltaSyp = Math.round(settlementDeltaUsd * rateForCredit)
+    const sypRemainder = netReceivedSyp - dueAfterCreditSyp
+    /**
+     * دفعة دولار مطابقة للمستحق بالليرة ليست رصيداً إضافياً.
+     * (تقليل سابق كان يصفّر dueAfterCreditUsd عند غياب رصيد، فيُحسب كامل المبلغ فائضاً.)
+     */
+    if (Math.abs(sypRemainder) <= 1) {
+      settlementDeltaUsd = 0
+      settlementDeltaSyp = 0
+    } else {
+      settlementDeltaSyp = Math.round(settlementDeltaUsd * rateForCredit)
+    }
   }
 
   const existingPay = await BillingPayment.findOne({ billingItemId: bi._id })
