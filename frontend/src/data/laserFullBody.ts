@@ -45,6 +45,32 @@ export function normalizePackageAreaLabel(text: string): string {
   return PACKAGE_AREA_ALIASES[n] || n
 }
 
+export function laserItemIsCoveredByPackage(
+  item: { id: string; name: string; kind?: string },
+  packageOptionIds: string[] | undefined,
+  packageItems: Array<{ id: string; name: string; kind?: string }>,
+): boolean {
+  const pidSet = new Set((packageOptionIds || []).map(String).filter(Boolean))
+  if (pidSet.has(String(item.id))) return true
+  const labels = new Set<string>()
+  for (const pkgItem of packageItems) {
+    const n = normalizePackageAreaLabel(pkgItem.name)
+    if (n) labels.add(n)
+    if (pkgItem.kind === 'offer') {
+      for (const part of splitLaserOfferAreaLabels(pkgItem.name)) {
+        const p = normalizePackageAreaLabel(part)
+        if (p) labels.add(p)
+      }
+    }
+  }
+  if (!labels.size) return false
+  if (labels.has(normalizePackageAreaLabel(item.name))) return true
+  if (item.kind === 'offer') {
+    return splitLaserOfferAreaLabels(item.name).some((part) => labels.has(normalizePackageAreaLabel(part)))
+  }
+  return false
+}
+
 export function laserProcedureMatchesRemainingPackageAreas(
   item: { name: string; kind?: string },
   remainingAreaLabels: string[],

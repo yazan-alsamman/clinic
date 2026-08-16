@@ -28,6 +28,7 @@ import {
   parseBookedLaserAddonSegment,
   splitLaserOfferAreaLabels,
   laserProcedureMatchesRemainingPackageAreas,
+  laserItemIsCoveredByPackage,
 } from '../data/laserFullBody'
 import type { LaserCategory, Patient, Role } from '../types'
 
@@ -1804,12 +1805,19 @@ export function PatientRecord() {
           ]),
       )
       const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
-        const packageIds = new Set((activeLaserPackage?.procedureOptionIds || []).map(String))
-        let isAddon = selectedLaserAddonItemIds.includes(item.id)
+        const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
+        const packageItems = packageIds
+          .map((pid) => laserItemById.get(pid))
+          .filter((x): x is LaserProcedureItem => Boolean(x))
+        const coveredByPackage = laserItemIsCoveredByPackage(item, packageIds, packageItems)
+        const pickedAsAddon = selectedLaserAddonItemIds.includes(item.id)
+        const pickedAsMain = selectedLaserItemIds.includes(item.id)
+        let isAddon = pickedAsAddon && !pickedAsMain
         if (sessionInPackageMode) {
-          // أي منطقة ليست من مناطق الباكج تُصنَّف خارج الباكج
-          if (!packageIds.has(item.id)) isAddon = true
-          if (selectedLaserAddonItemIds.includes(item.id)) isAddon = true
+          // مناطق الباكج (بالمعرّف أو الاسم) تبقى ضمن الباكج حتى لو اختيرت خطأً من قسم الإضافات
+          if (coveredByPackage) isAddon = false
+          else if (pickedAsMain) isAddon = false
+          else if (pickedAsAddon) isAddon = true
         }
         const parsedNames = item.kind === 'offer' ? splitLaserOfferAreaLabels(item.name) : []
         const neededRowsFromOffer =
@@ -1837,8 +1845,10 @@ export function PatientRecord() {
   }, [
     combinedLaserSaveItems,
     selectedLaserAddonItemIds,
+    selectedLaserItemIds,
     sessionInPackageMode,
     activeLaserPackage?.procedureOptionIds,
+    laserItemById,
   ])
 
   const partialPackageLaserSession = useMemo(() => {
@@ -2078,11 +2088,19 @@ export function PatientRecord() {
     if (!withAddonMode) return
     if (laserProcedureLoading || !laserProcedureGroups.length) return
 
-    const packageIds = new Set((activeLaserPackage?.procedureOptionIds || []).map(String))
+    const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
+    const packageItems = packageIds
+      .map((pid) => laserItemById.get(pid))
+      .filter((x): x is LaserProcedureItem => Boolean(x))
+    const isTrueAddon = (id: string) => {
+      const item = laserItemById.get(id)
+      if (!item) return !packageIds.includes(id)
+      return !laserItemIsCoveredByPackage(item, packageIds, packageItems)
+    }
     let matchedIds: string[] = []
 
     if (bookedLaserAddonIdsFromQuery.length > 0) {
-      matchedIds = bookedLaserAddonIdsFromQuery.filter((id) => laserItemById.has(id) && !packageIds.has(id))
+      matchedIds = bookedLaserAddonIdsFromQuery.filter((id) => laserItemById.has(id) && isTrueAddon(id))
     }
 
     if (matchedIds.length === 0) {
@@ -2102,7 +2120,7 @@ export function PatientRecord() {
           .map((x) => normalizeLaserBookingText(x))
           .filter(Boolean)
           .map((name) => byName.get(name))
-          .filter((id): id is string => Boolean(id) && !packageIds.has(String(id)))
+          .filter((id): id is string => Boolean(id) && isTrueAddon(id))
       }
     }
 
@@ -2136,8 +2154,15 @@ export function PatientRecord() {
         const slot = (data.slots || []).find((s) => String(s.id) === bookedLaserSlotId)
         const ids = (slot?.laserAddonProcedureOptionIds || []).map(String).filter(Boolean)
         if (ids.length > 0) {
-          const packageIds = new Set((activeLaserPackage?.procedureOptionIds || []).map(String))
-          const addonOnly = ids.filter((id) => !packageIds.has(id))
+          const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
+          const packageItems = packageIds
+            .map((pid) => laserItemById.get(pid))
+            .filter((x): x is LaserProcedureItem => Boolean(x))
+          const addonOnly = ids.filter((id) => {
+            const item = laserItemById.get(id)
+            if (!item) return !packageIds.includes(id)
+            return !laserItemIsCoveredByPackage(item, packageIds, packageItems)
+          })
           if (addonOnly.length > 0) {
             setSelectedLaserAddonItemIds((prev) => [...new Set([...prev, ...addonOnly])])
             setSelectedLaserItemIds((prev) => prev.filter((id) => !addonOnly.includes(id)))
@@ -2150,7 +2175,7 @@ export function PatientRecord() {
     return () => {
       cancelled = true
     }
-  }, [tab, bookedLaserSlotId, bookedLaserAddonIdsFromQuery.length, activeLaserPackage?.procedureOptionIds])
+  }, [tab, bookedLaserSlotId, bookedLaserAddonIdsFromQuery.length, activeLaserPackage?.procedureOptionIds, laserItemById])
 
   useEffect(() => {
     if (sessionInPackageMode) return
@@ -4751,7 +4776,7 @@ export function PatientRecord() {
                       <div style={{ display: 'grid', gap: '0.75rem' }}>
                         <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)' }}>
                           {sessionInPackageMode
-                            ? 'المناطق التالية تُسجّل ضمن الجلسة (ضمن الباكج أو كجلسة واحدة). لإضافة سعر اختر قسم «خارج الباكج» أدناه.'
+                            ? 'المناطق هنا تُسجّل ضمن الباكج. لإضافة مناطق مدفوعة منفصلة استخدم قسم «خارج الباكج» أدناه.'
                             : 'اختر المناطق أو العروض المطلوبة.'}
                         </p>
                         {laserProcedureGroups.map((g) => (
@@ -4803,10 +4828,14 @@ export function PatientRecord() {
                                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                   {g.items.map((item) => {
                                     const selected = selectedLaserAddonItemIds.includes(item.id)
-                                    const inPackage = (activeLaserPackage?.procedureOptionIds || []).includes(
-                                      item.id,
+                                    const coveredByPackage = laserItemIsCoveredByPackage(
+                                      item,
+                                      activeLaserPackage?.procedureOptionIds,
+                                      (activeLaserPackage?.procedureOptionIds || [])
+                                        .map((pid) => laserItemById.get(pid))
+                                        .filter((x): x is LaserProcedureItem => Boolean(x)),
                                     )
-                                    if (inPackage) return null
+                                    if (coveredByPackage) return null
                                     return (
                                       <button
                                         key={`addon-${item.id}`}

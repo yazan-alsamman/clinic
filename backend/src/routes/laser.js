@@ -24,6 +24,7 @@ import {
   mergeLaserDebtSettlementsIntoPaymentBreakdown,
 } from '../services/patientDebtSettlementAllocation.js'
 import { resolveLaserPackageSessionForBooking, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas } from '../services/laserPackageBooking.js'
+import { areaBelongsToLaserPackage } from '../services/laserPackageAreaBreakdown.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
 
@@ -1424,52 +1425,87 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     let addonProcedureOptionIds = addonProcedureOptionIdsEarly.filter(
       (id) => !effectiveMainOptionIds.includes(id),
     )
-    const packageOptionIdSet = new Set(
-      Array.isArray(packageMatch?.pkg?.procedureOptionIds)
-        ? packageMatch.pkg.procedureOptionIds.map((x) => String(x || '').trim()).filter(Boolean)
-        : [],
-    )
-    // إعادة تصنيف isAddon وفق عضوية الباكج + قائمة الإضافات — لا نثق بعلم الواجهة وحده
-    if (packageMatch && packageOptionIdSet.size > 0) {
-      // افصل أي معرّف خارج مناطق الباكج من القائمة الرئيسية إلى الإضافات
-      const leakedFromMain = effectiveMainOptionIds.filter((id) => !packageOptionIdSet.has(id))
-      effectiveMainOptionIds = effectiveMainOptionIds.filter((id) => packageOptionIdSet.has(id))
-      for (const id of leakedFromMain) {
-        if (!addonProcedureOptionIds.includes(id)) addonProcedureOptionIds.push(id)
-      }
-      for (const id of addonProcedureOptionIdsEarly) {
-        if (!packageOptionIdSet.has(id) && !addonProcedureOptionIds.includes(id)) {
-          addonProcedureOptionIds.push(id)
-        }
-      }
-      if (rawLineItems.length > 0) {
-        const addonIdSet = new Set(addonProcedureOptionIds)
-        rawLineItems = rawLineItems.map((row) => {
-          const oid = String(row.procedureOptionId || '').trim()
-          if (!oid) return row
-          const isAddon = addonIdSet.has(oid) || !packageOptionIdSet.has(oid)
-          return { ...row, isAddon }
-        })
-        for (const row of rawLineItems) {
-          const oid = String(row.procedureOptionId || '').trim()
-          if (row.isAddon && oid && !addonProcedureOptionIds.includes(oid)) {
-            addonProcedureOptionIds.push(oid)
-          }
-        }
-      }
-    }
-    const allProcedureOptionIds = [...new Set([...effectiveMainOptionIds, ...addonProcedureOptionIds])]
+    const packageIdList = Array.isArray(packageMatch?.pkg?.procedureOptionIds)
+      ? packageMatch.pkg.procedureOptionIds.map((x) => String(x || '').trim()).filter(Boolean)
+      : []
+    const packageOptionIdSet = new Set(packageIdList)
+    const allProcedureOptionIds = [
+      ...new Set([
+        ...effectiveMainOptionIds,
+        ...addonProcedureOptionIds,
+        ...packageIdList,
+        ...rawLineItems.map((row) => String(row.procedureOptionId || '').trim()).filter(Boolean),
+      ]),
+    ]
     const procedureOptionsById = new Map()
     if (allProcedureOptionIds.length > 0) {
       const optionRows = await LaserProcedureOption.find({
         _id: { $in: allProcedureOptionIds },
-        active: true,
       }).lean()
       for (const row of optionRows) procedureOptionsById.set(String(row._id), row)
-      const missing = allProcedureOptionIds.filter((id) => !procedureOptionsById.has(id))
+      const requiredIds = [
+        ...new Set([
+          ...effectiveMainOptionIds,
+          ...addonProcedureOptionIds,
+          ...rawLineItems.map((row) => String(row.procedureOptionId || '').trim()).filter(Boolean),
+        ]),
+      ]
+      const missing = requiredIds.filter((id) => {
+        const opt = procedureOptionsById.get(id)
+        return !opt || opt.active === false
+      })
       if (missing.length > 0) {
         res.status(400).json({ error: 'بعض المناطق/العروض المحددة غير موجودة أو موقفة' })
         return
+      }
+    }
+    const optionMetaById = new Map(
+      [...procedureOptionsById.entries()].map(([id, row]) => [
+        id,
+        { name: String(row?.name || '').trim(), kind: String(row?.kind || 'area').trim() },
+      ]),
+    )
+
+    // تصنيف ضمن/خارج الباكج: مناطق الباكج (معرّف أو اسم) + ما اختاره الأخصائي في القسم الرئيسي
+    if (packageMatch && packageOptionIdSet.size > 0) {
+      const explicitMain = new Set(effectiveMainOptionIds)
+      const promotedMains = []
+      const nextAddons = []
+      for (const id of addonProcedureOptionIdsEarly) {
+        const meta = optionMetaById.get(id)
+        if (areaBelongsToLaserPackage(id, meta?.name, packageIdList, optionMetaById)) {
+          if (!promotedMains.includes(id) && !explicitMain.has(id)) promotedMains.push(id)
+          continue
+        }
+        if (!explicitMain.has(id) && !nextAddons.includes(id)) nextAddons.push(id)
+      }
+      for (const id of effectiveMainOptionIds) {
+        if (!nextAddons.includes(id) && !promotedMains.includes(id)) promotedMains.unshift(id)
+      }
+      effectiveMainOptionIds = [...new Set([...effectiveMainOptionIds, ...promotedMains])]
+      addonProcedureOptionIds = nextAddons.filter((id) => !effectiveMainOptionIds.includes(id))
+
+      if (rawLineItems.length > 0) {
+        const explicitAddon = new Set(addonProcedureOptionIds)
+        rawLineItems = rawLineItems.map((row) => {
+          const oid = String(row.procedureOptionId || '').trim()
+          const meta = oid ? optionMetaById.get(oid) : null
+          const label = row.areaLabel || meta?.name || ''
+          const belongs = areaBelongsToLaserPackage(oid, label, packageIdList, optionMetaById)
+          const pickedAsMain = Boolean(oid && explicitMain.has(oid) && !explicitAddon.has(oid))
+          const isAddon = !(belongs || pickedAsMain)
+          return { ...row, isAddon }
+        })
+        for (const row of rawLineItems) {
+          const oid = String(row.procedureOptionId || '').trim()
+          if (!oid) continue
+          if (row.isAddon) {
+            if (!addonProcedureOptionIds.includes(oid)) addonProcedureOptionIds.push(oid)
+            effectiveMainOptionIds = effectiveMainOptionIds.filter((id) => id !== oid)
+          } else if (!effectiveMainOptionIds.includes(oid)) {
+            effectiveMainOptionIds.push(oid)
+          }
+        }
       }
     }
     const selectedMainOptions = effectiveMainOptionIds

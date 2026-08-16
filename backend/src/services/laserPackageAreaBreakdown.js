@@ -60,6 +60,27 @@ export function normalizePackageAreaLabel(text) {
   return PACKAGE_AREA_ALIASES.get(n) || n
 }
 
+/**
+ * هل المنطقة/العرض من مناطق الباكج؟ بالمعرّف أو باسم المنطقة (مع مرادفات العروض).
+ * يُستخدم حتى لا تُصنَّف منطقة باكج — خصوصاً المتبقية — كـ «خارج الباكج».
+ */
+export function areaBelongsToLaserPackage(optionId, label, packageIds, optionMetaById) {
+  const oid = String(optionId || '').trim()
+  const ids = (Array.isArray(packageIds) ? packageIds : []).map((x) => String(x || '').trim()).filter(Boolean)
+  if (oid && ids.includes(oid)) return true
+  const slots = expandPackageAreaSlots(ids, optionMetaById || new Map())
+  const slotNorms = new Set(slots.map((s) => s.normalized).filter(Boolean))
+  if (!slotNorms.size) return false
+  const labels = []
+  if (label) labels.push(String(label))
+  const meta = oid && optionMetaById ? optionMetaById.get(oid) : null
+  if (meta?.name) labels.push(String(meta.name))
+  if (meta && String(meta.kind || '') === 'offer') {
+    labels.push(...splitLaserOfferAreaLabels(meta.name))
+  }
+  return labels.some((t) => slotNorms.has(normalizePackageAreaLabel(t)))
+}
+
 function packageExpectedAreaCount(pkg) {
   const ids = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
   return Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0), ids.length)
