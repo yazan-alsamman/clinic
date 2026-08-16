@@ -2120,7 +2120,7 @@ export function PatientRecord() {
           .map((x) => normalizeLaserBookingText(x))
           .filter(Boolean)
           .map((name) => byName.get(name))
-          .filter((id): id is string => Boolean(id) && isTrueAddon(id))
+          .filter((id): id is string => typeof id === 'string' && isTrueAddon(id))
       }
     }
 
