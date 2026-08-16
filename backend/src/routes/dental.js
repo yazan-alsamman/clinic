@@ -1300,6 +1300,7 @@ dentalRouter.get('/credit-topup/:patientId', async (req, res) => {
     }
     const items = await BillingItem.find({
       patientId: patient._id,
+      department: 'dental',
       isCreditTopUp: true,
       status: { $in: ['pending_payment', 'paid'] },
     })
@@ -1307,7 +1308,8 @@ dentalRouter.get('/credit-topup/:patientId', async (req, res) => {
       .limit(40)
       .lean()
     res.json({
-      prepaidCreditSyp: Math.round(Number(patient.prepaidCreditSyp) || 0),
+      prepaidCreditSyp: Math.round(Number(patient.prepaidCreditDentalSyp) || 0),
+      prepaidCreditDentalSyp: Math.round(Number(patient.prepaidCreditDentalSyp) || 0),
       items: items.map(creditTopUpDto),
     })
   } catch (e) {
@@ -1409,7 +1411,8 @@ dentalRouter.post('/credit-topup/:patientId', requireActiveDay, async (req, res)
     })
 
     res.status(201).json({
-      prepaidCreditSyp: Math.round(Number(patient.prepaidCreditSyp) || 0),
+      prepaidCreditSyp: Math.round(Number(patient.prepaidCreditDentalSyp) || 0),
+      prepaidCreditDentalSyp: Math.round(Number(patient.prepaidCreditDentalSyp) || 0),
       item: creditTopUpDto(bi),
     })
   } catch (e) {

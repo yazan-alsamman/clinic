@@ -839,7 +839,7 @@ export function BillingPage() {
                   </p>
                   {b.isCreditTopUp ? (
                     <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: 'var(--success)' }}>
-                      شحن رصيد إضافي — بعد القبض يُضاف لمحفظة المريض ويُخصم لاحقاً من الإجراءات.
+                      شحن رصيد أسنان إضافي — بعد القبض يُضاف لرصيد الأسنان ويُخصم لاحقاً من إجراءات الأسنان فقط.
                     </p>
                   ) : null}
                   <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }} dir={itemBillingCurrency(b) === 'USD' ? 'ltr' : undefined}>
@@ -847,7 +847,8 @@ export function BillingPage() {
                   </p>
                   {itemPrepaidCreditSyp(b) > 0 && !b.isCreditTopUp ? (
                     <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--success)' }}>
-                      رصيد إضافي للمريض: {itemPrepaidCreditSyp(b).toLocaleString('ar-SY')} ل.س
+                      {b.department === 'dental' ? 'رصيد أسنان إضافي' : 'رصيد إضافي للمريض'}:{' '}
+                      {itemPrepaidCreditSyp(b).toLocaleString('ar-SY')} ل.س
                       {itemCreditTowardDueSyp(b) > 0 ? (
                         <>
                           {' '}
@@ -1059,7 +1060,7 @@ export function BillingPage() {
                 }}
               >
                 <div>
-                  رصيد إضافي للمريض:{' '}
+                  {payItem.department === 'dental' ? 'رصيد أسنان إضافي' : 'رصيد إضافي للمريض'}:{' '}
                   <strong>{itemPrepaidCreditSyp(payItem).toLocaleString('ar-SY')} ل.س</strong>
                 </div>
                 {creditTowardDueSyp > 0 ? (
@@ -1133,8 +1134,8 @@ export function BillingPage() {
             ) : null}
             {payItem.isCreditTopUp ? (
               <p style={{ margin: '0.55rem 0 0', fontSize: '0.86rem', color: 'var(--success)', lineHeight: 1.5 }}>
-                هذا البند شحن رصيد إضافي. بعد تأكيد القبض يُضاف المبلغ لمحفظة المريض، ثم يُخصم تلقائياً عند تحصيل
-                الإجراءات حتى يصبح الرصيد صفراً.
+                هذا البند شحن رصيد أسنان إضافي. بعد تأكيد القبض يُضاف لرصيد الأسنان فقط، ثم يُخصم عند تحصيل إجراءات
+                الأسنان — لا يُخصم لليزر أو الجلدية أو البشرة.
               </p>
             ) : null}
             {payItem.isCreditTopUp ? null : (

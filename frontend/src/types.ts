@@ -62,6 +62,7 @@ export interface Patient {
   outstandingDebtSyp?: number
   outstandingDebtUsd?: number
   prepaidCreditSyp?: number
+  prepaidCreditDentalSyp?: number
   paperLaserEntries?: Array<{
     therapist: string
     sessionDate: string

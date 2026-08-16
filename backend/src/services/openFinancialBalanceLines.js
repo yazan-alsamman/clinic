@@ -66,6 +66,7 @@ export function computeOpenFinancialLineBuckets(
   outstandingDebtSyp,
   prepaidCreditSyp,
   outstandingDebtUsd = 0,
+  prepaidCreditDentalSyp = 0,
 ) {
   const financialNonMatchingEntries = entries.filter((x) => {
     if (x.settlementType === 'debt' || x.settlementType === 'credit') return true
@@ -74,6 +75,7 @@ export function computeOpenFinancialLineBuckets(
   let remainingDebt = roundMoney(outstandingDebtSyp)
   let remainingDebtUsd = round6(outstandingDebtUsd)
   let remainingCredit = roundMoney(prepaidCreditSyp)
+  let remainingDentalCredit = roundMoney(prepaidCreditDentalSyp)
   const openDebtLines = []
   const openCreditLines = []
 
@@ -116,11 +118,15 @@ export function computeOpenFinancialLineBuckets(
         currency: 'SYP',
       })
     } else if (delta > 0 || deltaUsd > 1e-9) {
-      if (!(remainingCredit > 0)) continue
+      const isDental = String(entry.department || '') === 'dental'
+      let pool = isDental ? remainingDentalCredit : remainingCredit
+      if (!(pool > 0)) continue
       const creditDelta = delta > 0 ? delta : 0
       if (!(creditDelta > 0)) continue
-      const unresolved = roundMoney(Math.min(creditDelta, remainingCredit))
-      remainingCredit = roundMoney(remainingCredit - unresolved)
+      const unresolved = roundMoney(Math.min(creditDelta, pool))
+      pool = roundMoney(pool - unresolved)
+      if (isDental) remainingDentalCredit = pool
+      else remainingCredit = pool
       openCreditLines.push({
         paymentEntryId: entry.id,
         billingItemId: entry.billingItemId,
@@ -141,6 +147,7 @@ export function computeOpenFinancialLineBuckets(
     remainingDebt,
     remainingDebtUsd,
     remainingCredit,
+    remainingDentalCredit,
   }
 }
 
@@ -314,12 +321,13 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
     const idSet = new Set(pitems.map((it) => String(it._id)))
     const pPayments = payments.filter((pay) => idSet.has(String(pay.billingItemId)))
     const entries = buildLedgerEntriesFromBilling(pitems, pPayments)
-    const { openDebtLines, openCreditLines, remainingDebt, remainingDebtUsd, remainingCredit } =
+    const { openDebtLines, openCreditLines, remainingDebt, remainingDebtUsd, remainingCredit, remainingDentalCredit } =
       computeOpenFinancialLineBuckets(
         entries,
         Number(p.outstandingDebtSyp) || 0,
         Number(p.prepaidCreditSyp) || 0,
         Number(p.outstandingDebtUsd) || 0,
+        Number(p.prepaidCreditDentalSyp) || 0,
       )
     const sessionPackages = Array.isArray(p.sessionPackages) ? p.sessionPackages : []
 
@@ -374,7 +382,25 @@ export async function buildAdminOpenFinancialLines(patientDocs, mode) {
               },
             ]
           : []
-      merged = [...billingPart, ...packageCreditLines, ...synthetic]
+      const syntheticDental =
+        remainingDentalCredit > 0
+          ? [
+              {
+                paymentEntryId: '',
+                billingItemId: '',
+                clinicalSessionId: '',
+                department: 'dental',
+                businessDate: '',
+                procedureLabel: 'رصيد إضافي للأسنان',
+                amountSyp: roundMoney(remainingDentalCredit),
+                amountUsd: 0,
+                currency: 'SYP',
+                synthetic: true,
+                source: 'synthetic',
+              },
+            ]
+          : []
+      merged = [...billingPart, ...packageCreditLines, ...synthetic, ...syntheticDental]
     }
 
     for (const line of merged) {

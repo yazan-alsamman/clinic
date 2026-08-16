@@ -92,7 +92,7 @@ export function DentalExtraCredit({ patientId, canEdit, prepaidCreditSyp, onCred
       })
       setAmountSyp(0)
       setAmountUsd(0)
-      setOkMsg('تم إرسال الرصيد إلى التحصيل — يُضاف لمحفظة المريض بعد القبض، ثم يُخصم عند تحصيل الإجراءات.')
+      setOkMsg('تم إرسال الرصيد إلى التحصيل — يُضاف لرصيد الأسنان بعد القبض، ثم يُخصم عند تحصيل إجراءات الأسنان فقط.')
       await load()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'تعذر إضافة الرصيد الإضافي')
@@ -120,10 +120,10 @@ export function DentalExtraCredit({ patientId, canEdit, prepaidCreditSyp, onCred
 
   return (
     <div className="card" style={{ marginBottom: '1rem' }}>
-      <h2 className="card-title">رصيد إضافي</h2>
+      <h2 className="card-title">رصيد إضافي للأسنان</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-        أدخل مبلغاً بالليرة أو بالدولار ليظهر فوراً في التحصيل. بعد قبضه يُضاف لرصيد المريض، ويُخصم تلقائياً عند تحصيل
-        إجراءات الأسنان حتى يصبح الرصيد صفراً.
+        أدخل مبلغاً بالليرة أو بالدولار ليظهر فوراً في التحصيل. بعد قبضه يُضاف لرصيد الأسنان فقط، ويُخصم تلقائياً عند
+        تحصيل إجراءات الأسنان — ولا يُستخدم لليزر أو الجلدية أو البشرة أو أي قسم آخر.
       </p>
 
       <div
@@ -225,7 +225,7 @@ export function DentalExtraCredit({ patientId, canEdit, prepaidCreditSyp, onCred
                 background: 'var(--surface-2)',
               }}
             >
-              <strong style={{ fontSize: '0.92rem' }}>إضافة رصيد إضافي</strong>
+              <strong style={{ fontSize: '0.92rem' }}>إضافة رصيد أسنان إضافي</strong>
               <div
                 style={{
                   display: 'grid',

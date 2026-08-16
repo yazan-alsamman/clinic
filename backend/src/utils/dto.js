@@ -25,6 +25,7 @@ export function patientToDto(p, opts = {}) {
     outstandingDebtSyp: Number(o.outstandingDebtSyp) || 0,
     outstandingDebtUsd: Number(o.outstandingDebtUsd) || 0,
     prepaidCreditSyp: Number(o.prepaidCreditSyp) || 0,
+    prepaidCreditDentalSyp: Number(o.prepaidCreditDentalSyp) || 0,
     paperLaserEntries: Array.isArray(o.paperLaserEntries) ? o.paperLaserEntries : [],
     sessionPackages: Array.isArray(o.sessionPackages)
       ? o.sessionPackages.map((pkg) => ({

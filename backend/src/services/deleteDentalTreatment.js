@@ -141,7 +141,10 @@ async function reversePatientWalletFromPayment(patientId, pay, bi) {
 
   let debt = roundMoney(p.outstandingDebtSyp)
   let debtUsd = round6(p.outstandingDebtUsd)
-  let credit = roundMoney(p.prepaidCreditSyp)
+  let generalCredit = roundMoney(p.prepaidCreditSyp)
+  let dentalCredit = roundMoney(p.prepaidCreditDentalSyp)
+  const dentalWallet = String(bi?.department || '') === 'dental' || bi?.isCreditTopUp === true
+  let credit = dentalWallet ? dentalCredit : generalCredit
 
   const extraSyp = roundMoney(pay.settlementDeltaSyp)
   const extraUsd = round6(pay.settlementDeltaUsd)
@@ -174,13 +177,17 @@ async function reversePatientWalletFromPayment(patientId, pay, bi) {
 
   p.outstandingDebtSyp = Math.max(0, roundMoney(debt))
   p.outstandingDebtUsd = Math.max(0, round6(debtUsd))
-  p.prepaidCreditSyp = Math.max(0, roundMoney(credit))
+  if (dentalWallet) dentalCredit = Math.max(0, roundMoney(credit))
+  else generalCredit = Math.max(0, roundMoney(credit))
+  p.prepaidCreditSyp = Math.max(0, roundMoney(generalCredit))
+  p.prepaidCreditDentalSyp = Math.max(0, roundMoney(dentalCredit))
   await p.save()
 
   return {
     outstandingDebtSyp: p.outstandingDebtSyp,
     outstandingDebtUsd: p.outstandingDebtUsd,
     prepaidCreditSyp: p.prepaidCreditSyp,
+    prepaidCreditDentalSyp: p.prepaidCreditDentalSyp,
   }
 }
 

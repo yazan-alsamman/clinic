@@ -4,6 +4,7 @@ import { config } from './config.js'
 import { connectDb } from './db.js'
 import { ensureDefaultCalculationProfiles } from './services/ensureDefaultCalculationProfiles.js'
 import { repairUsdExactPaymentFalseCredit } from './services/repairUsdExactPaymentFalseCredit.js'
+import { splitDentalPrepaidCreditFromGeneralWallet } from './services/splitDentalPrepaidCreditFromGeneralWallet.js'
 import { authRouter } from './routes/auth.js'
 import { systemRouter } from './routes/system.js'
 import { patientsRouter } from './routes/patients.js'
@@ -98,6 +99,16 @@ connectDb()
       }
     } catch (repairErr) {
       console.error('repairUsdExactPaymentFalseCredit:', repairErr?.message || repairErr)
+    }
+    try {
+      const split = await splitDentalPrepaidCreditFromGeneralWallet()
+      if (split.patientsMoved > 0) {
+        console.log(
+          `splitDentalPrepaidCreditFromGeneralWallet: patientsMoved=${split.patientsMoved} amountMovedSyp=${split.amountMovedSyp}`,
+        )
+      }
+    } catch (splitErr) {
+      console.error('splitDentalPrepaidCreditFromGeneralWallet:', splitErr?.message || splitErr)
     }
   })
   .catch((err) => {

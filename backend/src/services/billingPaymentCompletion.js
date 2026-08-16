@@ -274,7 +274,10 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   const patient = await Patient.findById(bi.patientId).lean()
   let debt = Math.round(Number(patient?.outstandingDebtSyp) || 0)
   let debtUsd = round6(Number(patient?.outstandingDebtUsd) || 0)
-  let credit = Math.round(Number(patient?.prepaidCreditSyp) || 0)
+  const dentalWallet = String(bi.department || '') === 'dental'
+  let generalCredit = Math.round(Number(patient?.prepaidCreditSyp) || 0)
+  let dentalCredit = Math.round(Number(patient?.prepaidCreditDentalSyp) || 0)
+  let credit = dentalWallet ? dentalCredit : generalCredit
 
   let creditAppliedSyp = 0
   let dueAfterCreditSyp = dueForSettlement
@@ -405,7 +408,8 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
 
   let outstandingDebtSyp = debt
   let outstandingDebtUsd = debtUsd
-  let prepaidCreditSyp = credit
+  let prepaidCreditSyp = generalCredit
+  let prepaidCreditDentalSyp = dentalCredit
   if (patient && !opts.skipPatientDebtUpdate) {
     // الرصيد الإضافي خُصم مسبقاً من المستحق؛ هنا فقط ذمة/فائض المبلغ النقدي
     if (isUsdBilling && Math.abs(settlementDeltaUsd) > 1e-9) {
@@ -440,23 +444,28 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
     if (isCreditTopUp) {
       credit += Math.max(0, dueForSettlement)
     }
+    if (dentalWallet) dentalCredit = Math.max(0, credit)
+    else generalCredit = Math.max(0, credit)
     await Patient.updateOne(
       { _id: bi.patientId },
       {
         $set: {
           outstandingDebtSyp: debt,
           outstandingDebtUsd: debtUsd,
-          prepaidCreditSyp: credit,
+          prepaidCreditSyp: generalCredit,
+          prepaidCreditDentalSyp: dentalCredit,
         },
       },
     )
     outstandingDebtSyp = debt
     outstandingDebtUsd = debtUsd
-    prepaidCreditSyp = credit
+    prepaidCreditSyp = generalCredit
+    prepaidCreditDentalSyp = dentalCredit
   } else if (patient) {
     outstandingDebtSyp = Math.round(Number(patient.outstandingDebtSyp) || 0)
     outstandingDebtUsd = round6(Number(patient.outstandingDebtUsd) || 0)
-    prepaidCreditSyp = Math.round(Number(patient.prepaidCreditSyp) || 0)
+    prepaidCreditSyp = generalCredit
+    prepaidCreditDentalSyp = dentalCredit
   }
 
   let posting = { skipped: true, reason: 'unknown' }
@@ -535,6 +544,7 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       outstandingDebtSyp,
       outstandingDebtUsd,
       prepaidCreditSyp,
+      prepaidCreditDentalSyp,
       creditAppliedSyp,
       dueAfterCreditSyp,
     },

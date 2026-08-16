@@ -1586,7 +1586,7 @@ export function PatientRecord() {
     if (!id) return
     try {
       const data = await api<{
-        summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+        summary: { outstandingDebtSyp: number; prepaidCreditSyp: number; prepaidCreditDentalSyp?: number }
         entries: FinancialEntry[]
       }>(`/api/patients/${encodeURIComponent(id)}/financial-ledger`)
       setFinancialEntries(data.entries || [])
@@ -1596,6 +1596,7 @@ export function PatientRecord() {
               ...prev,
               outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
               prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
+              prepaidCreditDentalSyp: Number(data.summary?.prepaidCreditDentalSyp) || 0,
             }
           : prev,
       )
@@ -1614,7 +1615,7 @@ export function PatientRecord() {
     ;(async () => {
       try {
         const data = await api<{
-          summary: { outstandingDebtSyp: number; prepaidCreditSyp: number }
+          summary: { outstandingDebtSyp: number; prepaidCreditSyp: number; prepaidCreditDentalSyp?: number }
           entries: FinancialEntry[]
         }>(`/api/patients/${encodeURIComponent(id)}/financial-ledger`)
         if (cancelled) return
@@ -1625,6 +1626,7 @@ export function PatientRecord() {
                 ...prev,
                 outstandingDebtSyp: Number(data.summary?.outstandingDebtSyp) || 0,
                 prepaidCreditSyp: Number(data.summary?.prepaidCreditSyp) || 0,
+                prepaidCreditDentalSyp: Number(data.summary?.prepaidCreditDentalSyp) || 0,
               }
             : prev,
         )
@@ -3903,7 +3905,10 @@ export function PatientRecord() {
       {tab === 'financial' && (role === 'super_admin' || role === 'reception') && (
         <div className="card">
           <h2 className="card-title">السجل المالي للمريض</h2>
-          <div className="grid-2" style={{ marginBottom: '0.75rem' }}>
+          <div
+            className="grid-2"
+            style={{ marginBottom: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}
+          >
             <div>
               <span className="form-label">إجمالي الذمم</span>
               <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
@@ -3914,6 +3919,12 @@ export function PatientRecord() {
               <span className="form-label">الرصيد الإضافي</span>
               <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
                 {renderMoneySyp(Number(patient.prepaidCreditSyp) || 0)}
+              </div>
+            </div>
+            <div>
+              <span className="form-label">رصيد إضافي للأسنان</span>
+              <div style={{ marginTop: '0.15rem', fontWeight: 700 }}>
+                {renderMoneySyp(Number(patient.prepaidCreditDentalSyp) || 0)}
               </div>
             </div>
           </div>
@@ -5327,9 +5338,9 @@ export function PatientRecord() {
                 canEdit={
                   role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
                 }
-                prepaidCreditSyp={Number(patient?.prepaidCreditSyp) || 0}
-                onCreditChange={(prepaidCreditSyp) =>
-                  setPatient((prev) => (prev ? { ...prev, prepaidCreditSyp } : prev))
+                prepaidCreditSyp={Number(patient?.prepaidCreditDentalSyp) || 0}
+                onCreditChange={(prepaidCreditDentalSyp) =>
+                  setPatient((prev) => (prev ? { ...prev, prepaidCreditDentalSyp } : prev))
                 }
               />
             ) : null}

@@ -31,6 +31,7 @@ type PatientWipeHit = {
   outstandingDebtSyp?: number
   outstandingDebtUsd?: number
   prepaidCreditSyp?: number
+  prepaidCreditDentalSyp?: number
 }
 
 type PackageDetailPayload = {
@@ -310,11 +311,12 @@ export function AdminFinancialBalances() {
     }
   }
 
-  async function clearStoredBalance(kind: 'debt' | 'credit') {
+  async function clearStoredBalance(kind: 'debt' | 'credit' | 'dental_credit') {
     if (!wipePatient) return
     const debt = Math.round(Number(wipePatient.outstandingDebtSyp) || 0)
     const debtUsd = Number(wipePatient.outstandingDebtUsd) || 0
     const credit = Math.round(Number(wipePatient.prepaidCreditSyp) || 0)
+    const dentalCredit = Math.round(Number(wipePatient.prepaidCreditDentalSyp) || 0)
     const debtLabel = [
       debt > 0 ? `${debt.toLocaleString('ar-SY')} ل.س` : null,
       debtUsd > 0 ? `${debtUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD` : null,
@@ -324,14 +326,21 @@ export function AdminFinancialBalances() {
     const label =
       kind === 'debt'
         ? `مسح الذمة المخزّنة على المريض (${debtLabel || '0'})؟ لا يُعدّل بنود الفوترة في النظام.`
-        : `مسح الرصيد الإضافي المخزّن (${credit.toLocaleString('ar-SY')} ل.س)؟`
+        : kind === 'dental_credit'
+          ? `مسح رصيد الأسنان الإضافي المخزّن (${dentalCredit.toLocaleString('ar-SY')} ل.س)؟ لا يُمس الرصيد العام.`
+          : `مسح الرصيد الإضافي العام المخزّن (${credit.toLocaleString('ar-SY')} ل.س)؟ لا يُمس رصيد الأسنان.`
     if (!window.confirm(label)) return
     setWipeActionBusy(true)
     setWipeErr('')
     setWipeOk('')
     try {
       const d = await api<{
-        summary: { outstandingDebtSyp: number; outstandingDebtUsd?: number; prepaidCreditSyp: number }
+        summary: {
+          outstandingDebtSyp: number
+          outstandingDebtUsd?: number
+          prepaidCreditSyp: number
+          prepaidCreditDentalSyp?: number
+        }
       }>(`/api/patients/${encodeURIComponent(wipePatient.id)}/financial-clear-balance`, {
         method: 'POST',
         body: JSON.stringify({ kind }),
@@ -343,10 +352,17 @@ export function AdminFinancialBalances() {
               outstandingDebtSyp: Number(d.summary?.outstandingDebtSyp) || 0,
               outstandingDebtUsd: Number(d.summary?.outstandingDebtUsd) || 0,
               prepaidCreditSyp: Number(d.summary?.prepaidCreditSyp) || 0,
+              prepaidCreditDentalSyp: Number(d.summary?.prepaidCreditDentalSyp) || 0,
             }
           : prev,
       )
-      setWipeOk(kind === 'debt' ? 'تم مسح الذمة المخزّنة.' : 'تم مسح الرصيد الإضافي المخزّن.')
+      setWipeOk(
+        kind === 'debt'
+          ? 'تم مسح الذمة المخزّنة.'
+          : kind === 'dental_credit'
+            ? 'تم مسح رصيد الأسنان الإضافي المخزّن.'
+            : 'تم مسح الرصيد الإضافي العام المخزّن.',
+      )
       void load()
     } catch (e) {
       setWipeErr(e instanceof ApiError ? e.message : 'تعذر التنفيذ')
@@ -423,9 +439,15 @@ export function AdminFinancialBalances() {
                 </div>
               </div>
               <div>
-                <span className="form-label">رصيد إضافي مخزّن</span>
+                <span className="form-label">رصيد إضافي عام</span>
                 <div style={{ fontWeight: 700, color: 'var(--success)', fontVariantNumeric: 'tabular-nums' }}>
                   {(Math.round(Number(wipePatient.prepaidCreditSyp) || 0)).toLocaleString('ar-SY')} ل.س
+                </div>
+              </div>
+              <div>
+                <span className="form-label">رصيد أسنان إضافي</span>
+                <div style={{ fontWeight: 700, color: 'var(--success)', fontVariantNumeric: 'tabular-nums' }}>
+                  {(Math.round(Number(wipePatient.prepaidCreditDentalSyp) || 0)).toLocaleString('ar-SY')} ل.س
                 </div>
               </div>
             </div>
@@ -449,7 +471,15 @@ export function AdminFinancialBalances() {
                 disabled={wipeActionBusy || (Math.round(Number(wipePatient.prepaidCreditSyp) || 0) <= 0)}
                 onClick={() => void clearStoredBalance('credit')}
               >
-                مسح الرصيد الإضافي المخزّن
+                مسح الرصيد الإضافي العام
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={wipeActionBusy || (Math.round(Number(wipePatient.prepaidCreditDentalSyp) || 0) <= 0)}
+                onClick={() => void clearStoredBalance('dental_credit')}
+              >
+                مسح رصيد الأسنان الإضافي
               </button>
               <Link className="btn btn-primary" to={`/patients/${wipePatient.id}`}>
                 فتح ملف المريض

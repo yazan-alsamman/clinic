@@ -180,8 +180,10 @@ const patientSchema = new mongoose.Schema(
     outstandingDebtSyp: { type: Number, default: 0, min: 0 },
     /** ذمم مسجّلة بالدولار (جلسات مسعّرة بالـ USD) — تُحفظ بالدولار ولا تُحوَّل لليرة */
     outstandingDebtUsd: { type: Number, default: 0, min: 0 },
-    /** رصيد إضافي مدفوع مسبقاً للمريض */
+    /** رصيد إضافي مدفوع مسبقاً للمريض (ليزر / جلدية / بشرة / سولاريوم) */
     prepaidCreditSyp: { type: Number, default: 0, min: 0 },
+    /** رصيد إضافي للأسنان فقط — لا يُخصم إلا عند تحصيل إجراء أسنان */
+    prepaidCreditDentalSyp: { type: Number, default: 0, min: 0 },
     /** إدخالات أرشيف ورقي (ليزر/جلسات قديمة) */
     paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
     /** باقات جلسات مسبقة الدفع (حالياً: ليزر) */

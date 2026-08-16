@@ -378,7 +378,8 @@ patientsRouter.get('/financial-balances', async (req, res) => {
     }
     const debtDept = parseFinancialBalanceDept(req.query.debtDepartment)
     const creditDept = parseFinancialBalanceDept(req.query.creditDepartment)
-    const select = 'fileNumber name outstandingDebtSyp outstandingDebtUsd prepaidCreditSyp sessionPackages'
+    const select =
+      'fileNumber name outstandingDebtSyp outstandingDebtUsd prepaidCreditSyp prepaidCreditDentalSyp sessionPackages'
     const [debtPatients, creditPatients] = await Promise.all([
       Patient.find({
         $or: [{ outstandingDebtSyp: { $gt: 0 } }, { outstandingDebtUsd: { $gt: 0 } }],
@@ -387,9 +388,11 @@ patientsRouter.get('/financial-balances', async (req, res) => {
         .sort({ outstandingDebtSyp: -1, outstandingDebtUsd: -1, name: 1 })
         .limit(5000)
         .lean(),
-      Patient.find({ prepaidCreditSyp: { $gt: 0 } })
+      Patient.find({
+        $or: [{ prepaidCreditSyp: { $gt: 0 } }, { prepaidCreditDentalSyp: { $gt: 0 } }],
+      })
         .select(select)
-        .sort({ prepaidCreditSyp: -1, name: 1 })
+        .sort({ prepaidCreditSyp: -1, prepaidCreditDentalSyp: -1, name: 1 })
         .limit(5000)
         .lean(),
     ])
@@ -644,7 +647,7 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
     }
 
     const items = await BillingItem.find({ patientId: p._id })
-      .select('_id amountDueSyp effectiveAmountDueSyp businessDate procedureLabel')
+      .select('_id amountDueSyp effectiveAmountDueSyp businessDate procedureLabel department currency')
       .lean()
     const itemIds = items.map((x) => x._id)
     if (itemIds.length === 0) {
@@ -652,6 +655,7 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
         summary: {
           outstandingDebtSyp: Number(p.outstandingDebtSyp) || 0,
           prepaidCreditSyp: Number(p.prepaidCreditSyp) || 0,
+          prepaidCreditDentalSyp: Number(p.prepaidCreditDentalSyp) || 0,
         },
         entries: [],
       })
@@ -679,6 +683,7 @@ patientsRouter.get('/:id/financial-ledger', async (req, res) => {
       summary: {
         outstandingDebtSyp: Number(p.outstandingDebtSyp) || 0,
         prepaidCreditSyp: Number(p.prepaidCreditSyp) || 0,
+        prepaidCreditDentalSyp: Number(p.prepaidCreditDentalSyp) || 0,
       },
       entries,
     })
@@ -1006,8 +1011,8 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
       return
     }
     const kind = String(req.body?.kind || '').trim()
-    if (kind !== 'debt' && kind !== 'credit') {
-      res.status(400).json({ error: 'حدد النوع: debt أو credit' })
+    if (kind !== 'debt' && kind !== 'credit' && kind !== 'dental_credit') {
+      res.status(400).json({ error: 'حدد النوع: debt أو credit أو dental_credit' })
       return
     }
     const p = await Patient.findById(patientId).lean()
@@ -1018,15 +1023,19 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
     const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
     const debtBeforeUsd = round6(Number(p.outstandingDebtUsd) || 0)
     const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
+    const dentalCreditBefore = Math.round(Number(p.prepaidCreditDentalSyp) || 0)
 
     let debtAfter = debtBefore
     let debtAfterUsd = debtBeforeUsd
     let creditAfter = creditBefore
+    let dentalCreditAfter = dentalCreditBefore
     if (kind === 'debt') {
       debtAfter = 0
       debtAfterUsd = 0
-    } else {
+    } else if (kind === 'credit') {
       creditAfter = 0
+    } else {
+      dentalCreditAfter = 0
     }
 
     await Patient.updateOne(
@@ -1036,13 +1045,19 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
           outstandingDebtSyp: debtAfter,
           outstandingDebtUsd: debtAfterUsd,
           prepaidCreditSyp: creditAfter,
+          prepaidCreditDentalSyp: dentalCreditAfter,
         },
       },
     )
 
     await writeAudit({
       user: req.user,
-      action: kind === 'debt' ? 'تصفية ذمة مخزّنة لمريض (مدير)' : 'تصفية رصيد إضافي مخزّن لمريض (مدير)',
+      action:
+        kind === 'debt'
+          ? 'تصفية ذمة مخزّنة لمريض (مدير)'
+          : kind === 'dental_credit'
+            ? 'تصفية رصيد أسنان إضافي مخزّن لمريض (مدير)'
+            : 'تصفية رصيد إضافي مخزّن لمريض (مدير)',
       entityType: 'Patient',
       entityId: p._id,
       details: {
@@ -1053,6 +1068,8 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
         debtAfterUsd,
         creditBefore,
         creditAfter,
+        dentalCreditBefore,
+        dentalCreditAfter,
         fileNumber: String(p.fileNumber || ''),
         name: String(p.name || ''),
       },
@@ -1063,6 +1080,7 @@ patientsRouter.post('/:id/financial-clear-balance', async (req, res) => {
         outstandingDebtSyp: debtAfter,
         outstandingDebtUsd: debtAfterUsd,
         prepaidCreditSyp: creditAfter,
+        prepaidCreditDentalSyp: dentalCreditAfter,
       },
     })
   } catch (e) {
