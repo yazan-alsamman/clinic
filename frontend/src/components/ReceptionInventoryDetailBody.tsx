@@ -23,6 +23,16 @@ function formatTime(iso: string | null) {
   }
 }
 
+function displayReceivedSyp(t: TxRow) {
+  if (t.payCurrency === 'USD') return '—'
+  return t.receivedAmountSyp.toLocaleString('ar-SY')
+}
+
+function displayReceivedUsd(t: TxRow) {
+  if (t.payCurrency === 'SYP') return '—'
+  return t.receivedAmountUsd > 0 ? t.receivedAmountUsd.toFixed(2) : '—'
+}
+
 export type ReceptionInventoryDetailBodyProps = {
   inv: InventoryPayload
   /** جدول السجل فقط (استعلام تاريخ آخر للمدير) */
@@ -201,10 +211,10 @@ export function ReceptionInventoryDetailBody({
                           {t.payCurrency === 'USD' ? 'USD' : t.payCurrency === 'MIXED' ? 'ل.س+USD' : 'ل.س'}
                         </td>
                         <td style={{ padding: '0.5rem', direction: 'ltr', textAlign: 'left' }}>
-                          {t.receivedAmountSyp.toLocaleString('ar-SY')}
+                          {displayReceivedSyp(t)}
                         </td>
                         <td style={{ padding: '0.5rem', direction: 'ltr', textAlign: 'left' }}>
-                          {t.receivedAmountUsd > 0 ? t.receivedAmountUsd.toFixed(2) : '—'}
+                          {displayReceivedUsd(t)}
                         </td>
                         <td style={{ padding: '0.5rem' }}>{t.amountDueSyp.toLocaleString('ar-SY')}</td>
                         <td
@@ -657,10 +667,10 @@ export function ReceptionInventoryDetailBody({
                           {t.payCurrency === 'USD' ? 'USD' : t.payCurrency === 'MIXED' ? 'ل.س+USD' : 'ل.س'}
                         </td>
                         <td style={{ padding: '0.5rem', direction: 'ltr', textAlign: 'left' }}>
-                          {t.receivedAmountSyp.toLocaleString('ar-SY')}
+                          {displayReceivedSyp(t)}
                         </td>
                         <td style={{ padding: '0.5rem', direction: 'ltr', textAlign: 'left' }}>
-                          {t.receivedAmountUsd > 0 ? t.receivedAmountUsd.toFixed(2) : '—'}
+                          {displayReceivedUsd(t)}
                         </td>
                         <td style={{ padding: '0.5rem' }}>{t.amountDueSyp.toLocaleString('ar-SY')}</td>
                         <td
