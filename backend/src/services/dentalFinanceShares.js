@@ -12,6 +12,10 @@ import {
   loadDoctorShareContext,
   namedDentalPercent,
 } from './doctorShareSettings.js'
+import {
+  loadDentalSettlementPaidMaps,
+  settlementPaidForDentalTreatment,
+} from './dentalChartBilling.js'
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -344,6 +348,23 @@ function treatmentPaidSyp(tr) {
   return roundMoney((tr.payments || []).reduce((s, p) => s + roundMoney(p.amountSyp), 0))
 }
 
+function treatmentPaidAfterSettlements(tr, maps) {
+  const cost = treatmentCostSyp(tr)
+  const chartPaid = treatmentPaidSyp(tr)
+  const mapped = settlementPaidForDentalTreatment(tr, maps)
+  const alreadyOnChart = chartDebtSettlementPaidSyp(tr)
+  const extra = Math.max(0, mapped - alreadyOnChart)
+  return roundMoney(Math.min(cost, chartPaid + extra))
+}
+
+function chartDebtSettlementPaidSyp(tr) {
+  return roundMoney(
+    (tr.payments || []).reduce((s, p) => {
+      return /تسديد ذمة/.test(String(p.note || '')) ? s + roundMoney(p.amountSyp) : s
+    }, 0),
+  )
+}
+
 function resolveDoctorMeta(tr, userById) {
   const uid = tr.providerUserId ? String(tr.providerUserId) : ''
   const name = String(tr.doctorName || userById.get(uid) || '').trim()
@@ -379,6 +400,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
   const ctx = await loadDoctorShareContext()
   const users = ctx.users.filter((u) => u.role === 'dental_branch' && u.active !== false)
   const userById = new Map(users.map((u) => [String(u._id), String(u.name || '').trim()]))
+  const settlementMaps = await loadDentalSettlementPaidMaps(patients.map((p) => p._id))
+  const unassignedByPatient = new Map(settlementMaps.byPatientUnassigned)
 
   const filterKey = String(clinicKey || '').trim()
   const clinicsMap = new Map()
@@ -434,6 +457,17 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
     const patientId = String(p._id)
     const patientName = String(p.name || '').trim() || '—'
     const fileNumber = String(p.fileNumber || '').trim()
+    let leftoverUnassigned = unassignedByPatient.get(patientId) || 0
+    const consumeChartedUnassigned = (tr) => {
+      if (!(leftoverUnassigned > 0)) return
+      if (settlementPaidForDentalTreatment(tr, settlementMaps) > 0) return
+      leftoverUnassigned = Math.max(0, leftoverUnassigned - chartDebtSettlementPaidSyp(tr))
+    }
+    for (const tooth of p.dentalChart?.teeth || []) {
+      for (const tr of tooth.treatments || []) consumeChartedUnassigned(tr)
+    }
+    for (const tr of p.dentalChart?.generalTreatments || []) consumeChartedUnassigned(tr)
+    unassignedByPatient.set(patientId, leftoverUnassigned)
 
     for (const tooth of p.dentalChart?.teeth || []) {
       const fdi = Number(tooth.fdi) || 0
@@ -456,8 +490,17 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         if (!undated && !inRange(bd, from, to)) continue
         if (undated) bd = 'بدون تاريخ'
 
-        const paid = treatmentPaidSyp(tr)
-        const remaining = Math.max(0, cost - paid)
+        const paid = treatmentPaidAfterSettlements(tr, settlementMaps)
+        let remaining = Math.max(0, cost - paid)
+        const pid = String(p._id)
+        let leftover = unassignedByPatient.get(pid) || 0
+        if (leftover > 0 && remaining > 0) {
+          const take = Math.min(remaining, leftover)
+          remaining = Math.max(0, remaining - take)
+          leftover = roundMoney(leftover - take)
+          unassignedByPatient.set(pid, leftover)
+        }
+        const paidFinal = roundMoney(cost - remaining)
         const meta = resolveDoctorMeta(tr, userById)
         if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
 
@@ -466,7 +509,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         if (clinic) {
           clinic.treatmentCount += 1
           clinic.proceduresSyp += cost
-          clinic.paidSyp += paid
+          clinic.paidSyp += paidFinal
           clinic.remainingSyp += remaining
         }
 
@@ -487,7 +530,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           procedureDescription: String(tr.procedureDescription || '').trim(),
           totalCostSyp: cost,
           totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
-          paidSyp: paid,
+          paidSyp: paidFinal,
           remainingSyp: remaining,
           payments: (tr.payments || []).map((pay, idx) => ({
             id: pay._id ? String(pay._id) : `pay-${idx}`,
@@ -569,8 +612,15 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       if (!undated && !inRange(bd, from, to)) continue
       if (undated) bd = 'بدون تاريخ'
 
-      const paid = treatmentPaidSyp(tr)
-      const remaining = Math.max(0, cost - paid)
+      const paid = treatmentPaidAfterSettlements(tr, settlementMaps)
+      let remaining = Math.max(0, cost - paid)
+      const leftover = unassignedByPatient.get(patientId) || 0
+      if (leftover > 0 && remaining > 0) {
+        const take = Math.min(remaining, leftover)
+        remaining = Math.max(0, remaining - take)
+        unassignedByPatient.set(patientId, roundMoney(leftover - take))
+      }
+      const paidFinal = roundMoney(cost - remaining)
       const meta = resolveDoctorMeta(tr, userById)
       if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
 
@@ -578,7 +628,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       if (clinic) {
         clinic.treatmentCount += 1
         clinic.proceduresSyp += cost
-        clinic.paidSyp += paid
+        clinic.paidSyp += paidFinal
         clinic.remainingSyp += remaining
       }
 
@@ -600,7 +650,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         procedureDescription: generalProcedureLabel(tr.procedureDescription),
         totalCostSyp: cost,
         totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
-        paidSyp: paid,
+        paidSyp: paidFinal,
         remainingSyp: remaining,
         payments: (tr.payments || []).map((pay, idx) => ({
           id: pay._id ? String(pay._id) : `pay-${idx}`,
@@ -676,21 +726,42 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
   const users = await User.find({ role: 'dental_branch' }).select('name').lean()
   const userById = new Map(users.map((u) => [String(u._id), String(u.name || '').trim()]))
   const needle = String(q || '').trim().toLowerCase()
+  const settlementMaps = await loadDentalSettlementPaidMaps(patients.map((p) => p._id))
+  const unassignedByPatient = new Map(settlementMaps.byPatientUnassigned)
 
   const rows = []
   for (const p of patients) {
     const procedures = []
-    let totalCostSyp = 0
-    let paidSyp = 0
+    const pid = String(p._id)
+    let leftoverUnassigned = unassignedByPatient.get(pid) || 0
+    const consumeChartedUnassigned = (tr) => {
+      if (!(leftoverUnassigned > 0)) return
+      if (settlementPaidForDentalTreatment(tr, settlementMaps) > 0) return
+      leftoverUnassigned = Math.max(0, leftoverUnassigned - chartDebtSettlementPaidSyp(tr))
+    }
+    for (const tooth of p.dentalChart?.teeth || []) {
+      for (const tr of tooth.treatments || []) consumeChartedUnassigned(tr)
+    }
+    for (const tr of p.dentalChart?.generalTreatments || []) consumeChartedUnassigned(tr)
+    unassignedByPatient.set(pid, leftoverUnassigned)
 
     const pushProcedure = (tr, { fdi, isGeneral }) => {
       const { cost, paid, desc, include } = treatmentHasAccountContent(tr)
       if (!include) return
       const meta = resolveDoctorMeta(tr, userById)
-      const remaining = Math.max(0, cost - paid)
+      const settlementPaid = settlementPaidForDentalTreatment(tr, settlementMaps)
+      const extra = Math.max(0, settlementPaid - chartDebtSettlementPaidSyp(tr))
+      let paidFinal = roundMoney(Math.min(cost, paid + extra))
+      let remaining = Math.max(0, cost - paidFinal)
+      let leftover = unassignedByPatient.get(pid) || 0
+      if (leftover > 0 && remaining > 0) {
+        const take = Math.min(remaining, leftover)
+        paidFinal = roundMoney(paidFinal + take)
+        remaining = Math.max(0, remaining - take)
+        leftover = roundMoney(leftover - take)
+        unassignedByPatient.set(pid, leftover)
+      }
       const bd = treatmentBusinessDate(tr) || '—'
-      totalCostSyp += cost
-      paidSyp += paid
       procedures.push({
         id: tr._id ? String(tr._id) : `${isGeneral ? 'g' : 't'}-${String(p._id)}-${fdi}-${procedures.length}`,
         fdi: isGeneral ? 0 : fdi,
@@ -702,13 +773,13 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
         noShare: meta.noShare,
         totalCostSyp: cost,
         totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
-        paidSyp: paid,
+        paidSyp: paidFinal,
         remainingSyp: remaining,
         billingStatus: tr.billingItemId
-          ? paid >= cost && cost > 0
+          ? paidFinal >= cost && cost > 0
             ? 'paid'
             : 'pending_payment'
-          : paid >= cost && cost > 0
+          : paidFinal >= cost && cost > 0
             ? 'paid'
             : cost > 0
               ? 'unlinked'
@@ -746,7 +817,9 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
       return a.fdi - b.fdi
     })
 
-    const remainingSyp = Math.max(0, totalCostSyp - paidSyp)
+    const totalCostSyp = procedures.reduce((s, r) => s + r.totalCostSyp, 0)
+    const paidSyp = procedures.reduce((s, r) => s + r.paidSyp, 0)
+    const remainingSyp = procedures.reduce((s, r) => s + r.remainingSyp, 0)
     rows.push({
       patientId: String(p._id),
       patientName: name,

@@ -21,6 +21,7 @@ import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
 import { buildDepartmentAllocationsForSettlement } from '../services/patientDebtSettlementAllocation.js'
+import { applyDentalDebtAllocationsToChart } from '../services/dentalChartBilling.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { resolvePaymentChannelFromBody } from '../services/paymentChannelSettings.js'
 import {
@@ -923,6 +924,16 @@ patientsRouter.post('/:id/financial-settlement', requireActiveDay, async (req, r
       receivedAt,
       departmentAllocations,
     })
+
+    try {
+      await applyDentalDebtAllocationsToChart(p._id, departmentAllocations, {
+        paidAt: businessDate,
+        note: 'تسديد ذمة',
+        usdSypRateUsed: usdRate,
+      })
+    } catch (dentalDebtErr) {
+      console.error('applyDentalDebtAllocationsToChart:', dentalDebtErr)
+    }
 
     const totalDebtBeforeSypEquiv =
       debtBeforeSyp + (usdRate > 0 ? Math.round(debtBeforeUsd * usdRate) : 0)

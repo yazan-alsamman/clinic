@@ -366,4 +366,148 @@ export async function billingStatusByItemIds(ids) {
   return map
 }
 
+/** مبلغ تسديد ذمة الأسنان حسب بند التحصيل / الجلسة / مريض بلا ربط */
+export async function loadDentalSettlementPaidMaps(patientIds) {
+  const ids = [
+    ...new Set(
+      (patientIds || [])
+        .map((id) => String(id || '').trim())
+        .filter((id) => mongoose.Types.ObjectId.isValid(id)),
+    ),
+  ]
+  const empty = {
+    byBillingItemId: new Map(),
+    byClinicalSessionId: new Map(),
+    byPatientUnassigned: new Map(),
+  }
+  if (!ids.length) return empty
+
+  const { PatientDebtSettlement } = await import('../models/PatientDebtSettlement.js')
+  const rows = await PatientDebtSettlement.find({ patientId: { $in: ids } })
+    .select('patientId departmentAllocations')
+    .lean()
+
+  const byBillingItemId = new Map()
+  const byClinicalSessionId = new Map()
+  const byPatientUnassigned = new Map()
+  for (const ds of rows) {
+    const pid = String(ds.patientId)
+    for (const alloc of ds.departmentAllocations || []) {
+      if (String(alloc.department || '') !== 'dental') continue
+      const amt = roundMoney(alloc.amountSyp)
+      if (!(amt > 0)) continue
+      const bid = alloc.billingItemId ? String(alloc.billingItemId) : ''
+      const csid = alloc.clinicalSessionId ? String(alloc.clinicalSessionId) : ''
+      if (bid) {
+        byBillingItemId.set(bid, roundMoney((byBillingItemId.get(bid) || 0) + amt))
+      } else if (csid) {
+        byClinicalSessionId.set(csid, roundMoney((byClinicalSessionId.get(csid) || 0) + amt))
+      } else {
+        byPatientUnassigned.set(pid, roundMoney((byPatientUnassigned.get(pid) || 0) + amt))
+      }
+    }
+  }
+  return { byBillingItemId, byClinicalSessionId, byPatientUnassigned }
+}
+
+export function settlementPaidForDentalTreatment(tr, maps) {
+  if (!tr || !maps) return 0
+  const bid = tr.billingItemId ? String(tr.billingItemId) : ''
+  if (bid && maps.byBillingItemId?.has(bid)) return roundMoney(maps.byBillingItemId.get(bid) || 0)
+  const csid = tr.clinicalSessionId ? String(tr.clinicalSessionId) : ''
+  if (csid && maps.byClinicalSessionId?.has(csid)) return roundMoney(maps.byClinicalSessionId.get(csid) || 0)
+  return 0
+}
+
+function walkDentalTreatments(patient, fn) {
+  for (const tooth of patient?.dentalChart?.teeth || []) {
+    for (const tr of tooth.treatments || []) fn(tr)
+  }
+  for (const tr of patient?.dentalChart?.generalTreatments || []) fn(tr)
+}
+
+function findDentalTreatmentForAlloc(patient, alloc) {
+  const bid = alloc?.billingItemId ? String(alloc.billingItemId) : ''
+  const csid = alloc?.clinicalSessionId ? String(alloc.clinicalSessionId) : ''
+  let found = null
+  walkDentalTreatments(patient, (tr) => {
+    if (found) return
+    if (bid && tr.billingItemId && String(tr.billingItemId) === bid) {
+      found = tr
+      return
+    }
+    if (csid && tr.clinicalSessionId && String(tr.clinicalSessionId) === csid) found = tr
+  })
+  return found
+}
+
+function chartPaidSyp(tr) {
+  return roundMoney((tr?.payments || []).reduce((s, p) => s + roundMoney(p.amountSyp), 0))
+}
+
+function appendDentalChartDebtPayment(tr, amountSyp, meta) {
+  const take = roundMoney(amountSyp)
+  if (!(take > 0)) return 0
+  if (!Array.isArray(tr.payments)) tr.payments = []
+  const currency = String(meta?.currency || 'syp').toLowerCase() === 'usd' ? 'usd' : 'syp'
+  tr.payments.push({
+    amountSyp: take,
+    amountUsd: currency === 'usd' ? Math.max(0, Number(meta?.amountUsd) || 0) : 0,
+    currency,
+    usdSypRateUsed: currency === 'usd' ? roundMoney(Number(meta?.usdSypRateUsed) || 0) : 0,
+    paidAt: String(meta?.paidAt || todayBusinessDate()).slice(0, 10),
+    note: String(meta?.note || 'تسديد ذمة').slice(0, 300),
+  })
+  return take
+}
+
+/**
+ * بعد تسديد ذمة: أضف المبلغ إلى إجراءات المخطط المرتبطة حتى يظهر المتبقي صفراً إن اكتمل التسديد.
+ */
+export async function applyDentalDebtAllocationsToChart(patientId, allocations, meta = {}) {
+  const dentalAllocs = (allocations || []).filter(
+    (a) => String(a?.department || '') === 'dental' && roundMoney(a.amountSyp) > 0,
+  )
+  if (!dentalAllocs.length) return { applied: 0, leftover: 0 }
+  const patient = await Patient.findById(patientId)
+  if (!patient?.dentalChart) return { applied: 0, leftover: 0 }
+
+  let applied = 0
+  let leftover = 0
+  for (const alloc of dentalAllocs) {
+    let remainingAlloc = roundMoney(alloc.amountSyp)
+    const tr = findDentalTreatmentForAlloc(patient, alloc)
+    if (tr) {
+      const room = Math.max(0, treatmentEffectiveTotalSyp(tr) - chartPaidSyp(tr))
+      const take = Math.min(room, remainingAlloc)
+      if (take > 0) {
+        applied += appendDentalChartDebtPayment(tr, take, {
+          ...meta,
+          amountUsd: alloc.amountUsd,
+          currency: String(alloc.currency || 'SYP').toLowerCase() === 'usd' ? 'usd' : 'syp',
+        })
+        remainingAlloc = roundMoney(remainingAlloc - take)
+      }
+    }
+    leftover = roundMoney(leftover + remainingAlloc)
+  }
+
+  if (leftover > 0) {
+    walkDentalTreatments(patient, (tr) => {
+      if (!(leftover > 0)) return
+      const room = Math.max(0, treatmentEffectiveTotalSyp(tr) - chartPaidSyp(tr))
+      const take = Math.min(room, leftover)
+      if (!(take > 0)) return
+      applied += appendDentalChartDebtPayment(tr, take, meta)
+      leftover = roundMoney(leftover - take)
+    })
+  }
+
+  if (applied > 0) {
+    patient.markModified('dentalChart')
+    await patient.save()
+  }
+  return { applied, leftover }
+}
+
 export { treatmentEffectiveTotalSyp, DENTAL_ELIAS_PROVIDER_KEY }

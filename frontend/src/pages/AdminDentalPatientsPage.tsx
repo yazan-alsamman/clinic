@@ -45,6 +45,11 @@ function fmtSyp(n: number) {
   return `${new Intl.NumberFormat('ar-SY', { maximumFractionDigits: 0 }).format(Math.round(n || 0))} ل.س`
 }
 
+function fmtRemaining(n: number) {
+  if (!(Math.round(n || 0) > 0)) return 'لا متبقي'
+  return fmtSyp(n)
+}
+
 function isMongoId(id: string) {
   return /^[a-f0-9]{24}$/i.test(String(id || '').trim())
 }
@@ -213,7 +218,7 @@ export function AdminDentalPatientsPage() {
           <div className="stat-card">
             <div className="lbl">المتبقي</div>
             <div className="val" style={{ fontSize: '0.95rem' }}>
-              {fmtSyp(totals.remainingSyp)}
+              {fmtRemaining(totals.remainingSyp)}
             </div>
           </div>
         </div>
@@ -295,9 +300,12 @@ export function AdminDentalPatientsPage() {
                       <td
                         rowSpan={Math.max(1, expanded[p.patientId] === false ? 1 : p.procedures.length || 1)}
                         dir="ltr"
-                        style={{ color: p.remainingSyp > 0 ? 'var(--warning)' : undefined, fontWeight: 700 }}
+                        style={{
+                          color: p.remainingSyp > 0 ? 'var(--warning)' : 'var(--success)',
+                          fontWeight: 700,
+                        }}
                       >
-                        {fmtSyp(p.remainingSyp)}
+                        {fmtRemaining(p.remainingSyp)}
                       </td>
                     ) : null}
                     {proc && expanded[p.patientId] !== false ? (
@@ -327,7 +335,7 @@ export function AdminDentalPatientsPage() {
                               color: proc.remainingSyp > 0 ? 'var(--warning)' : 'var(--success)',
                             }}
                           >
-                            متبقي {fmtSyp(proc.remainingSyp)}
+                            متبقي {fmtRemaining(proc.remainingSyp)}
                           </div>
                         </td>
                         {canDelete ? (
