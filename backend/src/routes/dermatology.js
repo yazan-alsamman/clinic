@@ -19,6 +19,7 @@ import {
   createEmptyDermatologyShareTotals,
   finalizeDermatologyShares,
   loadDermatologyDebtSettlementLookup,
+  resolveDermatologySharePercents,
 } from '../services/dermatologyFinanceShares.js'
 
 export const dermatologyRouter = Router()
@@ -115,7 +116,8 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       invIds.size > 0 ? await InventoryItem.find({ _id: { $in: [...invIds] } }).select('unitCost unitCostUsd name').lean() : []
     const invById = new Map(invDocs.map((i) => [String(i._id), i]))
 
-    const sharePercent = 50
+    const percents = await resolveDermatologySharePercents()
+    const sharePercent = percents.default
     let totalCollectedSyp = 0
     let totalMaterialSypPricedSyp = 0
     let totalMaterialUsdPricedUsd = 0
@@ -172,7 +174,7 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       rows.push(dr)
     }
 
-    const shares = finalizeDermatologyShares(shareTotals, sharePercent)
+    const shares = finalizeDermatologyShares(shareTotals, percents)
     const {
       loraPayableSyp,
       samerPayableSyp,
@@ -190,12 +192,19 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       samerClinicHalfSyp,
     } = shares
 
+    const loraSharePercent = shares.loraSharePercent
+    const samerSharePercent = shares.samerSharePercent
+    const clinicLoraRemainPercent = Math.max(0, 100 - loraSharePercent)
+    const clinicSamerRemainPercent = Math.max(0, 100 - samerSharePercent)
+
     res.json({
       period: range.period,
       from: range.from,
       to: range.to,
       label: range.label,
       sharePercent,
+      loraSharePercent,
+      samerSharePercent,
       totals: {
         collectedRevenueSyp: Math.round(totalCollectedSyp),
         materialExpenseSypFromSypPricedItems: Math.round(totalMaterialSypPricedSyp),
@@ -208,6 +217,7 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
         netAfterMaterialSyp: Math.round(poolLora),
         payableShareSyp: loraPayableSyp,
         clinicShareSyp: loraClinicHalfSyp,
+        sharePercent: loraSharePercent,
       },
       samerShare: {
         providerLabel: 'الدكتور سامر',
@@ -216,6 +226,7 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
         netAfterMaterialSyp: Math.round(poolSamer),
         payableShareSyp: samerPayableSyp,
         clinicShareSyp: samerClinicHalfSyp,
+        sharePercent: samerSharePercent,
       },
       others: {
         sessionRevenueSyp: Math.round(otherRevenueSyp),
@@ -228,8 +239,9 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
         'الإيراد = مجموع مبالغ التحصيل (دفعات الاستقبال) لبنود جلدية مسدّدة في النطاق — تاريخ السطر هو يوم التحصيل المخزّن على البند.',
         'تسديد ذمم مرتبطة بجلدية يُضاف للإيراد حسب الجلسة الأصلية ومقدّمها، مع خصم مواد الجلسة عند تسديد ذمة كاملة دون تحصيل سابق.',
         'تكلفة المواد: تُجمع من جلسات الجلدية المرتبطة؛ تُقسَّم للعرض بين مواد بسعر ليرة (unitCost) ومواد بسعر دولار (unitCostUsd) مع تحويل عرض الدولار باستخدام سعر الصرف المسجّل لذلك اليوم.',
-        'حصة د.لورا ود.سامر = (مجموع تحصيل جلسات الطبيب − تكلفة المواد في جلساته) × 50%.',
-        'صافي ربح المركز في البطاقة = 50% المتبقية من د.لورا + 50% المتبقية من د.سامر + صافي جلسات أطباء آخرين (كامل الصافي لصالح المركز).',
+        `حصة د.لورا = (مجموع تحصيل جلساتها − تكلفة المواد في جلساتها) × ${loraSharePercent}%.`,
+        `حصة د.سامر = (مجموع تحصيل جلساته − تكلفة المواد في جلساته) × ${samerSharePercent}%.`,
+        `صافي ربح المركز في البطاقة = ${clinicLoraRemainPercent}% المتبقية من د.لورا + ${clinicSamerRemainPercent}% المتبقية من د.سامر + صافي جلسات أطباء آخرين (كامل الصافي لصالح المركز).`,
       ],
     })
   } catch (e) {

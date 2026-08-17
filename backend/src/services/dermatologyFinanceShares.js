@@ -2,6 +2,11 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { User } from '../models/User.js'
+import {
+  clampSharePercent,
+  HARD_DEFAULTS,
+  loadDoctorShareContext,
+} from './doctorShareSettings.js'
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -62,18 +67,36 @@ export function addDermatologyRevenueToTotals(totals, collectedSyp, matSyp, prov
   totals.totalMaterialSyp += mat
 }
 
-export function finalizeDermatologyShares(totals, sharePercent = 50) {
+export function finalizeDermatologyShares(totals, sharePercentOrPercents = 50) {
+  let defaultPct
+  let loraPct
+  let samerPct
+  if (sharePercentOrPercents && typeof sharePercentOrPercents === 'object') {
+    defaultPct = clampSharePercent(
+      sharePercentOrPercents.default ?? sharePercentOrPercents.sharePercent,
+      HARD_DEFAULTS.dermatology,
+    )
+    loraPct = clampSharePercent(sharePercentOrPercents.lora, defaultPct)
+    samerPct = clampSharePercent(sharePercentOrPercents.samer, defaultPct)
+  } else {
+    defaultPct = clampSharePercent(sharePercentOrPercents, HARD_DEFAULTS.dermatology)
+    loraPct = defaultPct
+    samerPct = defaultPct
+  }
+
   const poolLora = Math.max(0, totals.loraRevenueSyp - totals.loraMaterialSyp)
   const poolSamer = Math.max(0, totals.samerRevenueSyp - totals.samerMaterialSyp)
-  const loraPayableSyp = roundMoney(poolLora * (sharePercent / 100))
-  const samerPayableSyp = roundMoney(poolSamer * (sharePercent / 100))
+  const loraPayableSyp = roundMoney(poolLora * (loraPct / 100))
+  const samerPayableSyp = roundMoney(poolSamer * (samerPct / 100))
   const loraClinicHalfSyp = roundMoney(poolLora - loraPayableSyp)
   const samerClinicHalfSyp = roundMoney(poolSamer - samerPayableSyp)
   const otherNetSyp = Math.max(0, totals.otherRevenueSyp - totals.otherMaterialSyp)
   const clinicNetSyp = roundMoney(loraClinicHalfSyp + samerClinicHalfSyp + otherNetSyp)
 
   return {
-    sharePercent,
+    sharePercent: defaultPct,
+    loraSharePercent: loraPct,
+    samerSharePercent: samerPct,
     loraPayableSyp,
     samerPayableSyp,
     loraSessionRevenueSyp: roundMoney(totals.loraRevenueSyp),
@@ -89,6 +112,18 @@ export function finalizeDermatologyShares(totals, sharePercent = 50) {
     otherNetSyp: roundMoney(otherNetSyp),
     loraClinicHalfSyp,
     samerClinicHalfSyp,
+  }
+}
+
+export async function resolveDermatologySharePercents() {
+  const ctx = await loadDoctorShareContext()
+  const def = clampSharePercent(ctx.settings.departmentDefaults.dermatology, HARD_DEFAULTS.dermatology)
+  const loraUser = ctx.users.find((u) => providerNameMatchesLora(u.name))
+  const samerUser = ctx.users.find((u) => providerNameMatchesSamer(u.name))
+  return {
+    default: def,
+    lora: loraUser ? clampSharePercent(loraUser.doctorSharePercent) : def,
+    samer: samerUser ? clampSharePercent(samerUser.doctorSharePercent) : def,
   }
 }
 

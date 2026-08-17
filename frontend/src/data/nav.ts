@@ -16,6 +16,7 @@ export const navItems: { key: NavKey; path: string; label: string }[] = [
   { key: 'reception_daily_inventory', path: '/reception/daily-inventory', label: 'جرد مالي يومي' },
   { key: 'inventory', path: '/inventory', label: 'المستودع' },
   { key: 'admin_users', path: '/admin/users', label: 'المستخدمون' },
+  { key: 'admin_doctor_shares', path: '/admin/doctor-shares', label: 'نسب الأطباء' },
   { key: 'admin_skin_procedures', path: '/admin/skin-procedures', label: 'إجراءات البشرة' },
   { key: 'admin_clinic_sessions', path: '/admin/clinic-sessions', label: 'جلسات العيادة' },
   { key: 'admin_dental_clinics', path: '/admin/dental-clinics', label: 'عيادات الأسنان' },

@@ -20,6 +20,7 @@ const BookedAppointmentsPage    = lazyPage(() => import('./pages/BookedAppointme
 const ReceptionAppointmentPage  = lazyPage(() => import('./pages/ReceptionAppointmentPage'), 'ReceptionAppointmentPage')
 const InventoryPage             = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage')
 const AdminUsers                = lazyPage(() => import('./pages/AdminUsers'), 'AdminUsers')
+const AdminDoctorSharesPage     = lazyPage(() => import('./pages/AdminDoctorSharesPage'), 'AdminDoctorSharesPage')
 const AdminSendNotificationsPage = lazyPage(() => import('./pages/AdminSendNotificationsPage'), 'AdminSendNotificationsPage')
 const AdminAudit                = lazyPage(() => import('./pages/AdminAudit'), 'AdminAudit')
 const AdminRooms                = lazyPage(() => import('./pages/AdminRooms'), 'AdminRooms')
@@ -118,6 +119,7 @@ export default function App() {
                 {/* الرابط القديم للتقرير المُزال — يوجّه لصفحة الجرد المالي للاستقبال */}
                 <Route path="/reports/daily" element={<Navigate to="/reception/daily-inventory" replace />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/doctor-shares" element={<AdminDoctorSharesPage />} />
                 <Route path="/admin/skin-procedures" element={<AdminSkinProceduresPage />} />
                 <Route path="/admin/clinic-sessions" element={<AdminClinicSessionsPage />} />
                 <Route path="/admin/dental-clinics" element={<AdminDentalClinicsPage />} />

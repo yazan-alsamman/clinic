@@ -7,6 +7,11 @@ import {
   DENTAL_ELIAS_VIRTUAL_ID,
   isEliasProviderRef,
 } from './dentalDoctorConstants.js'
+import {
+  dentalSharePercentFor,
+  loadDoctorShareContext,
+  namedDentalPercent,
+} from './doctorShareSettings.js'
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -45,8 +50,6 @@ export function providerNameMatchesOmar(name) {
   return /عمر|omar|omer/.test(raw) || s.includes('omar')
 }
 
-const SHARE_PERCENT = 40
-
 const DENTAL_CHART_PATIENT_FILTER = {
   $or: [
     { 'dentalChart.teeth.0': { $exists: true } },
@@ -80,15 +83,20 @@ function generalProcedureLabel(desc) {
 
 /**
  * يجمع إيرادات مخطط الأسنان وحصص الأطباء والمخابر ضمن نطاق التاريخ.
- * د. الياس: بدون نسبة 40٪ — إجراءاته تُحسب كاملة لربح القسم بعد خصم مخابره.
+ * نسبة كل طبيب تُقرأ من حسابه؛ د. الياس من إعداد النسبة الافتراضية الخاص به (قد تكون 0).
  */
 export async function summarizeDentalChartFinance({ from, to }) {
   const patients = await Patient.find(DENTAL_CHART_PATIENT_FILTER)
     .select('dentalChart name')
     .lean()
 
-  const users = await User.find({ role: 'dental_branch', active: true }).select('name').lean()
-  const userById = new Map(users.map((u) => [String(u._id), String(u.name || '').trim()]))
+  const ctx = await loadDoctorShareContext()
+  const userById = new Map(
+    ctx.users
+      .filter((u) => u.role === 'dental_branch')
+      .map((u) => [String(u._id), String(u.name || '').trim()]),
+  )
+  const dentalDefault = ctx.settings.departmentDefaults.dental
 
   let totalRevenueSyp = 0
   let labWorksTotalSyp = 0
@@ -247,37 +255,55 @@ export async function summarizeDentalChartFinance({ from, to }) {
 
   const doctorRows = [...byDoctor.values()]
     .map((r) => {
-      const noShare = r.noShare === true || r.providerKey === DENTAL_ELIAS_PROVIDER_KEY
+      const isElias = r.providerKey === DENTAL_ELIAS_PROVIDER_KEY
+      const sharePercent = dentalSharePercentFor(
+        { isElias, userId: r.userId, name: r.name },
+        ctx,
+      )
+      const noShare = sharePercent <= 0
       return {
         ...r,
         proceduresSyp: roundMoney(r.proceduresSyp),
-        shareSyp: noShare ? 0 : roundMoney((r.proceduresSyp * SHARE_PERCENT) / 100),
+        sharePercent,
+        shareSyp: roundMoney((r.proceduresSyp * sharePercent) / 100),
         noShare,
       }
     })
     .sort((a, b) => b.proceduresSyp - a.proceduresSyp)
 
-  const ayhamShareSyp = roundMoney((ayhamProceduresSyp * SHARE_PERCENT) / 100)
-  const iyadShareSyp = roundMoney((iyadProceduresSyp * SHARE_PERCENT) / 100)
-  const omarShareSyp = roundMoney((omarProceduresSyp * SHARE_PERCENT) / 100)
-  const otherShareSyp = roundMoney((otherProceduresSyp * SHARE_PERCENT) / 100)
-  /** د. الياس بدون نسبة */
-  const doctorSharesTotalSyp = roundMoney(ayhamShareSyp + iyadShareSyp + omarShareSyp + otherShareSyp)
+  const ayhamSharePercent = namedDentalPercent(providerNameMatchesAyham, ctx)
+  const iyadSharePercent = namedDentalPercent(providerNameMatchesIyad, ctx)
+  const omarSharePercent = namedDentalPercent(providerNameMatchesOmar, ctx)
+  const eliasSharePercent = dentalSharePercentFor({ isElias: true }, ctx)
+
+  const ayhamShareSyp = roundMoney((ayhamProceduresSyp * ayhamSharePercent) / 100)
+  const iyadShareSyp = roundMoney((iyadProceduresSyp * iyadSharePercent) / 100)
+  const omarShareSyp = roundMoney((omarProceduresSyp * omarSharePercent) / 100)
+  const eliasShareSyp = roundMoney((eliasProceduresSyp * eliasSharePercent) / 100)
+  const doctorSharesTotalSyp = roundMoney(doctorRows.reduce((s, r) => s + r.shareSyp, 0))
+  const otherShareSyp = roundMoney(
+    Math.max(0, doctorSharesTotalSyp - ayhamShareSyp - iyadShareSyp - omarShareSyp - eliasShareSyp),
+  )
 
   totalRevenueSyp = roundMoney(totalRevenueSyp)
   labWorksTotalSyp = roundMoney(labWorksTotalSyp)
   eliasProceduresSyp = roundMoney(eliasProceduresSyp)
   eliasLabWorksSyp = roundMoney(eliasLabWorksSyp)
-  const eliasNetToClinicSyp = roundMoney(eliasProceduresSyp - eliasLabWorksSyp)
+  const eliasNetToClinicSyp = roundMoney(eliasProceduresSyp - eliasShareSyp - eliasLabWorksSyp)
   const clinicRemainderAfterSharesSyp = roundMoney(totalRevenueSyp - doctorSharesTotalSyp)
   const netProfitBeforeExpensesSyp = roundMoney(clinicRemainderAfterSharesSyp - labWorksTotalSyp)
 
   return {
-    sharePercent: SHARE_PERCENT,
+    sharePercent: dentalDefault,
+    ayhamSharePercent,
+    iyadSharePercent,
+    omarSharePercent,
+    eliasSharePercent,
     totalRevenueSyp,
     labWorksTotalSyp,
     eliasProceduresSyp,
     eliasLabWorksSyp,
+    eliasShareSyp,
     eliasNetToClinicSyp,
     ayhamProceduresSyp: roundMoney(ayhamProceduresSyp),
     iyadProceduresSyp: roundMoney(iyadProceduresSyp),
@@ -350,7 +376,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
     .select('dentalChart name fileNumber')
     .lean()
 
-  const users = await User.find({ role: 'dental_branch', active: true }).select('name active').lean()
+  const ctx = await loadDoctorShareContext()
+  const users = ctx.users.filter((u) => u.role === 'dental_branch' && u.active !== false)
   const userById = new Map(users.map((u) => [String(u._id), String(u.name || '').trim()]))
 
   const filterKey = String(clinicKey || '').trim()
@@ -588,17 +615,28 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
   }
 
   const clinics = [...clinicsMap.values()]
-    .map((c) => ({
-      ...c,
-      proceduresSyp: roundMoney(c.proceduresSyp),
-      paidSyp: roundMoney(c.paidSyp),
-      remainingSyp: roundMoney(c.remainingSyp),
-      labsSyp: roundMoney(c.labsSyp),
-      shareSyp: c.noShare ? 0 : roundMoney((c.proceduresSyp * SHARE_PERCENT) / 100),
-      netToClinicSyp: c.noShare
-        ? roundMoney(c.proceduresSyp - c.labsSyp)
-        : roundMoney(c.proceduresSyp - (c.proceduresSyp * SHARE_PERCENT) / 100 - c.labsSyp),
-    }))
+    .map((c) => {
+      const isElias = c.providerKey === DENTAL_ELIAS_PROVIDER_KEY || c.key === DENTAL_ELIAS_PROVIDER_KEY
+      const sharePercent = dentalSharePercentFor(
+        { isElias, userId: c.userId, name: c.name },
+        ctx,
+      )
+      const noShare = sharePercent <= 0
+      const proceduresSyp = roundMoney(c.proceduresSyp)
+      const labsSyp = roundMoney(c.labsSyp)
+      const shareSyp = roundMoney((proceduresSyp * sharePercent) / 100)
+      return {
+        ...c,
+        proceduresSyp,
+        paidSyp: roundMoney(c.paidSyp),
+        remainingSyp: roundMoney(c.remainingSyp),
+        labsSyp,
+        sharePercent,
+        shareSyp,
+        noShare,
+        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp),
+      }
+    })
     .filter((c) => !filterKey || c.key === filterKey || c.userId === filterKey)
     .sort((a, b) => b.proceduresSyp - a.proceduresSyp || a.name.localeCompare(b.name, 'ar'))
 
@@ -612,7 +650,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
   return {
     from,
     to,
-    sharePercent: SHARE_PERCENT,
+    sharePercent: ctx.settings.departmentDefaults.dental,
     filters: { clinicKey: filterKey || null },
     clinics,
     rows,

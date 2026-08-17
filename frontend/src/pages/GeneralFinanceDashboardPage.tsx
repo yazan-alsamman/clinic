@@ -54,6 +54,8 @@ type DashboardPayload = {
     totalProfitSyp: number
     clinicNetBeforeTableSyp: number
     sharePercent: number
+    loraSharePercent?: number
+    samerSharePercent?: number
   }
   skincare: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
   dental: {
@@ -71,6 +73,11 @@ type DashboardPayload = {
     eliasProceduresSyp?: number
     eliasLabWorksSyp?: number
     eliasNetToClinicSyp?: number
+    eliasShareSyp?: number
+    eliasSharePercent?: number
+    ayhamSharePercent?: number
+    iyadSharePercent?: number
+    omarSharePercent?: number
     doctorSharesTotalSyp?: number
     clinicRemainderAfterSharesSyp?: number
     totalProfitSyp: number
@@ -474,7 +481,7 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>حصة الدكتورة لورا</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dermatology.lauraShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              (تحصيل جلسات الدكتورة لورا − مواد جلساتها) × {data?.dermatology.sharePercent ?? 50}٪ — التحصيل:{' '}
+              (تحصيل جلسات الدكتورة لورا − مواد جلساتها) × {data?.dermatology.loraSharePercent ?? data?.dermatology.sharePercent ?? 50}٪ — التحصيل:{' '}
               {fmtSyp(data?.dermatology.lauraSessionRevenueSyp || 0)}، المواد: {fmtSyp(data?.dermatology.lauraMaterialSyp || 0)}.
             </p>
           </div>
@@ -482,7 +489,7 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>حصة الدكتور سامر</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dermatology.samerShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              (تحصيل جلسات الدكتور سامر − مواد جلساته) × {data?.dermatology.sharePercent ?? 50}٪ — التحصيل:{' '}
+              (تحصيل جلسات الدكتور سامر − مواد جلساته) × {data?.dermatology.samerSharePercent ?? data?.dermatology.sharePercent ?? 50}٪ — التحصيل:{' '}
               {fmtSyp(data?.dermatology.samerSessionRevenueSyp || 0)}، المواد: {fmtSyp(data?.dermatology.samerMaterialSyp || 0)}.
             </p>
           </div>
@@ -529,29 +536,32 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>نسبة د. أيهم</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.ayhamShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إجراءاته ({fmtSyp(data?.dental.ayhamProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
+              إجراءاته ({fmtSyp(data?.dental.ayhamProceduresSyp || 0)}) × {data?.dental.ayhamSharePercent ?? data?.dental.sharePercent ?? 40}٪.
             </p>
           </div>
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>نسبة د. إياد</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.iyadShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إجراءاته ({fmtSyp(data?.dental.iyadProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
+              إجراءاته ({fmtSyp(data?.dental.iyadProceduresSyp || 0)}) × {data?.dental.iyadSharePercent ?? data?.dental.sharePercent ?? 40}٪.
             </p>
           </div>
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>نسبة د. عمر</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.omarShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إجراءاته ({fmtSyp(data?.dental.omarProceduresSyp || 0)}) × {data?.dental.sharePercent ?? 40}٪.
+              إجراءاته ({fmtSyp(data?.dental.omarProceduresSyp || 0)}) × {data?.dental.omarSharePercent ?? data?.dental.sharePercent ?? 40}٪.
             </p>
           </div>
           <div className="card" style={{ borderColor: '#38bdf8' }}>
-            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>د. الياس (بدون نسبة)</h3>
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>
+              د. الياس{(data?.dental.eliasSharePercent || 0) > 0 ? ` (${data?.dental.eliasSharePercent}٪)` : ' (بدون نسبة)'}
+            </h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.eliasNetToClinicSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إجراءاته كاملة للقسم ({fmtSyp(data?.dental.eliasProceduresSyp || 0)}) − مخابره (
-              {fmtSyp(data?.dental.eliasLabWorksSyp || 0)}).
+              {(data?.dental.eliasSharePercent || 0) > 0
+                ? `إجراءاته (${fmtSyp(data?.dental.eliasProceduresSyp || 0)}) × ${data?.dental.eliasSharePercent}٪ = ${fmtSyp(data?.dental.eliasShareSyp || 0)}، ثم صافي القسم بعد المخابر.`
+                : `إجراءاته كاملة للقسم (${fmtSyp(data?.dental.eliasProceduresSyp || 0)}) − مخابره (${fmtSyp(data?.dental.eliasLabWorksSyp || 0)}).`}
             </p>
           </div>
           <div className="card">
@@ -568,7 +578,7 @@ export function GeneralFinanceDashboardPage() {
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
               إيرادات القسم − حصص الأطباء ذوي النسبة ({fmtSyp(data?.dental.doctorSharesTotalSyp || 0)}) − المخابر (
               {fmtSyp(data?.dental.labWorksTotalSyp || 0)}) − جدول المصاريف ({fmtSyp(data?.dental.expensesTableSyp || 0)}
-              ). د. الياس بدون نسبة: صافي إجراءاته للقسم {fmtSyp(data?.dental.eliasNetToClinicSyp || 0)}.
+              ). صافي د. الياس للقسم {fmtSyp(data?.dental.eliasNetToClinicSyp || 0)}.
             </p>
           </div>
         </div>

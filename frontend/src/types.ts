@@ -29,6 +29,7 @@ export type NavKey =
   | 'reception_daily_inventory'
   | 'inventory'
   | 'admin_users'
+  | 'admin_doctor_shares'
   | 'admin_send_notifications'
   | 'admin_audit'
   | 'admin_rooms'

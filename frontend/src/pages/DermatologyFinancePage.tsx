@@ -23,6 +23,7 @@ type ProviderShareBlock = {
   netAfterMaterialSyp: number
   payableShareSyp: number
   clinicShareSyp: number
+  sharePercent?: number
 }
 
 type FinanceSummary = {
@@ -31,6 +32,8 @@ type FinanceSummary = {
   to: string
   label: string
   sharePercent: number
+  loraSharePercent?: number
+  samerSharePercent?: number
   totals: {
     collectedRevenueSyp: number
     materialExpenseSypFromSypPricedItems: number
@@ -139,13 +142,17 @@ export function DermatologyFinancePage() {
   }
 
   const pct = Number(data?.sharePercent ?? 50)
+  const loraPct = Number(data?.loraShare?.sharePercent ?? data?.loraSharePercent ?? pct)
+  const samerPct = Number(data?.samerShare?.sharePercent ?? data?.samerSharePercent ?? pct)
+  const clinicLoraRemain = Math.max(0, 100 - loraPct)
+  const clinicSamerRemain = Math.max(0, 100 - samerPct)
 
   return (
     <>
       <h1 className="page-title">مالية الجلدية</h1>
       <p className="page-desc">
         أرقام مبنية على تحصيل الاستقبال لبنود الجلدية المسدّدة في النطاق، وتكلفة المواد من الجلسات المرتبطة، وحصص
-        50% لد.لورا ود.سامر بعد خصم المواد.
+        الأطباء بعد خصم المواد حسب النسب المحفوظة لكل طبيب.
       </p>
 
       <div className="toolbar" style={{ marginTop: '0.95rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -213,7 +220,7 @@ export function DermatologyFinancePage() {
           </p>
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#a21caf' }}>
             (جلساتها {renderSyp(data?.loraShare?.sessionRevenueSyp || 0)} − مواد {renderSyp(data?.loraShare?.materialCostSyp || 0)}) ={' '}
-            {renderSyp(data?.loraShare?.netAfterMaterialSyp || 0)} × {pct}% = {renderSyp(data?.loraShare?.payableShareSyp || 0)}
+            {renderSyp(data?.loraShare?.netAfterMaterialSyp || 0)} × {loraPct}% = {renderSyp(data?.loraShare?.payableShareSyp || 0)}
           </p>
         </div>
 
@@ -224,7 +231,7 @@ export function DermatologyFinancePage() {
           </p>
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#0369a1' }}>
             (جلساته {renderSyp(data?.samerShare?.sessionRevenueSyp || 0)} − مواد {renderSyp(data?.samerShare?.materialCostSyp || 0)}) ={' '}
-            {renderSyp(data?.samerShare?.netAfterMaterialSyp || 0)} × {pct}% = {renderSyp(data?.samerShare?.payableShareSyp || 0)}
+            {renderSyp(data?.samerShare?.netAfterMaterialSyp || 0)} × {samerPct}% = {renderSyp(data?.samerShare?.payableShareSyp || 0)}
           </p>
         </div>
 
@@ -232,7 +239,7 @@ export function DermatologyFinancePage() {
           <h3 style={{ margin: 0, color: '#3730a3' }}>صافي الربح للمركز</h3>
           <p style={{ margin: '0.45rem 0 0', fontWeight: 900, color: '#312e81' }}>{renderSyp(data?.clinicNetSyp || 0)}</p>
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: '#4f46e5' }}>
-            50% المتبقية من صافي د.لورا ({renderSyp(data?.loraShare?.clinicShareSyp || 0)}) + 50% المتبقية من صافي د.سامر (
+            {clinicLoraRemain}% المتبقية من صافي د.لورا ({renderSyp(data?.loraShare?.clinicShareSyp || 0)}) + {clinicSamerRemain}% المتبقية من صافي د.سامر (
             {renderSyp(data?.samerShare?.clinicShareSyp || 0)})
             {hasOthers ? ` + جلسات أخرى (${renderSyp(data?.others?.clinicKeepsSyp || 0)})` : ''}.
           </p>

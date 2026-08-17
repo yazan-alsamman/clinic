@@ -16,6 +16,7 @@ import {
   createEmptyDermatologyShareTotals,
   finalizeDermatologyShares,
   loadDermatologyDebtSettlementLookup,
+  resolveDermatologySharePercents,
 } from '../services/dermatologyFinanceShares.js'
 import { summarizeDentalChartFinance } from '../services/dentalFinanceShares.js'
 
@@ -219,8 +220,8 @@ function collectedForItem(bi, payById) {
   return Math.round(Number(pay?.amountSyp) || 0)
 }
 
-function computeDermatologyShares(items, sessionById, payById, debtSettlements = [], debtLookup = null) {
-  const sharePercent = 50
+async function computeDermatologyShares(items, sessionById, payById, debtSettlements = [], debtLookup = null) {
+  const percents = await resolveDermatologySharePercents()
   const totals = createEmptyDermatologyShareTotals()
 
   for (const bi of items) {
@@ -236,7 +237,7 @@ function computeDermatologyShares(items, sessionById, payById, debtSettlements =
     applyDermatologyDebtSettlements(totals, debtSettlements, debtLookup)
   }
 
-  return finalizeDermatologyShares(totals, sharePercent)
+  return finalizeDermatologyShares(totals, percents)
 }
 
 function sumRevenueByDepartment(items, payById) {
@@ -531,7 +532,7 @@ financeRouter.get('/dashboard', async (req, res) => {
       overallExpensesTablesSyp = Math.round(expenseTotals[deptFilter] || 0)
     }
 
-    const dermShares = computeDermatologyShares(items, sessionById, payById, debtSettlements, debtLookup)
+    const dermShares = await computeDermatologyShares(items, sessionById, payById, debtSettlements, debtLookup)
     const discounts = buildDiscountRows(items, payById)
 
     const laserRev = revenueByDept.laser
@@ -646,6 +647,8 @@ financeRouter.get('/dashboard', async (req, res) => {
         totalProfitSyp: dermProfit,
         clinicNetBeforeTableSyp: dermShares.clinicNetSyp,
         sharePercent: dermShares.sharePercent,
+        loraSharePercent: dermShares.loraSharePercent,
+        samerSharePercent: dermShares.samerSharePercent,
       },
       skincare: {
         totalRevenueSyp: skinRev,
@@ -667,6 +670,11 @@ financeRouter.get('/dashboard', async (req, res) => {
         eliasProceduresSyp: dentalChart.eliasProceduresSyp,
         eliasLabWorksSyp: dentalChart.eliasLabWorksSyp,
         eliasNetToClinicSyp: dentalChart.eliasNetToClinicSyp,
+        eliasShareSyp: dentalChart.eliasShareSyp,
+        eliasSharePercent: dentalChart.eliasSharePercent,
+        ayhamSharePercent: dentalChart.ayhamSharePercent,
+        iyadSharePercent: dentalChart.iyadSharePercent,
+        omarSharePercent: dentalChart.omarSharePercent,
         doctorSharesTotalSyp: dentalSharesTotal,
         clinicRemainderAfterSharesSyp: dentalChart.clinicRemainderAfterSharesSyp,
         totalProfitSyp: dentalProfit,

@@ -26,6 +26,8 @@ import { patientPortalRouter } from './routes/patientPortal.js'
 import { skinRouter } from './routes/skin.js'
 import { solariumRouter } from './routes/solarium.js'
 import { financeRouter } from './routes/finance.js'
+import { doctorSharesRouter } from './routes/doctorShares.js'
+import { ensureDoctorShareDefaults } from './services/doctorShareSettings.js'
 
 let dbConnected = false
 
@@ -71,6 +73,7 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/skin', skinRouter)
 app.use('/api/solarium', solariumRouter)
 app.use('/api/finance', financeRouter)
+app.use('/api/admin/doctor-shares', doctorSharesRouter)
 
 app.use((err, _req, res, _next) => {
   console.error(err)
@@ -90,6 +93,16 @@ connectDb()
     dbConnected = true
     console.log('MongoDB connected')
     await ensureDefaultCalculationProfiles()
+    try {
+      const seeded = await ensureDoctorShareDefaults()
+      if (seeded.seeded) {
+        console.log(
+          `ensureDoctorShareDefaults: seeded clinical percents usersUpdated=${seeded.usersUpdated}`,
+        )
+      }
+    } catch (shareErr) {
+      console.error('ensureDoctorShareDefaults:', shareErr?.message || shareErr)
+    }
     try {
       const repair = await repairUsdExactPaymentFalseCredit()
       if (repair.repaired > 0) {

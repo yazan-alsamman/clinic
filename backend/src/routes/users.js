@@ -4,6 +4,7 @@ import { User, ROLES } from '../models/User.js'
 import { authMiddleware, requireRoles } from '../middleware/auth.js'
 import { userToPublic } from '../utils/dto.js'
 import { writeAudit } from '../utils/audit.js'
+import { defaultPercentForRole } from '../services/doctorShareSettings.js'
 
 export const usersRouter = Router()
 
@@ -78,7 +79,7 @@ usersRouter.post('/', async (req, res) => {
       role,
       active: true,
       doctorSharePercent:
-        Number.isFinite(dsp) && dsp >= 0 && dsp <= 100 ? dsp : 0,
+        Number.isFinite(dsp) && dsp >= 0 && dsp <= 100 ? dsp : await defaultPercentForRole(role),
     })
     await writeAudit({
       user: req.user,
