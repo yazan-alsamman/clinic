@@ -11,6 +11,7 @@ type LabWorkRow = {
   fileNumber: string
   phone: string
   fdi: number
+  isGeneral?: boolean
   labName: string
   procedureDescription: string
   amountSyp: number
@@ -358,7 +359,7 @@ export function AdminDentalLabsPage() {
                                         </span>
                                       ) : null}
                                     </td>
-                                    <td>{w.fdi || '—'}</td>
+                                    <td>{w.isGeneral ? 'عام' : w.fdi || '—'}</td>
                                     <td>{w.procedureDescription || '—'}</td>
                                     <td>{w.doctorName || '—'}</td>
                                     <td dir="ltr">{fmtSyp(w.effectiveSyp)}</td>

@@ -360,7 +360,7 @@ function labWorkToDto(row) {
 }
 
 function emptyDentalChartDto() {
-  return { teeth: [], generalTreatments: [], updatedAt: null, updatedBy: null }
+  return { teeth: [], generalTreatments: [], generalLabWorks: [], updatedAt: null, updatedBy: null }
 }
 
 function chartToDto(chart, billingMap) {
@@ -386,6 +386,9 @@ function chartToDto(chart, billingMap) {
     }),
     generalTreatments: (Array.isArray(chart.generalTreatments) ? chart.generalTreatments : []).map((x) =>
       treatmentToDto(x, billingMap),
+    ),
+    generalLabWorks: (Array.isArray(chart.generalLabWorks) ? chart.generalLabWorks : []).map((x) =>
+      labWorkToDto(x),
     ),
     updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
     updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
@@ -1087,9 +1090,13 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
     const prevGeneral = patient.dentalChart?.generalTreatments
       ? JSON.parse(JSON.stringify(patient.dentalChart.generalTreatments))
       : []
+    const prevGeneralLabs = patient.dentalChart?.generalLabWorks
+      ? JSON.parse(JSON.stringify(patient.dentalChart.generalLabWorks))
+      : []
 
     const bodyHasTeeth = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'teeth')
     const bodyHasGeneral = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'generalTreatments')
+    const bodyHasGeneralLabs = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'generalLabWorks')
 
     let teeth = bodyHasTeeth ? normalizeChartTeeth(req.body?.teeth, fallbackRate) : prevTeeth
     if (bodyHasTeeth) teeth = mergePreviousBillingLinks(prevTeeth, teeth)
@@ -1101,9 +1108,14 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       generalTreatments = mergePreviousGeneralBillingLinks(prevGeneral, generalTreatments)
     }
 
+    const generalLabWorks = bodyHasGeneralLabs
+      ? normalizeLabWorks(req.body?.generalLabWorks, fallbackRate)
+      : prevGeneralLabs
+
     patient.dentalChart = {
       teeth,
       generalTreatments,
+      generalLabWorks,
       updatedAt: new Date(),
       updatedBy: req.user._id,
     }
@@ -1127,6 +1139,7 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       details: {
         toothCount: teeth.length,
         generalTreatmentCount: generalTreatments.length,
+        generalLabWorkCount: generalLabWorks.length,
       },
     })
     res.json({ chart: await chartToDtoEnriched(patient.dentalChart) })

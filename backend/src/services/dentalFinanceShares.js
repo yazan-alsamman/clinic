@@ -58,6 +58,7 @@ const DENTAL_CHART_PATIENT_FILTER = {
   $or: [
     { 'dentalChart.teeth.0': { $exists: true } },
     { 'dentalChart.generalTreatments.0': { $exists: true } },
+    { 'dentalChart.generalLabWorks.0': { $exists: true } },
     { departments: 'dental' },
   ],
 }
@@ -254,6 +255,24 @@ export async function summarizeDentalChartFinance({ from, to }) {
       else if (providerNameMatchesIyad(matchName)) iyadProceduresSyp += cost
       else if (providerNameMatchesOmar(matchName)) omarProceduresSyp += cost
       else otherProceduresSyp += cost
+    }
+
+    for (const lab of p.dentalChart?.generalLabWorks || []) {
+      const amt = labEffectiveAmountSyp(lab)
+      if (!(amt > 0)) continue
+      let bd = String(lab.businessDate || '').trim().slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) continue
+      if (!inRange(bd, from, to)) continue
+      labWorksTotalSyp += amt
+
+      const labUid = lab.providerUserId ? String(lab.providerUserId) : ''
+      const labName = String(lab.doctorName || userById.get(labUid) || '').trim()
+      const labIsElias = isEliasProviderRef({
+        providerUserId: labUid || lab.providerUserId,
+        providerKey: lab.providerKey,
+        doctorName: labName,
+      })
+      if (labIsElias) eliasLabWorksSyp += amt
     }
   }
 
@@ -660,6 +679,48 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           paidAt: String(pay.paidAt || ''),
           note: String(pay.note || ''),
         })),
+      })
+    }
+
+    for (const lab of p.dentalChart?.generalLabWorks || []) {
+      const amt = labEffectiveAmountSyp(lab)
+      if (!(amt > 0) && !String(lab.labName || '').trim() && !String(lab.procedureDescription || '').trim()) {
+        continue
+      }
+      let bd = String(lab.businessDate || '').trim().slice(0, 10)
+      const undated = !/^\d{4}-\d{2}-\d{2}$/.test(bd)
+      if (!undated && !inRange(bd, from, to)) continue
+      if (undated) bd = 'بدون تاريخ'
+
+      let meta = resolveDoctorMeta(lab, userById)
+      if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
+
+      const clinic = ensureClinic(meta)
+      if (clinic) {
+        clinic.labCount += 1
+        clinic.labsSyp += amt
+      }
+
+      rows.push({
+        kind: 'lab',
+        id: lab._id ? String(lab._id) : `gl-${patientId}-${bd}-${rows.length}`,
+        patientId,
+        patientName,
+        fileNumber,
+        fdi: 0,
+        isGeneral: true,
+        businessDate: bd,
+        undated,
+        clinicKey: meta.key,
+        clinicLabel: meta.clinicLabel,
+        doctorName: meta.name,
+        providerUserId: meta.userId,
+        noShare: meta.noShare,
+        labName: String(lab.labName || '').trim(),
+        procedureDescription: String(lab.procedureDescription || '').trim() || 'مخبر — إجراء عام',
+        amountSyp: amt,
+        amountUsd: Math.max(0, Number(lab.amountUsd) || 0),
+        amountSypOnly: roundMoney(lab.amountSyp),
       })
     }
   }

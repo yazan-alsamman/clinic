@@ -2,8 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import { useClinic } from '../../context/ClinicContext'
 import {
+  emptyLabWork,
   emptyTreatment,
   formatUsdAmount,
+  labEffectiveAmountSyp,
+  labWorkHasData,
+  normalizeLabWork,
   normalizeTreatment,
   roundUsd,
   treatmentEffectiveTotalSyp,
@@ -12,9 +16,10 @@ import {
   treatmentPaidTotalUsd,
   treatmentRemaining,
   type DentalChartDto,
+  type DentalLabWork,
   type DentalToothTreatment,
 } from './dentalChartTypes'
-import type { DentalProviderOption } from './ToothTreatmentModal'
+import type { DentalLabOption, DentalProviderOption } from './ToothTreatmentModal'
 
 type Props = {
   patientId: string
@@ -34,7 +39,9 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
   const rate = usdSypRate != null && usdSypRate > 0 ? usdSypRate : null
 
   const [rows, setRows] = useState<DentalToothTreatment[]>([])
+  const [labRows, setLabRows] = useState<DentalLabWork[]>([])
   const [providers, setProviders] = useState<DentalProviderOption[]>([])
+  const [labs, setLabs] = useState<DentalLabOption[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -46,21 +53,30 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
   const [providerId, setProviderId] = useState('')
   const [businessDate, setBusinessDate] = useState(todayIsoDate)
 
+  const [labDraft, setLabDraft] = useState<DentalLabWork>(() => emptyLabWork())
+
   const load = useCallback(async () => {
     setErr('')
     setLoading(true)
     try {
-      const [chartRes, providersRes] = await Promise.all([
+      const [chartRes, providersRes, labsRes] = await Promise.all([
         api<{ chart: DentalChartDto }>(`/api/dental/chart/${encodeURIComponent(patientId)}`),
         api<{ providers: DentalProviderOption[] }>('/api/dental/providers').catch(() => ({
           providers: [] as DentalProviderOption[],
         })),
+        api<{ labs: DentalLabOption[] }>('/api/dental/labs').catch(() => ({
+          labs: [] as DentalLabOption[],
+        })),
       ])
       setProviders(providersRes.providers || [])
+      setLabs(labsRes.labs || [])
       const list = (chartRes.chart?.generalTreatments || []).map((t) => normalizeTreatment(t, rate))
       setRows(list.filter(treatmentHasData))
+      const labsList = (chartRes.chart?.generalLabWorks || []).map((x) => normalizeLabWork(x, rate))
+      setLabRows(labsList.filter(labWorkHasData))
     } catch (e) {
       setRows([])
+      setLabRows([])
       setErr(e instanceof ApiError ? e.message : 'تعذر تحميل الإجراءات العامة')
     } finally {
       setLoading(false)
@@ -79,12 +95,16 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
     setBusinessDate(todayIsoDate())
   }
 
-  async function saveList(next: DentalToothTreatment[]) {
+  function resetLabForm() {
+    setLabDraft(emptyLabWork())
+  }
+
+  async function saveAll(nextTreatments: DentalToothTreatment[], nextLabs: DentalLabWork[]) {
     setSaving(true)
     setErr('')
     setOkMsg('')
     try {
-      const payload = next
+      const treatmentsPayload = nextTreatments
         .map((t) =>
           normalizeTreatment({
             ...t,
@@ -92,15 +112,31 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
           }),
         )
         .filter(treatmentHasData)
+      const labsPayload = nextLabs
+        .map((x) =>
+          normalizeLabWork(
+            {
+              ...x,
+              procedureDescription: String(x.procedureDescription || '').trim(),
+            },
+            rate,
+          ),
+        )
+        .filter(labWorkHasData)
       const data = await api<{ chart: DentalChartDto }>(
         `/api/dental/chart/${encodeURIComponent(patientId)}`,
         {
           method: 'PUT',
-          body: JSON.stringify({ generalTreatments: payload }),
+          body: JSON.stringify({
+            generalTreatments: treatmentsPayload,
+            generalLabWorks: labsPayload,
+          }),
         },
       )
       const list = (data.chart?.generalTreatments || []).map((t) => normalizeTreatment(t, rate))
       setRows(list.filter(treatmentHasData))
+      const labsList = (data.chart?.generalLabWorks || []).map((x) => normalizeLabWork(x, rate))
+      setLabRows(labsList.filter(labWorkHasData))
       setOkMsg('تم الحفظ — البنود ذات السعر تذهب للتحصيل')
       return true
     } catch (e) {
@@ -141,8 +177,22 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       },
       rate,
     )
-    const ok = await saveList([...rows, row])
+    const ok = await saveAll([...rows, row], labRows)
     if (ok) resetForm()
+  }
+
+  async function addLab() {
+    const draft = normalizeLabWork(labDraft, rate)
+    if (!labWorkHasData(draft)) {
+      setErr('أدخل مخبراً ووصفاً أو مبلغاً لسجل المخبر')
+      return
+    }
+    if (!draft.labId && !draft.labName.trim()) {
+      setErr('اختر المخبر من القائمة')
+      return
+    }
+    const ok = await saveAll(rows, [...labRows, draft])
+    if (ok) resetLabForm()
   }
 
   async function removeRow(idx: number) {
@@ -152,8 +202,48 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       return
     }
     if (!window.confirm('حذف هذا الإجراء العام؟')) return
-    const next = rows.filter((_, i) => i !== idx)
-    await saveList(next)
+    await saveAll(
+      rows.filter((_, i) => i !== idx),
+      labRows,
+    )
+  }
+
+  async function removeLab(idx: number) {
+    if (!canEdit || saving) return
+    if (!window.confirm('حذف سجل المخبر هذا؟')) return
+    await saveAll(
+      rows,
+      labRows.filter((_, i) => i !== idx),
+    )
+  }
+
+  function selectLabCatalog(labId: string) {
+    const lab = labs.find((x) => x.id === labId)
+    setLabDraft((prev) =>
+      normalizeLabWork(
+        {
+          ...prev,
+          labId: lab ? lab.id : null,
+          labName: lab ? lab.name : '',
+        },
+        rate,
+      ),
+    )
+  }
+
+  function selectLabDoctor(providerKey: string) {
+    const p = providers.find((x) => x.id === providerKey)
+    setLabDraft((prev) =>
+      normalizeLabWork(
+        {
+          ...prev,
+          providerUserId: p ? p.id : null,
+          doctorName: p ? p.name : '',
+          providerKey: p?.id === '__elias__' || p?.noShare ? 'elias' : '',
+        },
+        rate,
+      ),
+    )
   }
 
   return (
@@ -161,7 +251,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       <h2 className="card-title">إجراءات عامة</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
         إجراءات على كامل الفم وليست مرتبطة بسن واحد — مثل التنظيف أو التبييض. يمكن إدخال 0 ل.س أو 0 دولار (مجاني). عند
-        إدخال سعر أكبر من صفر مع الطبيب يُرسل البند إلى التحصيل.
+        إدخال سعر أكبر من صفر مع الطبيب يُرسل البند إلى التحصيل. يمكن أيضاً ربط مخبر بالإجراءات العامة.
       </p>
 
       {err ? (
@@ -258,6 +348,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                 borderRadius: 12,
                 border: '1px solid var(--border)',
                 background: 'var(--surface-2)',
+                marginBottom: '1rem',
               }}
             >
               <strong style={{ fontSize: '0.92rem' }}>إضافة إجراء عام</strong>
@@ -344,6 +435,229 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
               </div>
             </div>
           ) : null}
+
+          <section
+            style={{
+              marginTop: '0.35rem',
+              padding: '0.95rem 1rem',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              background: 'var(--bg)',
+            }}
+          >
+            <h3 style={{ margin: '0 0 0.35rem', fontSize: '1rem' }}>مخابر الإجراءات العامة</h3>
+            <p style={{ margin: '0 0 0.85rem', fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+              سجّل أعمال المخبر المرتبطة بإجراء عام (وليست بسن محدد)، مع اختيار المخبر والطبيب والمبلغ.
+            </p>
+
+            {labRows.length === 0 ? (
+              <p style={{ margin: '0 0 0.75rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                لا سجلات مخابر للإجراءات العامة بعد.
+              </p>
+            ) : (
+              <div className="table-wrap" style={{ marginBottom: '0.85rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>المخبر</th>
+                      <th>الوصف</th>
+                      <th>الطبيب</th>
+                      <th>المبلغ</th>
+                      {canEdit ? <th></th> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {labRows.map((lab, idx) => {
+                      const effective = labEffectiveAmountSyp(lab, rate)
+                      return (
+                        <tr key={lab.id || `glab-${idx}`}>
+                          <td dir="ltr">{lab.businessDate || '—'}</td>
+                          <td>{lab.labName || '—'}</td>
+                          <td>{lab.procedureDescription.trim() || '—'}</td>
+                          <td>{lab.doctorName || '—'}</td>
+                          <td>
+                            {effective.toLocaleString('ar-SY')} ل.س
+                            {lab.amountUsd > 0 ? (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                منها {formatUsdAmount(lab.amountUsd)} USD
+                              </div>
+                            ) : null}
+                          </td>
+                          {canEdit ? (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ fontSize: '0.78rem' }}
+                                disabled={saving}
+                                onClick={() => void removeLab(idx)}
+                              >
+                                حذف
+                              </button>
+                            </td>
+                          ) : null}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {canEdit ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gap: '0.65rem',
+                  padding: '0.85rem',
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface-2)',
+                }}
+              >
+                <strong style={{ fontSize: '0.92rem' }}>إضافة مخبر لإجراء عام</strong>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                    gap: '0.55rem',
+                  }}
+                >
+                  <div>
+                    <label className="form-label">المخبر</label>
+                    {labs.length > 0 ? (
+                      <select
+                        className="select"
+                        value={labDraft.labId || ''}
+                        onChange={(e) => selectLabCatalog(e.target.value)}
+                        disabled={saving}
+                      >
+                        <option value="">— اختر مخبر —</option>
+                        {labs.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--amber)' }}>
+                        لا مخابر في القائمة — أضفها من صفحة «المخابر» أولاً.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="form-label">الطبيب</label>
+                    <select
+                      className="select"
+                      value={labDraft.providerUserId || ''}
+                      onChange={(e) => selectLabDoctor(e.target.value)}
+                      disabled={saving}
+                    >
+                      <option value="">—</option>
+                      {providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">التاريخ</label>
+                    <input
+                      className="input"
+                      type="date"
+                      value={labDraft.businessDate || todayIsoDate()}
+                      onChange={(e) =>
+                        setLabDraft((prev) => normalizeLabWork({ ...prev, businessDate: e.target.value }, rate))
+                      }
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="form-label">وصف العمل</label>
+                  <input
+                    className="input"
+                    value={labDraft.procedureDescription}
+                    onChange={(e) =>
+                      setLabDraft((prev) =>
+                        normalizeLabWork({ ...prev, procedureDescription: e.target.value }, rate),
+                      )
+                    }
+                    placeholder="مثال: طقم متحرك / وجه تجميلي"
+                    disabled={saving}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: '0.55rem',
+                  }}
+                >
+                  <div>
+                    <label className="form-label">المبلغ (ل.س)</label>
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      dir="ltr"
+                      value={String(Math.max(0, Number(labDraft.amountSyp) || 0))}
+                      onChange={(e) =>
+                        setLabDraft((prev) =>
+                          normalizeLabWork(
+                            {
+                              ...prev,
+                              amountSyp: Math.max(
+                                0,
+                                Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0),
+                              ),
+                            },
+                            rate,
+                          ),
+                        )
+                      }
+                      disabled={saving}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">المبلغ (USD)</label>
+                    <input
+                      className="input"
+                      inputMode="decimal"
+                      dir="ltr"
+                      value={String(labDraft.amountUsd || 0)}
+                      onChange={(e) => {
+                        const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                        const n = Math.max(0, roundUsd(Number(cleaned) || 0))
+                        setLabDraft((prev) =>
+                          normalizeLabWork(
+                            {
+                              ...prev,
+                              amountUsd: n,
+                              usdSypRate: n > 0 ? rate || prev.usdSypRate || 0 : 0,
+                            },
+                            rate,
+                          ),
+                        )
+                      }}
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={saving || labs.length === 0}
+                    onClick={() => void addLab()}
+                  >
+                    {saving ? 'جاري الحفظ…' : 'حفظ المخبر'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
         </>
       )}
     </div>

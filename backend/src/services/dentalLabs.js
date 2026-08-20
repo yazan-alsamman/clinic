@@ -51,65 +51,82 @@ export async function listDentalLabAccounts({ includeInactive = true } = {}) {
   }
 
   const patients = await Patient.find({
-    'dentalChart.teeth.labWorks.0': { $exists: true },
+    $or: [
+      { 'dentalChart.teeth.labWorks.0': { $exists: true } },
+      { 'dentalChart.generalLabWorks.0': { $exists: true } },
+    ],
   })
-    .select('fullName fileNumber phone dentalChart.teeth')
+    .select('name fullName fileNumber phone dentalChart.teeth dentalChart.generalLabWorks')
     .lean()
 
+  function pushLabWork(pMeta, lw, fdi, isGeneral) {
+    const amountSyp = Math.max(0, Math.round(Number(lw.amountSyp) || 0))
+    const amountUsd = Math.max(0, round6(Number(lw.amountUsd) || 0))
+    const usdSypRate = Math.max(0, Number(lw.usdSypRate) || 0)
+    const effectiveSyp = labWorkEffectiveSyp(lw)
+    if (
+      !(amountSyp > 0 || amountUsd > 0 || String(lw.labName || '').trim() || String(lw.procedureDescription || '').trim())
+    ) {
+      return
+    }
+    const labIdRaw = lw.labId != null ? String(lw.labId).trim() : ''
+    const labName = String(lw.labName || '').trim()
+    let targetId = ''
+    if (labIdRaw && labById.has(labIdRaw)) {
+      targetId = labIdRaw
+    } else {
+      const byName = labByName.get(normalizeLabNameKey(labName))
+      if (byName) targetId = String(byName._id)
+    }
+
+    const workRow = {
+      id: lw._id
+        ? String(lw._id)
+        : `${pMeta.patientId}-${isGeneral ? 'g' : fdi}-${labName}-${lw.businessDate || ''}`,
+      patientId: pMeta.patientId,
+      patientName: pMeta.patientName,
+      fileNumber: pMeta.fileNumber,
+      phone: pMeta.phone,
+      fdi: isGeneral ? 0 : fdi,
+      isGeneral: Boolean(isGeneral),
+      labName: labName || (targetId ? labById.get(targetId)?.name : '') || '—',
+      procedureDescription:
+        String(lw.procedureDescription || '').trim() || (isGeneral ? 'إجراء عام' : ''),
+      amountSyp,
+      amountUsd,
+      usdSypRate,
+      effectiveSyp,
+      businessDate: String(lw.businessDate || '').trim(),
+      doctorName: String(lw.doctorName || '').trim(),
+    }
+
+    if (targetId) {
+      bucket.get(targetId)?.works.push(workRow)
+    } else if (labName) {
+      const orphanKey = `orphan:${normalizeLabNameKey(labName)}`
+      if (!bucket.has(orphanKey)) {
+        bucket.set(orphanKey, { works: [], orphan: true, orphanName: labName })
+      }
+      bucket.get(orphanKey).works.push(workRow)
+    }
+  }
+
   for (const p of patients) {
-    const patientId = String(p._id)
-    const patientName = String(p.fullName || '').trim() || '—'
-    const fileNumber = String(p.fileNumber || '').trim()
-    const phone = String(p.phone || '').trim()
+    const pMeta = {
+      patientId: String(p._id),
+      patientName: String(p.name || p.fullName || '').trim() || '—',
+      fileNumber: String(p.fileNumber || '').trim(),
+      phone: String(p.phone || '').trim(),
+    }
     const teeth = Array.isArray(p.dentalChart?.teeth) ? p.dentalChart.teeth : []
     for (const tooth of teeth) {
       const fdi = Number(tooth?.fdi) || 0
-      const labWorks = Array.isArray(tooth?.labWorks) ? tooth.labWorks : []
-      for (const lw of labWorks) {
-        const amountSyp = Math.max(0, Math.round(Number(lw.amountSyp) || 0))
-        const amountUsd = Math.max(0, round6(Number(lw.amountUsd) || 0))
-        const usdSypRate = Math.max(0, Number(lw.usdSypRate) || 0)
-        const effectiveSyp = labWorkEffectiveSyp(lw)
-        if (!(amountSyp > 0 || amountUsd > 0 || String(lw.labName || '').trim() || String(lw.procedureDescription || '').trim())) {
-          continue
-        }
-        const labIdRaw = lw.labId != null ? String(lw.labId).trim() : ''
-        const labName = String(lw.labName || '').trim()
-        let targetId = ''
-        if (labIdRaw && labById.has(labIdRaw)) {
-          targetId = labIdRaw
-        } else {
-          const byName = labByName.get(normalizeLabNameKey(labName))
-          if (byName) targetId = String(byName._id)
-        }
-
-        const workRow = {
-          id: lw._id ? String(lw._id) : `${patientId}-${fdi}-${labName}-${lw.businessDate || ''}`,
-          patientId,
-          patientName,
-          fileNumber,
-          phone,
-          fdi,
-          labName: labName || (targetId ? labById.get(targetId)?.name : '') || '—',
-          procedureDescription: String(lw.procedureDescription || '').trim(),
-          amountSyp,
-          amountUsd,
-          usdSypRate,
-          effectiveSyp,
-          businessDate: String(lw.businessDate || '').trim(),
-          doctorName: String(lw.doctorName || '').trim(),
-        }
-
-        if (targetId) {
-          bucket.get(targetId)?.works.push(workRow)
-        } else if (labName) {
-          const orphanKey = `orphan:${normalizeLabNameKey(labName)}`
-          if (!bucket.has(orphanKey)) {
-            bucket.set(orphanKey, { works: [], orphan: true, orphanName: labName })
-          }
-          bucket.get(orphanKey).works.push(workRow)
-        }
+      for (const lw of tooth?.labWorks || []) {
+        pushLabWork(pMeta, lw, fdi, false)
       }
+    }
+    for (const lw of p.dentalChart?.generalLabWorks || []) {
+      pushLabWork(pMeta, lw, 0, true)
     }
   }
 
