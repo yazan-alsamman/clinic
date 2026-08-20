@@ -421,45 +421,68 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                 borderRadius: 12,
                 border: '1px solid var(--border)',
                 marginBottom: '1rem',
-                background: 'var(--surface-2, transparent)',
+                background: 'var(--surface-2)',
               }}
             >
               <strong style={{ fontSize: '0.92rem' }}>
                 قسط جديد — {cases[installCaseIdx].title || 'تقويم'} ({cases[installCaseIdx].doctorName})
               </strong>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.65rem' }}>
-                <label>
-                  المبلغ ل.س
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                  gap: '0.55rem',
+                }}
+              >
+                <div>
+                  <label className="form-label">المبلغ (ل.س)</label>
                   <input
-                    type="number"
-                    min={0}
-                    value={instAmountSyp || ''}
-                    onChange={(e) => setInstAmountSyp(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                    className="input"
+                    inputMode="numeric"
+                    value={String(instAmountSyp)}
+                    onChange={(e) =>
+                      setInstAmountSyp(
+                        Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)),
+                      )
+                    }
+                    disabled={saving}
                   />
-                </label>
-                <label>
-                  المبلغ USD
+                </div>
+                <div>
+                  <label className="form-label">المبلغ (USD)</label>
                   <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={instAmountUsd || ''}
-                    onChange={(e) => setInstAmountUsd(Math.max(0, Number(e.target.value) || 0))}
+                    className="input"
+                    inputMode="decimal"
+                    value={String(instAmountUsd)}
+                    onChange={(e) => {
+                      const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                      setInstAmountUsd(Math.max(0, Number(cleaned) || 0))
+                    }}
+                    disabled={saving}
                   />
-                </label>
-                <label>
-                  التاريخ
-                  <input type="date" value={instDate} onChange={(e) => setInstDate(e.target.value)} />
-                </label>
-                <label>
-                  ملاحظة
-                  <input value={instNote} onChange={(e) => setInstNote(e.target.value)} placeholder="قسط أول…" />
-                </label>
+                </div>
+                <div>
+                  <label className="form-label">التاريخ</label>
+                  <input
+                    className="input"
+                    type="date"
+                    value={instDate}
+                    onChange={(e) => setInstDate(e.target.value)}
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">ملاحظة</label>
+                  <input
+                    className="input"
+                    value={instNote}
+                    onChange={(e) => setInstNote(e.target.value)}
+                    placeholder="قسط أول…"
+                    disabled={saving}
+                  />
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void addInstallment()}>
-                  حفظ القسط للتحصيل
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="btn btn-ghost"
@@ -470,6 +493,14 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                   }}
                 >
                   إلغاء
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving}
+                  onClick={() => void addInstallment()}
+                >
+                  {saving ? 'جاري الحفظ…' : 'حفظ القسط للتحصيل'}
                 </button>
               </div>
             </div>
@@ -483,61 +514,107 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                 padding: '0.85rem',
                 borderRadius: 12,
                 border: '1px solid var(--border)',
+                background: 'var(--surface-2)',
               }}
             >
               <strong style={{ fontSize: '0.92rem' }}>حالة تقويم جديدة</strong>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.65rem' }}>
-                <label>
-                  العنوان
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="تقويم" />
-                </label>
-                <label>
-                  الطبيب
-                  <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-                    <option value="">— اختر —</option>
+
+              <div>
+                <label className="form-label">العنوان</label>
+                <input
+                  className="input"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="تقويم"
+                  disabled={saving}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                  gap: '0.55rem',
+                }}
+              >
+                <div>
+                  <label className="form-label">الطبيب</label>
+                  <select
+                    className="select"
+                    value={providerId}
+                    onChange={(e) => setProviderId(e.target.value)}
+                    disabled={saving}
+                  >
+                    <option value="">— اختر الطبيب —</option>
                     {providers.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  تاريخ البدء
-                  <input type="date" value={startedAt} onChange={(e) => setStartedAt(e.target.value)} />
-                </label>
-                <label>
-                  إجمالي الخطة ل.س (اختياري)
+                </div>
+                <div>
+                  <label className="form-label">تاريخ البدء</label>
                   <input
-                    type="number"
-                    min={0}
-                    value={totalCostSyp || ''}
-                    onChange={(e) => setTotalCostSyp(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                    className="input"
+                    type="date"
+                    value={startedAt}
+                    onChange={(e) => setStartedAt(e.target.value)}
+                    disabled={saving}
                   />
-                </label>
-                <label>
-                  إجمالي الخطة USD (اختياري)
+                </div>
+                <div>
+                  <label className="form-label">إجمالي الخطة (ل.س) اختياري</label>
                   <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={totalCostUsd || ''}
-                    onChange={(e) => setTotalCostUsd(Math.max(0, Number(e.target.value) || 0))}
+                    className="input"
+                    inputMode="numeric"
+                    value={String(totalCostSyp)}
+                    onChange={(e) =>
+                      setTotalCostSyp(
+                        Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)),
+                      )
+                    }
+                    disabled={saving}
                   />
-                </label>
+                </div>
+                <div>
+                  <label className="form-label">إجمالي الخطة (USD) اختياري</label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={String(totalCostUsd)}
+                    onChange={(e) => {
+                      const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                      setTotalCostUsd(Math.max(0, Number(cleaned) || 0))
+                    }}
+                    disabled={saving}
+                  />
+                </div>
               </div>
-              <label>
-                ملاحظات
+
+              <div>
+                <label className="form-label">ملاحظات</label>
                 <textarea
+                  className="input"
                   rows={2}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="ملاحظات اختيارية…"
+                  disabled={saving}
+                  style={{ resize: 'vertical', minHeight: '4.5rem', width: '100%' }}
                 />
-              </label>
-              <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void addCase()}>
-                إضافة حالة تقويم
-              </button>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving}
+                  onClick={() => void addCase()}
+                >
+                  {saving ? 'جاري الحفظ…' : 'إضافة حالة تقويم'}
+                </button>
+              </div>
             </div>
           ) : null}
         </>
