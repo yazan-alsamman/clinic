@@ -59,6 +59,7 @@ const DENTAL_CHART_PATIENT_FILTER = {
     { 'dentalChart.teeth.0': { $exists: true } },
     { 'dentalChart.generalTreatments.0': { $exists: true } },
     { 'dentalChart.generalLabWorks.0': { $exists: true } },
+    { 'dentalChart.orthodonticCases.0': { $exists: true } },
     { departments: 'dental' },
   ],
 }
@@ -84,6 +85,79 @@ function generalProcedureLabel(desc) {
   if (!d) return 'إجراء عام'
   if (/^إجراء عام/.test(d)) return d
   return `إجراء عام — ${d}`
+}
+
+function orthoInstallmentAsTreatment(orthoCase, inst) {
+  const title = String(orthoCase?.title || 'تقويم').trim() || 'تقويم'
+  const note = String(inst?.note || '').trim()
+  return {
+    _id: inst?._id,
+    procedureDescription: note ? `تقويم — ${title} — ${note}` : `تقويم — ${title}`,
+    totalCostSyp: roundMoney(inst?.amountSyp),
+    totalCostUsd: Math.max(0, Number(inst?.amountUsd) || 0),
+    costUsdSypRate: Math.max(0, Number(inst?.costUsdSypRate) || 0),
+    doctorName: String(orthoCase?.doctorName || '').trim(),
+    providerUserId: orthoCase?.providerUserId || null,
+    providerKey: String(orthoCase?.providerKey || '').trim(),
+    businessDate: String(inst?.businessDate || '').trim().slice(0, 10),
+    payments: Array.isArray(inst?.payments) ? inst.payments : [],
+    billingItemId: inst?.billingItemId || null,
+    clinicalSessionId: inst?.clinicalSessionId || null,
+  }
+}
+
+/**
+ * حصة التقويم: فقط المبالغ المسدّدة (حسب تاريخ الدفع) — وليس إجمالي الخطة أو القسط غير المسدّد.
+ */
+function accumulateOrthoPaidShare({
+  orthoCase,
+  from,
+  to,
+  userById,
+  byDoctor,
+  bumpNamed,
+  addRevenue,
+}) {
+  let paidInRange = 0
+  for (const inst of orthoCase?.installments || []) {
+    for (const pay of inst.payments || []) {
+      const paidAt = String(pay.paidAt || '').trim().slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) continue
+      if (!inRange(paidAt, from, to)) continue
+      const amount = roundMoney(pay.amountSyp)
+      if (!(amount > 0)) continue
+      paidInRange += amount
+    }
+  }
+  if (!(paidInRange > 0)) return 0
+
+  const uid = orthoCase.providerUserId ? String(orthoCase.providerUserId) : ''
+  const name = String(orthoCase.doctorName || userById.get(uid) || '').trim()
+  const matchName = name || userById.get(uid) || ''
+  const isElias = isEliasProviderRef({
+    providerUserId: uid || orthoCase.providerUserId,
+    providerKey: orthoCase.providerKey,
+    doctorName: matchName,
+  })
+
+  if (addRevenue) addRevenue(paidInRange)
+
+  const key = isElias ? DENTAL_ELIAS_PROVIDER_KEY : uid || name || '—'
+  const prev = byDoctor.get(key) || {
+    userId: isElias ? null : uid || null,
+    providerKey: isElias ? DENTAL_ELIAS_PROVIDER_KEY : '',
+    name: isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || '—',
+    proceduresSyp: 0,
+    shareSyp: 0,
+    noShare: isElias,
+  }
+  prev.proceduresSyp += paidInRange
+  prev.name = isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || prev.name
+  if (uid && !isElias) prev.userId = uid
+  byDoctor.set(key, prev)
+
+  if (typeof bumpNamed === 'function') bumpNamed(paidInRange, isElias, matchName)
+  return paidInRange
 }
 
 /**
@@ -273,6 +347,26 @@ export async function summarizeDentalChartFinance({ from, to }) {
         doctorName: labName,
       })
       if (labIsElias) eliasLabWorksSyp += amt
+    }
+
+    for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
+      accumulateOrthoPaidShare({
+        orthoCase,
+        from,
+        to,
+        userById,
+        byDoctor,
+        addRevenue: (amt) => {
+          totalRevenueSyp += amt
+        },
+        bumpNamed: (amt, isElias, matchName) => {
+          if (isElias) eliasProceduresSyp += amt
+          else if (providerNameMatchesAyham(matchName)) ayhamProceduresSyp += amt
+          else if (providerNameMatchesIyad(matchName)) iyadProceduresSyp += amt
+          else if (providerNameMatchesOmar(matchName)) omarProceduresSyp += amt
+          else otherProceduresSyp += amt
+        },
+      })
     }
   }
 
@@ -486,6 +580,11 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       for (const tr of tooth.treatments || []) consumeChartedUnassigned(tr)
     }
     for (const tr of p.dentalChart?.generalTreatments || []) consumeChartedUnassigned(tr)
+    for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
+      for (const inst of orthoCase.installments || []) {
+        consumeChartedUnassigned(orthoInstallmentAsTreatment(orthoCase, inst))
+      }
+    }
     unassignedByPatient.set(patientId, leftoverUnassigned)
 
     for (const tooth of p.dentalChart?.teeth || []) {
@@ -723,6 +822,78 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         amountSypOnly: roundMoney(lab.amountSyp),
       })
     }
+
+    for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
+      for (const inst of orthoCase.installments || []) {
+        const tr = orthoInstallmentAsTreatment(orthoCase, inst)
+        const cost = treatmentCostSyp(tr)
+        const hasContent =
+          cost > 0 ||
+          Boolean(String(tr.procedureDescription || '').trim()) ||
+          Boolean(String(tr.doctorName || '').trim()) ||
+          Boolean(tr.providerUserId) ||
+          Boolean(tr.providerKey) ||
+          (Array.isArray(tr.payments) && tr.payments.length > 0)
+        if (!hasContent) continue
+
+        let bd = treatmentBusinessDate(tr)
+        const undated = !bd
+        if (!undated && !inRange(bd, from, to)) continue
+        if (undated) bd = 'بدون تاريخ'
+
+        const paid = treatmentPaidAfterSettlements(tr, settlementMaps)
+        let remaining = Math.max(0, cost - paid)
+        const leftover = unassignedByPatient.get(patientId) || 0
+        if (leftover > 0 && remaining > 0) {
+          const take = Math.min(remaining, leftover)
+          remaining = Math.max(0, remaining - take)
+          unassignedByPatient.set(patientId, roundMoney(leftover - take))
+        }
+        const paidFinal = roundMoney(cost - remaining)
+        const meta = resolveDoctorMeta(tr, userById)
+        if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
+
+        const clinic = ensureClinic(meta)
+        if (clinic) {
+          clinic.treatmentCount += 1
+          /** حصة الطبيب من التقويم = المسدّد فقط */
+          clinic.proceduresSyp += paidFinal
+          clinic.paidSyp += paidFinal
+          clinic.remainingSyp += remaining
+        }
+
+        rows.push({
+          kind: 'treatment',
+          id: tr._id ? String(tr._id) : `ortho-${patientId}-${bd}-${rows.length}`,
+          patientId,
+          patientName,
+          fileNumber,
+          fdi: 0,
+          isGeneral: true,
+          isOrthodontic: true,
+          businessDate: bd,
+          undated,
+          clinicKey: meta.key,
+          clinicLabel: meta.clinicLabel,
+          doctorName: meta.name,
+          providerUserId: meta.userId,
+          noShare: meta.noShare,
+          procedureDescription: tr.procedureDescription,
+          totalCostSyp: cost,
+          totalCostUsd: Math.max(0, Number(tr.totalCostUsd) || 0),
+          paidSyp: paidFinal,
+          remainingSyp: remaining,
+          payments: (tr.payments || []).map((pay, idx) => ({
+            id: pay._id ? String(pay._id) : `pay-${idx}`,
+            amountSyp: roundMoney(pay.amountSyp),
+            amountUsd: Number(pay.amountUsd) || 0,
+            currency: pay.currency === 'usd' ? 'usd' : 'syp',
+            paidAt: String(pay.paidAt || ''),
+            note: String(pay.note || ''),
+          })),
+        })
+      }
+    }
   }
 
   const clinics = [...clinicsMap.values()]
@@ -804,6 +975,11 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
       for (const tr of tooth.treatments || []) consumeChartedUnassigned(tr)
     }
     for (const tr of p.dentalChart?.generalTreatments || []) consumeChartedUnassigned(tr)
+    for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
+      for (const inst of orthoCase.installments || []) {
+        consumeChartedUnassigned(orthoInstallmentAsTreatment(orthoCase, inst))
+      }
+    }
     unassignedByPatient.set(pid, leftoverUnassigned)
 
     const pushProcedure = (tr, { fdi, isGeneral }) => {
@@ -823,12 +999,17 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
         unassignedByPatient.set(pid, leftover)
       }
       const bd = treatmentBusinessDate(tr) || '—'
+      const isOrtho = /^تقويم/.test(String(desc || '').trim())
       procedures.push({
         id: tr._id ? String(tr._id) : `${isGeneral ? 'g' : 't'}-${String(p._id)}-${fdi}-${procedures.length}`,
         fdi: isGeneral ? 0 : fdi,
         isGeneral: Boolean(isGeneral),
         businessDate: bd,
-        procedureDescription: isGeneral ? generalProcedureLabel(desc) : desc || 'إجراء',
+        procedureDescription: isGeneral
+          ? isOrtho
+            ? desc || 'تقويم'
+            : generalProcedureLabel(desc)
+          : desc || 'إجراء',
         doctorName: meta.name,
         providerUserId: meta.userId,
         noShare: meta.noShare,
@@ -856,6 +1037,12 @@ export async function listDentalPatientsAccounts({ q = '' } = {}) {
     }
     for (const tr of p.dentalChart?.generalTreatments || []) {
       pushProcedure(tr, { fdi: 0, isGeneral: true })
+    }
+    for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
+      for (const inst of orthoCase.installments || []) {
+        const tr = orthoInstallmentAsTreatment(orthoCase, inst)
+        pushProcedure(tr, { fdi: 0, isGeneral: true })
+      }
     }
 
     if (procedures.length === 0 && !(Array.isArray(p.departments) && p.departments.includes('dental'))) {

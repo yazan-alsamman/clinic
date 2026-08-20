@@ -122,6 +122,40 @@ const dentalChartLabWorkSchema = new mongoose.Schema(
   { _id: true },
 )
 
+/** قسط تقويم — يُرسل للتحصيل؛ حصة الطبيب تُحسب من المبلغ المسدّد فقط */
+const dentalOrthoInstallmentSchema = new mongoose.Schema(
+  {
+    amountSyp: { type: Number, default: 0, min: 0 },
+    amountUsd: { type: Number, default: 0, min: 0 },
+    costUsdSypRate: { type: Number, default: 0, min: 0 },
+    businessDate: { type: String, default: '' },
+    note: { type: String, default: '', trim: true, maxlength: 300 },
+    payments: { type: [dentalChartPaymentSchema], default: [] },
+    billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+    clinicalSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalSession', default: null },
+  },
+  { _id: true },
+)
+
+/** حالة تقويم لمريض — مرتبطة بطبيب أسنان؛ التسديد على دفعات */
+const dentalOrthoCaseSchema = new mongoose.Schema(
+  {
+    title: { type: String, default: 'تقويم', trim: true, maxlength: 200 },
+    doctorName: { type: String, default: '', trim: true, maxlength: 160 },
+    providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    providerKey: { type: String, default: '', trim: true, maxlength: 40 },
+    /** إجمالي خطة التقويم للعرض (اختياري) — لا يُحسب كله لحصة الطبيب دفعة واحدة */
+    totalCostSyp: { type: Number, default: 0, min: 0 },
+    totalCostUsd: { type: Number, default: 0, min: 0 },
+    costUsdSypRate: { type: Number, default: 0, min: 0 },
+    notes: { type: String, default: '', trim: true, maxlength: 2000 },
+    startedAt: { type: String, default: '' },
+    active: { type: Boolean, default: true },
+    installments: { type: [dentalOrthoInstallmentSchema], default: [] },
+  },
+  { _id: true },
+)
+
 const dentalChartToothSchema = new mongoose.Schema(
   {
     fdi: { type: Number, required: true, min: 11, max: 48 },
@@ -148,6 +182,8 @@ const dentalChartSchema = new mongoose.Schema(
     generalTreatments: { type: [dentalChartTreatmentSchema], default: [] },
     /** مخابر مرتبطة بالإجراءات العامة (وليست بسن محدد) */
     generalLabWorks: { type: [dentalChartLabWorkSchema], default: [] },
+    /** حالات التقويم — تسديد على دفعات؛ حصة الطبيب من كل دفعة مسدّدة */
+    orthodonticCases: { type: [dentalOrthoCaseSchema], default: [] },
     updatedAt: { type: Date, default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },

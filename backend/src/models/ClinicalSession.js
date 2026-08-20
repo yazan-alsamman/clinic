@@ -57,7 +57,8 @@ const clinicalSessionSchema = new mongoose.Schema(
     },
     /** ربط بإجراء مخطط أسنان (معرف فرعي داخل patient.dentalChart) */
     dentalToothFdi: { type: Number, min: 11, max: 48, default: undefined },
-    dentalTreatmentId: { type: String, default: '', trim: true, maxlength: 40 },
+    /** معرف إجراء المخطط أو قسط التقويم (مثل ortho:<ObjectId>) */
+    dentalTreatmentId: { type: String, default: '', trim: true, maxlength: 64 },
     isPackageSession: { type: Boolean, default: false },
     /** شحن رصيد إضافي (ليس إجراء سريري) */
     isCreditTopUp: { type: Boolean, default: false },

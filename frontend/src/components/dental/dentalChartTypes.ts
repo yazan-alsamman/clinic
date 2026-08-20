@@ -95,8 +95,38 @@ export type DentalChartDto = {
   generalTreatments?: DentalToothTreatment[]
   /** مخابر مرتبطة بالإجراءات العامة */
   generalLabWorks?: DentalLabWork[]
+  /** حالات التقويم — تسديد على دفعات */
+  orthodonticCases?: DentalOrthodonticCase[]
   updatedAt: string | null
   updatedBy: string | null
+}
+
+export type DentalOrthoInstallment = {
+  id?: string
+  amountSyp: number
+  amountUsd: number
+  costUsdSypRate: number
+  businessDate: string
+  note: string
+  payments: DentalPayment[]
+  billingItemId?: string | null
+  clinicalSessionId?: string | null
+  billingStatus?: 'pending_payment' | 'paid' | 'cancelled' | null
+}
+
+export type DentalOrthodonticCase = {
+  id?: string
+  title: string
+  doctorName: string
+  providerUserId: string | null
+  providerKey?: string
+  totalCostSyp: number
+  totalCostUsd: number
+  costUsdSypRate: number
+  notes: string
+  startedAt: string
+  active: boolean
+  installments: DentalOrthoInstallment[]
 }
 
 export type ChartTool =
@@ -412,6 +442,145 @@ export function labWorkHasData(row: DentalLabWork | undefined): boolean {
     row.amountSyp > 0 ||
     row.amountUsd > 0
   )
+}
+
+export function installmentEffectiveTotalSyp(
+  inst: DentalOrthoInstallment,
+  fallbackRate?: number | null,
+): number {
+  const syp = Math.max(0, Math.round(Number(inst.amountSyp) || 0))
+  const usd = Math.max(0, Number(inst.amountUsd) || 0)
+  const rate =
+    Number(inst.costUsdSypRate) > 0
+      ? Number(inst.costUsdSypRate)
+      : Math.max(0, Number(fallbackRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? Math.round(usd * rate) : 0
+  return syp + fromUsd
+}
+
+export function emptyOrthoInstallment(): DentalOrthoInstallment {
+  return {
+    id: `oi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    amountSyp: 0,
+    amountUsd: 0,
+    costUsdSypRate: 0,
+    businessDate: todayIsoDateLocal(),
+    note: '',
+    payments: [],
+  }
+}
+
+export function normalizeOrthoInstallment(
+  raw: Partial<DentalOrthoInstallment> | null | undefined,
+  fallbackRate?: number | null,
+): DentalOrthoInstallment {
+  const amountSyp = Math.max(0, Math.round(Number(raw?.amountSyp) || 0))
+  const amountUsd = Math.max(0, roundUsd(Number(raw?.amountUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(raw?.costUsdSypRate) || 0)
+  if (amountUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(fallbackRate) || 0)
+  }
+  if (!(amountUsd > 0)) costUsdSypRate = 0
+  let businessDate = String(raw?.businessDate || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) businessDate = todayIsoDateLocal()
+  const payments: DentalPayment[] = []
+  for (const p of raw?.payments || []) {
+    const currency: 'syp' | 'usd' = String(p.currency || '').toLowerCase() === 'usd' ? 'usd' : 'syp'
+    payments.push({
+      id: String(p.id || `p-${payments.length}`),
+      amountSyp: Math.max(0, Math.round(Number(p.amountSyp) || 0)),
+      amountUsd: currency === 'usd' ? Math.max(0, roundUsd(Number(p.amountUsd) || 0)) : 0,
+      currency,
+      usdSypRateUsed: currency === 'usd' ? Math.max(0, Number(p.usdSypRateUsed) || 0) : 0,
+      paidAt: String(p.paidAt || ''),
+      note: String(p.note || ''),
+    })
+  }
+  return {
+    id: raw?.id ? String(raw.id) : undefined,
+    amountSyp,
+    amountUsd,
+    costUsdSypRate,
+    businessDate,
+    note: String(raw?.note || ''),
+    payments,
+    billingItemId: raw?.billingItemId ? String(raw.billingItemId) : null,
+    clinicalSessionId: raw?.clinicalSessionId ? String(raw.clinicalSessionId) : null,
+    billingStatus: raw?.billingStatus || null,
+  }
+}
+
+export function emptyOrthodonticCase(): DentalOrthodonticCase {
+  return {
+    id: `oc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    title: 'تقويم',
+    doctorName: '',
+    providerUserId: null,
+    providerKey: '',
+    totalCostSyp: 0,
+    totalCostUsd: 0,
+    costUsdSypRate: 0,
+    notes: '',
+    startedAt: todayIsoDateLocal(),
+    active: true,
+    installments: [],
+  }
+}
+
+export function normalizeOrthodonticCase(
+  raw: Partial<DentalOrthodonticCase> | null | undefined,
+  fallbackRate?: number | null,
+): DentalOrthodonticCase {
+  const totalCostSyp = Math.max(0, Math.round(Number(raw?.totalCostSyp) || 0))
+  const totalCostUsd = Math.max(0, roundUsd(Number(raw?.totalCostUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(raw?.costUsdSypRate) || 0)
+  if (totalCostUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(fallbackRate) || 0)
+  }
+  if (!(totalCostUsd > 0)) costUsdSypRate = 0
+  let startedAt = String(raw?.startedAt || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startedAt)) startedAt = todayIsoDateLocal()
+  const providerRaw = raw?.providerUserId != null ? String(raw.providerUserId).trim() : ''
+  const providerKey = String(raw?.providerKey || '').trim()
+  const isElias =
+    providerRaw === DENTAL_ELIAS_VIRTUAL_ID ||
+    providerKey === 'elias' ||
+    /الياس|إلياس|elias|elyas/i.test(String(raw?.doctorName || ''))
+  return {
+    id: raw?.id ? String(raw.id) : undefined,
+    title: String(raw?.title || 'تقويم').trim() || 'تقويم',
+    doctorName: isElias ? DENTAL_ELIAS_DISPLAY_NAME : String(raw?.doctorName || '').trim(),
+    providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : providerRaw || null,
+    providerKey: isElias ? 'elias' : providerKey,
+    totalCostSyp,
+    totalCostUsd,
+    costUsdSypRate,
+    notes: String(raw?.notes || ''),
+    startedAt,
+    active: raw?.active === false ? false : true,
+    installments: (raw?.installments || []).map((x) => normalizeOrthoInstallment(x, fallbackRate)),
+  }
+}
+
+export function orthodonticCaseHasData(c: DentalOrthodonticCase | undefined): boolean {
+  if (!c) return false
+  return (
+    Boolean(c.doctorName.trim()) ||
+    Boolean(c.providerUserId) ||
+    Boolean(c.providerKey?.trim()) ||
+    c.totalCostSyp > 0 ||
+    c.totalCostUsd > 0 ||
+    Boolean(c.notes.trim()) ||
+    c.installments.length > 0
+  )
+}
+
+export function installmentPaidTotal(inst: DentalOrthoInstallment): number {
+  return Math.round(inst.payments.reduce((s, p) => s + (Number(p.amountSyp) || 0), 0))
+}
+
+export function installmentRemaining(inst: DentalOrthoInstallment, fallbackRate?: number | null): number {
+  return Math.max(0, installmentEffectiveTotalSyp(inst, fallbackRate) - installmentPaidTotal(inst))
 }
 
 export function normalizeLabWorksList(

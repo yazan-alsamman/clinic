@@ -360,7 +360,190 @@ function labWorkToDto(row) {
 }
 
 function emptyDentalChartDto() {
-  return { teeth: [], generalTreatments: [], generalLabWorks: [], updatedAt: null, updatedBy: null }
+  return {
+    teeth: [],
+    generalTreatments: [],
+    generalLabWorks: [],
+    orthodonticCases: [],
+    updatedAt: null,
+    updatedBy: null,
+  }
+}
+
+function normalizeOrthoInstallment(row, fallbackUsdSypRate = 0) {
+  const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
+  const amountUsd = Math.max(0, round6(Number(row?.amountUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(row?.costUsdSypRate) || 0)
+  if (amountUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(fallbackUsdSypRate) || 0)
+  }
+  if (!(amountUsd > 0)) costUsdSypRate = 0
+  const businessDate = normalizeYmd(row?.businessDate, todayBusinessDate())
+  const note = String(row?.note || '').trim().slice(0, 300)
+  if (!(amountSyp > 0) && !(amountUsd > 0) && !note && !row?.billingItemId) return null
+  const payments = Array.isArray(row?.payments)
+    ? row.payments.map((p) => ({
+        amountSyp: Math.max(0, Math.round(Number(p.amountSyp) || 0)),
+        amountUsd: Math.max(0, round6(Number(p.amountUsd) || 0)),
+        currency: p.currency === 'usd' ? 'usd' : 'syp',
+        usdSypRateUsed: Math.max(0, Number(p.usdSypRateUsed) || 0),
+        paidAt: String(p.paidAt || '').trim().slice(0, 10),
+        note: String(p.note || '').trim().slice(0, 300),
+        ...(p._id ? { _id: p._id } : {}),
+      }))
+    : []
+  const item = {
+    amountSyp,
+    amountUsd,
+    costUsdSypRate,
+    businessDate,
+    note,
+    payments,
+  }
+  if (row?._id) item._id = row._id
+  if (row?.id && mongoose.Types.ObjectId.isValid(String(row.id))) item._id = row.id
+  const billingRaw = row?.billingItemId != null ? String(row.billingItemId).trim() : ''
+  if (billingRaw && mongoose.Types.ObjectId.isValid(billingRaw)) item.billingItemId = billingRaw
+  const csRaw = row?.clinicalSessionId != null ? String(row.clinicalSessionId).trim() : ''
+  if (csRaw && mongoose.Types.ObjectId.isValid(csRaw)) item.clinicalSessionId = csRaw
+  return item
+}
+
+function normalizeOrthodonticCases(raw, fallbackUsdSypRate = 0) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const row of raw) {
+    const resolved = resolveDentalProviderFields({
+      providerUserId: row?.providerUserId,
+      providerKey: row?.providerKey,
+      doctorName: row?.doctorName,
+    })
+    const providerRaw = row?.providerUserId != null ? String(row.providerUserId).trim() : ''
+    let providerUserId = null
+    if (!resolved.isElias && mongoose.Types.ObjectId.isValid(providerRaw)) {
+      providerUserId = providerRaw
+    }
+    const totalCostSyp = Math.max(0, Math.round(Number(row?.totalCostSyp) || 0))
+    const totalCostUsd = Math.max(0, round6(Number(row?.totalCostUsd) || 0))
+    let costUsdSypRate = Math.max(0, Number(row?.costUsdSypRate) || 0)
+    if (totalCostUsd > 0 && !(costUsdSypRate > 0)) {
+      costUsdSypRate = Math.max(0, Number(fallbackUsdSypRate) || 0)
+    }
+    if (!(totalCostUsd > 0)) costUsdSypRate = 0
+    const installments = []
+    for (const inst of row?.installments || []) {
+      const n = normalizeOrthoInstallment(inst, fallbackUsdSypRate)
+      if (n) installments.push(n)
+      if (installments.length >= 80) break
+    }
+    const title = String(row?.title || 'تقويم').trim().slice(0, 200) || 'تقويم'
+    const notes = String(row?.notes || '').trim().slice(0, 2000)
+    const startedAt = normalizeYmd(row?.startedAt, todayBusinessDate())
+    const hasDoctor =
+      resolved.isElias ||
+      Boolean(providerUserId) ||
+      Boolean(String(resolved.doctorName || '').trim())
+    if (!hasDoctor && installments.length === 0 && !(totalCostSyp > 0) && !(totalCostUsd > 0) && !notes) {
+      continue
+    }
+    const item = {
+      title,
+      doctorName: resolved.isElias
+        ? DENTAL_ELIAS_DISPLAY_NAME
+        : String(resolved.doctorName || row?.doctorName || '').trim().slice(0, 160),
+      providerUserId,
+      providerKey: resolved.isElias
+        ? DENTAL_ELIAS_PROVIDER_KEY
+        : String(resolved.providerKey || '').trim().slice(0, 40),
+      totalCostSyp,
+      totalCostUsd,
+      costUsdSypRate,
+      notes,
+      startedAt,
+      active: row?.active === false ? false : true,
+      installments,
+    }
+    if (row?._id) item._id = row._id
+    if (row?.id && mongoose.Types.ObjectId.isValid(String(row.id))) item._id = row.id
+    out.push(item)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
+function mergePreviousOrthoBillingLinks(prevList, nextList) {
+  const prevById = new Map()
+  for (const c of prevList || []) {
+    if (c?._id) prevById.set(String(c._id), c)
+  }
+  for (const c of nextList || []) {
+    const prevCase = c._id ? prevById.get(String(c._id)) : null
+    const prevInstById = new Map()
+    for (const inst of prevCase?.installments || []) {
+      if (inst?._id) prevInstById.set(String(inst._id), inst)
+    }
+    for (const inst of c.installments || []) {
+      const prev = inst._id ? prevInstById.get(String(inst._id)) : null
+      if (!prev) continue
+      if (prev.billingItemId) inst.billingItemId = prev.billingItemId
+      if (prev.clinicalSessionId) inst.clinicalSessionId = prev.clinicalSessionId
+      if (Array.isArray(prev.payments) && prev.payments.length > 0) {
+        const nextPaid = Array.isArray(inst.payments) ? inst.payments.length : 0
+        if (!(nextPaid > 0)) inst.payments = prev.payments
+      }
+    }
+  }
+  return nextList
+}
+
+function orthoInstallmentToDto(inst, billingMap) {
+  const billingItemId = inst?.billingItemId ? String(inst.billingItemId) : ''
+  const billingMeta = billingItemId && billingMap ? billingMap.get(billingItemId) : null
+  const rawPays = Array.isArray(inst?.payments) ? inst.payments : []
+  return {
+    id: inst?._id ? String(inst._id) : undefined,
+    amountSyp: Math.max(0, Math.round(Number(inst?.amountSyp) || 0)),
+    amountUsd: Math.max(0, round6(Number(inst?.amountUsd) || 0)),
+    costUsdSypRate: Math.max(0, Number(inst?.costUsdSypRate) || 0),
+    businessDate: String(inst?.businessDate || '').trim().slice(0, 10),
+    note: String(inst?.note || '').trim(),
+    billingItemId: billingItemId || null,
+    clinicalSessionId: inst?.clinicalSessionId ? String(inst.clinicalSessionId) : null,
+    billingStatus: billingMeta?.status || (billingItemId ? 'pending_payment' : null),
+    payments: rawPays.map((p, idx) => ({
+      id: p?._id ? String(p._id) : `p-${idx}`,
+      amountSyp: Math.max(0, Math.round(Number(p.amountSyp) || 0)),
+      amountUsd: Math.max(0, round6(Number(p.amountUsd) || 0)),
+      currency: p.currency === 'usd' ? 'usd' : 'syp',
+      usdSypRateUsed: Math.max(0, Number(p.usdSypRateUsed) || 0),
+      paidAt: String(p.paidAt || '').trim().slice(0, 10),
+      note: String(p.note || '').trim(),
+    })),
+  }
+}
+
+function orthodonticCaseToDto(c, billingMap) {
+  const isElias = String(c?.providerKey || '') === DENTAL_ELIAS_PROVIDER_KEY
+  return {
+    id: c?._id ? String(c._id) : undefined,
+    title: String(c?.title || 'تقويم').trim() || 'تقويم',
+    doctorName: String(c?.doctorName || '').trim(),
+    providerUserId: isElias
+      ? DENTAL_ELIAS_VIRTUAL_ID
+      : c?.providerUserId
+        ? String(c.providerUserId)
+        : null,
+    providerKey: String(c?.providerKey || ''),
+    totalCostSyp: Math.max(0, Math.round(Number(c?.totalCostSyp) || 0)),
+    totalCostUsd: Math.max(0, round6(Number(c?.totalCostUsd) || 0)),
+    costUsdSypRate: Math.max(0, Number(c?.costUsdSypRate) || 0),
+    notes: String(c?.notes || '').trim(),
+    startedAt: String(c?.startedAt || '').trim().slice(0, 10),
+    active: c?.active !== false,
+    installments: (Array.isArray(c?.installments) ? c.installments : []).map((x) =>
+      orthoInstallmentToDto(x, billingMap),
+    ),
+  }
 }
 
 function chartToDto(chart, billingMap) {
@@ -390,6 +573,9 @@ function chartToDto(chart, billingMap) {
     generalLabWorks: (Array.isArray(chart.generalLabWorks) ? chart.generalLabWorks : []).map((x) =>
       labWorkToDto(x),
     ),
+    orthodonticCases: (Array.isArray(chart.orthodonticCases) ? chart.orthodonticCases : []).map((x) =>
+      orthodonticCaseToDto(x, billingMap),
+    ),
     updatedAt: chart.updatedAt ? new Date(chart.updatedAt).toISOString() : null,
     updatedBy: chart.updatedBy ? String(chart.updatedBy) : null,
   }
@@ -405,6 +591,11 @@ async function chartToDtoEnriched(chart) {
   }
   for (const tr of chart?.generalTreatments || []) {
     if (tr.billingItemId) ids.push(String(tr.billingItemId))
+  }
+  for (const c of chart?.orthodonticCases || []) {
+    for (const inst of c.installments || []) {
+      if (inst.billingItemId) ids.push(String(inst.billingItemId))
+    }
   }
   const { billingStatusByItemIds } = await import('../services/dentalChartBilling.js')
   const billingMap = await billingStatusByItemIds(ids)
@@ -1093,10 +1284,14 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
     const prevGeneralLabs = patient.dentalChart?.generalLabWorks
       ? JSON.parse(JSON.stringify(patient.dentalChart.generalLabWorks))
       : []
+    const prevOrtho = patient.dentalChart?.orthodonticCases
+      ? JSON.parse(JSON.stringify(patient.dentalChart.orthodonticCases))
+      : []
 
     const bodyHasTeeth = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'teeth')
     const bodyHasGeneral = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'generalTreatments')
     const bodyHasGeneralLabs = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'generalLabWorks')
+    const bodyHasOrtho = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'orthodonticCases')
 
     let teeth = bodyHasTeeth ? normalizeChartTeeth(req.body?.teeth, fallbackRate) : prevTeeth
     if (bodyHasTeeth) teeth = mergePreviousBillingLinks(prevTeeth, teeth)
@@ -1112,10 +1307,18 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
       ? normalizeLabWorks(req.body?.generalLabWorks, fallbackRate)
       : prevGeneralLabs
 
+    let orthodonticCases = bodyHasOrtho
+      ? normalizeOrthodonticCases(req.body?.orthodonticCases, fallbackRate)
+      : prevOrtho
+    if (bodyHasOrtho) {
+      orthodonticCases = mergePreviousOrthoBillingLinks(prevOrtho, orthodonticCases)
+    }
+
     patient.dentalChart = {
       teeth,
       generalTreatments,
       generalLabWorks,
+      orthodonticCases,
       updatedAt: new Date(),
       updatedBy: req.user._id,
     }
@@ -1140,6 +1343,7 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
         toothCount: teeth.length,
         generalTreatmentCount: generalTreatments.length,
         generalLabWorkCount: generalLabWorks.length,
+        orthodonticCaseCount: orthodonticCases.length,
       },
     })
     res.json({ chart: await chartToDtoEnriched(patient.dentalChart) })

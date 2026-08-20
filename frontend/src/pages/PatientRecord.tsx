@@ -15,6 +15,7 @@ import { BillingPaymentModal } from '../components/BillingPaymentModal'
 import { DentalOdontogram } from '../components/dental/DentalOdontogram'
 import { DentalTreatmentPlan } from '../components/dental/DentalTreatmentPlan'
 import { DentalGeneralProcedures } from '../components/dental/DentalGeneralProcedures'
+import { DentalOrthodontics } from '../components/dental/DentalOrthodontics'
 import { DentalExtraCredit } from '../components/dental/DentalExtraCredit'
 import {
   netCollectedSypFromPayment,
@@ -5346,6 +5347,14 @@ export function PatientRecord() {
             ) : null}
             {id ? (
               <DentalGeneralProcedures
+                patientId={id}
+                canEdit={
+                  role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
+                }
+              />
+            ) : null}
+            {id ? (
+              <DentalOrthodontics
                 patientId={id}
                 canEdit={
                   role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'

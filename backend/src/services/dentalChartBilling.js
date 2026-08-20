@@ -15,8 +15,8 @@ function roundMoney(n) {
 }
 
 function treatmentEffectiveTotalSyp(tr) {
-  const syp = roundMoney(tr?.totalCostSyp)
-  const usd = Math.max(0, Number(tr?.totalCostUsd) || 0)
+  const syp = roundMoney(tr?.totalCostSyp ?? tr?.amountSyp)
+  const usd = Math.max(0, Number(tr?.totalCostUsd ?? tr?.amountUsd) || 0)
   const rate = Math.max(0, Number(tr?.costUsdSypRate) || 0)
   const fromUsd = usd > 0 && rate > 0 ? roundMoney(usd * rate) : 0
   return syp + fromUsd
@@ -32,6 +32,194 @@ function procedureLabelForGeneral(tr) {
   const desc = String(tr?.procedureDescription || '').trim()
   const base = desc || 'إجراء أسنان عام'
   return `إجراء عام — ${base}`.slice(0, 500)
+}
+
+/** معرّف قسط التقويم في الجلسة السريرية — لا يُلغى عند مزامنة الإجراءات العادية */
+export const ORTHO_TREATMENT_ID_PREFIX = 'ortho:'
+
+export function orthoDentalTreatmentId(installmentId) {
+  return `${ORTHO_TREATMENT_ID_PREFIX}${String(installmentId || '').trim()}`
+}
+
+export function parseOrthoInstallmentId(dentalTreatmentId) {
+  const raw = String(dentalTreatmentId || '').trim()
+  if (!raw.startsWith(ORTHO_TREATMENT_ID_PREFIX)) return ''
+  return raw.slice(ORTHO_TREATMENT_ID_PREFIX.length)
+}
+
+function installmentEffectiveTotalSyp(inst) {
+  const syp = roundMoney(inst?.amountSyp)
+  const usd = Math.max(0, Number(inst?.amountUsd) || 0)
+  const rate = Math.max(0, Number(inst?.costUsdSypRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? roundMoney(usd * rate) : 0
+  return syp + fromUsd
+}
+
+function procedureLabelForOrtho(orthoCase, inst) {
+  const title = String(orthoCase?.title || 'تقويم').trim() || 'تقويم'
+  const note = String(inst?.note || '').trim()
+  const base = note ? `${title} — ${note}` : title
+  return `تقويم — ${base}`.slice(0, 500)
+}
+
+/**
+ * يزامن قسط تقويم واحد مع بند تحصيل معلّق.
+ */
+async function syncOneOrthoInstallment(patient, orthoCase, inst, { actorUserId, fallbackDate }) {
+  if (!inst._id) return { created: 0, updated: 0, cancelled: 0, dirty: false }
+  let created = 0
+  let updated = 0
+  let cancelled = 0
+  let dirty = false
+
+  const effective = installmentEffectiveTotalSyp(inst)
+  const billingId = inst.billingItemId ? String(inst.billingItemId) : ''
+  const hasBillable =
+    effective > 0 &&
+    (Boolean(orthoCase.providerUserId) ||
+      isEliasProviderRef({
+        providerUserId: orthoCase.providerUserId,
+        providerKey: orthoCase.providerKey,
+        doctorName: orthoCase.doctorName,
+      }))
+
+  if (!hasBillable) {
+    if (billingId && mongoose.Types.ObjectId.isValid(billingId)) {
+      const bi = await BillingItem.findById(billingId)
+      if (bi && bi.status === 'pending_payment') {
+        bi.status = 'cancelled'
+        await bi.save()
+        cancelled += 1
+      }
+      inst.billingItemId = undefined
+      inst.clinicalSessionId = undefined
+      dirty = true
+    }
+    return { created, updated, cancelled, dirty }
+  }
+
+  let providerUserId = orthoCase.providerUserId
+  if (
+    isEliasProviderRef({
+      providerUserId: orthoCase.providerUserId,
+      providerKey: orthoCase.providerKey,
+      doctorName: orthoCase.doctorName,
+    })
+  ) {
+    providerUserId = actorUserId
+  }
+  if (!providerUserId || !mongoose.Types.ObjectId.isValid(String(providerUserId))) {
+    return { created, updated, cancelled, dirty }
+  }
+
+  const businessDate = /^\d{4}-\d{2}-\d{2}$/.test(String(inst.businessDate || ''))
+    ? String(inst.businessDate).slice(0, 10)
+    : fallbackDate
+  const label = procedureLabelForOrtho(orthoCase, inst)
+  const usdPart = Math.max(0, Number(inst.amountUsd) || 0)
+  const sypPart = roundMoney(inst.amountSyp)
+  const currency = usdPart > 0 && !(sypPart > 0) ? 'USD' : 'SYP'
+  const amountDueUsd = usdPart > 0 ? round6(usdPart) : 0
+  const treatmentKey = orthoDentalTreatmentId(inst._id)
+
+  if (billingId && mongoose.Types.ObjectId.isValid(billingId)) {
+    const bi = await BillingItem.findById(billingId)
+    if (bi && bi.status === 'pending_payment') {
+      bi.procedureLabel = label
+      bi.listAmountDueSyp = effective
+      bi.effectiveAmountDueSyp = effective
+      bi.amountDueSyp = effective
+      bi.listAmountDueUsd = amountDueUsd
+      bi.effectiveAmountDueUsd = amountDueUsd
+      bi.amountDueUsd = amountDueUsd
+      bi.currency = currency
+      bi.businessDate = businessDate
+      bi.providerUserId = providerUserId
+      await bi.save()
+      const cs = inst.clinicalSessionId
+        ? await ClinicalSession.findById(inst.clinicalSessionId)
+        : await ClinicalSession.findById(bi.clinicalSessionId)
+      if (cs) {
+        cs.procedureDescription = label
+        cs.sessionFeeSyp = effective
+        cs.sessionFeeUsd = amountDueUsd
+        cs.feeCurrency = currency
+        cs.businessDate = businessDate
+        cs.providerUserId = providerUserId
+        cs.dentalToothFdi = undefined
+        cs.dentalTreatmentId = treatmentKey
+        await cs.save()
+        if (!inst.clinicalSessionId) {
+          inst.clinicalSessionId = cs._id
+          dirty = true
+        }
+      }
+      updated += 1
+      return { created, updated, cancelled, dirty }
+    }
+    if (bi && bi.status === 'paid') {
+      return { created, updated, cancelled, dirty }
+    }
+    inst.billingItemId = undefined
+    inst.clinicalSessionId = undefined
+    dirty = true
+  }
+
+  let cs = null
+  try {
+    cs = await ClinicalSession.create({
+      patientId: patient._id,
+      providerUserId,
+      department: 'dental',
+      procedureDescription: label,
+      sessionFeeSyp: effective,
+      ...(currency === 'USD'
+        ? { sessionFeeUsd: amountDueUsd, feeCurrency: 'USD' }
+        : { feeCurrency: 'SYP' }),
+      businessDate,
+      notes: orthoCase.doctorName
+        ? `طبيب التقويم: ${orthoCase.doctorName}`
+        : isEliasProviderRef({ providerKey: orthoCase.providerKey, doctorName: orthoCase.doctorName })
+          ? `طبيب التقويم: ${DENTAL_ELIAS_DISPLAY_NAME}`
+          : '',
+      materials: [],
+      materialCostSypTotal: 0,
+      materialChargeSypTotal: 0,
+      dentalTreatmentId: treatmentKey,
+    })
+    const bi = await BillingItem.create({
+      clinicalSessionId: cs._id,
+      patientId: patient._id,
+      providerUserId,
+      department: 'dental',
+      procedureLabel: label,
+      listAmountDueSyp: effective,
+      discountPercent: 0,
+      effectiveAmountDueSyp: effective,
+      amountDueSyp: effective,
+      listAmountDueUsd: amountDueUsd,
+      effectiveAmountDueUsd: amountDueUsd,
+      amountDueUsd,
+      currency,
+      businessDate,
+      status: 'pending_payment',
+    })
+    cs.billingItemId = bi._id
+    await cs.save()
+    inst.billingItemId = bi._id
+    inst.clinicalSessionId = cs._id
+    inst.payments = []
+    dirty = true
+    created += 1
+  } catch (e) {
+    if (cs?._id) {
+      await BillingItem.deleteMany({ clinicalSessionId: cs._id })
+      await ClinicalSession.findByIdAndDelete(cs._id)
+    }
+    throw e
+  }
+
+  return { created, updated, cancelled, dirty }
 }
 
 /**
@@ -206,6 +394,7 @@ export async function syncDentalChartBilling(patient, { actorUserId, businessDat
   if (!patient?._id) return { created: 0, updated: 0, cancelled: 0 }
   const teeth = patient.dentalChart?.teeth || []
   const generalTreatments = patient.dentalChart?.generalTreatments || []
+  const orthodonticCases = patient.dentalChart?.orthodonticCases || []
   let created = 0
   let updated = 0
   let cancelled = 0
@@ -245,7 +434,20 @@ export async function syncDentalChartBilling(patient, { actorUserId, businessDat
     if (r.dirty) dirty = true
   }
 
-  /** إلغاء بنود معلّقة لإجراءات حُذفت من المخطط */
+  for (const orthoCase of orthodonticCases) {
+    for (const inst of orthoCase.installments || []) {
+      const r = await syncOneOrthoInstallment(patient, orthoCase, inst, {
+        actorUserId,
+        fallbackDate,
+      })
+      created += r.created
+      updated += r.updated
+      cancelled += r.cancelled
+      if (r.dirty) dirty = true
+    }
+  }
+
+  /** إلغاء بنود معلّقة لإجراءات/أقساط حُذفت من المخطط */
   const liveTreatmentIds = new Set()
   for (const tooth of teeth) {
     for (const tr of tooth.treatments || []) {
@@ -254,6 +456,11 @@ export async function syncDentalChartBilling(patient, { actorUserId, businessDat
   }
   for (const tr of generalTreatments) {
     if (tr._id) liveTreatmentIds.add(String(tr._id))
+  }
+  for (const orthoCase of orthodonticCases) {
+    for (const inst of orthoCase.installments || []) {
+      if (inst._id) liveTreatmentIds.add(orthoDentalTreatmentId(inst._id))
+    }
   }
   const orphanSessions = await ClinicalSession.find({
     patientId: patient._id,
@@ -285,7 +492,7 @@ export async function syncDentalChartBilling(patient, { actorUserId, businessDat
 }
 
 /**
- * بعد تأكيد التحصيل: انسخ الدفعة إلى إجراء المخطط المرتبط (سن أو إجراء عام).
+ * بعد تأكيد التحصيل: انسخ الدفعة إلى إجراء المخطط المرتبط (سن أو إجراء عام أو قسط تقويم).
  */
 export async function applyDentalBillingPaymentToChart(bi, payment) {
   if (!bi?._id || bi.department !== 'dental') return false
@@ -298,19 +505,6 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
 
   const patient = await Patient.findById(bi.patientId)
   if (!patient?.dentalChart) return false
-
-  let tr = null
-  if (Number.isFinite(toothFdi) && toothFdi >= 11) {
-    const tooth = (patient.dentalChart.teeth || []).find((t) => Number(t.fdi) === toothFdi)
-    if (!tooth) return false
-    tr = (tooth.treatments || []).find((x) => String(x._id) === treatmentId)
-  } else {
-    if (!Array.isArray(patient.dentalChart.generalTreatments)) {
-      patient.dentalChart.generalTreatments = []
-    }
-    tr = (patient.dentalChart.generalTreatments || []).find((x) => String(x._id) === treatmentId)
-  }
-  if (!tr) return false
 
   const cashSyp = roundMoney(payment?.amountSyp)
   const creditSyp = roundMoney(payment?.creditAppliedSyp)
@@ -326,19 +520,51 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
   const rateUsed =
     currency === 'usd' && amountUsd > 0 && amountSyp > 0 ? roundMoney(amountSyp / amountUsd) : 0
 
-  tr.payments = [
-    {
-      amountSyp,
-      amountUsd: currency === 'usd' ? round6(amountUsd) : 0,
-      currency,
-      usdSypRateUsed: currency === 'usd' ? rateUsed : 0,
-      paidAt,
-      note:
-        creditSyp > 0
-          ? `تحصيل استقبال — رصيد إضافي ${creditSyp.toLocaleString('en-US')} ل.س`
-          : 'تحصيل استقبال',
-    },
-  ]
+  const paymentRow = {
+    amountSyp,
+    amountUsd: currency === 'usd' ? round6(amountUsd) : 0,
+    currency,
+    usdSypRateUsed: currency === 'usd' ? rateUsed : 0,
+    paidAt,
+    note:
+      creditSyp > 0
+        ? `تحصيل استقبال — رصيد إضافي ${creditSyp.toLocaleString('en-US')} ل.س`
+        : 'تحصيل استقبال',
+  }
+
+  const orthoInstId = parseOrthoInstallmentId(treatmentId)
+  if (orthoInstId) {
+    if (!Array.isArray(patient.dentalChart.orthodonticCases)) {
+      patient.dentalChart.orthodonticCases = []
+    }
+    let inst = null
+    for (const c of patient.dentalChart.orthodonticCases) {
+      inst = (c.installments || []).find((x) => String(x._id) === orthoInstId)
+      if (inst) break
+    }
+    if (!inst) return false
+    inst.payments = [paymentRow]
+    if (!inst.billingItemId) inst.billingItemId = bi._id
+    if (!inst.clinicalSessionId && cs?._id) inst.clinicalSessionId = cs._id
+    patient.markModified('dentalChart')
+    await patient.save()
+    return true
+  }
+
+  let tr = null
+  if (Number.isFinite(toothFdi) && toothFdi >= 11) {
+    const tooth = (patient.dentalChart.teeth || []).find((t) => Number(t.fdi) === toothFdi)
+    if (!tooth) return false
+    tr = (tooth.treatments || []).find((x) => String(x._id) === treatmentId)
+  } else {
+    if (!Array.isArray(patient.dentalChart.generalTreatments)) {
+      patient.dentalChart.generalTreatments = []
+    }
+    tr = (patient.dentalChart.generalTreatments || []).find((x) => String(x._id) === treatmentId)
+  }
+  if (!tr) return false
+
+  tr.payments = [paymentRow]
   if (!tr.billingItemId) tr.billingItemId = bi._id
   if (!tr.clinicalSessionId && cs?._id) tr.clinicalSessionId = cs._id
 
@@ -424,6 +650,9 @@ function walkDentalTreatments(patient, fn) {
     for (const tr of tooth.treatments || []) fn(tr)
   }
   for (const tr of patient?.dentalChart?.generalTreatments || []) fn(tr)
+  for (const c of patient?.dentalChart?.orthodonticCases || []) {
+    for (const inst of c.installments || []) fn(inst)
+  }
 }
 
 function findDentalTreatmentForAlloc(patient, alloc) {
@@ -510,4 +739,4 @@ export async function applyDentalDebtAllocationsToChart(patientId, allocations, 
   return { applied, leftover }
 }
 
-export { treatmentEffectiveTotalSyp, DENTAL_ELIAS_PROVIDER_KEY }
+export { treatmentEffectiveTotalSyp, installmentEffectiveTotalSyp, DENTAL_ELIAS_PROVIDER_KEY }
