@@ -19,6 +19,7 @@ function buildLaserPackageAreaBreakdown(sessionRow, packagesById, optionMetaById
   return {
     doneAreas: breakdown.doneAreas,
     remainingAreas: breakdown.remainingAreas,
+    remainingProcedureOptionIds: breakdown.remainingProcedureOptionIds,
     isPartial: breakdown.isPartial,
   }
 }

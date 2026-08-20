@@ -24,7 +24,11 @@ import {
   mergeLaserDebtSettlementsIntoPaymentBreakdown,
 } from '../services/patientDebtSettlementAllocation.js'
 import { resolveLaserPackageSessionForBooking, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas } from '../services/laserPackageBooking.js'
-import { areaBelongsToLaserPackage } from '../services/laserPackageAreaBreakdown.js'
+import {
+  areaBelongsToLaserPackage,
+  buildPackageAreaBreakdown,
+  normalizePackageAreaLabel,
+} from '../services/laserPackageAreaBreakdown.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round2 } from '../utils/money.js'
 
@@ -1551,7 +1555,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       })
     }
 
-    const normalizedLineItems = rawLineItems.map((row, idx) => {
+    let normalizedLineItems = rawLineItems.map((row, idx) => {
       const option =
         row.procedureOptionId && procedureOptionsById.has(row.procedureOptionId)
           ? procedureOptionsById.get(row.procedureOptionId)
@@ -1835,21 +1839,73 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         res.status(404).json({ error: 'جلسة الليزر المرتبطة بالباكج غير موجودة.' })
         return
       }
-      const oldRecorded = (Array.isArray(existingLs.lineItems) ? existingLs.lineItems : []).filter((r) => !r.isAddon)
-        .length
-      const newRecorded = normalizedLineItems.filter((r) => !r.isAddon).length
-      if (newRecorded <= oldRecorded) {
+      const existingLines = Array.isArray(existingLs.lineItems) ? existingLs.lineItems : []
+      const existingNonAddon = existingLines.filter((r) => !r.isAddon).map((r) => {
+        const plain = typeof r.toObject === 'function' ? r.toObject() : { ...r }
+        return { ...plain, isAddon: false }
+      })
+      const incomingNonAddon = normalizedLineItems.filter((r) => !r.isAddon)
+      const incomingAddons = normalizedLineItems.filter((r) => r.isAddon)
+      const lineMergeKey = (row) => {
+        const oid = String(row?.procedureOptionId || '').trim()
+        const label = normalizePackageAreaLabel(row?.areaLabel || '')
+        const instance = Math.max(1, Math.trunc(Number(row?.optionInstance) || 1))
+        return `${oid}|${instance}|${label}`
+      }
+      const mergedByKey = new Map()
+      for (const row of existingNonAddon) mergedByKey.set(lineMergeKey(row), row)
+      for (const row of incomingNonAddon) {
+        const key = lineMergeKey(row)
+        const prev = mergedByKey.get(key)
+        mergedByKey.set(key, prev ? { ...prev, ...row, isAddon: false } : { ...row, isAddon: false })
+      }
+      const mergedNonAddon = [...mergedByKey.values()]
+      const oldBreakdown = buildPackageAreaBreakdown(
+        { lineItems: existingNonAddon },
+        packageMatch.pkg,
+        optionMetaById,
+      )
+      const newBreakdown = buildPackageAreaBreakdown(
+        { lineItems: mergedNonAddon },
+        packageMatch.pkg,
+        optionMetaById,
+      )
+      const oldMatched = Number(oldBreakdown?.matchedPackageAreaCount) || 0
+      const newMatched = Number(newBreakdown?.matchedPackageAreaCount) || 0
+      const oldRemaining = Array.isArray(oldBreakdown?.remainingAreas)
+        ? oldBreakdown.remainingAreas.length
+        : 0
+      const newRemaining = Array.isArray(newBreakdown?.remainingAreas)
+        ? newBreakdown.remainingAreas.length
+        : 0
+      const progressed =
+        newMatched > oldMatched ||
+        newRemaining < oldRemaining ||
+        mergedNonAddon.length > existingNonAddon.length
+      if (!progressed) {
         res.status(400).json({
-          error: 'أضف منطقة واحدة على الأقل من مناطق الباكج المتبقية ثم احفظ (عدد أسطر المناطق أكبر من السابق).',
+          error: 'أضف منطقة واحدة على الأقل من مناطق الباكج المتبقية ثم احفظ.',
         })
         return
       }
+      const newRecorded = mergedNonAddon.length
       if (newRecorded > packageMatch.expectedAreas) {
         res.status(400).json({
           error: `لا يمكن تجاوز عدد مناطق الباكج (${packageMatch.expectedAreas} منطقة/ات).`,
         })
         return
       }
+
+      normalizedLineItems = [...mergedNonAddon, ...incomingAddons]
+      const linesPwAfterMerge = normalizedLineItems.map((row) => row.pw).filter(Boolean)
+      const linesPulseAfterMerge = normalizedLineItems.map((row) => row.pulse).filter(Boolean)
+      const linesShotsAfterMerge = normalizedLineItems.map((row) => row.shotCount).filter(Boolean)
+      const mergedPwFinal =
+        linesPwAfterMerge.length > 0 ? linesPwAfterMerge.join(' | ').slice(0, 500) : mergedPw
+      const mergedPulseFinal =
+        linesPulseAfterMerge.length > 0 ? linesPulseAfterMerge.join(' | ').slice(0, 500) : mergedPulse
+      const mergedShotCountFinal =
+        linesShotsAfterMerge.length > 0 ? linesShotsAfterMerge.join(' | ').slice(0, 500) : mergedShotCount
 
       const csExisting = existingLs.clinicalSessionId
         ? await ClinicalSession.findById(existingLs.clinicalSessionId)
@@ -1862,9 +1918,9 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
 
       existingLs.room = resolvedRoom
       existingLs.laserType = laserType
-      existingLs.pw = mergedPw
-      existingLs.pulse = mergedPulse
-      existingLs.shotCount = mergedShotCount
+      existingLs.pw = mergedPwFinal
+      existingLs.pulse = mergedPulseFinal
+      existingLs.shotCount = mergedShotCountFinal
       existingLs.chargeByPulseCount =
         normalizedLineItems.length > 0
           ? normalizedLineItems.some((row) => row.chargeByPulseCount)

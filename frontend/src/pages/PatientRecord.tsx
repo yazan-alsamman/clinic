@@ -102,6 +102,7 @@ type ClinicalLaserRow = {
   packageAreaBreakdown?: {
     doneAreas: string[]
     remainingAreas: string[]
+    remainingProcedureOptionIds?: string[]
     isPartial: boolean
   } | null
 }
@@ -2028,20 +2029,34 @@ export function PatientRecord() {
 
     let ids = (pkg?.procedureOptionIds || []).filter(Boolean)
     if (wantsContinueOnly && partialPackageLaserSession) {
-      const remainingLabels = partialPackageLaserSession.packageAreaBreakdown?.remainingAreas || []
-      if (remainingLabels.length > 0) {
-        ids = ids.filter((oid) => {
-          const item = laserItemById.get(oid)
-          return item ? laserProcedureMatchesRemainingPackageAreas(item, remainingLabels) : false
-        })
-      } else {
-        const doneIds = new Set(
-          (partialPackageLaserSession.lineItems || [])
-            .filter((li) => !li.isAddon && li.procedureOptionId)
-            .map((li) => li.procedureOptionId),
+      // يجب الإبقاء على المناطق المنجزة + إضافة المتبقية؛ إرسال المتبقية وحدها
+      // كان يفشل الحفظ لأن الخادم يقارن بعدد أسطر الجلسة السابقة.
+      const doneMainIds = (partialPackageLaserSession.lineItems || [])
+        .filter((li) => !li.isAddon && li.procedureOptionId)
+        .map((li) => String(li.procedureOptionId))
+      const remainingFromBreakdown = (
+        partialPackageLaserSession.packageAreaBreakdown?.remainingProcedureOptionIds || []
+      )
+        .map(String)
+        .filter(Boolean)
+      let remainingIds: string[] = []
+      if (remainingFromBreakdown.length > 0) {
+        remainingIds = remainingFromBreakdown.filter((oid) =>
+          (pkg?.procedureOptionIds || []).map(String).includes(oid),
         )
-        ids = ids.filter((oid) => !doneIds.has(oid))
+      } else {
+        const remainingLabels = partialPackageLaserSession.packageAreaBreakdown?.remainingAreas || []
+        if (remainingLabels.length > 0) {
+          remainingIds = (pkg?.procedureOptionIds || []).filter((oid) => {
+            const item = laserItemById.get(oid)
+            return item ? laserProcedureMatchesRemainingPackageAreas(item, remainingLabels) : false
+          })
+        } else {
+          const doneIds = new Set(doneMainIds)
+          remainingIds = (pkg?.procedureOptionIds || []).filter((oid) => !doneIds.has(String(oid)))
+        }
       }
+      ids = [...new Set([...doneMainIds, ...remainingIds].filter(Boolean))]
     }
     if (!ids.length) return
     if (!ids.every((oid) => laserItemById.has(oid))) return
@@ -2056,7 +2071,7 @@ export function PatientRecord() {
     ) {
       setSelectedLaserAddonItemIds([])
     }
-    // فرض مناطق الباكج كمواضع رئيسية (لا تُترك إن مُلئت خطأً من نص الموعد)
+    // فرض مناطق الباكج كمواضع رئيسية (منجزة + متبقية) — لا تُستبدل بالمتبقية فقط
     setSelectedLaserItemIds([...ids])
   }, [
     tab,
@@ -2073,6 +2088,8 @@ export function PatientRecord() {
     clinicalHistory,
     partialPackageLaserSession?.id,
     partialPackageLaserSession?.packageAreaBreakdown?.remainingAreas?.join(','),
+    (partialPackageLaserSession?.packageAreaBreakdown?.remainingProcedureOptionIds || []).join(','),
+    laserItemById,
   ])
 
   useEffect(() => {
