@@ -203,6 +203,23 @@ function normalizeTreatment(raw) {
     businessDate,
     payments,
   }
+  const gaEnabled = t.generalAnesthesia === true || t.generalAnesthesia === 'true' || t.generalAnesthesia === 1
+  let gaSyp = Math.max(0, Math.round(Number(t.generalAnesthesiaAmountSyp) || 0))
+  let gaUsd = Math.max(0, round6(Number(t.generalAnesthesiaAmountUsd) || 0))
+  let gaRate = Math.max(0, Number(t.generalAnesthesiaUsdSypRate) || 0)
+  if (gaUsd > 0 && !(gaRate > 0)) {
+    gaRate = Math.max(0, Number(t._fallbackUsdSypRate) || costUsdSypRate || 0)
+  }
+  if (!(gaUsd > 0)) gaRate = 0
+  if (!gaEnabled) {
+    gaSyp = 0
+    gaUsd = 0
+    gaRate = 0
+  }
+  out.generalAnesthesia = Boolean(gaEnabled)
+  out.generalAnesthesiaAmountSyp = gaEnabled ? gaSyp : 0
+  out.generalAnesthesiaAmountUsd = gaEnabled ? gaUsd : 0
+  out.generalAnesthesiaUsdSypRate = gaEnabled ? gaRate : 0
   if (t._id) out._id = t._id
   else if (t.id && mongoose.Types.ObjectId.isValid(String(t.id))) out._id = t.id
   const billingRaw = t.billingItemId != null ? String(t.billingItemId).trim() : ''
@@ -273,6 +290,10 @@ function treatmentToDto(t, billingMap) {
       paidAt: String(p.paidAt || ''),
       note: String(p.note || ''),
     })),
+    generalAnesthesia: Boolean(n.generalAnesthesia),
+    generalAnesthesiaAmountSyp: Math.max(0, Math.round(Number(n.generalAnesthesiaAmountSyp) || 0)),
+    generalAnesthesiaAmountUsd: Math.max(0, round6(Number(n.generalAnesthesiaAmountUsd) || 0)),
+    generalAnesthesiaUsdSypRate: Math.max(0, Number(n.generalAnesthesiaUsdSypRate) || 0),
   }
 }
 

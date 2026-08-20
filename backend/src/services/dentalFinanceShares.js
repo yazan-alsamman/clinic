@@ -280,6 +280,12 @@ export async function summarizeDentalChartFinance({ from, to }) {
         else if (providerNameMatchesIyad(matchName)) iyadProceduresSyp += cost
         else if (providerNameMatchesOmar(matchName)) omarProceduresSyp += cost
         else otherProceduresSyp += cost
+
+        const gaAmt = generalAnesthesiaCostSyp(tr)
+        if (gaAmt > 0) {
+          labWorksTotalSyp += gaAmt
+          if (isElias) eliasLabWorksSyp += gaAmt
+        }
       }
 
       for (const lab of tooth.labWorks || []) {
@@ -313,8 +319,10 @@ export async function summarizeDentalChartFinance({ from, to }) {
       const usdPart = Math.max(0, Number(tr.totalCostUsd) || 0)
       const cost =
         roundMoney(tr.totalCostSyp) + (usdPart > 0 && rate > 0 ? roundMoney(usdPart * rate) : 0)
+      const gaAmtEarly = generalAnesthesiaCostSyp(tr)
       if (
         !(cost > 0) &&
+        !(gaAmtEarly > 0) &&
         !String(tr.procedureDescription || '').trim() &&
         !String(tr.doctorName || '').trim() &&
         !tr.providerUserId &&
@@ -362,6 +370,12 @@ export async function summarizeDentalChartFinance({ from, to }) {
       else if (providerNameMatchesIyad(matchName)) iyadProceduresSyp += cost
       else if (providerNameMatchesOmar(matchName)) omarProceduresSyp += cost
       else otherProceduresSyp += cost
+
+      const gaAmt = generalAnesthesiaCostSyp(tr)
+      if (gaAmt > 0) {
+        labWorksTotalSyp += gaAmt
+        if (isElias) eliasLabWorksSyp += gaAmt
+      }
     }
 
     for (const lab of p.dentalChart?.generalLabWorks || []) {
@@ -492,6 +506,17 @@ function treatmentCostSyp(tr) {
   const rate = Math.max(0, Number(tr.costUsdSypRate) || 0)
   const usdPart = Math.max(0, Number(tr.totalCostUsd) || 0)
   return roundMoney(tr.totalCostSyp) + (usdPart > 0 && rate > 0 ? roundMoney(usdPart * rate) : 0)
+}
+
+/** تكلفة التخدير العام — تُحسب مالياً مثل المخبر */
+function generalAnesthesiaCostSyp(tr) {
+  if (!tr?.generalAnesthesia) return 0
+  const rate = Math.max(0, Number(tr.generalAnesthesiaUsdSypRate) || 0)
+  const usdPart = Math.max(0, Number(tr.generalAnesthesiaAmountUsd) || 0)
+  return (
+    roundMoney(tr.generalAnesthesiaAmountSyp) +
+    (usdPart > 0 && rate > 0 ? roundMoney(usdPart * rate) : 0)
+  )
 }
 
 function treatmentPaidSyp(tr) {
@@ -754,8 +779,10 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
 
     for (const tr of p.dentalChart?.generalTreatments || []) {
       const cost = treatmentCostSyp(tr)
+      const gaAmt = generalAnesthesiaCostSyp(tr)
       const hasContent =
         cost > 0 ||
+        gaAmt > 0 ||
         Boolean(String(tr.procedureDescription || '').trim()) ||
         Boolean(String(tr.doctorName || '').trim()) ||
         Boolean(tr.providerUserId) ||
@@ -817,6 +844,35 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           note: String(pay.note || ''),
         })),
       })
+
+      if (gaAmt > 0) {
+        if (clinic) {
+          clinic.labCount += 1
+          clinic.labsSyp += gaAmt
+        }
+        rows.push({
+          kind: 'lab',
+          id: tr._id ? `ga-${String(tr._id)}` : `ga-${patientId}-${bd}-${rows.length}`,
+          patientId,
+          patientName,
+          fileNumber,
+          fdi: 0,
+          isGeneral: true,
+          isGeneralAnesthesia: true,
+          businessDate: bd,
+          undated,
+          clinicKey: meta.key,
+          clinicLabel: meta.clinicLabel,
+          doctorName: meta.name,
+          providerUserId: meta.userId,
+          noShare: meta.noShare,
+          labName: 'تخدير عام',
+          procedureDescription: `تخدير عام — ${generalProcedureLabel(tr.procedureDescription)}`,
+          amountSyp: gaAmt,
+          amountUsd: Math.max(0, Number(tr.generalAnesthesiaAmountUsd) || 0),
+          amountSypOnly: roundMoney(tr.generalAnesthesiaAmountSyp),
+        })
+      }
     }
 
     for (const lab of p.dentalChart?.generalLabWorks || []) {

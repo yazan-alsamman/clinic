@@ -100,6 +100,11 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
     /** بند التحصيل في الاستقبال */
     billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
     clinicalSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClinicalSession', default: null },
+    /** تخدير عام — تكلفة تُعامل مالياً مثل المخبر */
+    generalAnesthesia: { type: Boolean, default: false },
+    generalAnesthesiaAmountSyp: { type: Number, default: 0, min: 0 },
+    generalAnesthesiaAmountUsd: { type: Number, default: 0, min: 0 },
+    generalAnesthesiaUsdSypRate: { type: Number, default: 0, min: 0 },
   },
   { _id: true },
 )

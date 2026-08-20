@@ -55,6 +55,11 @@ export type DentalToothTreatment = {
   billingItemId?: string | null
   clinicalSessionId?: string | null
   billingStatus?: 'pending_payment' | 'paid' | 'cancelled' | null
+  /** تخدير عام — تكلفة تُعامل مالياً مثل المخبر */
+  generalAnesthesia?: boolean
+  generalAnesthesiaAmountSyp?: number
+  generalAnesthesiaAmountUsd?: number
+  generalAnesthesiaUsdSypRate?: number
 }
 
 export type DentalLabWork = {
@@ -265,6 +270,10 @@ export function emptyTreatment(): DentalToothTreatment {
     providerKey: '',
     businessDate: todayIsoDateLocal(),
     payments: [],
+    generalAnesthesia: false,
+    generalAnesthesiaAmountSyp: 0,
+    generalAnesthesiaAmountUsd: 0,
+    generalAnesthesiaUsdSypRate: 0,
   }
 }
 
@@ -326,6 +335,19 @@ export function normalizeTreatment(
     providerRaw === DENTAL_ELIAS_VIRTUAL_ID ||
     providerKey === 'elias' ||
     /الياس|إلياس|elias|elyas/i.test(String(raw?.doctorName || ''))
+  const generalAnesthesia = Boolean(raw?.generalAnesthesia)
+  let generalAnesthesiaAmountSyp = Math.max(0, Math.round(Number(raw?.generalAnesthesiaAmountSyp) || 0))
+  let generalAnesthesiaAmountUsd = Math.max(0, roundUsd(Number(raw?.generalAnesthesiaAmountUsd) || 0))
+  let generalAnesthesiaUsdSypRate = Math.max(0, Number(raw?.generalAnesthesiaUsdSypRate) || 0)
+  if (generalAnesthesiaAmountUsd > 0 && !(generalAnesthesiaUsdSypRate > 0)) {
+    generalAnesthesiaUsdSypRate = Math.max(0, Number(fallbackRate) || costUsdSypRate || 0)
+  }
+  if (!(generalAnesthesiaAmountUsd > 0)) generalAnesthesiaUsdSypRate = 0
+  if (!generalAnesthesia) {
+    generalAnesthesiaAmountSyp = 0
+    generalAnesthesiaAmountUsd = 0
+    generalAnesthesiaUsdSypRate = 0
+  }
   return {
     id: raw?.id ? String(raw.id) : undefined,
     /** لا نستخدم trim هنا — يُستدعى عند كل حرف أثناء الكتابة ويمنع المسافات بين الكلمات */
@@ -341,7 +363,26 @@ export function normalizeTreatment(
     billingItemId: raw?.billingItemId ? String(raw.billingItemId) : null,
     clinicalSessionId: raw?.clinicalSessionId ? String(raw.clinicalSessionId) : null,
     billingStatus: raw?.billingStatus || null,
+    generalAnesthesia,
+    generalAnesthesiaAmountSyp,
+    generalAnesthesiaAmountUsd,
+    generalAnesthesiaUsdSypRate,
   }
+}
+
+export function generalAnesthesiaEffectiveSyp(
+  t: DentalToothTreatment,
+  fallbackRate?: number | null,
+): number {
+  if (!t.generalAnesthesia) return 0
+  const syp = Math.max(0, Math.round(Number(t.generalAnesthesiaAmountSyp) || 0))
+  const usd = Math.max(0, Number(t.generalAnesthesiaAmountUsd) || 0)
+  const rate =
+    Number(t.generalAnesthesiaUsdSypRate) > 0
+      ? Number(t.generalAnesthesiaUsdSypRate)
+      : Math.max(0, Number(fallbackRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? Math.round(usd * rate) : 0
+  return syp + fromUsd
 }
 
 export function treatmentHasData(t: DentalToothTreatment | undefined): boolean {

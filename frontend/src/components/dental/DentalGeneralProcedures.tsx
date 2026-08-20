@@ -5,6 +5,7 @@ import {
   emptyLabWork,
   emptyTreatment,
   formatUsdAmount,
+  generalAnesthesiaEffectiveSyp,
   labEffectiveAmountSyp,
   labWorkHasData,
   normalizeLabWork,
@@ -74,6 +75,9 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
   const [labId, setLabId] = useState('')
   const [labAmountSyp, setLabAmountSyp] = useState(0)
   const [labAmountUsd, setLabAmountUsd] = useState(0)
+  const [generalAnesthesia, setGeneralAnesthesia] = useState(false)
+  const [gaAmountSyp, setGaAmountSyp] = useState(0)
+  const [gaAmountUsd, setGaAmountUsd] = useState(0)
 
   const load = useCallback(async () => {
     setErr('')
@@ -155,6 +159,9 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
     setLabId('')
     setLabAmountSyp(0)
     setLabAmountUsd(0)
+    setGeneralAnesthesia(false)
+    setGaAmountSyp(0)
+    setGaAmountUsd(0)
   }
 
   async function saveAll(nextTreatments: DentalToothTreatment[], nextLabs: DentalLabWork[]) {
@@ -230,6 +237,10 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       setErr('أدخل مبلغ المخبر (ل.س أو دولار) أو أزل اختيار المخبر')
       return
     }
+    if (generalAnesthesia && !(gaAmountSyp > 0) && !(gaAmountUsd > 0)) {
+      setErr('أدخل مبلغ التخدير العام أو أزل التحديد')
+      return
+    }
 
     const treatmentId = newClientObjectId()
     const row = normalizeTreatment(
@@ -245,6 +256,10 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
         providerKey: p.id === '__elias__' || p.noShare ? 'elias' : '',
         businessDate,
         payments: [],
+        generalAnesthesia,
+        generalAnesthesiaAmountSyp: generalAnesthesia ? gaAmountSyp : 0,
+        generalAnesthesiaAmountUsd: generalAnesthesia ? gaAmountUsd : 0,
+        generalAnesthesiaUsdSypRate: generalAnesthesia && gaAmountUsd > 0 ? rate || 0 : 0,
       },
       rate,
     )
@@ -310,7 +325,8 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       <h2 className="card-title">إجراءات عامة</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
         إجراءات على كامل الفم وليست مرتبطة بسن واحد — مثل التنظيف أو التبييض. يمكن إدخال 0 ل.س أو 0 دولار (مجاني). عند
-        إدخال سعر أكبر من صفر مع الطبيب يُرسل البند إلى التحصيل. يمكن اختيار مخبر اختيارياً مع الإجراء أو تركه فارغاً.
+        إدخال سعر أكبر من صفر مع الطبيب يُرسل البند إلى التحصيل. يمكن اختيار مخبر أو تخدير عام اختيارياً؛ تكلفتهما تُحسب
+        مالياً مثل المخابر.
       </p>
 
       {err ? (
@@ -336,6 +352,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                     <th>الطبيب</th>
                     <th>السعر</th>
                     <th>المخبر</th>
+                    <th>تخدير عام</th>
                     <th>التحصيل</th>
                     {canEdit ? <th></th> : null}
                   </tr>
@@ -354,6 +371,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                           : '—'
                     const linkedLab = t.id ? labByTreatmentId.get(String(t.id)) : undefined
                     const labEffective = linkedLab ? labEffectiveAmountSyp(linkedLab, rate) : 0
+                    const gaEffective = generalAnesthesiaEffectiveSyp(t, rate)
                     return (
                       <tr key={t.id || `g-${idx}`}>
                         <td>{t.businessDate || '—'}</td>
@@ -376,6 +394,21 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                                 {labEffective.toLocaleString('ar-SY')} ل.س
                                 {linkedLab.amountUsd > 0
                                   ? ` · ${formatUsdAmount(linkedLab.amountUsd)} USD`
+                                  : ''}
+                              </div>
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {t.generalAnesthesia && gaEffective > 0 ? (
+                            <>
+                              نعم
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {gaEffective.toLocaleString('ar-SY')} ل.س
+                                {(t.generalAnesthesiaAmountUsd || 0) > 0
+                                  ? ` · ${formatUsdAmount(t.generalAnesthesiaAmountUsd || 0)} USD`
                                   : ''}
                               </div>
                             </>
@@ -426,6 +459,7 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                             {lab.amountUsd > 0 ? ` · ${formatUsdAmount(lab.amountUsd)} USD` : ''}
                           </div>
                         </td>
+                        <td>—</td>
                         <td>—</td>
                         {canEdit ? (
                           <td>
@@ -587,6 +621,68 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                   </>
                 ) : null}
               </div>
+
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.9rem',
+                  cursor: saving ? 'default' : 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={generalAnesthesia}
+                  onChange={(e) => {
+                    setGeneralAnesthesia(e.target.checked)
+                    if (!e.target.checked) {
+                      setGaAmountSyp(0)
+                      setGaAmountUsd(0)
+                    }
+                  }}
+                  disabled={saving}
+                />
+                تخدير عام
+              </label>
+              {generalAnesthesia ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: '0.55rem',
+                  }}
+                >
+                  <div>
+                    <label className="form-label">مبلغ التخدير (ل.س)</label>
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      value={String(gaAmountSyp)}
+                      onChange={(e) =>
+                        setGaAmountSyp(
+                          Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)),
+                        )
+                      }
+                      disabled={saving}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">مبلغ التخدير (USD)</label>
+                    <input
+                      className="input"
+                      inputMode="decimal"
+                      value={String(gaAmountUsd)}
+                      onChange={(e) => {
+                        const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                        setGaAmountUsd(Math.max(0, roundUsd(Number(cleaned) || 0)))
+                      }}
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                 <button
                   type="button"
