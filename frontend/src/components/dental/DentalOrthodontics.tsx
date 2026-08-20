@@ -18,6 +18,7 @@ import {
   type DentalChartDto,
   type DentalOrthodonticCase,
   type DentalOrthoInstallment,
+  type DentalOrthoSupply,
 } from './dentalChartTypes'
 import type { DentalProviderOption } from './ToothTreatmentModal'
 
@@ -51,18 +52,17 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
   const [totalCostUsd, setTotalCostUsd] = useState(0)
   const [startedAt, setStartedAt] = useState(todayIsoDate)
   const [notes, setNotes] = useState('')
+  const [draftSupplies, setDraftSupplies] = useState<DentalOrthoSupply[]>([])
+  const [supplyName, setSupplyName] = useState('')
+  const [supplyAmountSyp, setSupplyAmountSyp] = useState(0)
+  const [supplyAmountUsd, setSupplyAmountUsd] = useState(0)
+  const [supplyDate, setSupplyDate] = useState(todayIsoDate)
 
   const [installCaseIdx, setInstallCaseIdx] = useState<number | null>(null)
   const [instAmountSyp, setInstAmountSyp] = useState(0)
   const [instAmountUsd, setInstAmountUsd] = useState(0)
   const [instDate, setInstDate] = useState(todayIsoDate)
   const [instNote, setInstNote] = useState('')
-
-  const [supplyCaseIdx, setSupplyCaseIdx] = useState<number | null>(null)
-  const [supplyName, setSupplyName] = useState('')
-  const [supplyAmountSyp, setSupplyAmountSyp] = useState(0)
-  const [supplyAmountUsd, setSupplyAmountUsd] = useState(0)
-  const [supplyDate, setSupplyDate] = useState(todayIsoDate)
 
   const load = useCallback(async () => {
     setErr('')
@@ -98,6 +98,11 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
     setTotalCostUsd(0)
     setStartedAt(todayIsoDate())
     setNotes('')
+    setDraftSupplies([])
+    setSupplyName('')
+    setSupplyAmountSyp(0)
+    setSupplyAmountUsd(0)
+    setSupplyDate(todayIsoDate())
   }
 
   function resetInstallForm() {
@@ -107,7 +112,7 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
     setInstNote('')
   }
 
-  function resetSupplyForm() {
+  function resetDraftSupplyFields() {
     setSupplyName('')
     setSupplyAmountSyp(0)
     setSupplyAmountUsd(0)
@@ -170,12 +175,45 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
     }
   }
 
+  function addDraftSupply() {
+    const name = supplyName.trim()
+    if (!name) {
+      setErr('أدخل اسم المستلزم')
+      return
+    }
+    if (!(supplyAmountSyp > 0) && !(supplyAmountUsd > 0)) {
+      setErr('أدخل سعر المستلزم بالليرة أو بالدولار')
+      return
+    }
+    const supply = normalizeOrthoSupply(
+      {
+        ...emptyOrthoSupply(),
+        name,
+        amountSyp: supplyAmountSyp,
+        amountUsd: supplyAmountUsd,
+        costUsdSypRate: supplyAmountUsd > 0 ? rate || 0 : 0,
+        businessDate: supplyDate || startedAt || todayIsoDate(),
+      },
+      rate,
+    )
+    setDraftSupplies((prev) => [...prev, supply])
+    resetDraftSupplyFields()
+    setErr('')
+  }
+
+  function removeDraftSupply(idx: number) {
+    setDraftSupplies((prev) => prev.filter((_, i) => i !== idx))
+  }
+
   async function addCase() {
     const p = providers.find((x) => x.id === providerId)
     if (!p) {
       setErr('اختر طبيب الأسنان المسؤول عن التقويم')
       return
     }
+    const supplies = draftSupplies
+      .map((x) => normalizeOrthoSupply({ ...x, name: String(x.name || '').trim() }, rate))
+      .filter(orthoSupplyHasData)
     const row = normalizeOrthodonticCase(
       {
         ...emptyOrthodonticCase(),
@@ -189,7 +227,7 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
         startedAt,
         notes: notes.trim(),
         installments: [],
-        supplies: [],
+        supplies,
       },
       rate,
     )
@@ -260,41 +298,6 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
     await saveAll(next)
   }
 
-  async function addSupply() {
-    if (supplyCaseIdx == null || !cases[supplyCaseIdx]) {
-      setErr('اختر حالة تقويم لإضافة مستلزم')
-      return
-    }
-    const name = supplyName.trim()
-    if (!name) {
-      setErr('أدخل اسم المستلزم')
-      return
-    }
-    if (!(supplyAmountSyp > 0) && !(supplyAmountUsd > 0)) {
-      setErr('أدخل سعر المستلزم بالليرة أو بالدولار')
-      return
-    }
-    const supply = normalizeOrthoSupply(
-      {
-        ...emptyOrthoSupply(),
-        name,
-        amountSyp: supplyAmountSyp,
-        amountUsd: supplyAmountUsd,
-        costUsdSypRate: supplyAmountUsd > 0 ? rate || 0 : 0,
-        businessDate: supplyDate,
-      },
-      rate,
-    )
-    const next = cases.map((c, i) =>
-      i === supplyCaseIdx ? { ...c, supplies: [...(c.supplies || []), supply] } : c,
-    )
-    const ok = await saveAll(next)
-    if (ok) {
-      resetSupplyForm()
-      setSupplyCaseIdx(null)
-    }
-  }
-
   async function removeSupply(caseIdx: number, supplyIdx: number) {
     if (!canEdit || saving) return
     if (!window.confirm('حذف هذا المستلزم؟')) return
@@ -318,9 +321,8 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
     <div className="card" style={{ marginBottom: '1rem' }}>
       <h2 className="card-title">تقويم</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-        ربط حالة تقويم بطبيب أسنان، ثم إضافة أقساط للتحصيل (ل.س أو دولار). يمكن إضافة مستلزمات باسم وسعر؛
-        تُطرح من المسدّد قبل حساب نسبة الطبيب (مثل المخبر). حصة الطبيب من الدفعات المسدّدة فقط — وليس من إجمالي
-        الخطة دفعة واحدة.
+        عند إنشاء حالة التقويم اختر الطبيب وأضف المستلزمات (اسم وسعر) ضمن نفس النموذج. الأقساط تُضاف لاحقاً
+        للتحصيل. المستلزمات تُطرح من المسدّد قبل حساب نسبة الطبيب (مثل المخبر).
       </p>
 
       {err ? (
@@ -397,12 +399,65 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                       ) : null}
                     </div>
 
+                    {(c.supplies || []).length > 0 ? (
+                      <div className="table-wrap" style={{ marginBottom: '0.75rem' }}>
+                        <strong style={{ display: 'block', fontSize: '0.88rem', marginBottom: '0.35rem' }}>
+                          المستلزمات
+                        </strong>
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>التاريخ</th>
+                              <th>المستلزم</th>
+                              <th>السعر</th>
+                              {canEdit ? <th></th> : null}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(c.supplies || []).map((s, supplyIdx) => {
+                              const effective = orthoSupplyEffectiveSyp(s, rate)
+                              return (
+                                <tr key={s.id || `sup-${caseIdx}-${supplyIdx}`}>
+                                  <td>{s.businessDate || '—'}</td>
+                                  <td>{s.name.trim() || '—'}</td>
+                                  <td>
+                                    {effective.toLocaleString('ar-SY')} ل.س
+                                    {s.amountUsd > 0 ? (
+                                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                        منها {formatUsdAmount(s.amountUsd)} USD
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                  {canEdit ? (
+                                    <td>
+                                      <button
+                                        type="button"
+                                        className="btn btn-ghost"
+                                        style={{ fontSize: '0.78rem' }}
+                                        disabled={saving}
+                                        onClick={() => void removeSupply(caseIdx, supplyIdx)}
+                                      >
+                                        حذف
+                                      </button>
+                                    </td>
+                                  ) : null}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+
                     {(c.installments || []).length === 0 ? (
                       <p style={{ color: 'var(--text-muted)', margin: '0 0 0.5rem', fontSize: '0.85rem' }}>
                         لا أقساط بعد.
                       </p>
                     ) : (
                       <div className="table-wrap" style={{ marginBottom: '0.65rem' }}>
+                        <strong style={{ display: 'block', fontSize: '0.88rem', marginBottom: '0.35rem' }}>
+                          الأقساط
+                        </strong>
                         <table className="data-table">
                           <thead>
                             <tr>
@@ -476,85 +531,20 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                     )}
 
                     {canEdit ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '0.82rem' }}
-                          disabled={saving}
-                          onClick={() => {
-                            setInstallCaseIdx(caseIdx)
-                            setSupplyCaseIdx(null)
-                            resetInstallForm()
-                            setErr('')
-                            setOkMsg('')
-                          }}
-                        >
-                          + إضافة قسط لهذه الحالة
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '0.82rem' }}
-                          disabled={saving}
-                          onClick={() => {
-                            setSupplyCaseIdx(caseIdx)
-                            setInstallCaseIdx(null)
-                            resetSupplyForm()
-                            setErr('')
-                            setOkMsg('')
-                          }}
-                        >
-                          + إضافة مستلزم
-                        </button>
-                      </div>
-                    ) : null}
-
-                    {(c.supplies || []).length > 0 ? (
-                      <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
-                        <table className="data-table">
-                          <thead>
-                            <tr>
-                              <th>التاريخ</th>
-                              <th>المستلزم</th>
-                              <th>السعر</th>
-                              {canEdit ? <th></th> : null}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(c.supplies || []).map((s, supplyIdx) => {
-                              const effective = orthoSupplyEffectiveSyp(s, rate)
-                              return (
-                                <tr key={s.id || `sup-${caseIdx}-${supplyIdx}`}>
-                                  <td>{s.businessDate || '—'}</td>
-                                  <td>{s.name.trim() || '—'}</td>
-                                  <td>
-                                    {effective.toLocaleString('ar-SY')} ل.س
-                                    {s.amountUsd > 0 ? (
-                                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        منها {formatUsdAmount(s.amountUsd)} USD
-                                      </div>
-                                    ) : null}
-                                  </td>
-                                  {canEdit ? (
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="btn btn-ghost"
-                                        style={{ fontSize: '0.78rem' }}
-                                        disabled={saving}
-                                        onClick={() => void removeSupply(caseIdx, supplyIdx)}
-                                      >
-                                        حذف
-                                      </button>
-                                    </td>
-                                  ) : null}
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.82rem' }}
+                        disabled={saving}
+                        onClick={() => {
+                          setInstallCaseIdx(caseIdx)
+                          resetInstallForm()
+                          setErr('')
+                          setOkMsg('')
+                        }}
+                      >
+                        + إضافة قسط لهذه الحالة
+                      </button>
                     ) : null}
                   </div>
                 )
@@ -651,103 +641,6 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                   onClick={() => void addInstallment()}
                 >
                   {saving ? 'جاري الحفظ…' : 'حفظ القسط للتحصيل'}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {canEdit && supplyCaseIdx != null && cases[supplyCaseIdx] ? (
-            <div
-              style={{
-                display: 'grid',
-                gap: '0.65rem',
-                padding: '0.85rem',
-                borderRadius: 12,
-                border: '1px solid var(--border)',
-                marginBottom: '1rem',
-                background: 'var(--surface-2)',
-              }}
-            >
-              <strong style={{ fontSize: '0.92rem' }}>
-                مستلزم جديد — {cases[supplyCaseIdx].title || 'تقويم'} ({cases[supplyCaseIdx].doctorName})
-              </strong>
-              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                يُطرح سعر المستلزم من المسدّد قبل حساب نسبة الطبيب.
-              </p>
-              <div>
-                <label className="form-label">اسم المستلزم</label>
-                <input
-                  className="input"
-                  value={supplyName}
-                  onChange={(e) => setSupplyName(e.target.value)}
-                  placeholder="مثال: أسلاك / حلقات"
-                  disabled={saving}
-                />
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                  gap: '0.55rem',
-                }}
-              >
-                <div>
-                  <label className="form-label">السعر (ل.س)</label>
-                  <input
-                    className="input"
-                    inputMode="numeric"
-                    value={String(supplyAmountSyp)}
-                    onChange={(e) =>
-                      setSupplyAmountSyp(
-                        Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)),
-                      )
-                    }
-                    disabled={saving}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">السعر (USD)</label>
-                  <input
-                    className="input"
-                    inputMode="decimal"
-                    value={String(supplyAmountUsd)}
-                    onChange={(e) => {
-                      const cleaned = e.target.value.replace(/[^\d.]/g, '')
-                      setSupplyAmountUsd(Math.max(0, Number(cleaned) || 0))
-                    }}
-                    disabled={saving}
-                  />
-                </div>
-                <div>
-                  <label className="form-label">التاريخ</label>
-                  <input
-                    className="input"
-                    type="date"
-                    value={supplyDate}
-                    onChange={(e) => setSupplyDate(e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={saving}
-                  onClick={() => {
-                    setSupplyCaseIdx(null)
-                    resetSupplyForm()
-                  }}
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={saving}
-                  onClick={() => void addSupply()}
-                >
-                  {saving ? 'جاري الحفظ…' : 'حفظ المستلزم'}
                 </button>
               </div>
             </div>
@@ -850,6 +743,133 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                   disabled={saving}
                   style={{ resize: 'vertical', minHeight: '4.5rem', width: '100%' }}
                 />
+              </div>
+
+              <div
+                style={{
+                  marginTop: '0.25rem',
+                  padding: '0.75rem',
+                  borderRadius: 10,
+                  border: '1px dashed var(--border)',
+                  display: 'grid',
+                  gap: '0.55rem',
+                }}
+              >
+                <strong style={{ fontSize: '0.9rem' }}>المستلزمات (اختياري)</strong>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  تُحفظ مع الحالة وتُطرح من أساس حصة الطبيب قبل النسبة.
+                </p>
+
+                {draftSupplies.length > 0 ? (
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>التاريخ</th>
+                          <th>المستلزم</th>
+                          <th>السعر</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {draftSupplies.map((s, idx) => {
+                          const effective = orthoSupplyEffectiveSyp(s, rate)
+                          return (
+                            <tr key={s.id || `draft-sup-${idx}`}>
+                              <td>{s.businessDate || '—'}</td>
+                              <td>{s.name.trim() || '—'}</td>
+                              <td>
+                                {effective.toLocaleString('ar-SY')} ل.س
+                                {s.amountUsd > 0 ? (
+                                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    منها {formatUsdAmount(s.amountUsd)} USD
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: '0.78rem' }}
+                                  disabled={saving}
+                                  onClick={() => removeDraftSupply(idx)}
+                                >
+                                  حذف
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+
+                <div>
+                  <label className="form-label">اسم المستلزم</label>
+                  <input
+                    className="input"
+                    value={supplyName}
+                    onChange={(e) => setSupplyName(e.target.value)}
+                    placeholder="مثال: أسلاك / حلقات"
+                    disabled={saving}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: '0.55rem',
+                  }}
+                >
+                  <div>
+                    <label className="form-label">السعر (ل.س)</label>
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      value={String(supplyAmountSyp)}
+                      onChange={(e) =>
+                        setSupplyAmountSyp(
+                          Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)),
+                        )
+                      }
+                      disabled={saving}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">السعر (USD)</label>
+                    <input
+                      className="input"
+                      inputMode="decimal"
+                      value={String(supplyAmountUsd)}
+                      onChange={(e) => {
+                        const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                        setSupplyAmountUsd(Math.max(0, Number(cleaned) || 0))
+                      }}
+                      disabled={saving}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">التاريخ</label>
+                    <input
+                      className="input"
+                      type="date"
+                      value={supplyDate}
+                      onChange={(e) => setSupplyDate(e.target.value)}
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={saving}
+                    onClick={() => addDraftSupply()}
+                  >
+                    + إضافة للمستلزمات
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
