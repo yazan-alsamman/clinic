@@ -71,6 +71,8 @@ export type DentalLabWork = {
   doctorName?: string
   providerUserId?: string | null
   providerKey?: string
+  /** ربط اختياري بإجراء عام */
+  linkedGeneralTreatmentId?: string | null
 }
 
 /** طبيب خاص بدون حساب مستخدم (د. الياس) */
@@ -430,6 +432,9 @@ export function normalizeLabWork(
     doctorName: isElias ? DENTAL_ELIAS_DISPLAY_NAME : String(raw?.doctorName || '').trim(),
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : providerRaw || null,
     providerKey: isElias ? 'elias' : providerKey,
+    linkedGeneralTreatmentId: raw?.linkedGeneralTreatmentId
+      ? String(raw.linkedGeneralTreatmentId)
+      : null,
   }
 }
 

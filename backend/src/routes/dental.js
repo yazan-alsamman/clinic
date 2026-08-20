@@ -321,6 +321,12 @@ function normalizeLabWorks(raw, fallbackUsdSypRate = 0) {
         : String(resolved.providerKey || '').trim().slice(0, 40),
     }
     if (row?._id) item._id = row._id
+    else if (row?.id && mongoose.Types.ObjectId.isValid(String(row.id))) item._id = row.id
+    const linkedRaw =
+      row?.linkedGeneralTreatmentId != null ? String(row.linkedGeneralTreatmentId).trim() : ''
+    if (linkedRaw && mongoose.Types.ObjectId.isValid(linkedRaw)) {
+      item.linkedGeneralTreatmentId = linkedRaw
+    }
     out.push(item)
     if (out.length >= 80) break
   }
@@ -339,11 +345,18 @@ function labWorkToDto(row) {
     doctorName: '',
     providerUserId: null,
     providerKey: '',
+    linkedGeneralTreatmentId: null,
   }
   const isElias = String(n.providerKey || '') === DENTAL_ELIAS_PROVIDER_KEY
   const labId =
     n.labId ||
     (row?.labId && mongoose.Types.ObjectId.isValid(String(row.labId)) ? String(row.labId) : null)
+  const linked =
+    n.linkedGeneralTreatmentId ||
+    (row?.linkedGeneralTreatmentId &&
+    mongoose.Types.ObjectId.isValid(String(row.linkedGeneralTreatmentId))
+      ? String(row.linkedGeneralTreatmentId)
+      : null)
   return {
     id: row?._id ? String(row._id) : undefined,
     labId: labId ? String(labId) : null,
@@ -356,6 +369,7 @@ function labWorkToDto(row) {
     doctorName: n.doctorName || '',
     providerUserId: isElias ? DENTAL_ELIAS_VIRTUAL_ID : n.providerUserId ? String(n.providerUserId) : null,
     providerKey: n.providerKey || '',
+    linkedGeneralTreatmentId: linked || null,
   }
 }
 

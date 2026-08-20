@@ -118,6 +118,11 @@ const dentalChartLabWorkSchema = new mongoose.Schema(
     doctorName: { type: String, default: '', trim: true, maxlength: 160 },
     providerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     providerKey: { type: String, default: '', trim: true, maxlength: 40 },
+    /** ربط اختياري بإجراء عام في نفس المخطط */
+    linkedGeneralTreatmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
   },
   { _id: true },
 )
