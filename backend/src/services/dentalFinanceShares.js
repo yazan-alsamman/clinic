@@ -107,8 +107,32 @@ function orthoInstallmentAsTreatment(orthoCase, inst) {
 }
 
 /**
- * حصة التقويم: فقط المبالغ المسدّدة (حسب تاريخ الدفع) — وليس إجمالي الخطة أو القسط غير المسدّد.
+ * حصة التقويم: من المسدّد بعد طرح مستلزمات الحالة (مثل المخبر قبل نسبة الطبيب).
  */
+function orthoSupplyCostSyp(s) {
+  const rate = Math.max(0, Number(s?.costUsdSypRate) || 0)
+  const usdPart = Math.max(0, Number(s?.amountUsd) || 0)
+  return (
+    roundMoney(s?.amountSyp) + (usdPart > 0 && rate > 0 ? roundMoney(usdPart * rate) : 0)
+  )
+}
+
+function orthoSuppliesInRange(orthoCase, from, to) {
+  let total = 0
+  for (const s of orthoCase?.supplies || []) {
+    const amt = orthoSupplyCostSyp(s)
+    if (!(amt > 0)) continue
+    let bd = String(s.businessDate || '').trim().slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
+      bd = String(orthoCase?.startedAt || '').trim().slice(0, 10)
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) continue
+    if (!inRange(bd, from, to)) continue
+    total += amt
+  }
+  return roundMoney(total)
+}
+
 function accumulateOrthoPaidShare({
   orthoCase,
   from,
@@ -117,6 +141,7 @@ function accumulateOrthoPaidShare({
   byDoctor,
   bumpNamed,
   addRevenue,
+  addLabs,
 }) {
   let paidInRange = 0
   for (const inst of orthoCase?.installments || []) {
@@ -129,7 +154,8 @@ function accumulateOrthoPaidShare({
       paidInRange += amount
     }
   }
-  if (!(paidInRange > 0)) return 0
+  const suppliesInRange = orthoSuppliesInRange(orthoCase, from, to)
+  if (!(paidInRange > 0) && !(suppliesInRange > 0)) return 0
 
   const uid = orthoCase.providerUserId ? String(orthoCase.providerUserId) : ''
   const name = String(orthoCase.doctorName || userById.get(uid) || '').trim()
@@ -140,24 +166,31 @@ function accumulateOrthoPaidShare({
     doctorName: matchName,
   })
 
-  if (addRevenue) addRevenue(paidInRange)
+  if (addRevenue && paidInRange > 0) addRevenue(paidInRange)
+  if (addLabs && suppliesInRange > 0) addLabs(suppliesInRange, isElias)
 
-  const key = isElias ? DENTAL_ELIAS_PROVIDER_KEY : uid || name || '—'
-  const prev = byDoctor.get(key) || {
-    userId: isElias ? null : uid || null,
-    providerKey: isElias ? DENTAL_ELIAS_PROVIDER_KEY : '',
-    name: isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || '—',
-    proceduresSyp: 0,
-    shareSyp: 0,
-    noShare: isElias,
+  /** أساس الحصة = المسدّد − المستلزمات (لا يقل عن صفر) */
+  const shareBase = Math.max(0, paidInRange - suppliesInRange)
+  if (!(shareBase > 0) && !(suppliesInRange > 0)) return 0
+
+  if (shareBase > 0) {
+    const key = isElias ? DENTAL_ELIAS_PROVIDER_KEY : uid || name || '—'
+    const prev = byDoctor.get(key) || {
+      userId: isElias ? null : uid || null,
+      providerKey: isElias ? DENTAL_ELIAS_PROVIDER_KEY : '',
+      name: isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || '—',
+      proceduresSyp: 0,
+      shareSyp: 0,
+      noShare: isElias,
+    }
+    prev.proceduresSyp += shareBase
+    prev.name = isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || prev.name
+    if (uid && !isElias) prev.userId = uid
+    byDoctor.set(key, prev)
+
+    if (typeof bumpNamed === 'function') bumpNamed(shareBase, isElias, matchName)
   }
-  prev.proceduresSyp += paidInRange
-  prev.name = isElias ? DENTAL_ELIAS_DISPLAY_NAME : name || prev.name
-  if (uid && !isElias) prev.userId = uid
-  byDoctor.set(key, prev)
-
-  if (typeof bumpNamed === 'function') bumpNamed(paidInRange, isElias, matchName)
-  return paidInRange
+  return shareBase
 }
 
 /**
@@ -359,6 +392,10 @@ export async function summarizeDentalChartFinance({ from, to }) {
         addRevenue: (amt) => {
           totalRevenueSyp += amt
         },
+        addLabs: (amt, isElias) => {
+          labWorksTotalSyp += amt
+          if (isElias) eliasLabWorksSyp += amt
+        },
         bumpNamed: (amt, isElias, matchName) => {
           if (isElias) eliasProceduresSyp += amt
           else if (providerNameMatchesAyham(matchName)) ayhamProceduresSyp += amt
@@ -536,6 +573,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         paidSyp: 0,
         remainingSyp: 0,
         labsSyp: 0,
+        orthoSupplySyp: 0,
         shareSyp: 0,
       })
     }
@@ -824,6 +862,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
     }
 
     for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
+      const meta = resolveDoctorMeta(orthoCase, userById)
+
       for (const inst of orthoCase.installments || []) {
         const tr = orthoInstallmentAsTreatment(orthoCase, inst)
         const cost = treatmentCostSyp(tr)
@@ -850,13 +890,11 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           unassignedByPatient.set(patientId, roundMoney(leftover - take))
         }
         const paidFinal = roundMoney(cost - remaining)
-        const meta = resolveDoctorMeta(tr, userById)
         if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
 
         const clinic = ensureClinic(meta)
         if (clinic) {
           clinic.treatmentCount += 1
-          /** حصة الطبيب من التقويم = المسدّد فقط */
           clinic.proceduresSyp += paidFinal
           clinic.paidSyp += paidFinal
           clinic.remainingSyp += remaining
@@ -893,6 +931,54 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
           })),
         })
       }
+
+      for (const s of orthoCase.supplies || []) {
+        const amt = orthoSupplyCostSyp(s)
+        const name = String(s?.name || '').trim() || 'مستلزم'
+        if (!(amt > 0) && !String(s?.name || '').trim()) continue
+        let bd = String(s.businessDate || '').trim().slice(0, 10)
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
+          bd = String(orthoCase.startedAt || '').trim().slice(0, 10)
+        }
+        const undated = !/^\d{4}-\d{2}-\d{2}$/.test(bd)
+        if (!undated && !inRange(bd, from, to)) continue
+        if (undated) bd = 'بدون تاريخ'
+        if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
+
+        const clinic = ensureClinic(meta)
+        if (clinic) {
+          clinic.labCount += 1
+          clinic.labsSyp += amt
+          clinic.orthoSupplySyp = roundMoney((clinic.orthoSupplySyp || 0) + amt)
+          /** طرح المستلزم من أساس حصة الطبيب قبل النسبة */
+          const deduct = Math.min(amt, Math.max(0, clinic.proceduresSyp))
+          clinic.proceduresSyp = Math.max(0, clinic.proceduresSyp - deduct)
+        }
+
+        rows.push({
+          kind: 'lab',
+          id: s._id ? String(s._id) : `ortho-sup-${patientId}-${bd}-${rows.length}`,
+          patientId,
+          patientName,
+          fileNumber,
+          fdi: 0,
+          isGeneral: true,
+          isOrthodontic: true,
+          isOrthoSupply: true,
+          businessDate: bd,
+          undated,
+          clinicKey: meta.key,
+          clinicLabel: meta.clinicLabel,
+          doctorName: meta.name,
+          providerUserId: meta.userId,
+          noShare: meta.noShare,
+          labName: name,
+          procedureDescription: `مستلزم تقويم — ${name}`,
+          amountSyp: amt,
+          amountUsd: Math.max(0, Number(s.amountUsd) || 0),
+          amountSypOnly: roundMoney(s.amountSyp),
+        })
+      }
     }
   }
 
@@ -906,6 +992,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       const noShare = sharePercent <= 0
       const proceduresSyp = roundMoney(c.proceduresSyp)
       const labsSyp = roundMoney(c.labsSyp)
+      const orthoSupplySyp = roundMoney(c.orthoSupplySyp || 0)
       const shareSyp = roundMoney((proceduresSyp * sharePercent) / 100)
       return {
         ...c,
@@ -913,10 +1000,12 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         paidSyp: roundMoney(c.paidSyp),
         remainingSyp: roundMoney(c.remainingSyp),
         labsSyp,
+        orthoSupplySyp,
         sharePercent,
         shareSyp,
         noShare,
-        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp),
+        /** المستلزمات طُرحت مسبقاً من proceduresSyp وتظهر في labsSyp — نعيد إضافتها مرة حتى لا تُطرح مرتين */
+        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp + orthoSupplySyp),
       }
     })
     .filter((c) => !filterKey || c.key === filterKey || c.userId === filterKey)

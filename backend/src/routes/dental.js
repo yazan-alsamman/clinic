@@ -423,6 +423,29 @@ function normalizeOrthoInstallment(row, fallbackUsdSypRate = 0) {
   return item
 }
 
+function normalizeOrthoSupply(row, fallbackUsdSypRate = 0) {
+  const name = String(row?.name || '').trim().slice(0, 200)
+  const amountSyp = Math.max(0, Math.round(Number(row?.amountSyp) || 0))
+  const amountUsd = Math.max(0, round6(Number(row?.amountUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(row?.costUsdSypRate) || 0)
+  if (amountUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(fallbackUsdSypRate) || 0)
+  }
+  if (!(amountUsd > 0)) costUsdSypRate = 0
+  if (!name && !(amountSyp > 0) && !(amountUsd > 0)) return null
+  const businessDate = normalizeYmd(row?.businessDate, todayBusinessDate())
+  const item = {
+    name: name || 'مستلزم',
+    amountSyp,
+    amountUsd,
+    costUsdSypRate,
+    businessDate,
+  }
+  if (row?._id) item._id = row._id
+  if (row?.id && mongoose.Types.ObjectId.isValid(String(row.id))) item._id = row.id
+  return item
+}
+
 function normalizeOrthodonticCases(raw, fallbackUsdSypRate = 0) {
   if (!Array.isArray(raw)) return []
   const out = []
@@ -450,6 +473,12 @@ function normalizeOrthodonticCases(raw, fallbackUsdSypRate = 0) {
       if (n) installments.push(n)
       if (installments.length >= 80) break
     }
+    const supplies = []
+    for (const s of row?.supplies || []) {
+      const n = normalizeOrthoSupply(s, fallbackUsdSypRate)
+      if (n) supplies.push(n)
+      if (supplies.length >= 80) break
+    }
     const title = String(row?.title || 'تقويم').trim().slice(0, 200) || 'تقويم'
     const notes = String(row?.notes || '').trim().slice(0, 2000)
     const startedAt = normalizeYmd(row?.startedAt, todayBusinessDate())
@@ -457,7 +486,14 @@ function normalizeOrthodonticCases(raw, fallbackUsdSypRate = 0) {
       resolved.isElias ||
       Boolean(providerUserId) ||
       Boolean(String(resolved.doctorName || '').trim())
-    if (!hasDoctor && installments.length === 0 && !(totalCostSyp > 0) && !(totalCostUsd > 0) && !notes) {
+    if (
+      !hasDoctor &&
+      installments.length === 0 &&
+      supplies.length === 0 &&
+      !(totalCostSyp > 0) &&
+      !(totalCostUsd > 0) &&
+      !notes
+    ) {
       continue
     }
     const item = {
@@ -476,6 +512,7 @@ function normalizeOrthodonticCases(raw, fallbackUsdSypRate = 0) {
       startedAt,
       active: row?.active === false ? false : true,
       installments,
+      supplies,
     }
     if (row?._id) item._id = row._id
     if (row?.id && mongoose.Types.ObjectId.isValid(String(row.id))) item._id = row.id
@@ -557,6 +594,14 @@ function orthodonticCaseToDto(c, billingMap) {
     installments: (Array.isArray(c?.installments) ? c.installments : []).map((x) =>
       orthoInstallmentToDto(x, billingMap),
     ),
+    supplies: (Array.isArray(c?.supplies) ? c.supplies : []).map((s) => ({
+      id: s?._id ? String(s._id) : undefined,
+      name: String(s?.name || '').trim() || 'مستلزم',
+      amountSyp: Math.max(0, Math.round(Number(s?.amountSyp) || 0)),
+      amountUsd: Math.max(0, round6(Number(s?.amountUsd) || 0)),
+      costUsdSypRate: Math.max(0, Number(s?.costUsdSypRate) || 0),
+      businessDate: String(s?.businessDate || '').trim().slice(0, 10),
+    })),
   }
 }
 

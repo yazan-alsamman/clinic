@@ -142,6 +142,18 @@ const dentalOrthoInstallmentSchema = new mongoose.Schema(
   { _id: true },
 )
 
+/** مستلزم تقويم — يُطرح من أساس حصة الطبيب مثل تكلفة المخبر */
+const dentalOrthoSupplySchema = new mongoose.Schema(
+  {
+    name: { type: String, default: '', trim: true, maxlength: 200 },
+    amountSyp: { type: Number, default: 0, min: 0 },
+    amountUsd: { type: Number, default: 0, min: 0 },
+    costUsdSypRate: { type: Number, default: 0, min: 0 },
+    businessDate: { type: String, default: '' },
+  },
+  { _id: true },
+)
+
 /** حالة تقويم لمريض — مرتبطة بطبيب أسنان؛ التسديد على دفعات */
 const dentalOrthoCaseSchema = new mongoose.Schema(
   {
@@ -157,6 +169,7 @@ const dentalOrthoCaseSchema = new mongoose.Schema(
     startedAt: { type: String, default: '' },
     active: { type: Boolean, default: true },
     installments: { type: [dentalOrthoInstallmentSchema], default: [] },
+    supplies: { type: [dentalOrthoSupplySchema], default: [] },
   },
   { _id: true },
 )

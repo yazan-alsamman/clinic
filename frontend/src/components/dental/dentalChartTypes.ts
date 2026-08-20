@@ -116,6 +116,15 @@ export type DentalOrthoInstallment = {
   billingStatus?: 'pending_payment' | 'paid' | 'cancelled' | null
 }
 
+export type DentalOrthoSupply = {
+  id?: string
+  name: string
+  amountSyp: number
+  amountUsd: number
+  costUsdSypRate: number
+  businessDate: string
+}
+
 export type DentalOrthodonticCase = {
   id?: string
   title: string
@@ -129,6 +138,7 @@ export type DentalOrthodonticCase = {
   startedAt: string
   active: boolean
   installments: DentalOrthoInstallment[]
+  supplies: DentalOrthoSupply[]
 }
 
 export type ChartTool =
@@ -529,7 +539,56 @@ export function emptyOrthodonticCase(): DentalOrthodonticCase {
     startedAt: todayIsoDateLocal(),
     active: true,
     installments: [],
+    supplies: [],
   }
+}
+
+export function emptyOrthoSupply(): DentalOrthoSupply {
+  return {
+    id: `os-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: '',
+    amountSyp: 0,
+    amountUsd: 0,
+    costUsdSypRate: 0,
+    businessDate: todayIsoDateLocal(),
+  }
+}
+
+export function normalizeOrthoSupply(
+  raw: Partial<DentalOrthoSupply> | null | undefined,
+  fallbackRate?: number | null,
+): DentalOrthoSupply {
+  const amountSyp = Math.max(0, Math.round(Number(raw?.amountSyp) || 0))
+  const amountUsd = Math.max(0, roundUsd(Number(raw?.amountUsd) || 0))
+  let costUsdSypRate = Math.max(0, Number(raw?.costUsdSypRate) || 0)
+  if (amountUsd > 0 && !(costUsdSypRate > 0)) {
+    costUsdSypRate = Math.max(0, Number(fallbackRate) || 0)
+  }
+  if (!(amountUsd > 0)) costUsdSypRate = 0
+  let businessDate = String(raw?.businessDate || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) businessDate = todayIsoDateLocal()
+  return {
+    id: raw?.id ? String(raw.id) : undefined,
+    name: String(raw?.name || ''),
+    amountSyp,
+    amountUsd,
+    costUsdSypRate,
+    businessDate,
+  }
+}
+
+export function orthoSupplyEffectiveSyp(s: DentalOrthoSupply, fallbackRate?: number | null): number {
+  const syp = Math.max(0, Math.round(Number(s.amountSyp) || 0))
+  const usd = Math.max(0, Number(s.amountUsd) || 0)
+  const rate =
+    Number(s.costUsdSypRate) > 0 ? Number(s.costUsdSypRate) : Math.max(0, Number(fallbackRate) || 0)
+  const fromUsd = usd > 0 && rate > 0 ? Math.round(usd * rate) : 0
+  return syp + fromUsd
+}
+
+export function orthoSupplyHasData(s: DentalOrthoSupply | undefined): boolean {
+  if (!s) return false
+  return Boolean(s.name.trim()) || s.amountSyp > 0 || s.amountUsd > 0
 }
 
 export function normalizeOrthodonticCase(
@@ -564,6 +623,9 @@ export function normalizeOrthodonticCase(
     startedAt,
     active: raw?.active === false ? false : true,
     installments: (raw?.installments || []).map((x) => normalizeOrthoInstallment(x, fallbackRate)),
+    supplies: (raw?.supplies || [])
+      .map((x) => normalizeOrthoSupply(x, fallbackRate))
+      .filter(orthoSupplyHasData),
   }
 }
 
@@ -576,7 +638,8 @@ export function orthodonticCaseHasData(c: DentalOrthodonticCase | undefined): bo
     c.totalCostSyp > 0 ||
     c.totalCostUsd > 0 ||
     Boolean(c.notes.trim()) ||
-    c.installments.length > 0
+    c.installments.length > 0 ||
+    (c.supplies || []).length > 0
   )
 }
 
