@@ -175,7 +175,14 @@ function BuccalToothArt({
   }
 
   if (tooth.status === 'implant') {
-    return <ImplantScrew color={tooth.implantColor === 'red' ? 'red' : 'teal'} flip={flip} />
+    return (
+      <g>
+        <ImplantScrew color={tooth.implantColor === 'red' ? 'red' : 'teal'} flip={flip} />
+        <g transform={flip ? 'translate(0,90) scale(1,-1)' : undefined}>
+          {surfaceHighlight(tooth.surfaces, 'buccal', kind)}
+        </g>
+      </g>
+    )
   }
 
   const crown =
@@ -248,7 +255,12 @@ function OcclusalToothArt({ fdi, tooth }: { fdi: number; tooth: DentalToothState
 
   if (tooth.status === 'implant') {
     const fill = tooth.implantColor === 'red' ? '#e11d2e' : '#14b8a6'
-    return <circle cx="20" cy="24" r="10" fill={fill} stroke="#0f172a" strokeWidth="1" opacity={0.85} />
+    return (
+      <g>
+        <circle cx="20" cy="24" r="10" fill={fill} stroke="#0f172a" strokeWidth="1" opacity={0.85} />
+        {surfaceHighlight(tooth.surfaces, 'occlusal', kind)}
+      </g>
+    )
   }
 
   const body =
@@ -315,7 +327,7 @@ export function ToothCell({
       <svg viewBox={`0 0 40 ${h}`} width="40" height={h} aria-hidden>
         {view === 'buccal' ? <BuccalToothArt fdi={fdi} tooth={tooth} /> : <OcclusalToothArt fdi={fdi} tooth={tooth} />}
         {badge ? <circle cx="34" cy="6" r="3.5" fill="#0d9488" stroke="#fff" strokeWidth="1" /> : null}
-        {onSurfaceClick && tooth.status === 'present' ? (
+        {onSurfaceClick && tooth.status !== 'missing' ? (
           <>
             <rect
               x="0"

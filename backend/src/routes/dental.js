@@ -486,7 +486,8 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
       implantColor = row?.implantColor === 'red' ? 'red' : 'teal'
     }
     const surfaces = []
-    if (status === 'present' && Array.isArray(row?.surfaces)) {
+    /** المفقود بلا سطوح؛ الحاضر والزراعة يحتفظان بعلامات متعددة (تاج + زراعة…) */
+    if (status !== 'missing' && Array.isArray(row?.surfaces)) {
       for (const s of row.surfaces) {
         const view = String(s?.view || '').trim()
         const region = String(s?.region || '').trim().toUpperCase()
@@ -512,7 +513,7 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
       status,
       statusOrigin: status === 'present' ? 'preexisting' : statusOrigin,
       ...(status === 'implant' ? { implantColor } : {}),
-      surfaces: status === 'present' ? surfaces.slice(0, 12) : [],
+      surfaces: status === 'missing' ? [] : surfaces.slice(0, 24),
       note: String(row?.note || '').trim().slice(0, 500),
       treatments,
       labWorks,

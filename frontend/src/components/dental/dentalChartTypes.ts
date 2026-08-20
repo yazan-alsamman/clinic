@@ -485,7 +485,9 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       status: t.status,
       statusOrigin: t.status === 'present' ? 'preexisting' : t.statusOrigin || 'preexisting',
       implantColor: t.status === 'implant' ? t.implantColor : null,
-      surfaces: t.status === 'present' ? t.surfaces.map((s) => normalizeSurfaceMark(s)) : [],
+      /** الزراعة تحتفظ بالعلامات السطحية (تاج/حشوة…)؛ المفقود بلا سطوح */
+      surfaces:
+        t.status === 'missing' ? [] : t.surfaces.map((s) => normalizeSurfaceMark(s)),
       note: t.note,
       treatments: (t.treatments || [])
         .map((x) =>
@@ -524,17 +526,13 @@ export function toothForViewLayer(tooth: DentalToothState, layer: ChartViewLayer
     }
   }
 
-  // clinic layer — الإجراءات دائماً عمل عيادة
-  const status =
-    tooth.status !== 'present' && tooth.statusOrigin === 'clinic'
-      ? tooth.status
-      : 'present'
+  // عمل العيادة: إجراءات العيادة + إبقاء علامات حالة الدخول ظاهرة للطبيب
   return {
     ...tooth,
-    status,
-    statusOrigin: status === 'present' ? 'preexisting' : 'clinic',
-    implantColor: status === 'implant' ? tooth.implantColor : null,
-    surfaces: tooth.surfaces.filter((s) => s.origin === 'clinic'),
+    status: tooth.status,
+    statusOrigin: tooth.status === 'present' ? 'preexisting' : tooth.statusOrigin || 'preexisting',
+    implantColor: tooth.status === 'implant' ? tooth.implantColor : null,
+    surfaces: tooth.surfaces,
     treatments: tooth.treatments,
     labWorks: tooth.labWorks,
   }

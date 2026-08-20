@@ -241,7 +241,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           status: 'missing',
           statusOrigin: originForPaint,
           implantColor: null,
-          surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
+          surfaces: [],
         }))
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
@@ -252,7 +252,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           status: 'implant',
           statusOrigin: originForPaint,
           implantColor: 'teal',
-          surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
+          surfaces: prev.surfaces,
         }))
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
@@ -263,7 +263,7 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
           status: 'implant',
           statusOrigin: originForPaint,
           implantColor: 'red',
-          surfaces: paintMode === 'baseline' ? [] : prev.surfaces.filter((s) => s.origin === 'clinic'),
+          surfaces: prev.surfaces,
         }))
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
@@ -283,20 +283,20 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             color: opt.color,
             shape: opt.shape,
           }
-          if (prev.status !== 'present') {
-            return {
-              ...prev,
-              status: 'present' as const,
-              statusOrigin: 'preexisting' as const,
-              implantColor: null,
-              surfaces: [mark],
-            }
-          }
           const surfaces = prev.surfaces.filter(
             (s) => !(s.view === view && s.region === r && s.origin === originForPaint),
           )
           surfaces.push(mark)
-          return { ...prev, status: 'present' as const, implantColor: null, surfaces }
+          if (prev.status === 'implant') {
+            return { ...prev, surfaces }
+          }
+          return {
+            ...prev,
+            status: 'present' as const,
+            statusOrigin: 'preexisting' as const,
+            implantColor: null,
+            surfaces,
+          }
         })
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
