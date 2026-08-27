@@ -6,7 +6,12 @@ import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BusinessDay } from '../models/BusinessDay.js'
-import { ExpenseEntry, EXPENSE_CATEGORIES, expenseEffectiveAmountSyp } from '../models/ExpenseEntry.js'
+import {
+  ExpenseEntry,
+  EXPENSE_CATEGORIES,
+  EXPENSE_CATEGORY_LABELS,
+  expenseEffectiveAmountSyp,
+} from '../models/ExpenseEntry.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
@@ -50,7 +55,9 @@ function normalizeDeptFilter(raw) {
   const d = String(raw || '').trim().toLowerCase()
   if (!d || d === 'all') return null
   if (d === 'skincare') return 'skin'
-  if (['laser', 'dermatology', 'skin', 'dental', 'solarium', 'general'].includes(d)) return d
+  if (['laser', 'dermatology', 'skin', 'dental', 'solarium', 'general', 'salaries'].includes(d)) {
+    return d
+  }
   return null
 }
 
@@ -500,7 +507,7 @@ financeRouter.get('/dashboard', async (req, res) => {
     let items = []
     let sessionById = new Map()
     let payById = new Map()
-    if (deptFilter !== 'general') {
+    if (deptFilter !== 'general' && deptFilter !== 'salaries') {
       const bundle = await loadPaidBillingItems({
         from: range.from,
         to: range.to,
@@ -525,9 +532,9 @@ financeRouter.get('/dashboard', async (req, res) => {
     }
     let totalRevenueSyp = Math.round(Object.values(revenueByDept).reduce((a, n) => a + n, 0))
     let overallExpensesTablesSyp = totalExpensesTablesSyp
-    if (deptFilter === 'general') {
+    if (deptFilter === 'general' || deptFilter === 'salaries') {
       totalRevenueSyp = 0
-      overallExpensesTablesSyp = Math.round(expenseTotals.general || 0)
+      overallExpensesTablesSyp = Math.round(expenseTotals[deptFilter] || 0)
     } else if (deptFilter) {
       overallExpensesTablesSyp = Math.round(expenseTotals[deptFilter] || 0)
     }
@@ -569,10 +576,16 @@ financeRouter.get('/dashboard', async (req, res) => {
     const generalExp = expenseTotals.general || 0
     const generalProfit = Math.round(-generalExp)
 
-    let totalProfitSyp = laserProfit + dermProfit + skinProfit + dentalProfit + solariumProfit + generalProfit
+    const salariesExp = expenseTotals.salaries || 0
+    const salariesProfit = Math.round(-salariesExp)
+
+    let totalProfitSyp =
+      laserProfit + dermProfit + skinProfit + dentalProfit + solariumProfit + generalProfit + salariesProfit
 
     if (deptFilter === 'general') {
       totalProfitSyp = generalProfit
+    } else if (deptFilter === 'salaries') {
+      totalProfitSyp = salariesProfit
     } else if (deptFilter) {
       const parts = {
         laser: laserProfit,
@@ -594,18 +607,7 @@ financeRouter.get('/dashboard', async (req, res) => {
 
     const chartExpenseByCategory = EXPENSE_CATEGORIES.map((key) => ({
       key,
-      label:
-        key === 'laser'
-          ? 'ليزر'
-          : key === 'dermatology'
-            ? 'جلدية'
-            : key === 'skin'
-              ? 'بشرة'
-              : key === 'solarium'
-                ? 'سولاريوم'
-                : key === 'dental'
-                  ? 'أسنان'
-                  : 'عام',
+      label: EXPENSE_CATEGORY_LABELS[key] || key,
       expensesSyp: expenseTotals[key] || 0,
     }))
 
@@ -689,6 +691,10 @@ financeRouter.get('/dashboard', async (req, res) => {
       general: {
         totalExpensesSyp: generalExp,
         totalProfitSyp: generalProfit,
+      },
+      salaries: {
+        totalExpensesSyp: salariesExp,
+        totalProfitSyp: salariesProfit,
       },
       charts: {
         revenueByDepartment: chartRevenueByDepartment,

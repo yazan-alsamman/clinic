@@ -86,6 +86,7 @@ type DashboardPayload = {
   }
   solarium: { totalRevenueSyp: number; totalExpensesSyp: number; totalProfitSyp: number }
   general: { totalExpensesSyp: number; totalProfitSyp: number }
+  salaries: { totalExpensesSyp: number; totalProfitSyp: number }
   charts: {
     revenueByDepartment: { key: string; label: string; revenueSyp: number }[]
     expensesByCategory: { key: string; label: string; expensesSyp: number }[]
@@ -257,8 +258,8 @@ export function GeneralFinanceDashboardPage() {
     <>
       <h1 className="page-title">لوحة المالية العامة</h1>
       <p className="page-desc">
-        إيرادات التحصيل (البنود المسدّدة) ومصاريف الجداول الستة وأرباح الأقسام. تُحدَّث البيانات تلقائياً. جميع
-        المبالغ بالليرة السورية.
+        إيرادات التحصيل (البنود المسدّدة) ومصاريف الجداول (بما فيها الرواتب) وأرباح الأقسام. تُحدَّث البيانات تلقائياً.
+        جميع المبالغ بالليرة السورية.
       </p>
 
       <div
@@ -289,6 +290,7 @@ export function GeneralFinanceDashboardPage() {
             <option value="dental">الأسنان</option>
             <option value="solarium">السولاريوم</option>
             <option value="general">مصاريف عامة</option>
+            <option value="salaries">رواتب</option>
           </select>
         </label>
         <label style={{ display: 'grid', gap: '0.25rem' }}>
@@ -328,14 +330,16 @@ export function GeneralFinanceDashboardPage() {
           <div className="card" style={{ borderColor: '#fb923c', background: 'linear-gradient(160deg, #fff7ed 0%, #ffedd5 100%)' }}>
             <h3 style={{ margin: 0, color: '#9a3412', fontSize: '0.95rem' }}>إجمالي المصاريف</h3>
             <p style={{ margin: '0.4rem 0 0', fontWeight: 800, color: '#7c2d12' }}>{fmtSyp(data?.overall.totalExpensesSyp || 0)}</p>
-            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#9a3412' }}>مجموع جداول المصاريف الستة (حسب التصفية عند اختيار قسم).</p>
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#9a3412' }}>
+              مجموع جداول المصاريف والرواتب (حسب التصفية عند اختيار قسم).
+            </p>
           </div>
           <div className="card" style={{ borderColor: '#60a5fa', background: 'linear-gradient(160deg, #eff6ff 0%, #dbeafe 100%)' }}>
             <h3 style={{ margin: 0, color: '#1e40af', fontSize: '0.95rem' }}>إجمالي الأرباح</h3>
             <p style={{ margin: '0.4rem 0 0', fontWeight: 800, color: '#1e3a8a' }}>{fmtSyp(data?.overall.totalProfitSyp || 0)}</p>
             <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#1d4ed8' }}>
-              مجموع أرباح الأقسام المعروضة: الليزر، الجلدية (بعد حصص الأطباء وجدول مصاريف الجلدية)، البشرة، الأسنان، السولاريوم،
-              والمصاريف العامة.
+              مجموع أرباح الأقسام ناقص المصاريف العامة والرواتب: الليزر، الجلدية، البشرة، الأسنان، السولاريوم،
+              المصاريف العامة، والرواتب.
             </p>
           </div>
           <div className="card" style={{ borderColor: '#c084fc', background: 'linear-gradient(160deg, #faf5ff 0%, #f3e8ff 100%)' }}>
@@ -597,6 +601,18 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>مصاريف عامة</h3>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>إجمالي المصاريف: {fmtSyp(data?.general.totalExpensesSyp || 0)}</p>
             <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>تأثير الربح: {fmtSyp(data?.general.totalProfitSyp || 0)}</p>
+          </div>
+          <div className="card" style={{ borderColor: '#f59e0b' }}>
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>رواتب</h3>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
+              إجمالي الرواتب: {fmtSyp(data?.salaries?.totalExpensesSyp || 0)}
+            </p>
+            <p style={{ margin: '0.15rem 0 0', fontWeight: 700 }}>
+              تأثير على صافي أرباح المركز: {fmtSyp(data?.salaries?.totalProfitSyp || 0)}
+            </p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              تُدخل من صفحة المصاريف ← «رواتب الموظفين» وتُطرح من إجمالي أرباح المركز ضمن النطاق الزمني.
+            </p>
           </div>
         </div>
       </section>

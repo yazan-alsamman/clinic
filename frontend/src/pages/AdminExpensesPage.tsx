@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 
-type ExpenseCategory = 'laser' | 'dermatology' | 'skin' | 'solarium' | 'dental' | 'general'
+type ExpenseCategory = 'laser' | 'dermatology' | 'skin' | 'solarium' | 'dental' | 'general' | 'salaries'
 
 type ExpenseEntry = {
   id: string
@@ -24,13 +24,14 @@ type DraftRow = {
   businessDate: string
 }
 
-const CATEGORY_META: { key: ExpenseCategory; title: string }[] = [
+const CATEGORY_META: { key: ExpenseCategory; title: string; reasonPlaceholder?: string }[] = [
   { key: 'laser', title: 'مصاريف الليزر' },
   { key: 'dermatology', title: 'مصاريف الجلدية' },
   { key: 'skin', title: 'مصاريف العناية بالبشرة' },
   { key: 'solarium', title: 'مصاريف السولاريوم' },
   { key: 'dental', title: 'مصاريف الأسنان' },
   { key: 'general', title: 'مصاريف عامة' },
+  { key: 'salaries', title: 'رواتب الموظفين', reasonPlaceholder: 'اسم الموظف / المسمى الوظيفي' },
 ]
 
 function emptyDraft(businessDate: string): DraftRow {
@@ -260,9 +261,10 @@ export function AdminExpensesPage() {
     <>
       <h1 className="page-title">المصاريف</h1>
       <p className="page-desc">
-        سجلات مصاريف الأقسام الستة. يمكن إدخال المبلغ بالليرة السورية أو بالدولار (أو الاثنين معاً). دولار يُحوَّل
-        للتقارير بسعر صرف يوم العمل
-        {usdSypRate != null ? ` (حالياً ${usdSypRate.toLocaleString('ar-SY')} ل.س)` : ''}.
+        سجلات مصاريف الأقسام ورواتب الموظفين. يمكن إدخال المبلغ بالليرة السورية أو بالدولار (أو الاثنين معاً). دولار
+        يُحوَّل للتقارير بسعر صرف يوم العمل
+        {usdSypRate != null ? ` (حالياً ${usdSypRate.toLocaleString('ar-SY')} ل.س)` : ''}. بند «رواتب الموظفين»
+        يُخصم من صافي أرباح المركز في لوحة المالية العامة.
       </p>
 
       <div
@@ -344,7 +346,7 @@ export function AdminExpensesPage() {
       ) : null}
 
       <div style={{ marginTop: '1.25rem', display: 'grid', gap: '1.25rem' }}>
-        {CATEGORY_META.map(({ key, title }) => (
+        {CATEGORY_META.map(({ key, title, reasonPlaceholder }) => (
           <section key={key} className="card" style={{ overflow: 'auto' }}>
             <div
               style={{
@@ -364,7 +366,7 @@ export function AdminExpensesPage() {
             <table className="table" style={{ marginTop: '0.75rem', minWidth: 560 }}>
               <thead>
                 <tr>
-                  <th>سبب المصروف</th>
+                  <th>{key === 'salaries' ? 'الموظف / الوصف' : 'سبب المصروف'}</th>
                   <th>المبلغ</th>
                   <th>مكافئ ل.س</th>
                   <th>التاريخ</th>
@@ -428,13 +430,14 @@ export function AdminExpensesPage() {
               }}
             >
               <label style={{ display: 'grid', gap: '0.25rem' }}>
-                <span>سبب جديد</span>
+                <span>{key === 'salaries' ? 'موظف / وصف جديد' : 'سبب جديد'}</span>
                 <input
                   className="input"
                   value={draftByCat[key].reason}
                   onChange={(e) =>
                     setDraftByCat((p) => ({ ...p, [key]: { ...p[key], reason: e.target.value } }))
                   }
+                  placeholder={reasonPlaceholder || ''}
                 />
               </label>
               <label style={{ display: 'grid', gap: '0.25rem' }}>

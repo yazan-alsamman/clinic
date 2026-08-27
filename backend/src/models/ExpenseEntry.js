@@ -1,6 +1,24 @@
 import mongoose from 'mongoose'
 
-export const EXPENSE_CATEGORIES = ['laser', 'dermatology', 'skin', 'solarium', 'dental', 'general']
+export const EXPENSE_CATEGORIES = [
+  'laser',
+  'dermatology',
+  'skin',
+  'solarium',
+  'dental',
+  'general',
+  'salaries',
+]
+
+export const EXPENSE_CATEGORY_LABELS = {
+  laser: 'ليزر',
+  dermatology: 'جلدية',
+  skin: 'بشرة',
+  solarium: 'سولاريوم',
+  dental: 'أسنان',
+  general: 'عام',
+  salaries: 'رواتب',
+}
 
 const expenseEntrySchema = new mongoose.Schema(
   {
