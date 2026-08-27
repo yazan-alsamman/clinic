@@ -93,7 +93,7 @@ export function AdminDentalPatientsPage() {
     if (!canDelete || !isMongoId(proc.id)) return
     const toothLabel = proc.isGeneral ? 'إجراء عام' : `السن ${proc.fdi || '—'}`
     const ok = window.confirm(
-      `حذف هذا الإجراء نهائياً؟\n\n${patient.patientName} — ${toothLabel}\n${proc.procedureDescription || 'إجراء'}\nالتكلفة: ${fmtSyp(proc.totalCostSyp)}\n\nسيُحذف التحصيل من الجرد اليومي واللوحة المالية، وتُزال علامته من مخطط الأسنان.`,
+      `حذف هذا الإجراء نهائياً؟\n\n${patient.patientName} — ${toothLabel}\n${proc.procedureDescription || 'إجراء'}\nالتكلفة: ${fmtSyp(proc.totalCostSyp)}\n\nسيُحذف التحصيل من الجرد اليومي واللوحة المالية${proc.isGeneral ? ' وأي مخبر مرتبط' : '، وتُزال علامته من مخطط الأسنان إن وُجدت'} — حتى لو كان المبلغ محصّلاً.`,
     )
     if (!ok) return
     setDeletingId(proc.id)

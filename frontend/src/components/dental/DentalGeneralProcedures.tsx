@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../../api/client'
+import { useAuth } from '../../context/AuthContext'
 import { useClinic } from '../../context/ClinicContext'
 import {
   emptyLabWork,
@@ -55,6 +56,8 @@ function softLabKey(t: Pick<DentalToothTreatment, 'businessDate' | 'procedureDes
 }
 
 export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
+  const { user } = useAuth()
+  const isSuperAdmin = user?.role === 'super_admin'
   const { usdSypRate } = useClinic()
   const rate = usdSypRate != null && usdSypRate > 0 ? usdSypRate : null
 
@@ -293,14 +296,44 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
   async function removeRow(idx: number) {
     if (!canEdit || saving) return
     const t = rows[idx]
-    if (t?.billingStatus === 'paid') {
-      setErr('لا يمكن حذف إجراء محصّل')
+    if (!t) return
+    const tid = t.id ? String(t.id) : ''
+    const effective = treatmentEffectiveTotalSyp(t, rate)
+    const paid = treatmentPaidTotal(t)
+    const remaining = treatmentRemaining(t, rate)
+    const isPaid = t.billingStatus === 'paid' || (effective > 0 && paid > 0 && remaining <= 0)
+
+    if (isPaid && !isSuperAdmin) {
+      setErr('لا يمكن حذف إجراء محصّل — يحتاجه مدير النظام')
       return
     }
-    if (!window.confirm('حذف هذا الإجراء العام؟' + (t?.id && labByTreatmentId.has(String(t.id)) ? ' (مع المخبر المرتبط إن وُجد)' : ''))) {
+
+    if (isSuperAdmin && tid) {
+      const confirmMsg = isPaid
+        ? 'حذف هذا الإجراء العام نهائياً مع كل سجلاته المالية (حتى لو كان محصّلاً)؟\nسيُحذف من التحصيل والجرد واللوحة المالية، ويُزال أي مخبر مرتبط.'
+        : 'حذف هذا الإجراء العام نهائياً مع سجلاته المالية وأي مخبر مرتبط؟'
+      if (!window.confirm(confirmMsg)) return
+      setSaving(true)
+      setErr('')
+      setOkMsg('')
+      try {
+        await api(
+          `/api/dental/admin/patients/${encodeURIComponent(patientId)}/treatments/${encodeURIComponent(tid)}`,
+          { method: 'DELETE' },
+        )
+        setOkMsg('تم حذف الإجراء العام وسجلاته المالية.')
+        await load()
+      } catch (e) {
+        setErr(e instanceof ApiError ? e.message : 'تعذر حذف الإجراء')
+      } finally {
+        setSaving(false)
+      }
       return
     }
-    const tid = t?.id ? String(t.id) : ''
+
+    if (!window.confirm('حذف هذا الإجراء العام؟' + (tid && labByTreatmentId.has(tid) ? ' (مع المخبر المرتبط إن وُجد)' : ''))) {
+      return
+    }
     const linkedLab = tid ? labByTreatmentId.get(tid) : null
     const nextLabs = linkedLab
       ? labRows.filter((l) => l !== linkedLab && !(linkedLab.id && l.id === linkedLab.id))
@@ -326,7 +359,10 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
         إجراءات على كامل الفم وليست مرتبطة بسن واحد — مثل التنظيف أو التبييض. يمكن إدخال 0 ل.س أو 0 دولار (مجاني). عند
         إدخال سعر أكبر من صفر مع الطبيب يُرسل البند إلى التحصيل. يمكن اختيار مخبر أو تخدير عام اختيارياً؛ تكلفتهما تُحسب
-        مالياً مثل المخابر.
+        مالياً مثل المخابر
+        {isSuperAdmin
+          ? '. مدير النظام يمكنه حذف أي إجراء عام مع كل سجلاته المالية حتى بعد التحصيل.'
+          : '.'}
       </p>
 
       {err ? (
@@ -434,7 +470,14 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                               type="button"
                               className="btn btn-ghost"
                               style={{ fontSize: '0.78rem' }}
-                              disabled={saving || t.billingStatus === 'paid'}
+                              disabled={saving || (t.billingStatus === 'paid' && !isSuperAdmin)}
+                              title={
+                                t.billingStatus === 'paid' && !isSuperAdmin
+                                  ? 'لا يمكن حذف إجراء محصّل إلا لمدير النظام'
+                                  : isSuperAdmin
+                                    ? 'حذف الإجراء مع سجلاته المالية'
+                                    : undefined
+                              }
                               onClick={() => void removeRow(idx)}
                             >
                               حذف

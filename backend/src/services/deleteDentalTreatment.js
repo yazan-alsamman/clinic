@@ -319,6 +319,17 @@ export async function deleteDentalTreatmentFully({ patientId, treatmentId }) {
     found.tooth.treatments.splice(found.idx, 1)
   } else {
     patient.dentalChart.generalTreatments.splice(found.idx, 1)
+    const tid = String(treatment._id)
+    const beforeLabs = Array.isArray(patient.dentalChart.generalLabWorks)
+      ? patient.dentalChart.generalLabWorks.length
+      : 0
+    patient.dentalChart.generalLabWorks = (patient.dentalChart.generalLabWorks || []).filter(
+      (lab) => String(lab?.linkedGeneralTreatmentId || '') !== tid,
+    )
+    chartMarks.labsRemoved = Math.max(
+      0,
+      beforeLabs - (patient.dentalChart.generalLabWorks || []).length,
+    )
   }
 
   patient.markModified('dentalChart')
