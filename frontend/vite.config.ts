@@ -13,8 +13,10 @@ export default defineConfig({
     },
   },
   build: {
-    // Raise warning threshold now that code splitting is in place
-    chunkSizeWarningLimit: 600,
+    // Raise warning threshold now that code splitting is in place. vendor-three
+    // (three.js + @react-three/fiber) is only ever fetched lazily for the patient
+    // welcome scene, gated on WebGL support, so its size doesn't affect first load.
+    chunkSizeWarningLimit: 950,
     rolldownOptions: {
       output: {
         // Pin heavy vendors to stable, named chunks so browsers can cache them
@@ -25,6 +27,9 @@ export default defineConfig({
           }
           if (id.includes('/node_modules/react-router')) {
             return 'vendor-router'
+          }
+          if (id.includes('/node_modules/three/') || id.includes('/node_modules/@react-three/')) {
+            return 'vendor-three'
           }
         },
       },

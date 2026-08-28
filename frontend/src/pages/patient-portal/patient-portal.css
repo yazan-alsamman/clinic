@@ -220,6 +220,10 @@
   }
 }
 
+.patient-section-anchor {
+  scroll-margin-top: 5rem;
+}
+
 .patient-updates {
   list-style: none;
   margin: 0;

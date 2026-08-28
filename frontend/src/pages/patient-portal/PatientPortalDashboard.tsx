@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { patientApi } from '../../api/client'
+import { PatientWelcomeScene } from '../../components/patient-welcome/PatientWelcomeScene'
 import type { Patient } from '../../types'
 import './patient-portal.css'
 
@@ -57,19 +58,19 @@ export function PatientPortalDashboard() {
 
   return (
     <>
-      <div className="patient-hero">
-        <h1>مرحباً، {data.patient.name}</h1>
-        <p>نظرة شاملة على ملفك الصحي ومواعيدك — محدّثة من فريق العيادة.</p>
-        {data.mustChangePassword ? (
-          <p style={{ margin: '0.75rem 0 0', color: 'var(--warning)' }}>
+      <PatientWelcomeScene patientName={data.patient.name} />
+
+      {data.mustChangePassword ? (
+        <div className="card" style={{ marginBottom: '1.25rem', borderColor: 'rgba(202, 138, 4, 0.35)' }}>
+          <p style={{ margin: 0, color: 'var(--warning)' }}>
             يُرجى{' '}
             <Link to="/patient/security" style={{ fontWeight: 700 }}>
               تغيير كلمة المرور
             </Link>{' '}
             لأسباب أمنية.
           </p>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <div className="patient-stat-grid">
         <div className="patient-stat">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { patientApi } from '../../api/client'
 import './patient-portal.css'
 
@@ -34,6 +35,7 @@ type Clinical = {
 export function PatientPortalRecords() {
   const [data, setData] = useState<Clinical | null>(null)
   const [err, setErr] = useState('')
+  const loc = useLocation()
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +55,14 @@ export function PatientPortalRecords() {
     }
   }, [])
 
+  // يفتح القسم المطلوب عند القدوم من مشهد الترحيب (مثلاً #section-dental).
+  useEffect(() => {
+    if (!data || !loc.hash) return
+    const id = loc.hash.slice(1)
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [data, loc.hash])
+
   if (err) {
     return <div className="card"><p style={{ color: 'var(--danger)', margin: 0 }}>{err}</p></div>
   }
@@ -67,7 +77,7 @@ export function PatientPortalRecords() {
         <p>جلسات الليزر، الزيارات الجلدية، وملخص خطة الأسنان — لقراءتك فقط.</p>
       </div>
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
+      <div id="section-laser" className="card patient-section-anchor" style={{ marginBottom: '1rem' }}>
         <h2 className="card-title">جلسات الليزر</h2>
         {data.laserSessions.length === 0 ? (
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا جلسات مسجّلة.</p>
@@ -108,7 +118,7 @@ export function PatientPortalRecords() {
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
+      <div id="section-dermatology" className="card patient-section-anchor" style={{ marginBottom: '1rem' }}>
         <h2 className="card-title">الجلدية والتجميل</h2>
         {data.dermatologyVisits.length === 0 ? (
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا زيارات مسجّلة.</p>
@@ -140,7 +150,7 @@ export function PatientPortalRecords() {
         )}
       </div>
 
-      <div className="card">
+      <div id="section-dental" className="card patient-section-anchor">
         <h2 className="card-title">خطة الأسنان (ملخص)</h2>
         {!data.dentalPlan ? (
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا خطة أسنان مسجّلة.</p>
