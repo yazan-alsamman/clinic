@@ -1,18 +1,18 @@
-import { useRef } from 'react'
+import { useRef, type RefObject } from 'react'
 import { useFrame, useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Mesh, Sprite } from 'three'
 import { getGlowTexture } from './glowTexture'
-import { clamp01, easeOutBack, easeOutCubic } from './easing'
+import { LOGO_POSITION } from './walkthroughPath'
+import { lerp } from './easing'
 
 const LOGO_ASPECT = 2600 / 771
-const LOGO_WIDTH = 2.25
+const LOGO_WIDTH = 2.6
 const LOGO_HEIGHT = LOGO_WIDTH / LOGO_ASPECT
 
 interface ClinicLogoMeshProps {
   logoUrl: string
-  visible: boolean
-  instant: boolean
+  progressRef: RefObject<number>
 }
 
 /** Loads the logo texture and configures its color space/filtering once on load.
@@ -27,41 +27,40 @@ function useLogoTexture(url: string) {
   return texture
 }
 
-export function ClinicLogoMesh({ logoUrl, visible, instant }: ClinicLogoMeshProps) {
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+
+/** Mounted on the finale wall — the destination of the walk, not a floating
+ * hero. It's faintly present from far down the corridor (a glimmer of where
+ * this is all leading) and grows steadily more prominent as the patient's
+ * journey position approaches the end, per the brief's "final hero" beat. */
+export function ClinicLogoMesh({ logoUrl, progressRef }: ClinicLogoMeshProps) {
   const texture = useLogoTexture(logoUrl)
   const meshRef = useRef<Mesh>(null)
   const glowRef = useRef<Sprite>(null)
-  const revealStart = useRef<number | null>(null)
   const glowTexture = getGlowTexture()
 
   useFrame(({ clock }) => {
     if (!meshRef.current || !glowRef.current) return
     const t = clock.getElapsedTime()
+    const progress = progressRef.current ?? 0
+    const reveal = smoothstep(0.5, 1, progress)
 
-    if (instant) {
-      meshRef.current.scale.setScalar(1)
-      const mat = meshRef.current.material as THREE.MeshBasicMaterial
-      mat.opacity = 1
-      glowRef.current.material.opacity = 0.42 + Math.sin(t * 0.5) * 0.06
-    } else {
-      if (visible && revealStart.current === null) revealStart.current = t
-      const local = revealStart.current === null ? 0 : t - revealStart.current
-      const progress = clamp01(local / 1.15)
-      const scale = visible ? 0.001 + easeOutBack(progress) * 0.999 : 0.001
-      meshRef.current.scale.setScalar(Math.max(scale, 0.001))
-      const mat = meshRef.current.material as THREE.MeshBasicMaterial
-      mat.opacity = visible ? easeOutCubic(progress) : 0
-      glowRef.current.material.opacity = visible ? easeOutCubic(progress) * (0.42 + Math.sin(t * 0.5) * 0.06) : 0
-    }
+    const scale = lerp(0.16, 1, reveal)
+    meshRef.current.scale.setScalar(scale)
+    const mat = meshRef.current.material as THREE.MeshBasicMaterial
+    mat.opacity = lerp(0.22, 1, reveal)
+    glowRef.current.material.opacity = lerp(0.08, 0.46, reveal) + Math.sin(t * 0.5) * 0.05
 
-    // Gentle breathing sway — never enough to foreshorten the wordmark unreadably.
-    meshRef.current.rotation.y = Math.sin(t * 0.22) * 0.05
-    meshRef.current.position.y = Math.sin(t * 0.35) * 0.045
+    meshRef.current.rotation.y = Math.sin(t * 0.22) * 0.04
+    meshRef.current.position.y = 0.15 + Math.sin(t * 0.35) * 0.035
     glowRef.current.position.y = meshRef.current.position.y
   })
 
   return (
-    <group position={[0, 0.15, 0.4]}>
+    <group position={[LOGO_POSITION.x, LOGO_POSITION.y, LOGO_POSITION.z]}>
       <sprite ref={glowRef} scale={[LOGO_WIDTH * 2.1, LOGO_WIDTH * 2.1 * 0.55, 1]}>
         <spriteMaterial
           map={glowTexture}

@@ -40,6 +40,6 @@ export const SERVICES: ServiceDef[] = [
     id: 'laser',
     name: 'إزالة الشعر بالليزر',
     description: 'إزالة شعر دائمة بتقنية ليزر متقدمة ومريحة.',
-    accent: [0.42, 0.6, 0.98],
+    accent: [0.58, 0.7, 0.93],
   },
 ]

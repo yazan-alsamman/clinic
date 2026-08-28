@@ -74,6 +74,16 @@
   }
 }
 
+/* ─── Cinematic vignette — a lens cue, not a decoration; keeps the frame edges
+   quiet so the eye settles on the logo/orbit instead of the corners. ─── */
+.cw-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(ellipse 75% 70% at 50% 48%, transparent 55%, rgba(3, 3, 7, 0.5) 100%);
+}
+
 /* ─── Canvas mount ─── */
 .cw-canvas-wrap {
   position: absolute;
@@ -103,9 +113,8 @@
     transform 1.1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.cw-root[data-phase='logo'] .cw-title,
-.cw-root[data-phase='services'] .cw-title,
-.cw-root[data-phase='interactive'] .cw-title {
+.cw-root[data-phase='entering'] .cw-title,
+.cw-root[data-phase='walking'] .cw-title {
   opacity: 1;
   transform: translateY(0);
 }
@@ -155,8 +164,11 @@
   position: absolute;
   inset: 0;
   z-index: 2;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
 }
 
 .cw-fallback-logo {
@@ -165,8 +177,9 @@
   filter: drop-shadow(0 0 40px rgba(233, 178, 168, 0.35));
 }
 
-/* ─── Minimal service markers — wayfinding, not a card grid ─── */
-.cw-markers {
+/* ─── Minimal department rail — wayfinding through the walk, not a card grid.
+   Doubles as the journey progress indicator and a click-to-jump control. ─── */
+.cw-rail {
   position: absolute;
   z-index: 3;
   left: 50%;
@@ -179,12 +192,11 @@
   transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.2s;
 }
 
-.cw-root[data-phase='services'] .cw-markers,
-.cw-root[data-phase='interactive'] .cw-markers {
+.cw-root[data-phase='walking'] .cw-rail {
   opacity: 1;
 }
 
-.cw-root[data-phase='exiting'] .cw-markers {
+.cw-root[data-phase='exiting'] .cw-rail {
   opacity: 0;
   transition-duration: 0.4s;
 }
@@ -283,7 +295,7 @@
     transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.cw-root[data-phase='interactive'] .cw-continue-wrap {
+.cw-continue-wrap[data-unlocked='true'] {
   opacity: 1;
   transform: translate(-50%, 0);
 }
@@ -295,13 +307,15 @@
 }
 
 .cw-continue {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
   padding: 0.75rem 2.1rem;
   border-radius: 999px;
   border: 1px solid rgba(245, 224, 214, 0.28);
-  background: rgba(255, 255, 255, 0.04);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   color: #f8f2ee;
@@ -320,8 +334,10 @@
 .cw-continue:hover,
 .cw-continue:focus-visible {
   border-color: rgba(243, 201, 189, 0.65);
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 12px 34px -10px rgba(233, 178, 168, 0.55);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 12px 34px -10px rgba(233, 178, 168, 0.55);
   transform: translateY(-1px);
 }
 
@@ -378,8 +394,73 @@
   border: 0;
 }
 
+/* ─── "Scroll to explore" — a brief invitation, gone the moment the patient
+   actually moves. Never a big instructional overlay. ─── */
+.cw-scroll-hint {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: clamp(6.5rem, 15vh, 8.5rem);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  color: rgba(245, 224, 214, 0.55);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-family: var(--font-ui);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cw-root[data-phase='walking'] .cw-scroll-hint:not(.is-hidden) {
+  opacity: 1;
+}
+
+.cw-scroll-hint svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cw-scroll-hint svg {
+    animation: cw-hint-bob 1.7s ease-in-out infinite;
+  }
+}
+
+@keyframes cw-hint-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(5px);
+  }
+}
+
+/* ─── Reduced-motion department text — cross-fades with the rail/keyboard,
+   the fallback's substitute for the camera walking past each room. ─── */
+.cw-fallback-text {
+  margin-top: 1.4rem;
+  max-width: 320px;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cw-fallback-text.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 @media (max-width: 560px) {
-  .cw-markers {
+  .cw-rail {
     gap: 1.35rem;
   }
 }

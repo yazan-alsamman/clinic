@@ -1,82 +1,55 @@
-import { useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode, type RefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import type { Group } from 'three'
-import type { ScenePhase } from './types'
-import { lerp } from './easing'
+import type { PointLight } from 'three'
+import { sampleWalkthrough } from './walkthroughPath'
 
 interface SceneRigProps {
   children: ReactNode
-  phase: ScenePhase
-  parallaxEnabled: boolean
-  instant: boolean
+  progressRef: RefObject<number>
+  velocityRef: RefObject<number>
+  isTouch: boolean
 }
 
-// Establishing wide shot → the arrived, composed shot → a final forward push on exit.
-const CAM_ESTABLISH = { x: 0, y: 0.95, z: 9.6 }
-const CAM_ARRIVED = { x: 0, y: 0.2, z: 6.4 }
-const CAM_EXIT_PUSH = { x: 0, y: 0.05, z: 4.6 }
-
-function dollyTargetFor(phase: ScenePhase): number {
-  switch (phase) {
-    case 'dark':
-      return 0
-    case 'logo':
-      return 0.4
-    case 'services':
-      return 0.8
-    case 'exiting':
-      return 1.4
-    case 'interactive':
-    default:
-      return 1
-  }
-}
-
-/** Wraps the whole composition: drives the cinematic camera dolly (wide
- * establishing shot → arrived → forward push on exit) and, once arrived, a
- * subtle pointer-reactive tilt — the "premium spatial UI" reaction, not a
- * full parallax gimmick. */
-export function SceneRig({ children, phase, parallaxEnabled, instant }: SceneRigProps) {
-  const groupRef = useRef<Group>(null)
-  const dollyT = useRef(instant ? 1 : 0)
-  const { pointer, camera } = useThree()
+/** The walkthrough camera. All the "inertia/damping/settle" work already
+ * happened upstream in useWalkthroughProgress — this just samples the path at
+ * the current (already-smoothed) journey position each frame, adds a barely-
+ * perceptible walking sway/bob scaled to how fast the patient is currently
+ * moving (near-zero once they stop — a human settles, a drone doesn't), and
+ * carries one small point light that follows the camera, since no fixed rig
+ * of lights can reach every point along a 30-unit corridor. */
+export function SceneRig({ children, progressRef, velocityRef, isTouch }: SceneRigProps) {
+  const headlightRef = useRef<PointLight>(null)
+  const { camera, pointer } = useThree()
+  const swayPhase = useRef(0)
 
   useFrame(() => {
-    if (!groupRef.current) return
+    const progress = progressRef.current ?? 0
+    const velocity = velocityRef.current ?? 0
+    const { position, lookAt } = sampleWalkthrough(progress)
 
-    dollyT.current = lerp(dollyT.current, dollyTargetFor(phase), 0.02)
-    const t = dollyT.current
+    // Walking motion is proportional to how fast the journey position is
+    // currently changing — brisk while scrolling, settling to stillness
+    // within a beat of the patient stopping.
+    const speed = Math.min(Math.abs(velocity) * 45, 1)
+    swayPhase.current += 0.15 + speed * 0.35
+    const bobY = Math.sin(swayPhase.current * 2.1) * 0.018 * speed
+    const swayX = Math.sin(swayPhase.current * 1.05) * 0.012 * speed
 
-    const base =
-      t <= 1
-        ? {
-            x: lerp(CAM_ESTABLISH.x, CAM_ARRIVED.x, t),
-            y: lerp(CAM_ESTABLISH.y, CAM_ARRIVED.y, t),
-            z: lerp(CAM_ESTABLISH.z, CAM_ARRIVED.z, t),
-          }
-        : {
-            x: lerp(CAM_ARRIVED.x, CAM_EXIT_PUSH.x, t - 1),
-            y: lerp(CAM_ARRIVED.y, CAM_EXIT_PUSH.y, t - 1),
-            z: lerp(CAM_ARRIVED.z, CAM_EXIT_PUSH.z, t - 1),
-          }
+    camera.position.set(position.x + swayX, position.y + bobY, position.z)
 
-    const parallax = parallaxEnabled && phase === 'interactive'
-    const camTargetX = base.x + (parallax ? pointer.x * 0.3 : 0)
-    const camTargetY = base.y + (parallax ? pointer.y * 0.18 : 0)
+    const headTurnX = isTouch ? 0 : pointer.x * 0.14
+    const headTurnY = isTouch ? 0 : pointer.y * 0.05
+    camera.lookAt(lookAt.x + headTurnX, lookAt.y + headTurnY, lookAt.z)
 
-    // r3f's camera is a plain, imperative three.js Object3D — mutating its transform
-    // every frame inside useFrame is the documented, standard way to drive it.
-    // eslint-disable-next-line react-hooks/immutability
-    camera.position.x = lerp(camera.position.x, camTargetX, 0.05)
-    camera.position.y = lerp(camera.position.y, camTargetY, 0.05)
-    camera.position.z = lerp(camera.position.z, base.z, 0.05)
-    camera.lookAt(0, 0.1, -0.3)
-
-    const targetTiltY = parallax ? pointer.x * 0.16 : 0
-    const targetTiltX = parallax ? -pointer.y * 0.08 : 0
-    groupRef.current.rotation.y = lerp(groupRef.current.rotation.y, targetTiltY, 0.045)
-    groupRef.current.rotation.x = lerp(groupRef.current.rotation.x, targetTiltX, 0.045)
+    if (headlightRef.current) {
+      headlightRef.current.position.set(position.x, position.y + 0.35, position.z)
+    }
   })
 
-  return <group ref={groupRef}>{children}</group>
+  return (
+    <>
+      <pointLight ref={headlightRef} intensity={1.1} color="#fff4ee" distance={7} decay={2.3} />
+      {children}
+    </>
+  )
 }

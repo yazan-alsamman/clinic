@@ -1,13 +1,17 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import logoEliasClinic from '../../assets/logo-elias-clinic.png'
 import { SERVICES } from './serviceCatalog'
+import { STATIONS } from './walkthroughPath'
 import { useSceneCapability } from './useSceneCapability'
+import { useWalkthroughProgress } from './useWalkthroughProgress'
 import type { ScenePhase } from './types'
+import type { ServiceGeometry } from './serviceCatalog'
 import './cinematic-welcome.css'
 
-const EXIT_DURATION_MS = 820
+const EXIT_DURATION_MS = 900
+const ENTERING_DURATION_MS = 1100
 
-const GLYPHS: Record<string, string> = {
+const RAIL_LABELS: Record<string, string> = {
   dentistry: 'طب الأسنان',
   dermatology: 'الجلدية',
   skincare: 'العناية بالبشرة',
@@ -15,7 +19,7 @@ const GLYPHS: Record<string, string> = {
   laser: 'إزالة الشعر بالليزر',
 }
 
-const OrbitCanvas = lazy(() => import('./OrbitCanvas'))
+const WalkthroughCanvas = lazy(() => import('./WalkthroughCanvas'))
 
 interface CinematicWelcomeSceneProps {
   patientName: string
@@ -29,25 +33,24 @@ function accentCss(accent: [number, number, number]): string {
 export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelcomeSceneProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const cap = useSceneCapability()
-  const instant = cap.reducedMotion
-  const [phase, setPhase] = useState<ScenePhase>(() => (instant ? 'interactive' : 'dark'))
-  const [activeService, setActiveService] = useState<string | null>(null)
+  const [phase, setPhase] = useState<ScenePhase>('entering')
+  const [ready, setReady] = useState(false)
   const [containerActive, setContainerActive] = useState(true)
-  const [exiting, setExiting] = useState(false)
+  const [hoverPreview, setHoverPreview] = useState<ServiceGeometry | null>(null)
 
   const use3D = cap.webglSupported && !cap.reducedMotion
+  const walk = useWalkthroughProgress(rootRef, cap.reducedMotion)
 
+  // One tick after first paint so the entrance fade has a "before" state to
+  // transition from — mounting straight into the visible phase never animates.
   useEffect(() => {
-    if (instant) return
-    const t1 = window.setTimeout(() => setPhase('logo'), 300)
-    const t2 = window.setTimeout(() => setPhase('services'), 300 + 1150)
-    const t3 = window.setTimeout(() => setPhase('interactive'), 300 + 1150 + 1500)
+    const t0 = window.setTimeout(() => setReady(true), 30)
+    const t1 = window.setTimeout(() => setPhase('walking'), ENTERING_DURATION_MS)
     return () => {
+      window.clearTimeout(t0)
       window.clearTimeout(t1)
-      window.clearTimeout(t2)
-      window.clearTimeout(t3)
     }
-  }, [instant])
+  }, [])
 
   // Pause the render loop when the tab is hidden — this is a full-screen
   // experience, so only visibility (not scroll position) matters here.
@@ -58,16 +61,24 @@ export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelc
   }, [])
 
   function handleContinue() {
-    if (exiting) return
-    setExiting(true)
+    if (phase === 'exiting') return
+    walk.setLocked(true)
+    walk.jumpTo(1)
     setPhase('exiting')
-    window.setTimeout(onContinue, instant ? 120 : EXIT_DURATION_MS)
+    window.setTimeout(onContinue, cap.reducedMotion ? 150 : EXIT_DURATION_MS)
   }
 
-  const activeDef = SERVICES.find((s) => s.id === activeService) || null
+  const displayedStation = hoverPreview ?? walk.activeStation
+  const activeDef = SERVICES.find((s) => s.id === displayedStation) || null
 
   return (
-    <div ref={rootRef} className="cw-root" data-phase={phase} role="dialog" aria-label="مشهد ترحيب سينمائي بمرضى عيادة د. إلياس دحدل">
+    <div
+      ref={rootRef}
+      className="cw-root"
+      data-phase={ready ? phase : 'dark'}
+      role="dialog"
+      aria-label="جولة سينمائية داخل عيادة د. إلياس دحدل — مرّر للتقدّم عبر الممر"
+    >
       <div className="cw-bg" aria-hidden="true" />
       <div className="cw-motes" aria-hidden="true">
         {MOTES.map((m, i) => (
@@ -92,30 +103,40 @@ export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelc
       {use3D ? (
         <div className="cw-canvas-wrap" aria-hidden="true">
           <Suspense fallback={null}>
-            <OrbitCanvas
-              phase={phase}
-              instant={instant}
+            <WalkthroughCanvas
               active={containerActive}
               isTouch={cap.isTouch}
               lowPower={cap.isLowPower}
+              mobile={cap.isNarrow}
               logoUrl={logoEliasClinic}
-              activeService={activeService}
-              onHoverService={setActiveService}
+              progressRef={walk.progressRef}
+              velocityRef={walk.velocityRef}
+              activeStation={walk.activeStation}
             />
           </Suspense>
         </div>
       ) : (
-        <div className="cw-fallback-orb" aria-hidden="true">
-          <img className="cw-fallback-logo" src={logoEliasClinic} alt="" />
-        </div>
+        <FallbackJourney activeStation={walk.activeStation} />
       )}
+
+      <div className="cw-vignette" aria-hidden="true" />
 
       <div className="cw-title">
         <p className="cw-eyebrow">مركز الدكتور إلياس دحدل</p>
         <h1 className="cw-headline">
           مرحباً، <strong>{patientName || 'بك'}</strong>
         </h1>
-        <p className="cw-subline">نرحّب بك في تجربة رعاية متكاملة — استكشف عالم العيادة قبل أن نُكمل.</p>
+        <p className="cw-subline">تجولي معنا داخل العيادة — مرّري للأسفل لمتابعة الجولة.</p>
+      </div>
+
+      <div
+        className={`cw-scroll-hint${walk.hasInteracted ? ' is-hidden' : ''}`}
+        aria-hidden="true"
+      >
+        <span>مرّر للاستكشاف</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M12 5v14M6 13l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </div>
 
       <div
@@ -131,25 +152,26 @@ export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelc
         ) : null}
       </div>
 
-      <div className="cw-markers" role="group" aria-label="خدمات العيادة">
-        {SERVICES.map((s) => (
+      <nav className="cw-rail" aria-label="أقسام العيادة">
+        {SERVICES.map((s, i) => (
           <button
             key={s.id}
             type="button"
-            className={`cw-marker${activeService === s.id ? ' is-active' : ''}`}
+            className={`cw-marker${walk.activeStation === s.id ? ' is-active' : ''}`}
             style={{ '--cw-accent': accentCss(s.accent) } as CSSProperties}
-            onMouseEnter={() => setActiveService(s.id)}
-            onMouseLeave={() => setActiveService((cur) => (cur === s.id ? null : cur))}
-            onFocus={() => setActiveService(s.id)}
-            onBlur={() => setActiveService((cur) => (cur === s.id ? null : cur))}
+            onMouseEnter={() => setHoverPreview(s.id)}
+            onMouseLeave={() => setHoverPreview((cur) => (cur === s.id ? null : cur))}
+            onFocus={() => setHoverPreview(s.id)}
+            onBlur={() => setHoverPreview((cur) => (cur === s.id ? null : cur))}
+            onClick={() => walk.jumpTo(STATIONS[i].railT)}
           >
-            <span className="cw-sr-only">{GLYPHS[s.id]}</span>
+            <span className="cw-sr-only">{RAIL_LABELS[s.id]}</span>
           </button>
         ))}
-      </div>
+      </nav>
 
-      <div className="cw-continue-wrap">
-        <button type="button" className="cw-continue" onClick={handleContinue} disabled={exiting}>
+      <div className="cw-continue-wrap" data-unlocked={walk.continueUnlocked}>
+        <button type="button" className="cw-continue" onClick={handleContinue} disabled={phase === 'exiting'}>
           <span>متابعة</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
@@ -158,6 +180,26 @@ export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelc
       </div>
 
       <div className="cw-veil" aria-hidden="true" />
+    </div>
+  )
+}
+
+/** Reduced-motion / no-WebGL path: no camera movement at all — the same
+ * journey is told through a gentle text cross-fade the rail and scroll/
+ * keyboard input still drive, next to a stationary, softly glowing logo. */
+function FallbackJourney({ activeStation }: { activeStation: ServiceGeometry | null }) {
+  const def = SERVICES.find((s) => s.id === activeStation) || null
+  return (
+    <div className="cw-fallback-orb" aria-hidden="true">
+      <img className="cw-fallback-logo" src={logoEliasClinic} alt="" />
+      <div className={`cw-fallback-text${def ? ' is-visible' : ''}`}>
+        {def ? (
+          <>
+            <p className="cw-info-name">{def.name}</p>
+            <p className="cw-info-desc">{def.description}</p>
+          </>
+        ) : null}
+      </div>
     </div>
   )
 }

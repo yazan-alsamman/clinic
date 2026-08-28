@@ -9,6 +9,8 @@ export interface SceneCapability {
   isTouch: boolean
   /** low core count or small viewport — trims geometry detail and disables glass materials */
   isLowPower: boolean
+  /** narrow viewport — the camera/orbit are recomposed for portrait framing */
+  isNarrow: boolean
 }
 
 function detectWebgl(): boolean {
@@ -26,11 +28,13 @@ function computeCapability(): SceneCapability {
   const isTouch = window.matchMedia('(pointer: coarse)').matches
   const cores = navigator.hardwareConcurrency || 4
   const isLowPower = isTouch && (cores <= 4 || window.innerWidth < 480)
+  const isNarrow = window.innerWidth < 720
   return {
     reducedMotion,
     webglSupported: reducedMotion ? false : detectWebgl(),
     isTouch,
     isLowPower,
+    isNarrow,
   }
 }
 
