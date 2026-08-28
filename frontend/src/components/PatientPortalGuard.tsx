@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { patientApi, getPatientToken, setPatientToken } from '../api/client'
+import { hasPatientWelcomeSeen } from '../pages/patient-portal/patientWelcomeGate'
 
 export function PatientPortalGuard() {
   const loc = useLocation()
@@ -52,6 +53,11 @@ export function PatientPortalGuard() {
 
   if (!authed) {
     return <Navigate to="/login" replace state={{ from: loc.pathname }} />
+  }
+
+  // لا تتخطَّ مشهد الترحيب السينمائي في أول دخول لهذه الجلسة
+  if (!hasPatientWelcomeSeen()) {
+    return <Navigate to="/patient/welcome" replace />
   }
 
   const path = loc.pathname.replace(/\/$/, '') || '/'

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { patientApi, setPatientToken } from '../api/client'
+import { resetPatientWelcomeSeen } from '../pages/patient-portal/patientWelcomeGate'
 import '../pages/patient-portal/patient-portal.css'
 
 export function PatientPortalShell() {
@@ -34,6 +35,7 @@ export function PatientPortalShell() {
 
   function logout() {
     setPatientToken(null)
+    resetPatientWelcomeSeen()
     nav('/login', { replace: true })
   }
 

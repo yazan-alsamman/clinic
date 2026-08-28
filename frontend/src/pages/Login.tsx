@@ -3,6 +3,10 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { ApiError, getPatientToken, patientApi, setPatientToken } from '../api/client'
 import logoEliasClinic from '../assets/logo-elias-clinic.png'
 import { useAuth } from '../context/AuthContext'
+import {
+  hasPatientWelcomeSeen,
+  resetPatientWelcomeSeen,
+} from './patient-portal/patientWelcomeGate'
 
 const prodMissingApiBase =
   import.meta.env.PROD && !(import.meta.env.VITE_API_BASE_URL ?? '').toString().trim()
@@ -49,7 +53,7 @@ export function Login() {
   }
 
   if (patientGate === 'yes') {
-    return <Navigate to="/patient" replace />
+    return <Navigate to={hasPatientWelcomeSeen() ? '/patient' : '/patient/welcome'} replace />
   }
 
   if (staffLoading) {
@@ -74,7 +78,11 @@ export function Login() {
     try {
       const result = await login(identifier.trim(), password)
       if (result.accountType === 'patient') {
-        nav('/patient/welcome', { replace: true, state: { mustChangePassword: result.mustChangePassword } })
+        resetPatientWelcomeSeen()
+        nav('/patient/welcome', {
+          replace: true,
+          state: { mustChangePassword: result.mustChangePassword },
+        })
       } else {
         nav('/', { replace: true })
       }
