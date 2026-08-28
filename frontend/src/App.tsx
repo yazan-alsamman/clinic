@@ -63,6 +63,7 @@ const PatientPortalRecords      = lazyPage(() => import('./pages/patient-portal/
 const PatientPortalAppointments = lazyPage(() => import('./pages/patient-portal/PatientPortalAppointments'), 'PatientPortalAppointments')
 const PatientPortalFinancial    = lazyPage(() => import('./pages/patient-portal/PatientPortalFinancial'), 'PatientPortalFinancial')
 const PatientPortalSecurity     = lazyPage(() => import('./pages/patient-portal/PatientPortalSecurity'), 'PatientPortalSecurity')
+const PatientCinematicWelcome   = lazyPage(() => import('./pages/patient-portal/PatientCinematicWelcome'), 'PatientCinematicWelcome')
 
 function PageLoader() {
   return (
@@ -86,6 +87,9 @@ export default function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/patient/login" element={<Navigate to="/login" replace />} />
+            {/* بوابة سينمائية مستقلة تظهر فور نجاح تسجيل دخول المريض، قبل شاشة تغيير
+                كلمة المرور — خارج هيكل بوابة المريض عمداً (بلا تنقّل/إطار جانبي). */}
+            <Route path="/patient/welcome" element={<PatientCinematicWelcome />} />
             <Route element={<PatientPortalGuard />}>
               <Route path="/patient" element={<PatientPortalShell />}>
                 <Route index element={<PatientPortalDashboard />} />

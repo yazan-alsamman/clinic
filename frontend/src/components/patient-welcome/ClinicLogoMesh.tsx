@@ -61,7 +61,7 @@ export function ClinicLogoMesh({ logoUrl, visible, instant }: ClinicLogoMeshProp
   })
 
   return (
-    <group position={[0, 0.15, 0]}>
+    <group position={[0, 0.15, 0.4]}>
       <sprite ref={glowRef} scale={[LOGO_WIDTH * 2.1, LOGO_WIDTH * 2.1 * 0.55, 1]}>
         <spriteMaterial
           map={glowTexture}

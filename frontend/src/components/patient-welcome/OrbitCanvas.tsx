@@ -4,9 +4,10 @@ import { SERVICES } from './serviceCatalog'
 import { ORBIT_CONFIG } from './orbitConfig'
 import { ClinicLogoMesh } from './ClinicLogoMesh'
 import { ServiceObject } from './ServiceObject'
+import { ClinicEnvironment } from './ClinicEnvironment'
 import { SceneLighting } from './SceneLighting'
 import { SceneRig } from './SceneRig'
-import type { ScenePhase } from './PatientWelcomeScene'
+import type { ScenePhase } from './types'
 
 interface OrbitCanvasProps {
   phase: ScenePhase
@@ -17,7 +18,6 @@ interface OrbitCanvasProps {
   logoUrl: string
   activeService: string | null
   onHoverService: (id: string | null) => void
-  onSelectService: (href: string) => void
 }
 
 export default function OrbitCanvas({
@@ -29,23 +29,22 @@ export default function OrbitCanvas({
   logoUrl,
   activeService,
   onHoverService,
-  onSelectService,
 }: OrbitCanvasProps) {
-  const logoVisible = instant || phase === 'logo' || phase === 'services' || phase === 'interactive'
-  const objectsEntering = instant || phase === 'services' || phase === 'interactive'
-  const parallaxEnabled = !isTouch && (instant || phase === 'interactive')
+  const logoVisible = instant || phase === 'logo' || phase === 'services' || phase === 'interactive' || phase === 'exiting'
+  const objectsEntering = instant || phase === 'services' || phase === 'interactive' || phase === 'exiting'
 
   return (
     <Canvas
       dpr={[1, lowPower ? 1.4 : 2]}
       gl={{ antialias: !lowPower, alpha: true, powerPreference: lowPower ? 'low-power' : 'high-performance' }}
-      camera={{ position: [0, 0.2, 6.4], fov: 40, near: 0.1, far: 30 }}
+      camera={{ position: [0, 0.95, 9.6], fov: 38, near: 0.1, far: 30 }}
       frameloop={active ? 'always' : 'never'}
       style={{ position: 'absolute', inset: 0 }}
     >
-      <fogExp2 attach="fog" args={['#0a0a12', 0.058]} />
+      <fogExp2 attach="fog" args={['#0a0a12', 0.05]} />
       <SceneLighting />
-      <SceneRig enabled={parallaxEnabled}>
+      <ClinicEnvironment lowPower={lowPower} />
+      <SceneRig phase={phase} parallaxEnabled={!isTouch} instant={instant}>
         <Suspense fallback={null}>
           <ClinicLogoMesh logoUrl={logoUrl} visible={logoVisible} instant={instant} />
         </Suspense>
@@ -60,7 +59,6 @@ export default function OrbitCanvas({
             active={activeService === def.id}
             lowPower={lowPower}
             onHover={onHoverService}
-            onSelect={onSelectService}
           />
         ))}
       </SceneRig>

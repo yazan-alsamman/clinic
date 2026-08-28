@@ -74,7 +74,7 @@ export function Login() {
     try {
       const result = await login(identifier.trim(), password)
       if (result.accountType === 'patient') {
-        nav(result.mustChangePassword ? '/patient/security' : '/patient', { replace: true })
+        nav('/patient/welcome', { replace: true, state: { mustChangePassword: result.mustChangePassword } })
       } else {
         nav('/', { replace: true })
       }

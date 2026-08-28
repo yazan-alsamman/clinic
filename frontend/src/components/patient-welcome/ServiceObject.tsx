@@ -15,7 +15,6 @@ interface ServiceObjectProps {
   active: boolean
   lowPower: boolean
   onHover: (id: string | null) => void
-  onSelect: (href: string) => void
 }
 
 export function ServiceObject({
@@ -27,7 +26,6 @@ export function ServiceObject({
   active,
   lowPower,
   onHover,
-  onSelect,
 }: ServiceObjectProps) {
   const groupRef = useRef<Group>(null)
   const innerRef = useRef<Group>(null)
@@ -57,7 +55,10 @@ export function ServiceObject({
 
     const angle = orbit.baseAngle + t * orbit.speed
     const x = Math.cos(angle) * orbit.radiusX * radiusMul
-    const z = Math.sin(angle) * orbit.radiusZ * radiusMul
+    // Biased back of the logo's own forward offset so the wordmark reads as the
+    // clear foreground hero most of the time, while objects still drift in front
+    // of it occasionally — a living constellation, not a static backdrop.
+    const z = Math.sin(angle) * orbit.radiusZ * radiusMul - 0.55
     const bob = Math.sin(t * orbit.bobFreq + index) * orbit.bobAmp
     const y = bob + Math.sin(angle) * orbit.tilt
 
@@ -96,8 +97,13 @@ export function ServiceObject({
           document.body.style.cursor = 'auto'
         }}
         onClick={(e) => {
+          // Touch has no hover — tapping reveals the same name/description overlay
+          // as hover on desktop. There is no navigation from inside this scene.
           e.stopPropagation()
-          onSelect(def.href)
+          setLocalHover((was) => {
+            onHover(was ? null : def.id)
+            return !was
+          })
         }}
       >
         <ServiceGeometry def={def} lowPower={lowPower} highlight={active || localHover ? 1 : 0} />
