@@ -27,6 +27,7 @@ const AdminRooms                = lazyPage(() => import('./pages/AdminRooms'), '
 const AdminLaserPage            = lazyPage(() => import('./pages/AdminLaserPage'), 'AdminLaserPage')
 const AdminFinancialBalances    = lazyPage(() => import('./pages/AdminFinancialBalances'), 'AdminFinancialBalances')
 const AdminExpensesPage           = lazyPage(() => import('./pages/AdminExpensesPage'), 'AdminExpensesPage')
+const AdminSalariesPage           = lazyPage(() => import('./pages/AdminSalariesPage'), 'AdminSalariesPage')
 const GeneralFinanceDashboardPage = lazyPage(
   () => import('./pages/GeneralFinanceDashboardPage'),
   'GeneralFinanceDashboardPage',
@@ -136,6 +137,7 @@ export default function App() {
                 <Route path="/admin/laser" element={<AdminLaserPage />} />
                 <Route path="/admin/financial-balances" element={<AdminFinancialBalances />} />
                 <Route path="/admin/expenses" element={<AdminExpensesPage />} />
+                <Route path="/admin/salaries" element={<AdminSalariesPage />} />
                 <Route path="/admin/finance-dashboard" element={<GeneralFinanceDashboardPage />} />
                 <Route path="/account/password" element={<AccountPassword />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

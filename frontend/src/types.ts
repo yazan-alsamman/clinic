@@ -36,6 +36,7 @@ export type NavKey =
   | 'admin_laser'
   | 'admin_financial_balances'
   | 'admin_expenses'
+  | 'admin_salaries'
   | 'general_finance_dashboard'
   | 'account_password'
 

@@ -611,7 +611,7 @@ export function GeneralFinanceDashboardPage() {
               تأثير على صافي أرباح المركز: {fmtSyp(data?.salaries?.totalProfitSyp || 0)}
             </p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              تُدخل من صفحة المصاريف ← «رواتب الموظفين» وتُطرح من إجمالي أرباح المركز ضمن النطاق الزمني.
+              تُدخل من صفحة «الرواتب» (دفعات جزئية أو كاملة) وتُطرح من إجمالي أرباح المركز ضمن النطاق الزمني.
             </p>
           </div>
         </div>

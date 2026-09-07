@@ -12,6 +12,7 @@ import {
   EXPENSE_CATEGORY_LABELS,
   expenseEffectiveAmountSyp,
 } from '../models/ExpenseEntry.js'
+import { salaryLedgerRouter, sumSalaryPaymentsSyp } from './salaryLedger.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
@@ -28,6 +29,7 @@ import { summarizeDentalChartFinance } from '../services/dentalFinanceShares.js'
 export const financeRouter = Router()
 
 financeRouter.use(authMiddleware, loadBusinessDay, requireRoles('super_admin'))
+financeRouter.use('/salaries', salaryLedgerRouter)
 
 function parseYmd(raw) {
   const s = String(raw || '').trim().slice(0, 10)
@@ -109,6 +111,7 @@ async function sumExpensesByCategory({ from, to }) {
     const k = e.category
     if (k && map[k] != null) map[k] += expenseEffectiveAmountSyp(e)
   }
+  map.salaries = (map.salaries || 0) + (await sumSalaryPaymentsSyp({ from, to }))
   for (const k of Object.keys(map)) map[k] = Math.round(map[k] || 0)
   return map
 }
