@@ -5,14 +5,14 @@ import {
   emptyOrthodonticCase,
   emptyOrthoInstallment,
   emptyOrthoSupply,
-  formatUsdAmount,
-  installmentEffectiveTotalSyp,
+  formatEnteredAmount,
+  formatInstallmentRemaining,
+  installmentPaidNative,
   installmentPaidTotal,
   installmentRemaining,
   normalizeOrthodonticCase,
   normalizeOrthoInstallment,
   normalizeOrthoSupply,
-  orthoSupplyEffectiveSyp,
   orthoSupplyHasData,
   orthodonticCaseHasData,
   type DentalChartDto,
@@ -341,18 +341,18 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
           ) : (
             <div style={{ display: 'grid', gap: '1rem', marginBottom: '1rem' }}>
               {cases.map((c, caseIdx) => {
-                const planSyp =
-                  Math.max(0, Math.round(c.totalCostSyp || 0)) +
-                  (c.totalCostUsd > 0 && (c.costUsdSypRate || rate || 0) > 0
-                    ? Math.round(c.totalCostUsd * (c.costUsdSypRate || rate || 0))
-                    : 0)
-                const paidAll = (c.installments || []).reduce(
-                  (s, x) => s + installmentPaidTotal(x),
-                  0,
+                const planLabel = formatEnteredAmount(c.totalCostSyp, c.totalCostUsd)
+                const paidNative = (c.installments || []).reduce(
+                  (acc, x) => {
+                    const n = installmentPaidNative(x)
+                    return { syp: acc.syp + n.syp, usd: acc.usd + n.usd }
+                  },
+                  { syp: 0, usd: 0 },
                 )
-                const suppliesAll = (c.supplies || []).reduce(
-                  (s, x) => s + orthoSupplyEffectiveSyp(x, rate),
-                  0,
+                const paidLabel = formatEnteredAmount(paidNative.syp, paidNative.usd)
+                const suppliesLabel = formatEnteredAmount(
+                  (c.supplies || []).reduce((s, x) => s + Math.max(0, Math.round(x.amountSyp || 0)), 0),
+                  (c.supplies || []).reduce((s, x) => s + Math.max(0, Number(x.amountUsd) || 0), 0),
                 )
                 return (
                   <div
@@ -376,11 +376,9 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                         <strong>{c.title || 'تقويم'}</strong>
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                           الطبيب: {c.doctorName || '—'} · بدء: {c.startedAt || '—'}
-                          {planSyp > 0 ? ` · خطة ≈ ${planSyp.toLocaleString('ar-SY')} ل.س` : ''}
-                          {paidAll > 0 ? ` · مسدّد ${paidAll.toLocaleString('ar-SY')} ل.س` : ''}
-                          {suppliesAll > 0
-                            ? ` · مستلزمات ${suppliesAll.toLocaleString('ar-SY')} ل.س`
-                            : ''}
+                          {planLabel !== '—' ? ` · خطة ${planLabel}` : ''}
+                          {paidLabel !== '—' ? ` · مسدّد ${paidLabel}` : ''}
+                          {suppliesLabel !== '—' ? ` · مستلزمات ${suppliesLabel}` : ''}
                         </div>
                         {c.notes.trim() ? (
                           <div style={{ fontSize: '0.82rem', marginTop: 4 }}>{c.notes.trim()}</div>
@@ -415,19 +413,11 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                           </thead>
                           <tbody>
                             {(c.supplies || []).map((s, supplyIdx) => {
-                              const effective = orthoSupplyEffectiveSyp(s, rate)
                               return (
                                 <tr key={s.id || `sup-${caseIdx}-${supplyIdx}`}>
                                   <td>{s.businessDate || '—'}</td>
                                   <td>{s.name.trim() || '—'}</td>
-                                  <td>
-                                    {effective.toLocaleString('ar-SY')} ل.س
-                                    {s.amountUsd > 0 ? (
-                                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        منها {formatUsdAmount(s.amountUsd)} USD
-                                      </div>
-                                    ) : null}
-                                  </td>
+                                  <td>{formatEnteredAmount(s.amountSyp, s.amountUsd)}</td>
                                   {canEdit ? (
                                     <td>
                                       <button
@@ -470,26 +460,17 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                           </thead>
                           <tbody>
                             {(c.installments || []).map((inst, instIdx) => {
-                              const effective = installmentEffectiveTotalSyp(inst, rate)
-                              const paid = installmentPaidTotal(inst)
-                              const remaining = installmentRemaining(inst, rate)
+                              const remainingLabel = formatInstallmentRemaining(inst, rate)
                               const statusLabel = installmentStatusLabel(inst)
                               return (
                                 <tr key={inst.id || `inst-${caseIdx}-${instIdx}`}>
                                   <td>{inst.businessDate || '—'}</td>
                                   <td>{inst.note.trim() || '—'}</td>
                                   <td>
-                                    {effective.toLocaleString('ar-SY')} ل.س
-                                    {inst.amountUsd > 0 ? (
+                                    {formatEnteredAmount(inst.amountSyp, inst.amountUsd)}
+                                    {remainingLabel ? (
                                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        منها {formatUsdAmount(inst.amountUsd)} USD
-                                        {paid > 0 && remaining > 0
-                                          ? ` · متبقي ${remaining.toLocaleString('ar-SY')}`
-                                          : ''}
-                                      </div>
-                                    ) : paid > 0 && remaining > 0 ? (
-                                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        متبقي {remaining.toLocaleString('ar-SY')} ل.س
+                                        {remainingLabel}
                                       </div>
                                     ) : null}
                                   </td>
@@ -773,19 +754,11 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                       </thead>
                       <tbody>
                         {draftSupplies.map((s, idx) => {
-                          const effective = orthoSupplyEffectiveSyp(s, rate)
                           return (
                             <tr key={s.id || `draft-sup-${idx}`}>
                               <td>{s.businessDate || '—'}</td>
                               <td>{s.name.trim() || '—'}</td>
-                              <td>
-                                {effective.toLocaleString('ar-SY')} ل.س
-                                {s.amountUsd > 0 ? (
-                                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                    منها {formatUsdAmount(s.amountUsd)} USD
-                                  </div>
-                                ) : null}
-                              </td>
+                              <td>{formatEnteredAmount(s.amountSyp, s.amountUsd)}</td>
                               <td>
                                 <button
                                   type="button"

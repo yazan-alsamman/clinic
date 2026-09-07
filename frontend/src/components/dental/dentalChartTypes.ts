@@ -248,6 +248,20 @@ export function formatUsdAmount(n: number) {
   }).format(v)
 }
 
+/** عرض المبلغ بعملة الإدخال: دولار فقط أو ليرة فقط أو الاثنان إن وُجدا دون تحويل. */
+export function formatEnteredAmount(syp: number, usd: number): string {
+  const hasUsd = (Number(usd) || 0) > 0
+  const hasSyp = Math.round(Number(syp) || 0) > 0
+  if (hasUsd && !hasSyp) return `${formatUsdAmount(usd)} USD`
+  if (hasSyp && !hasUsd) {
+    return `${Math.round(Number(syp) || 0).toLocaleString('ar-SY')} ل.س`
+  }
+  if (hasUsd && hasSyp) {
+    return `${Math.round(Number(syp) || 0).toLocaleString('ar-SY')} ل.س + ${formatUsdAmount(usd)} USD`
+  }
+  return '—'
+}
+
 /** التكلفة الكلية المكافئة بالليرة = ل.س + دولار×سعر الصرف */
 export function treatmentEffectiveTotalSyp(t: DentalToothTreatment, fallbackRate?: number | null): number {
   const syp = Math.max(0, Math.round(Number(t.totalCostSyp) || 0))
@@ -688,8 +702,42 @@ export function installmentPaidTotal(inst: DentalOrthoInstallment): number {
   return Math.round(inst.payments.reduce((s, p) => s + (Number(p.amountSyp) || 0), 0))
 }
 
+export function installmentPaidNative(inst: DentalOrthoInstallment): { syp: number; usd: number } {
+  let syp = 0
+  let usd = 0
+  for (const p of inst.payments || []) {
+    if (String(p.currency || '').toLowerCase() === 'usd' && Number(p.amountUsd) > 0) {
+      usd += Number(p.amountUsd) || 0
+    } else {
+      syp += Math.round(Number(p.amountSyp) || 0)
+    }
+  }
+  return { syp: Math.round(syp), usd: roundUsd(usd) }
+}
+
 export function installmentRemaining(inst: DentalOrthoInstallment, fallbackRate?: number | null): number {
   return Math.max(0, installmentEffectiveTotalSyp(inst, fallbackRate) - installmentPaidTotal(inst))
+}
+
+export function formatInstallmentRemaining(inst: DentalOrthoInstallment, fallbackRate?: number | null): string {
+  const usd = Math.max(0, Number(inst.amountUsd) || 0)
+  const syp = Math.max(0, Math.round(Number(inst.amountSyp) || 0))
+  if (usd > 0 && !(syp > 0)) {
+    const paidUsd = installmentPaidNative(inst).usd
+    const paidSyp = installmentPaidNative(inst).syp
+    const rate =
+      Number(inst.costUsdSypRate) > 0
+        ? Number(inst.costUsdSypRate)
+        : Math.max(0, Number(fallbackRate) || 0)
+    const paidAsUsd =
+      paidUsd > 0 ? paidUsd : rate > 0 && paidSyp > 0 ? roundUsd(paidSyp / rate) : 0
+    const rem = Math.max(0, roundUsd(usd - paidAsUsd))
+    if (!(rem > 0)) return ''
+    return `متبقي ${formatUsdAmount(rem)} USD`
+  }
+  const remSyp = installmentRemaining(inst, fallbackRate)
+  if (!(remSyp > 0)) return ''
+  return `متبقي ${remSyp.toLocaleString('ar-SY')} ل.س`
 }
 
 export function normalizeLabWorksList(
