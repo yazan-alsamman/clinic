@@ -9,10 +9,25 @@ type WelcomeLocationState = {
   patientName?: string
 }
 
-class WelcomeSceneErrorBoundary extends Component<
-  { children: ReactNode; onContinue: () => void; patientName: string },
-  { crashed: boolean }
-> {
+type BoundaryProps = { children: ReactNode; onContinue: () => void; patientName: string }
+
+/**
+ * Catches a failure inside the 3D walkthrough and falls back to the *premium*
+ * non-3D journey rather than to a technical notice.
+ *
+ * The distinction matters because this boundary is what a patient actually
+ * saw in production: a cross-origin HDRI fetch inside the scene rejected, the
+ * error unwound past `<Suspense>` (which catches suspension, never errors) to
+ * here, and the whole welcome collapsed to a dark card apologising for the
+ * device. The device was fine. Losing the camera move is a reasonable cost for
+ * an unexpected scene error; losing the clinic's entire first impression, and
+ * blaming the patient's phone for it, is not.
+ *
+ * `force2D` renders the same shell — logo, department rail, copy, continue —
+ * that reduced-motion and genuinely WebGL-less devices get, so the failure
+ * mode is a quieter version of the experience instead of an error page.
+ */
+class WelcomeSceneErrorBoundary extends Component<BoundaryProps, { crashed: boolean }> {
   state = { crashed: false }
 
   static getDerivedStateFromError() {
@@ -21,6 +36,39 @@ class WelcomeSceneErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('Cinematic welcome scene failed:', error, info)
+  }
+
+  render() {
+    if (this.state.crashed) {
+      return (
+        <CinematicWelcomeScene
+          force2D
+          patientName={this.props.patientName}
+          onContinue={this.props.onContinue}
+        />
+      )
+    }
+    return this.props.children
+  }
+}
+
+/**
+ * Last line of defence, outside the boundary above.
+ *
+ * If the 2D journey *itself* throws, re-rendering it would crash again on
+ * every remount, so this one renders plain markup that cannot: no canvas, no
+ * scene modules, just the clinic's name and a way onward. It is the only path
+ * that should ever produce a technical notice.
+ */
+class WelcomeLastResortBoundary extends Component<BoundaryProps, { crashed: boolean }> {
+  state = { crashed: false }
+
+  static getDerivedStateFromError() {
+    return { crashed: true }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Patient welcome fallback failed:', error, info)
   }
 
   render() {
@@ -116,8 +164,10 @@ export function PatientCinematicWelcome() {
   }
 
   return (
-    <WelcomeSceneErrorBoundary patientName={name} onContinue={handleContinue}>
-      <CinematicWelcomeScene patientName={name} onContinue={handleContinue} />
-    </WelcomeSceneErrorBoundary>
+    <WelcomeLastResortBoundary patientName={name} onContinue={handleContinue}>
+      <WelcomeSceneErrorBoundary patientName={name} onContinue={handleContinue}>
+        <CinematicWelcomeScene patientName={name} onContinue={handleContinue} />
+      </WelcomeSceneErrorBoundary>
+    </WelcomeLastResortBoundary>
   )
 }

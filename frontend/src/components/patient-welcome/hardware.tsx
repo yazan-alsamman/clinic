@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import * as THREE from 'three'
+import { ClinicMaterial } from './ClinicMaterial'
 
 type Vec3 = [number, number, number]
 type Mat = Record<string, unknown>
@@ -66,9 +67,110 @@ export function Panel({ size, radius = 0.012, position, rotation, material, segm
   }, [size, radius, segments])
 
   return (
-    <mesh position={position} rotation={rotation} geometry={geo} castShadow={false}>
-      <meshPhysicalMaterial {...material} />
+    <mesh position={position} rotation={rotation} geometry={geo}>
+      <ClinicMaterial {...material} />
       {children}
+    </mesh>
+  )
+}
+
+interface ShellProps {
+  /** Outer radius of the arc, measured from the shell's own pivot. */
+  outerRadius: number
+  /** Inner radius. The difference is the moulding's wall thickness. */
+  innerRadius: number
+  /** Half the angular sweep, in radians. */
+  halfAngle: number
+  /** Extent along Z. */
+  length: number
+  position?: Vec3
+  rotation?: Vec3
+  material: Mat
+  /** Edge fillet, so the shell's rims catch a highlight instead of ending in
+   * a mathematically sharp line. */
+  radius?: number
+  segments?: number
+}
+
+/**
+ * A curved moulded shell — the cross-section of a canopy, a cowling, a hood.
+ *
+ * Large medical mouldings are almost never flat. A tanning canopy in
+ * particular is a single deep-drawn arc, and building it out of flat slabs is
+ * why it read as "a big white box" no matter what material went on it: a flat
+ * surface returns one constant shade across its whole width, while a curve
+ * sweeps continuously from its brightest to its darkest across the same span.
+ * That sweep *is* the large-scale shading variation, and it comes from the
+ * geometry — it cannot be painted on.
+ */
+export function Shell({
+  outerRadius,
+  innerRadius,
+  halfAngle,
+  length,
+  position,
+  rotation,
+  material,
+  radius = 0.006,
+  segments = 24,
+}: ShellProps) {
+  const geo = useMemo(() => {
+    const shape = new THREE.Shape()
+    const steps = Math.max(8, segments)
+    for (let i = 0; i <= steps; i++) {
+      const a = -halfAngle + (i / steps) * halfAngle * 2
+      const x = Math.sin(a) * outerRadius
+      const y = Math.cos(a) * outerRadius
+      if (i === 0) shape.moveTo(x, y)
+      else shape.lineTo(x, y)
+    }
+    for (let i = steps; i >= 0; i--) {
+      const a = -halfAngle + (i / steps) * halfAngle * 2
+      shape.lineTo(Math.sin(a) * innerRadius, Math.cos(a) * innerRadius)
+    }
+    shape.closePath()
+    const g = new THREE.ExtrudeGeometry(shape, {
+      depth: Math.max(length - radius * 2, 0.001),
+      bevelEnabled: true,
+      bevelThickness: radius,
+      bevelSize: radius,
+      bevelSegments: 2,
+      curveSegments: 2,
+    })
+    g.translate(0, 0, -length / 2 + radius)
+    g.computeVertexNormals()
+    return g
+  }, [outerRadius, innerRadius, halfAngle, length, radius, segments])
+
+  return (
+    <mesh position={position} rotation={rotation} geometry={geo}>
+      <ClinicMaterial {...material} />
+    </mesh>
+  )
+}
+
+interface SeamProps {
+  /** [length, depth] of the recess, in metres. */
+  size: [number, number]
+  position?: Vec3
+  rotation?: Vec3
+  material: Mat
+  /** Width of the gap. Real panel gaps on medical housings are 1.5-3 mm. */
+  width?: number
+}
+
+/**
+ * A panel gap. Two housings bolted together leave a shadow line between them,
+ * and that line is most of what tells a viewer an object was *assembled* from
+ * parts rather than modelled as one lump. Deliberately a real recess rather
+ * than a painted stripe: it has to darken with the light, not with the albedo.
+ */
+export function Seam({ size, position, rotation, material, width = 0.0025 }: SeamProps) {
+  const [len, depth] = size
+  return (
+    <mesh position={position} rotation={rotation}>
+      <boxGeometry args={[len, width, depth]} />
+      <ClinicMaterial {...material} />
     </mesh>
   )
 }
@@ -108,7 +210,7 @@ export function Cushion({ size, position, rotation, material, radius = 0.05, seg
 
   return (
     <mesh position={position} rotation={rotation} geometry={geo}>
-      <meshPhysicalMaterial {...material} />
+      <ClinicMaterial {...material} />
     </mesh>
   )
 }
@@ -148,7 +250,7 @@ export function Cable({ from, to, sag = 0.12, radius = 0.011, bow = 0, material,
 
   return (
     <mesh geometry={geo}>
-      <meshPhysicalMaterial {...material} />
+      <ClinicMaterial {...material} />
     </mesh>
   )
 }
@@ -202,7 +304,7 @@ export function CoiledCable({
 
   return (
     <mesh geometry={geo}>
-      <meshPhysicalMaterial {...material} />
+      <ClinicMaterial {...material} />
     </mesh>
   )
 }
@@ -226,7 +328,7 @@ export function Lathe({ profile, position, rotation, material, segments = 24 }: 
   )
   return (
     <mesh position={position} rotation={rotation} geometry={geo}>
-      <meshPhysicalMaterial {...material} side={THREE.DoubleSide} />
+      <ClinicMaterial {...material} side={THREE.DoubleSide} />
     </mesh>
   )
 }
@@ -254,7 +356,7 @@ export function Caster({ position, materials, yaw = 0, lowPower = false }: Caste
       {/* Mounting stem into the equipment base */}
       <mesh position={[0, -0.014, 0]}>
         <cylinderGeometry args={[0.014, 0.014, 0.028, seg]} />
-        <meshPhysicalMaterial {...materials.chrome} />
+        <ClinicMaterial {...materials.chrome} />
       </mesh>
       {/* Swivel housing */}
       <Panel size={[0.052, 0.022, 0.046]} radius={0.008} position={[0, -0.039, 0]} material={materials.paintedSteel} />
@@ -271,11 +373,11 @@ export function Caster({ position, materials, yaw = 0, lowPower = false }: Caste
       {/* Tyre + hub */}
       <mesh position={[0, -CASTER_HEIGHT + wheelR, -0.012]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[wheelR, wheelR, 0.024, seg + 4]} />
-        <meshPhysicalMaterial {...materials.rubber} />
+        <ClinicMaterial {...materials.rubber} />
       </mesh>
       <mesh position={[0, -CASTER_HEIGHT + wheelR, -0.012]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[wheelR * 0.45, wheelR * 0.45, 0.027, seg]} />
-        <meshPhysicalMaterial {...materials.chrome} />
+        <ClinicMaterial {...materials.chrome} />
       </mesh>
     </group>
   )
@@ -302,7 +404,7 @@ export function Screen({ size, position, rotation, materials, glow = '#7fa8c4', 
       <Panel size={[w, h, 0.016]} radius={0.005} material={materials.shellDark} />
       <mesh position={[0, 0, 0.0092]}>
         <planeGeometry args={[w - 0.022, h - 0.022]} />
-        <meshPhysicalMaterial {...materials.screenGlass} emissive={glow} emissiveIntensity={intensity} />
+        <ClinicMaterial {...materials.screenGlass} emissive={glow} emissiveIntensity={intensity} />
       </mesh>
     </group>
   )
@@ -328,7 +430,7 @@ export function Grille({ size, slats = 7, depth = 0.006, position, rotation, mat
       {Array.from({ length: slats }, (_, i) => (
         <mesh key={i} position={[0, -h / 2 + pitch * (i + 0.5), 0]} rotation={[0.34, 0, 0]}>
           <boxGeometry args={[w, pitch * 0.62, depth]} />
-          <meshPhysicalMaterial {...material} />
+          <ClinicMaterial {...material} />
         </mesh>
       ))}
     </group>
@@ -392,13 +494,13 @@ export function ArticulatedArm({
       {links.map((l, i) => (
         <mesh key={i} position={l.pos} quaternion={l.quat}>
           <cylinderGeometry args={[radius, radius, l.len, segments]} />
-          <meshPhysicalMaterial {...materials.paintedSteel} />
+          <ClinicMaterial {...materials.paintedSteel} />
         </mesh>
       ))}
       {joints.map((j, i) => (
         <mesh key={i} position={j}>
           <sphereGeometry args={[jointRadius, segments, segments - 2]} />
-          <meshPhysicalMaterial {...materials.shellDark} />
+          <ClinicMaterial {...materials.shellDark} />
         </mesh>
       ))}
     </group>

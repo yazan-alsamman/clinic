@@ -82,15 +82,21 @@ const POSITION_POINTS: THREE.Vector3[] = [
   [-0.27, 0.25, -17.3],
   [-0.3, 0.25, -17.9],
   [-0.15, 0.25, -19.3],
-  [0, 0.3, -20.6],
+  [0, 0.3, -20.2],
   // The room opens up here — clear of every alcove's influence, the corridor
-  // gives way to a wider, calmer final space the logo lives in.
-  [0, 0.2, -22.0],
+  // gives way to a wider, calmer final space the logo lives in. The camera
+  // stops a full 6 m short of the wall: an architectural hero frame contains
+  // the floor, the side walls and the ceiling line around its subject, and
+  // pressing closer turns the shot into a flat photograph of a sign.
+  [0, 0.22, -21.0],
 ].map(([x, y, z]) => new THREE.Vector3(x, y, z))
 
-/** Where the logo lives — the finale wall, and the fixed gaze target the
- * camera settles onto as the journey approaches its end. */
-export const LOGO_POSITION = new THREE.Vector3(0, 0.15, CORRIDOR.zEnd + 0.55)
+/** Where the logo lives, and the fixed gaze target the camera settles onto as
+ * the journey approaches its end. This sits *on the face of the plaque* on the
+ * finale wall (which stands 50 mm proud of it), not floating in front of it —
+ * a wordmark hanging half a metre off the wall it belongs to never reads as
+ * signage, however good the wall behind it looks. */
+export const LOGO_POSITION = new THREE.Vector3(0, 0.16, CORRIDOR.zEnd + 0.058)
 
 /** Centre of a department's room, out beyond the corridor wall. */
 export function roomCenterX(s: Station): number {

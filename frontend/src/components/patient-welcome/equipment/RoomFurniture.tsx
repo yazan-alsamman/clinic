@@ -1,5 +1,7 @@
-import { Panel, Cushion, Lathe, Caster, Indicator, CASTER_HEIGHT } from '../hardware'
+import { Panel, Seam, Cushion, Lathe, Caster, Indicator, CASTER_HEIGHT } from '../hardware'
+import { ContactShadow, CasterShadows } from '../grounding'
 import type { ClinicMaterials } from '../clinicMaterials'
+import { ClinicMaterial } from '../ClinicMaterial'
 
 type Vec3 = [number, number, number]
 
@@ -27,6 +29,14 @@ export function TreatmentBed({ mats, lowPower, detail, position, rotation, light
   const pad = light ? mats.upholsteryLight : mats.upholstery
   return (
     <group position={position} rotation={rotation}>
+      {/* The couch is a heavy pedestal-mounted unit: two dense contact patches
+          under the bases and one broad, faint pool of occlusion under the
+          overhanging mattress, which is exactly what the floor under a real
+          one looks like. */}
+      <ContactShadow size={[0.95, 2.15]} opacity={0.3} />
+      {[-0.52, 0.52].map((z) => (
+        <ContactShadow key={z} position={[0, 0, z]} size={[0.72, 0.36]} opacity={0.62} />
+      ))}
       {/* Twin pedestal base with a linear actuator between them */}
       {[-0.52, 0.52].map((z) => (
         <group key={z}>
@@ -36,7 +46,7 @@ export function TreatmentBed({ mats, lowPower, detail, position, rotation, light
       ))}
       <mesh position={[0, 0.42, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.035, 0.035, 0.95, seg]} />
-        <meshPhysicalMaterial {...mats.chrome} />
+        <ClinicMaterial {...mats.chrome} />
       </mesh>
       {/* Frame and the three-section mattress */}
       <Panel size={[0.66, 0.06, 1.92]} radius={0.02} position={[0, 0.58, 0]} material={mats.shellDark} />
@@ -69,8 +79,16 @@ export function TreatmentBed({ mats, lowPower, detail, position, rotation, light
 /** Utility trolley: 0.9 m to the top shelf, drawers, push handle, casters. */
 export function MedicalTrolley({ mats, lowPower, detail, position, rotation }: BaseProps) {
   const deck = CASTER_HEIGHT
+  const feet = [
+    [-0.19, 0.14],
+    [0.19, 0.14],
+    [-0.19, -0.14],
+    [0.19, -0.14],
+  ] as const
   return (
     <group position={position} rotation={rotation}>
+      <ContactShadow size={[0.7, 0.62]} opacity={0.22} />
+      <CasterShadows points={feet} radius={0.1} opacity={0.6} />
       {([
         [-0.19, 0.14],
         [0.19, 0.14],
@@ -88,7 +106,7 @@ export function MedicalTrolley({ mats, lowPower, detail, position, rotation }: B
             <Panel size={[0.4, 0.12, 0.012]} radius={0.006} position={[0, deck + y, 0.184]} material={mats.shell} />
             <mesh position={[0, deck + y + 0.04, 0.194]}>
               <boxGeometry args={[0.18, 0.008, 0.012]} />
-              <meshPhysicalMaterial {...mats.brushedSteel} />
+              <ClinicMaterial {...mats.brushedSteel} />
             </mesh>
           </group>
         ))}
@@ -103,13 +121,13 @@ export function MedicalTrolley({ mats, lowPower, detail, position, rotation }: B
         ] as const).map(([x, z, w, d], i) => (
           <mesh key={i} position={[x, deck + 0.518, z]}>
             <boxGeometry args={[w, 0.02, d]} />
-            <meshPhysicalMaterial {...mats.brushedSteel} />
+            <ClinicMaterial {...mats.brushedSteel} />
           </mesh>
         ))}
       {detail && (
         <mesh position={[0, deck + 0.56, -0.21]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.012, 0.012, 0.36, 8]} />
-          <meshPhysicalMaterial {...mats.brushedSteel} />
+          <ClinicMaterial {...mats.brushedSteel} />
         </mesh>
       )}
     </group>
@@ -119,8 +137,15 @@ export function MedicalTrolley({ mats, lowPower, detail, position, rotation }: B
 /** Operator stool on a five-star gas-lift base. */
 export function Stool({ mats, lowPower, position, rotation }: BaseProps) {
   const seg = lowPower ? 8 : 14
+  const feet = Array.from({ length: 5 }, (_, i) => {
+    const a = (i / 5) * Math.PI * 2
+    return [Math.sin(a) * 0.22, Math.cos(a) * 0.22] as const
+  })
   return (
     <group position={position} rotation={rotation}>
+      {/* A five-star base occludes almost nothing between its legs — one broad
+          shadow under a stool is the classic giveaway of a pasted-on object. */}
+      <CasterShadows points={feet} radius={0.075} opacity={0.5} />
       {Array.from({ length: 5 }, (_, i) => {
         const a = (i / 5) * Math.PI * 2
         return (
@@ -134,14 +159,14 @@ export function Stool({ mats, lowPower, position, rotation }: BaseProps) {
             />
             <mesh position={[Math.sin(a) * 0.22, 0.033, Math.cos(a) * 0.22]} rotation={[0, 0, Math.PI / 2]}>
               <cylinderGeometry args={[0.032, 0.032, 0.02, 8]} />
-              <meshPhysicalMaterial {...mats.rubber} />
+              <ClinicMaterial {...mats.rubber} />
             </mesh>
           </group>
         )
       })}
       <mesh position={[0, 0.3, 0]}>
         <cylinderGeometry args={[0.028, 0.034, 0.4, seg]} />
-        <meshPhysicalMaterial {...mats.chrome} />
+        <ClinicMaterial {...mats.chrome} />
       </mesh>
       <Cushion size={[0.38, 0.36, 0.09]} position={[0, 0.55, 0]} material={mats.upholstery} radius={0.14} />
     </group>
@@ -160,34 +185,55 @@ export function CabinetRun({
   const doors = Math.max(2, Math.round(width / 0.6))
   return (
     <group position={position} rotation={rotation}>
-      <Panel size={[width, 0.1, 0.58]} radius={0.01} position={[0, 0.05, 0]} material={mats.shellDark} />
-      <Panel size={[width, 0.78, 0.6]} radius={0.008} position={[0, 0.49, 0]} material={mats.shell} />
+      <ContactShadow size={[width + 0.3, 1.0]} opacity={0.5} />
+      {/* Recessed plinth. Fitted joinery never meets the floor at its own
+          face — it stands on a set-back toe kick, and the band of shade that
+          creates is what stops a run of cabinets reading as a solid block. */}
+      <Panel size={[width - 0.04, 0.1, 0.5]} radius={0.006} position={[0, 0.05, 0]} material={mats.recess} />
+      <Panel size={[width, 0.78, 0.6]} radius={0.008} position={[0, 0.49, 0]} material={mats.shellAlt} />
       {detail &&
         Array.from({ length: doors }, (_, i) => {
-          const x = -width / 2 + (width / doors) * (i + 0.5)
+          const pitch = width / doors
+          const x = -width / 2 + pitch * (i + 0.5)
           return (
             <group key={i}>
+              {/* The door itself stands proud of the carcass, so the gap
+                  between doors is a real recess rather than a drawn line. */}
               <Panel
-                size={[width / doors - 0.012, 0.72, 0.016]}
-                radius={0.005}
-                position={[x, 0.49, 0.305]}
+                size={[pitch - 0.02, 0.72, 0.018]}
+                radius={0.004}
+                position={[x, 0.49, 0.309]}
                 material={mats.shell}
               />
-              <mesh position={[x + width / doors / 2 - 0.06, 0.49, 0.322]}>
+              {/* Vertical reveal on the leading edge of each door */}
+              <Seam
+                size={[0.019, 0.72]}
+                position={[x + pitch / 2 - 0.01, 0.49, 0.303]}
+                rotation={[Math.PI / 2, 0, Math.PI / 2]}
+                material={mats.recess}
+                width={0.008}
+              />
+              <mesh position={[x + pitch / 2 - 0.06, 0.49, 0.325]}>
                 <boxGeometry args={[0.012, 0.16, 0.012]} />
-                <meshPhysicalMaterial {...mats.brushedSteel} />
+                <ClinicMaterial {...mats.brushedSteel} />
               </mesh>
             </group>
           )
         })}
-      {/* Stone worktop with an overhang and a shadow gap beneath */}
-      <Panel size={[width + 0.04, 0.04, 0.64]} radius={0.006} position={[0, 0.9, 0.01]} material={{ color: '#3b3730', roughness: 0.3, metalness: 0.05 }} />
+      {/* Shadow gap under the worktop overhang, and the worktop itself */}
+      <Seam size={[width + 0.04, 0.62]} position={[0, 0.879, 0.01]} material={mats.recess} width={0.008} />
+      <Panel
+        size={[width + 0.04, 0.04, 0.64]}
+        radius={0.006}
+        position={[0, 0.905, 0.01]}
+        material={{ ...mats.stone, color: '#6f6a62', roughness: 0.35 }}
+      />
       {/* Wall units, set at the height they are actually hung, with their own
           door divisions — a single unbroken slab up there reads as a painted
           rectangle rather than joinery. Suppressed when the run is used as a
           freestanding bench, since a wall cupboard needs a wall behind it. */}
       {wallUnits && (
-        <Panel size={[width * 0.8, 0.62, 0.34]} radius={0.008} position={[0, 1.72, -0.12]} material={mats.shell} />
+        <Panel size={[width * 0.8, 0.62, 0.34]} radius={0.008} position={[0, 1.72, -0.12]} material={mats.shellAlt} />
       )}
       {wallUnits &&
         detail &&
@@ -200,7 +246,7 @@ export function CabinetRun({
               <Panel size={[w - 0.014, 0.58, 0.014]} radius={0.004} position={[x, 1.72, 0.055]} material={mats.shell} />
               <mesh position={[x, 1.46, 0.07]}>
                 <boxGeometry args={[w * 0.5, 0.011, 0.011]} />
-                <meshPhysicalMaterial {...mats.brushedSteel} />
+                <ClinicMaterial {...mats.brushedSteel} />
               </mesh>
             </group>
           )
@@ -237,7 +283,7 @@ export function SterileTray({ mats, lowPower, detail, position, rotation }: Base
             <group key={x} position={[x, 0.022, -0.03 + i * 0.025]} rotation={[0, 0.22 - i * 0.4, Math.PI / 2]}>
               <mesh>
                 <cylinderGeometry args={[0.0065, 0.0065, 0.062, seg]} />
-                <meshPhysicalMaterial {...barrel} />
+                <ClinicMaterial {...barrel} />
               </mesh>
               {/* Graduation band */}
               <mesh position={[0, 0.006, 0]}>
@@ -247,16 +293,16 @@ export function SterileTray({ mats, lowPower, detail, position, rotation }: Base
               {/* Flange and plunger stem */}
               <mesh position={[0, -0.033, 0]}>
                 <cylinderGeometry args={[0.011, 0.011, 0.004, seg]} />
-                <meshPhysicalMaterial {...barrel} />
+                <ClinicMaterial {...barrel} />
               </mesh>
               <mesh position={[0, -0.046, 0]}>
                 <cylinderGeometry args={[0.004, 0.004, 0.026, seg]} />
-                <meshPhysicalMaterial {...mats.shell} />
+                <ClinicMaterial {...mats.shell} />
               </mesh>
               {/* Protective needle cap, still on */}
               <mesh position={[0, 0.045, 0]}>
                 <cylinderGeometry args={[0.0045, 0.0035, 0.028, seg]} />
-                <meshPhysicalMaterial {...{ color: '#d8dde0', roughness: 0.4, metalness: 0 }} />
+                <ClinicMaterial {...{ color: '#d8dde0', roughness: 0.4, metalness: 0 }} />
               </mesh>
             </group>
           ))}
@@ -288,7 +334,7 @@ export function SterileTray({ mats, lowPower, detail, position, rotation }: Base
               />
               <mesh position={[0, 0.034, 0]}>
                 <cylinderGeometry args={[0.0068, 0.0068, 0.005, seg]} />
-                <meshPhysicalMaterial {...{ color: '#c8a24e', roughness: 0.35, metalness: 1 }} />
+                <ClinicMaterial {...{ color: '#c8a24e', roughness: 0.35, metalness: 1 }} />
               </mesh>
             </group>
           ))}

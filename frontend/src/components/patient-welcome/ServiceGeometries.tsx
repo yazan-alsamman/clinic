@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { ServiceDef } from './serviceCatalog'
 import { makeClinicMaterials } from './clinicMaterials'
+import { DENTAL_UNIT_PLACEMENT } from './dentalLamp'
 import { DentalUnit } from './equipment/DentalUnit'
 import { LaserPlatform } from './equipment/LaserPlatform'
 import { Solarium } from './equipment/Solarium'
@@ -37,7 +38,7 @@ export function ServiceGeometry({ def, lowPower, highlight, detail }: GeometryPr
     case 'dentistry':
       return (
         <group>
-          <group position={[0.15, 0, 0.15]} rotation={[0, -0.62, 0]}>
+          <group position={DENTAL_UNIT_PLACEMENT.position} rotation={[0, DENTAL_UNIT_PLACEMENT.rotationY, 0]}>
             <DentalUnit mats={mats} lowPower={lowPower} highlight={highlight} detail={detail} />
           </group>
           <CabinetRun {...shared} position={[0.1, 0, 1.62]} rotation={[0, Math.PI, 0]} width={2.6} />
@@ -82,8 +83,16 @@ export function ServiceGeometry({ def, lowPower, highlight, detail }: GeometryPr
         <group>
           {/* Turned so the canopy's open mouth — and the lamp array inside it
               — faces the doorway. Opening away from the viewer showed only a
-              blank moulded shell, which is what made this read as a capsule. */}
-          <group position={[0.15, 0, 0.35]} rotation={[0, 1.2, 0]}>
+              blank moulded shell, which is what made this read as a capsule.
+              The extra 45° over the original angle swings the *foot* end round
+              toward the opening as well, which is where a sunbed keeps
+              everything that identifies it as operated equipment: the control
+              cockpit, the ventilation intake and the stainless kick strip. At
+              the old angle all three faced the back wall, so the machine could
+              only ever be read as a shell. The bed still presents broadside —
+              its long axis is barely 24° off where it was — so the hero
+              silhouette and the open canopy survive the change. */}
+          <group position={[0.15, 0, 0.35]} rotation={[0, 2.0, 0]}>
             <Solarium mats={mats} lowPower={lowPower} highlight={highlight} detail={detail} />
           </group>
           {/* Changing bench — a tanning room is a private room, not a machine
@@ -115,3 +124,4 @@ export function ServiceGeometry({ def, lowPower, highlight, detail }: GeometryPr
       return null
   }
 }
+

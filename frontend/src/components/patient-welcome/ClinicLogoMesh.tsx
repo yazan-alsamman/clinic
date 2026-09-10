@@ -7,7 +7,7 @@ import { LOGO_POSITION } from './walkthroughPath'
 import { lerp } from './easing'
 
 const LOGO_ASPECT = 2600 / 771
-const LOGO_WIDTH = 2.6
+const LOGO_WIDTH = 2.3
 const LOGO_HEIGHT = LOGO_WIDTH / LOGO_ASPECT
 
 interface ClinicLogoMeshProps {
@@ -48,20 +48,25 @@ export function ClinicLogoMesh({ logoUrl, progressRef }: ClinicLogoMeshProps) {
     const progress = progressRef.current ?? 0
     const reveal = smoothstep(0.5, 1, progress)
 
-    const scale = lerp(0.16, 1, reveal)
-    meshRef.current.scale.setScalar(scale)
+    // The logo is *mounted*. It does not drift, bob or rotate — a wordmark
+    // that sways in front of the wall it is fixed to is the single loudest
+    // remaining "this is a 3D scene" signal in the finale, and no amount of
+    // material work survives it. What changes as the patient approaches is
+    // only how the lighting picks it out: it comes up out of the wall's
+    // shadow rather than flying in.
     const mat = meshRef.current.material as THREE.MeshBasicMaterial
-    mat.opacity = lerp(0.22, 1, reveal)
-    glowRef.current.material.opacity = lerp(0.08, 0.46, reveal) + Math.sin(t * 0.5) * 0.05
-
-    meshRef.current.rotation.y = Math.sin(t * 0.22) * 0.04
-    meshRef.current.position.y = 0.15 + Math.sin(t * 0.35) * 0.035
-    glowRef.current.position.y = meshRef.current.position.y
+    mat.opacity = lerp(0.16, 1, reveal)
+    // The backlight behind the plaque breathes very slightly, the way a real
+    // dimmed LED cove does. Everything else is still.
+    glowRef.current.material.opacity = lerp(0.05, 0.34, reveal) * (1 + Math.sin(t * 0.45) * 0.06)
   })
 
   return (
     <group position={[LOGO_POSITION.x, LOGO_POSITION.y, LOGO_POSITION.z]}>
-      <sprite ref={glowRef} scale={[LOGO_WIDTH * 2.1, LOGO_WIDTH * 2.1 * 0.55, 1]}>
+      {/* Halo behind the lettering, not around a floating object: it sits on
+          the plaque face and reads as the wall washer catching the brushed
+          metal of the letters. */}
+      <sprite ref={glowRef} scale={[LOGO_WIDTH * 1.5, LOGO_WIDTH * 1.5 * 0.5, 1]} position={[0, 0, -0.004]}>
         <spriteMaterial
           map={glowTexture}
           color="#f0c6b8"

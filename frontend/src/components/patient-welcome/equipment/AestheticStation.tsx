@@ -1,5 +1,19 @@
-import { Panel, Cable, Lathe, Screen, Grille, Indicator, Caster, ArticulatedArm, CASTER_HEIGHT } from '../hardware'
+import {
+  Panel,
+  Shell,
+  Seam,
+  Cable,
+  Lathe,
+  Screen,
+  Grille,
+  Indicator,
+  Caster,
+  ArticulatedArm,
+  CASTER_HEIGHT,
+} from '../hardware'
+import { ContactShadow, CasterShadows } from '../grounding'
 import type { ClinicMaterials } from '../clinicMaterials'
+import { ClinicMaterial } from '../ClinicMaterial'
 
 interface Props {
   mats: ClinicMaterials
@@ -25,8 +39,19 @@ export function AestheticStation({ mats, lowPower, highlight, detail }: Props) {
   const seg = lowPower ? 8 : 14
   const deckY = CASTER_HEIGHT + 0.03
 
+  const feet = [
+    [-0.17, 0.17],
+    [0.17, 0.17],
+    [-0.17, -0.17],
+    [0.17, -0.17],
+  ] as const
+
   return (
     <group>
+      <ContactShadow size={[0.7, 0.7]} opacity={0.26} />
+      <CasterShadows points={feet} radius={0.1} opacity={0.6} />
+      {/* The vapour arm stands on its own weighted disc base */}
+      <ContactShadow position={[0.52, 0, -0.32]} size={[0.42, 0.42]} opacity={0.6} />
       {/* ── Console ──────────────────────────────────────────────── */}
       {([
         [-0.17, 0.17],
@@ -37,8 +62,25 @@ export function AestheticStation({ mats, lowPower, highlight, detail }: Props) {
         <Caster key={i} position={[x, CASTER_HEIGHT, z]} materials={mats} yaw={i * 1.1} lowPower={lowPower} />
       ))}
       <Panel size={[0.46, 0.055, 0.46]} radius={0.02} position={[0, deckY, 0]} material={mats.shellDark} />
-      <Panel size={[0.44, 0.72, 0.44]} radius={0.045} position={[0, deckY + 0.39, 0]} material={mats.shell} />
-      <Panel size={[0.448, 0.012, 0.448]} radius={0.004} position={[0, deckY + 0.42, 0]} material={mats.shellDark} />
+      {/* Two mouldings with a parting line, not one 720 mm column of white,
+          and a shallow arc across the face the patient actually looks at. */}
+      {/* Graphite lower body, matching the laser and the sunbed. These three
+          consoles are the same class of object and were all reading as white
+          columns; giving them one shared livery is both what a real clinic's
+          equipment looks like and what stops each room's hero device melting
+          into its own cabinetry. */}
+      <Panel size={[0.44, 0.34, 0.44]} radius={0.045} position={[0, deckY + 0.2, 0]} material={mats.bodyGraphite} />
+      <Panel size={[0.44, 0.36, 0.44]} radius={0.045} position={[0, deckY + 0.56, 0]} material={mats.shell} />
+      <Seam size={[0.45, 0.45]} position={[0, deckY + 0.378, 0]} material={mats.recess} width={0.006} />
+      <Shell
+        outerRadius={1.0}
+        innerRadius={0.975}
+        halfAngle={0.2}
+        length={0.6}
+        position={[0, deckY + 0.42, -0.78]}
+        rotation={[Math.PI / 2, 0, 0]}
+        material={mats.shellSatin}
+      />
 
       {/* Solution bay — recessed, with the flasks visible inside it */}
       <Panel size={[0.3, 0.24, 0.02]} radius={0.01} position={[0, deckY + 0.2, 0.22]} material={mats.shellDark} />
@@ -63,11 +105,11 @@ export function AestheticStation({ mats, lowPower, highlight, detail }: Props) {
               {/* Fluid level inside the flask */}
               <mesh position={[0, 0.055, 0]}>
                 <cylinderGeometry args={[0.026, 0.026, 0.095, seg]} />
-                <meshPhysicalMaterial color={c} roughness={0.18} metalness={0} transparent opacity={0.82} />
+                <ClinicMaterial color={c} roughness={0.18} metalness={0} transparent opacity={0.82} />
               </mesh>
               <mesh position={[0, 0.202, 0]}>
                 <cylinderGeometry args={[0.018, 0.018, 0.014, seg]} />
-                <meshPhysicalMaterial {...mats.shellDark} />
+                <ClinicMaterial {...mats.shellDark} />
               </mesh>
             </group>
           )
@@ -140,7 +182,7 @@ export function AestheticStation({ mats, lowPower, highlight, detail }: Props) {
         />
         <mesh position={[0, 0.63, 0]}>
           <cylinderGeometry args={[0.022, 0.028, 1.16, seg]} />
-          <meshPhysicalMaterial {...mats.chrome} />
+          <ClinicMaterial {...mats.chrome} />
         </mesh>
         <ArticulatedArm
           joints={[
@@ -169,11 +211,11 @@ export function AestheticStation({ mats, lowPower, highlight, detail }: Props) {
           />
           <mesh position={[0, 0.008, 0]}>
             <cylinderGeometry args={[0.056, 0.05, 0.03, seg]} />
-            <meshPhysicalMaterial {...mats.shell} />
+            <ClinicMaterial {...mats.shell} />
           </mesh>
           <mesh position={[0, -0.05, 0.05]} rotation={[1.1, 0, 0]}>
             <cylinderGeometry args={[0.013, 0.016, 0.09, seg]} />
-            <meshPhysicalMaterial {...mats.shell} />
+            <ClinicMaterial {...mats.shell} />
           </mesh>
           {detail && <Indicator position={[0.05, 0.012, 0.03]} color="#ffb98a" intensity={0.7} />}
         </group>

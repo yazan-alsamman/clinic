@@ -24,13 +24,21 @@ const WalkthroughCanvas = lazy(() => import('./WalkthroughCanvas'))
 interface CinematicWelcomeSceneProps {
   patientName: string
   onContinue: () => void
+  /** Render the premium non-3D journey even on a WebGL-capable device. Set by
+   * the page's error boundary after the walkthrough has thrown, so a scene
+   * failure costs the patient the camera move rather than the whole welcome. */
+  force2D?: boolean
 }
 
 function accentCss(accent: [number, number, number]): string {
   return `rgb(${accent.map((c) => Math.round(c * 255)).join(',')})`
 }
 
-export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelcomeSceneProps) {
+export function CinematicWelcomeScene({
+  patientName,
+  onContinue,
+  force2D = false,
+}: CinematicWelcomeSceneProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const cap = useSceneCapability()
   const [phase, setPhase] = useState<ScenePhase>('entering')
@@ -38,7 +46,7 @@ export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelc
   const [containerActive, setContainerActive] = useState(true)
   const [hoverPreview, setHoverPreview] = useState<ServiceGeometry | null>(null)
 
-  const use3D = cap.webglSupported && !cap.reducedMotion
+  const use3D = !force2D && cap.webglSupported && !cap.reducedMotion
   const walk = useWalkthroughProgress(rootRef, cap.reducedMotion)
 
   // One tick after first paint so the entrance fade has a "before" state to
@@ -139,18 +147,25 @@ export function CinematicWelcomeScene({ patientName, onContinue }: CinematicWelc
         </svg>
       </div>
 
-      <div
-        className={`cw-info${activeDef ? ' is-visible' : ''}`}
-        style={activeDef ? ({ '--cw-accent': accentCss(activeDef.accent) } as CSSProperties) : undefined}
-        aria-hidden="true"
-      >
-        {activeDef ? (
-          <>
-            <p className="cw-info-name">{activeDef.name}</p>
-            <p className="cw-info-desc">{activeDef.description}</p>
-          </>
-        ) : null}
-      </div>
+      {/* The floating department card belongs to the 3D walkthrough, where it
+          is the only place the department is named. The 2D journey already
+          carries that name and description under the logo, so rendering this
+          as well printed both twice on the same screen — the sort of doubling
+          that reads as a bug rather than as a design. */}
+      {use3D ? (
+        <div
+          className={`cw-info${activeDef ? ' is-visible' : ''}`}
+          style={activeDef ? ({ '--cw-accent': accentCss(activeDef.accent) } as CSSProperties) : undefined}
+          aria-hidden="true"
+        >
+          {activeDef ? (
+            <>
+              <p className="cw-info-name">{activeDef.name}</p>
+              <p className="cw-info-desc">{activeDef.description}</p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <nav className="cw-rail" aria-label="أقسام العيادة">
         {SERVICES.map((s, i) => (
