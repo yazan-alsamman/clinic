@@ -78,10 +78,11 @@ const roleNav: Record<Role, NavKey[]> = {
     'appointments_booked',
     'dermatology_create_session',
     'inventory',
+    'admin_expenses',
     'account_password',
   ],
   dental_branch: ['dashboard', 'patients', 'appointments_booked', 'admin_dental_labs', 'account_password'],
-  dental_assistant: ['dashboard', 'patients', 'admin_dental_patients', 'account_password'],
+  dental_assistant: ['dashboard', 'patients', 'admin_dental_patients', 'admin_expenses', 'account_password'],
 }
 
 export function visibleNavForRole(role: Role) {

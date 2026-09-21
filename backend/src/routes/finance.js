@@ -28,8 +28,10 @@ import { summarizeDentalChartFinance } from '../services/dentalFinanceShares.js'
 
 export const financeRouter = Router()
 
-financeRouter.use(authMiddleware, loadBusinessDay, requireRoles('super_admin'))
-financeRouter.use('/salaries', salaryLedgerRouter)
+const EXPENSE_ROLES = ['super_admin', 'dental_assistant', 'dermatology_assistant_manager']
+
+financeRouter.use(authMiddleware, loadBusinessDay)
+financeRouter.use('/salaries', requireRoles('super_admin'), salaryLedgerRouter)
 
 function parseYmd(raw) {
   const s = String(raw || '').trim().slice(0, 10)
@@ -300,7 +302,7 @@ function laserSpecialistTop(items, payById) {
   return best
 }
 
-financeRouter.get('/expenses', async (req, res) => {
+financeRouter.get('/expenses', requireRoles(...EXPENSE_ROLES), async (req, res) => {
   try {
     const range = parseRange(req.query.from, req.query.to)
     if (!range) {
@@ -328,7 +330,7 @@ financeRouter.get('/expenses', async (req, res) => {
   }
 })
 
-financeRouter.post('/expenses', async (req, res) => {
+financeRouter.post('/expenses', requireRoles(...EXPENSE_ROLES), async (req, res) => {
   try {
     const body = req.body ?? {}
     const category = String(body.category || '').trim().toLowerCase()
@@ -388,7 +390,7 @@ financeRouter.post('/expenses', async (req, res) => {
   }
 })
 
-financeRouter.patch('/expenses/:id', async (req, res) => {
+financeRouter.patch('/expenses/:id', requireRoles(...EXPENSE_ROLES), async (req, res) => {
   try {
     const doc = await ExpenseEntry.findById(req.params.id)
     if (!doc) {
@@ -472,7 +474,7 @@ financeRouter.patch('/expenses/:id', async (req, res) => {
   }
 })
 
-financeRouter.delete('/expenses/:id', async (req, res) => {
+financeRouter.delete('/expenses/:id', requireRoles(...EXPENSE_ROLES), async (req, res) => {
   try {
     const doc = await ExpenseEntry.findByIdAndDelete(req.params.id)
     if (!doc) {
@@ -492,7 +494,7 @@ financeRouter.delete('/expenses/:id', async (req, res) => {
   }
 })
 
-financeRouter.get('/dashboard', async (req, res) => {
+financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) => {
   try {
     const range = parseRange(req.query.from, req.query.to)
     if (!range) {

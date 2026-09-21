@@ -66,7 +66,10 @@ function formatAmountCell(row: ExpenseEntry) {
 export function AdminExpensesPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
-  const allowed = user?.role === 'super_admin'
+  const allowed =
+    user?.role === 'super_admin' ||
+    user?.role === 'dental_assistant' ||
+    user?.role === 'dermatology_assistant_manager'
 
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -251,7 +254,7 @@ export function AdminExpensesPage() {
     return (
       <>
         <h1 className="page-title">المصاريف</h1>
-        <p className="page-desc">هذه الصفحة متاحة لمدير النظام فقط.</p>
+        <p className="page-desc">هذه الصفحة متاحة لمدير النظام ومساعدي الأسنان ومساعد رئيس قسم الجلدية.</p>
       </>
     )
   }
