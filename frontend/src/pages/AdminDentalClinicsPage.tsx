@@ -17,6 +17,8 @@ type ClinicSummary = {
   paidSyp: number
   remainingSyp: number
   labsSyp: number
+  labsForShareSyp?: number
+  shareBaseSyp?: number
   shareSyp: number
   sharePercent?: number
   netToClinicSyp: number
@@ -262,7 +264,7 @@ export function AdminDentalClinicsPage() {
                 <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                   {c.noShare
                     ? `بدون نسبة — صافي للقسم ${fmtSyp(c.netToClinicSyp)}`
-                    : `نسبة الطبيب ${c.sharePercent ?? data?.sharePercent ?? 40}٪ — ${fmtSyp(c.shareSyp)} · متبقي ${fmtSyp(c.remainingSyp)}`}
+                    : `(إجراءات − مخابر/مواد) × ${c.sharePercent ?? data?.sharePercent ?? 40}٪ = ${fmtSyp(c.shareSyp)} · متبقي ${fmtSyp(c.remainingSyp)}`}
                 </p>
               </button>
             ))}
