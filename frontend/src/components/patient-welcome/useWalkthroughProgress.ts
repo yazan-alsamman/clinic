@@ -5,12 +5,17 @@ import type { ServiceGeometry } from './serviceCatalog'
 // Input → journey sensitivities. These are the pacing dial: the corridor, the
 // curve and its control-point clustering are all unchanged, so the only thing
 // setting how fast the patient walks is how much journey a gesture buys.
-// Tuned for a slow architectural walkthrough — a standard mouse notch
-// (deltaY 100 px) advances ~0.046 of the journey, so the full corridor is
-// roughly twenty unhurried notches rather than a dozen quick ones.
-const WHEEL_SENSITIVITY = 0.00046
-const TOUCH_SENSITIVITY = 0.0012
-const KEY_STEP = 0.055
+// Tuned for a guided tour rather than a scroll — a standard mouse notch
+// (deltaY 100 px) advances ~0.029 of the journey, putting the full corridor at
+// roughly forty-five unhurried notches and about nine seconds of walking at a
+// natural scrolling rhythm.
+const WHEEL_SENSITIVITY = 0.00029
+const TOUCH_SENSITIVITY = 0.00076
+// Keyboard sits at the top of its range rather than scaled strictly in step
+// with the wheel: a key press is one deliberate act where a wheel notch is one
+// of a continuous stream, and matching them exactly would put the far end of
+// the clinic forty presses away.
+const KEY_STEP = 0.04
 const CONTINUE_THRESHOLD = 0.86
 
 // A wheel event's deltaY is only in pixels when deltaMode is DOM_DELTA_PIXEL.
@@ -31,11 +36,11 @@ function wheelPixels(e: WheelEvent): number {
  * a hold — a hard stop would turn the corridor into a carousel. */
 const DEPARTMENT_ANCHORS = STATIONS.map((s) => s.railT)
 const DEPARTMENT_RADIUS = 0.055
-const DEPARTMENT_SCALE = 0.62
+const DEPARTMENT_SCALE = 0.52
 // The finale gets a wider, slower field than a department: the logo should
 // resolve out of the far end of the corridor over a long approach, not arrive.
 const FINALE_RADIUS = 0.13
-const FINALE_SCALE = 0.5
+const FINALE_SCALE = 0.42
 
 function smoothBump(d: number, radius: number): number {
   if (d >= radius) return 0
@@ -61,10 +66,13 @@ function pacingScale(t: number): number {
 // still well short of the lag that would read as sticky.
 const DAMPING_PER_FRAME = 0.08
 // Hard ceiling on how much journey a single 60 fps frame may cover, whatever
-// input is pending. This is what keeps a trackpad fling reading as "walking
-// faster" rather than teleporting: sustained maximum input crosses the whole
-// clinic in ~2.2 s at the ceiling, and ordinary scrolling never reaches it.
-const MAX_STEP_PER_FRAME = 0.0075
+// input is pending — a walking pace, not a scroll rate. Set just above the
+// speed an unhurried scroll actually asks for, so a leisurely walk is pure
+// inertia and never touches it, a natural rhythm brushes it, and a frantic
+// one is held to it: even continuous maximum input takes ~7 s to cross the
+// clinic, against ~9 s for the same walk taken calmly. Beyond this point
+// scrolling harder buys urgency, not distance.
+const MAX_STEP_PER_FRAME = 0.0032
 // A backgrounded tab hands back one enormous frame interval on resume; clamp it
 // so the camera picks up where it left off rather than lurching forward.
 const MAX_FRAME_SPAN = 4

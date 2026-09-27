@@ -23,3 +23,7 @@ frontend - Copy/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Local admin change report (not part of the app)
+تقرير-تغييرات-النظام-21-إلى-27-أيلول-2026.md
+تقرير-تغييرات-النظام-21-إلى-27-أيلول-2026.pdf

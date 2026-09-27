@@ -30,10 +30,13 @@ export function SceneRig({ children, progressRef, velocityRef, isTouch }: SceneR
     // Walking motion is proportional to how fast the journey position is
     // currently changing — brisk while scrolling, settling to stillness
     // within a beat of the patient stopping.
-    // Scaled against the walkthrough's own top speed, so this keeps the same
-    // sway the rig has always had: the journey now advances about half as much
-    // per frame, and left at the old factor the walk would have quietly flattened
-    // into a glide — the one thing a *walkthrough* cannot afford to lose.
+    // Scaled against the walkthrough's own top speed rather than left at the
+    // factor a much faster journey was tuned against, where this slow a walk
+    // would have flattened into a glide — the one thing a *walkthrough* cannot
+    // afford to lose. It is deliberately not re-scaled every time the pacing
+    // slows: at a guided-tour speed this yields a 4–5 mm head bob at about
+    // five steps a second, and compensating back up to the old amplitude would
+    // be a brisk stride bolted onto an unhurried one.
     const speed = Math.min(Math.abs(velocity) * 90, 1)
     swayPhase.current += 0.15 + speed * 0.35
     const bobY = Math.sin(swayPhase.current * 2.1) * 0.018 * speed
