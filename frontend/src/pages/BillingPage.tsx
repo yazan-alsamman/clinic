@@ -847,6 +847,7 @@ export function BillingPage() {
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا توجد بنود معلّقة.</p>
         </div>
       ) : (
+        <>
         {otherDateItems.length > 0 ? (
           <p style={{ margin: '1rem 0 0', color: 'var(--warning)', fontSize: '0.88rem' }}>
             بنود معلّقة من أيام أخرى ظاهرة في آخر القائمة حتى يمكن تحصيلها، ومنها جلسات لم يُنشأ لها بند في يومها.
@@ -1069,6 +1070,7 @@ export function BillingPage() {
             </li>
           ))}
         </ul>
+        </>
       )}
       {payOpen && payItem ? (
         <div
