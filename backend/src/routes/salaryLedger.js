@@ -21,6 +21,10 @@ function roundMoney(n) {
   return Math.round(Number(n) || 0)
 }
 
+function paymentKind(raw) {
+  return raw === 'bonus' ? 'bonus' : 'salary'
+}
+
 function serializePayment(p) {
   const amountSyp = roundMoney(p.amountSyp)
   const amountUsd = round2(p.amountUsd)
@@ -28,6 +32,7 @@ function serializePayment(p) {
   return {
     id: String(p._id),
     employeeId: String(p.employeeId),
+    kind: paymentKind(p.kind),
     amountSyp,
     amountUsd,
     usdSypRate,
@@ -68,7 +73,12 @@ salaryLedgerRouter.get('/', async (req, res) => {
 
     const rows = employees.map((e) => {
       const list = byEmp.get(String(e._id)) || []
-      const paidSyp = roundMoney(list.reduce((s, p) => s + p.effectiveAmountSyp, 0))
+      const salaryPaidSyp = roundMoney(
+        list.filter((p) => p.kind !== 'bonus').reduce((s, p) => s + p.effectiveAmountSyp, 0),
+      )
+      const bonusSyp = roundMoney(
+        list.filter((p) => p.kind === 'bonus').reduce((s, p) => s + p.effectiveAmountSyp, 0),
+      )
       const monthly = roundMoney(e.monthlySalarySyp)
       return {
         id: String(e._id),
@@ -76,9 +86,11 @@ salaryLedgerRouter.get('/', async (req, res) => {
         title: String(e.title || ''),
         monthlySalarySyp: monthly,
         active: e.active !== false,
-        paymentCount: list.length,
-        paidSyp,
-        remainingSyp: monthly > 0 ? Math.max(0, monthly - paidSyp) : 0,
+        paymentCount: list.filter((p) => p.kind !== 'bonus').length,
+        bonusCount: list.filter((p) => p.kind === 'bonus').length,
+        paidSyp: salaryPaidSyp,
+        bonusSyp,
+        remainingSyp: monthly > 0 ? Math.max(0, monthly - salaryPaidSyp) : 0,
         lastPaymentDate: list[0]?.businessDate || '',
         payments: list,
       }
@@ -90,8 +102,10 @@ salaryLedgerRouter.get('/', async (req, res) => {
       employees: rows,
       totals: {
         employeeCount: rows.filter((r) => r.active).length,
-        paymentCount: payments.length,
+        paymentCount: rows.reduce((s, r) => s + r.paymentCount, 0),
+        bonusCount: rows.reduce((s, r) => s + r.bonusCount, 0),
         paidSyp: roundMoney(rows.reduce((s, r) => s + r.paidSyp, 0)),
+        bonusSyp: roundMoney(rows.reduce((s, r) => s + r.bonusSyp, 0)),
       },
     })
   } catch (e) {
@@ -240,21 +254,23 @@ salaryLedgerRouter.post('/payments', async (req, res) => {
         return
       }
     }
+    const kind = paymentKind(body.kind)
     const doc = await SalaryPayment.create({
       employeeId,
       amountSyp,
       amountUsd,
       usdSypRate,
       businessDate,
+      kind,
       note: String(body.note || '').trim().slice(0, 2000),
       createdByUserId: req.user?._id || null,
     })
     await writeAudit({
       user: req.user,
-      action: 'دفعة راتب',
+      action: kind === 'bonus' ? 'بونس موظف' : 'دفعة راتب',
       entityType: 'SalaryPayment',
       entityId: doc._id,
-      details: { employeeId, employeeName: emp.name, amountSyp, amountUsd, businessDate },
+      details: { employeeId, employeeName: emp.name, amountSyp, amountUsd, businessDate, kind },
     })
     res.status(201).json({ payment: serializePayment(doc) })
   } catch (e) {
@@ -273,6 +289,7 @@ salaryLedgerRouter.patch('/payments/:id', async (req, res) => {
     const body = req.body ?? {}
     if (body.amountSyp != null) doc.amountSyp = roundMoney(body.amountSyp)
     if (body.amountUsd != null) doc.amountUsd = round2(body.amountUsd)
+    if (body.kind != null) doc.kind = paymentKind(body.kind)
     if (body.note != null) doc.note = String(body.note).trim().slice(0, 2000)
     if (body.businessDate != null) {
       const d = parseYmd(body.businessDate)

@@ -12,6 +12,8 @@ const salaryPaymentSchema = new mongoose.Schema(
     amountUsd: { type: Number, min: 0, default: 0 },
     usdSypRate: { type: Number, min: 0, default: 0 },
     businessDate: { type: String, required: true, index: true },
+    /** salary = من الراتب الشهري، bonus = بونس إضافي لا يُخصم من المتبقي */
+    kind: { type: String, enum: ['salary', 'bonus'], default: 'salary', index: true },
     note: { type: String, trim: true, maxlength: 2000, default: '' },
     createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
