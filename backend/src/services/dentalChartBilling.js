@@ -552,8 +552,9 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
   }
 
   let tr = null
+  let tooth = null
   if (Number.isFinite(toothFdi) && toothFdi >= 11) {
-    const tooth = (patient.dentalChart.teeth || []).find((t) => Number(t.fdi) === toothFdi)
+    tooth = (patient.dentalChart.teeth || []).find((t) => Number(t.fdi) === toothFdi)
     if (!tooth) return false
     tr = (tooth.treatments || []).find((x) => String(x._id) === treatmentId)
   } else {
@@ -570,6 +571,16 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
 
   patient.markModified('dentalChart')
   await patient.save()
+  try {
+    const { settleLabsForCollectedTreatment } = await import('./dentalLabCollectionSettlement.js')
+    await settleLabsForCollectedTreatment(patient, tr, {
+      billingItemId: bi._id,
+      businessDate: paidAt,
+      tooth,
+    })
+  } catch (labSettleErr) {
+    console.error('settleLabsForCollectedTreatment:', labSettleErr)
+  }
   return true
 }
 
@@ -735,6 +746,12 @@ export async function applyDentalDebtAllocationsToChart(patientId, allocations, 
   if (applied > 0) {
     patient.markModified('dentalChart')
     await patient.save()
+    try {
+      const { syncCollectedDentalLabPayments } = await import('./dentalLabCollectionSettlement.js')
+      await syncCollectedDentalLabPayments()
+    } catch (labSettleErr) {
+      console.error('syncCollectedDentalLabPayments:', labSettleErr)
+    }
   }
   return { applied, leftover }
 }

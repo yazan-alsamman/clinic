@@ -8,6 +8,11 @@ const dentalLabPaymentSchema = new mongoose.Schema(
     usdSypRate: { type: Number, default: 0, min: 0 },
     businessDate: { type: String, default: '', trim: true },
     note: { type: String, default: '', trim: true, maxlength: 500 },
+    /** دفعة أُنشئت تلقائياً عند تحصيل إجراء المريض الذي يخص هذا المخبر */
+    autoFromCollection: { type: Boolean, default: false },
+    sourceLabWorkId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    sourcePatientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', default: null },
+    sourceBillingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     createdByName: { type: String, default: '', trim: true, maxlength: 160 },
   },

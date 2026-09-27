@@ -320,12 +320,24 @@ export async function deleteDentalTreatmentFully({ patientId, treatmentId }) {
   } else {
     patient.dentalChart.generalTreatments.splice(found.idx, 1)
     const tid = String(treatment._id)
+    const removedLabIds = (patient.dentalChart.generalLabWorks || [])
+      .filter((lab) => String(lab?.linkedGeneralTreatmentId || '') === tid)
+      .map((lab) => lab?._id)
+      .filter(Boolean)
     const beforeLabs = Array.isArray(patient.dentalChart.generalLabWorks)
       ? patient.dentalChart.generalLabWorks.length
       : 0
     patient.dentalChart.generalLabWorks = (patient.dentalChart.generalLabWorks || []).filter(
       (lab) => String(lab?.linkedGeneralTreatmentId || '') !== tid,
     )
+    if (removedLabIds.length) {
+      try {
+        const { removeAutoLabPaymentsForWorkIds } = await import('./dentalLabCollectionSettlement.js')
+        await removeAutoLabPaymentsForWorkIds(removedLabIds)
+      } catch (labPayErr) {
+        console.error('removeAutoLabPaymentsForWorkIds:', labPayErr)
+      }
+    }
     chartMarks.labsRemoved = Math.max(
       0,
       beforeLabs - (patient.dentalChart.generalLabWorks || []).length,

@@ -33,6 +33,13 @@ function normalizeLabNameKey(name) {
  * يجمع أعمال المخابر من مخططات المرضى ويربطها بحسابات المخابر المسجّلة.
  */
 export async function listDentalLabAccounts({ includeInactive = true } = {}) {
+  try {
+    const { syncCollectedDentalLabPayments } = await import('./dentalLabCollectionSettlement.js')
+    await syncCollectedDentalLabPayments()
+  } catch (syncErr) {
+    console.error('syncCollectedDentalLabPayments:', syncErr)
+  }
+
   const labs = await DentalLab.find(includeInactive ? {} : { active: true })
     .sort({ sortOrder: 1, name: 1 })
     .lean()
@@ -148,6 +155,7 @@ export async function listDentalLabAccounts({ includeInactive = true } = {}) {
       businessDate: String(pay.businessDate || '').trim(),
       note: String(pay.note || '').trim(),
       createdByName: String(pay.createdByName || '').trim(),
+      autoFromCollection: pay.autoFromCollection === true,
       createdAt: pay.createdAt || null,
     }))
     payments.sort((a, b) => String(b.businessDate || b.createdAt || '').localeCompare(String(a.businessDate || a.createdAt || '')))

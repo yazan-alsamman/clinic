@@ -31,6 +31,7 @@ type LabPaymentRow = {
   businessDate: string
   note: string
   createdByName: string
+  autoFromCollection?: boolean
   createdAt: string | null
 }
 
@@ -123,8 +124,8 @@ export function AdminDentalLabsPage() {
     <>
       <h1 className="page-title">المخابر</h1>
       <p className="page-desc">
-        أضف أسماء المخابر هنا. عند تسجيل عمل مخبر على سن المريض يُحسب تلقائياً على حساب المخبر المحدد —
-        مع إجمالي الأعمال، المسدّد، والمتبقي.
+        أضف أسماء المخابر هنا. عند تسجيل عمل مخبر على إجراء المريض يُحسب على حساب المخبر، وبعد تحصيل
+        الإجراء يُضاف مبلغ المخبر مباشرةً إلى المسدّد.
       </p>
 
       {err ? <p style={{ color: 'var(--danger)' }}>{err}</p> : null}
@@ -396,7 +397,7 @@ export function AdminDentalLabsPage() {
                                       <td dir="ltr">{p.businessDate || '—'}</td>
                                       <td dir="ltr">{fmtSyp(p.effectiveSyp)}</td>
                                       <td>{p.note || '—'}</td>
-                                      <td>{p.createdByName || '—'}</td>
+                                      <td>{p.autoFromCollection ? 'تحصيل تلقائي' : p.createdByName || '—'}</td>
                                       <td>
                                         <button
                                           type="button"
