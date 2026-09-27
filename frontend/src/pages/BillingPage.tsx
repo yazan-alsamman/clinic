@@ -119,6 +119,12 @@ function itemEffectiveDueUsd(item: Item | null): number {
   return Number(item.effectiveAmountDueUsd ?? item.amountDueUsd) || 0
 }
 
+function itemHasCollectableDue(item: Item | null): boolean {
+  if (!item) return false
+  if (itemEffectiveDueSyp(item) > 0) return true
+  return itemBillingCurrency(item) === 'USD' && itemEffectiveDueUsd(item) > 0
+}
+
 function formatUsdAmount(n: number): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 6 })
 }
@@ -252,6 +258,7 @@ export function BillingPage() {
   const [date, setDate] = useState('')
   const [viewAllPending, setViewAllPending] = useState(false)
   const [items, setItems] = useState<Item[]>([])
+  const [otherDateItems, setOtherDateItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -356,19 +363,23 @@ export function BillingPage() {
       if (viewAllPending && user?.role === 'super_admin') {
         const data = await api<{ items: Item[] }>('/api/billing/pending-all?limit=100')
         setItems(data.items)
+        setOtherDateItems([])
         return
       }
       if (!date) {
         setItems([])
+        setOtherDateItems([])
         return
       }
-      const data = await api<{ items: Item[] }>(
+      const data = await api<{ items: Item[]; otherDateItems?: Item[] }>(
         `/api/billing/pending?date=${encodeURIComponent(date)}`,
       )
       setItems(data.items)
+      setOtherDateItems(data.otherDateItems || [])
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'تعذر التحميل')
       setItems([])
+      setOtherDateItems([])
     } finally {
       setLoading(false)
     }
@@ -380,7 +391,7 @@ export function BillingPage() {
 
   async function completePay(id: string) {
     setErr('')
-    if (payItem && itemEffectiveDueSyp(payItem) <= 0) {
+    if (payItem && !itemHasCollectableDue(payItem)) {
       setErr('لا يوجد مبلغ مستحق على هذا البند — راجع التسعير في ملف المريض.')
       return
     }
@@ -831,13 +842,18 @@ export function BillingPage() {
         <div className="card" style={{ marginTop: '1rem' }}>
           <p style={{ margin: 0 }}>جاري التحميل…</p>
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && otherDateItems.length === 0 ? (
         <div className="card" style={{ marginTop: '1rem' }}>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا توجد بنود معلّقة.</p>
         </div>
       ) : (
+        {otherDateItems.length > 0 ? (
+          <p style={{ margin: '1rem 0 0', color: 'var(--warning)', fontSize: '0.88rem' }}>
+            بنود معلّقة من أيام أخرى ظاهرة في آخر القائمة حتى يمكن تحصيلها، ومنها جلسات لم يُنشأ لها بند في يومها.
+          </p>
+        ) : null}
         <ul style={{ listStyle: 'none', padding: 0, marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-          {items.map((b) => (
+          {[...items, ...otherDateItems].map((b) => (
             <li key={b.id} className="card">
               <div
                 style={{
@@ -992,7 +1008,7 @@ export function BillingPage() {
                       ) : null}
                     </>
                   ) : null}
-                  {(!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) && itemEffectiveDueSyp(b) > 0 ? (
+                  {(!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) && itemHasCollectableDue(b) ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1016,7 +1032,7 @@ export function BillingPage() {
                       {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                     </button>
                   ) : (!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) &&
-                    itemEffectiveDueSyp(b) <= 0 ? (
+                    !itemHasCollectableDue(b) ? (
                     <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
                       مستحق ٠ — راجع الملف
                     </span>
@@ -1165,7 +1181,7 @@ export function BillingPage() {
                 لا يتوفر سعر صرف في الواجهة لهذا البند — سيتحقق الخادم من السعر المحفوظ لتاريخ البند.
               </p>
             ) : null}
-            {itemEffectiveDueSyp(payItem) <= 0 ? (
+            {!itemHasCollectableDue(payItem) ? (
               <p style={{ color: 'var(--danger)', marginTop: '0.35rem', fontSize: '0.88rem' }}>
                 لا يمكن تأكيد الدفع: المستحق صفر. أغلق النافذة وراجع تسعير الجلسة في ملف المريض.
               </p>
@@ -1725,7 +1741,7 @@ export function BillingPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={busyId === payItem.id || itemEffectiveDueSyp(payItem) <= 0}
+                disabled={busyId === payItem.id || !itemHasCollectableDue(payItem)}
                 onClick={() =>
                   void (itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
                     ? completePackageAddonPayAndConsume()

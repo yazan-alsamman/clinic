@@ -209,7 +209,11 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   const savedDiscountPercent = Number(bi.discountPercent) || 0
   const savedEffectiveDueSyp = Math.round(Number(bi.effectiveAmountDueSyp || bi.amountDueSyp) || 0)
   const dueBaseSyp = savedDiscountPercent > 0 ? savedEffectiveDueSyp : savedListDueSyp
-  if (dueBaseSyp <= 0) {
+  const isUsdBillingEarly = String(bi.currency || 'SYP').toUpperCase() === 'USD'
+  const dueUsdEarly = isUsdBillingEarly
+    ? round6(Number(bi.effectiveAmountDueUsd || bi.amountDueUsd || bi.listAmountDueUsd) || 0)
+    : 0
+  if (dueBaseSyp <= 0 && !(dueUsdEarly > 0)) {
     const err = new Error(
       bi.isPackagePrepaid
         ? 'هذه الجلسة ضمن باكج ولا يوجد مبلغ إضافي مستحق.'

@@ -26,6 +26,7 @@ import {
 } from '../services/billingPaymentCompletion.js'
 import { normalizePayCurrency } from '../services/billingPaymentReceipt.js'
 import { demoteAddonOnlyLinkedPackageSession } from '../services/laserPackageBooking.js'
+import { repairUnbilledSessions } from '../services/repairUnbilledSessions.js'
 
 /** يُرجع { discountPercent, listAmountDueSyp, effectiveAmountDueSyp } — يرمي إن كانت النسبة غير صالحة */
 function resolveBillingDiscount(listDueSyp, discountPercentBody) {
@@ -510,6 +511,7 @@ async function attachLaserAreaLabels(billingItems, dtos) {
 billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
     const date = String(req.query.date || '').trim() || todayBusinessDate()
+    await repairUnbilledSessions(date)
     const [items, bdDay] = await Promise.all([
       BillingItem.find({
         status: 'pending_payment',
@@ -580,9 +582,29 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
     )
     await attachLaserAreaLabels(items, itemsOut)
 
+    const otherRaw = await BillingItem.find({
+      status: 'pending_payment',
+      businessDate: { $ne: date },
+    })
+      .sort({ businessDate: -1, createdAt: -1 })
+      .limit(40)
+      .populate('patientId', 'name prepaidCreditSyp prepaidCreditDentalSyp outstandingDebtSyp outstandingDebtUsd')
+      .populate('providerUserId', 'name')
+      .lean()
+    const otherDateItems = otherRaw.map((b) =>
+      billingItemDto(
+        b,
+        resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
+        b.providerUserId?.name,
+        null,
+      ),
+    )
+    await attachLaserAreaLabels(otherRaw, otherDateItems)
+
     res.json({
       date,
       items: itemsOut,
+      otherDateItems,
     })
   } catch (e) {
     console.error(e)
@@ -612,6 +634,7 @@ billingRouter.get('/pending-count', requireRoles(...BILLING_ROLES), async (req, 
 /** كل المعلّقة (أيام) — اختياري لمدير */
 billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) => {
   try {
+    await repairUnbilledSessions(todayBusinessDate())
     const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '80'), 10) || 80))
     const items = await BillingItem.find({ status: 'pending_payment' })
       .sort({ businessDate: -1, createdAt: 1 })
