@@ -43,8 +43,10 @@ const scheduleSlotSchema = new mongoose.Schema(
      * تُستخدم لاستعادة التصنيف دون الاعتماد على نص procedureType فقط.
      */
     laserAddonProcedureOptionIds: [{ type: String, trim: true }],
-    /** باكج الليزر التي تُخصم منها هذه الجلسة عند وجود أكثر من باكج */
+    /** باكج الليزر التي تُخصم منها هذه الجلسة عند وجود أكثر من باكج (الأولى للتوافق) */
     laserBookingPackageId: { type: String, default: '', trim: true },
+    /** كل الباكجات التي تُنجز ضمن هذه الجلسة */
+    laserBookingPackageIds: [{ type: String, trim: true }],
     /** تُملأ عند إنشاء جلسة ليزر لهذا الموعد لمنع إنشاء جلسة ثانية لنفسه */
     laserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null, index: true },
   },

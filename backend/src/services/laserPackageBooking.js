@@ -248,6 +248,79 @@ export function normalizeLaserSlotPackageModeForResolve(mode) {
   return m
 }
 
+/**
+ * عند اختيار أكثر من باكج لجلسة واحدة: كل باكج تُكمَل إن كانت ناقصة، وإلا تُؤخذ جلسة جديدة.
+ * لا تُدمج جلستان ناقصتان مرتبطتان بجلستي ليزر مختلفتين.
+ */
+export async function resolveLaserPackagesForBooking(patientLike, packageIds, slotPackageMode) {
+  const ids = [...new Set((packageIds || []).map((id) => String(id || '').trim()).filter(Boolean))].slice(0, 12)
+  if (!ids.length) return { matches: [], primary: null, error: 'اختر باكجاً واحداً على الأقل.' }
+  const mode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
+  const matches = []
+  for (const id of ids) {
+    let match = null
+    if (ids.length > 1) {
+      match =
+        (await findContinueLaserPackageSession(patientLike, id)) ||
+        findFreshLaserPackageSession(patientLike, id)
+    } else if (mode === 'continue_package') {
+      match = await findContinueLaserPackageSession(patientLike, id)
+    } else if (mode === 'use_package') {
+      match = findFreshLaserPackageSession(patientLike, id)
+    } else {
+      match = await resolveLaserPackageSessionForBooking(patientLike, slotPackageMode, id)
+    }
+    if (!match) {
+      const title = String(
+        (patientLike?.sessionPackages || []).find((p) => String(p?._id || '') === id)?.title || 'الباكج',
+      ).trim()
+      return {
+        matches: [],
+        primary: null,
+        error: `لا يمكن حجز «${title}» في هذه الجلسة — لا توجد جلسة متاحة أو قيد الإكمال.`,
+      }
+    }
+    matches.push(match)
+  }
+  const continues = matches.filter((m) => m.mode === 'continue')
+  if (continues.length > 1) {
+    const sessionIds = new Set(continues.map((m) => String(m.existingLaserSession?._id || '')))
+    if (sessionIds.size > 1) {
+      return {
+        matches: [],
+        primary: null,
+        error:
+          'لا يمكن جمع أكثر من جلسة باكج ناقصة في موعد واحد. أكمل الجلسة الناقصة أولاً، أو اختر باكجات فيها جلسات جديدة.',
+      }
+    }
+  }
+  const primary = continues[0] || matches[0]
+  return { matches, primary, error: null }
+}
+
+export async function attachPackageSessionsToLaserSession({ patientId, matches, laserSessionId, billingItemId }) {
+  const pid = String(patientId || '').trim()
+  const lsId = laserSessionId || null
+  if (!pid || !lsId) return
+  for (const match of matches || []) {
+    const pkgId = match?.pkg?._id
+    const sessId = match?.session?._id
+    if (!pkgId || !sessId) continue
+    await Patient.updateOne(
+      { _id: pid },
+      {
+        $set: {
+          'sessionPackages.$[pkg].sessions.$[sess].linkedLaserSessionId': lsId,
+          ...(billingItemId
+            ? { 'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': billingItemId }
+            : {}),
+        },
+      },
+      { arrayFilters: [{ 'pkg._id': pkgId }, { 'sess._id': sessId }] },
+    )
+  }
+}
+
 export async function resolveLaserPackageSessionForBooking(patientLike, slotPackageMode, packageId) {
   const mode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
   if (mode === 'outside_package') return null

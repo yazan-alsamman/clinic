@@ -52,15 +52,18 @@ export function LaserOpenPackagesDetails({
   packages,
   compact = false,
   selectedId,
+  selectedIds,
   onSelect,
 }: {
   packages: LaserBookingOpenPackage[]
   compact?: boolean
   selectedId?: string
+  selectedIds?: string[]
   onSelect?: (pkg: LaserBookingOpenPackage) => void
 }) {
   if (!packages.length) return null
   const selectable = typeof onSelect === 'function'
+  const chosen = new Set((selectedIds && selectedIds.length ? selectedIds : selectedId ? [selectedId] : []).map(String))
   return (
     <div
       style={{
@@ -70,7 +73,7 @@ export function LaserOpenPackagesDetails({
       }}
     >
       {packages.map((pkg) => {
-        const selected = Boolean(selectedId) && selectedId === pkg.id
+        const selected = chosen.has(pkg.id)
         return (
           <div
             key={pkg.id}
@@ -109,7 +112,7 @@ export function LaserOpenPackagesDetails({
               {pkg.title}
               {selected ? (
                 <span style={{ color: 'var(--cyan)', fontWeight: 600, marginRight: '0.35rem' }}>
-                  — هذه الجلسة من هذا الباكج
+                  — ضمن هذه الجلسة
                 </span>
               ) : null}
               {pkg.isPartial ? (

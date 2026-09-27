@@ -332,7 +332,7 @@ export function ReceptionAppointmentPage() {
   const [successMsg, setSuccessMsg] = useState('')
   const [bookingOpen, setBookingOpen] = useState(false)
   const [laserPackageBookingIntent, setLaserPackageBookingIntent] = useState<LaserPackageBookingIntent>('')
-  const [laserBookingPackageId, setLaserBookingPackageId] = useState('')
+  const [laserBookingPackageIds, setLaserBookingPackageIds] = useState<string[]>([])
   const [laserBookingContext, setLaserBookingContext] = useState<LaserBookingContext | null>(null)
   const [laserBookingContextLoading, setLaserBookingContextLoading] = useState(false)
   const [laserProcedureGroups, setLaserProcedureGroups] = useState<LaserProcedureGroup[]>([])
@@ -427,7 +427,7 @@ export function ReceptionAppointmentPage() {
     if (!picked?.id || selectedService !== 'laser') {
       setLaserBookingContext(null)
       setLaserPackageBookingIntent('')
-      setLaserBookingPackageId('')
+      setLaserBookingPackageIds([])
       return
     }
     let cancelled = false
@@ -451,15 +451,11 @@ export function ReceptionAppointmentPage() {
 
   useEffect(() => {
     const pkgs = laserBookingContext?.openPackages || []
-    if (pkgs.length === 1) {
-      setLaserBookingPackageId(pkgs[0].id)
+    if (pkgs.length <= 1) {
+      setLaserBookingPackageIds(pkgs.length === 1 ? [pkgs[0].id] : [])
       return
     }
-    if (pkgs.length === 0) {
-      setLaserBookingPackageId('')
-      return
-    }
-    setLaserBookingPackageId((prev) => (pkgs.some((p) => p.id === prev) ? prev : ''))
+    setLaserBookingPackageIds((prev) => prev.filter((id) => pkgs.some((p) => p.id === id)))
   }, [laserBookingContext?.openPackages])
 
   const channelsByService = useMemo(
@@ -654,11 +650,14 @@ export function ReceptionAppointmentPage() {
     [selectedLaserItemIds, laserItemById],
   )
 
-  const selectedLaserBookingPackage = useMemo((): LaserBookingOpenPackage | undefined => {
+  const selectedLaserBookingPackages = useMemo((): LaserBookingOpenPackage[] => {
     const pkgs = laserBookingContext?.openPackages || []
-    if (!pkgs.length) return undefined
-    return pkgs.find((p) => p.id === laserBookingPackageId) || (pkgs.length === 1 ? pkgs[0] : undefined)
-  }, [laserBookingContext?.openPackages, laserBookingPackageId])
+    if (!pkgs.length) return []
+    if (pkgs.length === 1) return pkgs
+    return pkgs.filter((p) => laserBookingPackageIds.includes(p.id))
+  }, [laserBookingContext?.openPackages, laserBookingPackageIds])
+
+  const selectedLaserBookingPackage = selectedLaserBookingPackages[0]
 
   const selectedGenderForLaserPricing: '' | 'male' | 'female' =
     picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderPending
@@ -784,8 +783,8 @@ export function ReceptionAppointmentPage() {
     }
     const usesSelectedPackage = Boolean(laserIntent && laserIntent !== 'outside_package')
     const openPkgs = laserBookingContext?.openPackages || []
-    if (usesSelectedPackage && openPkgs.length > 1 && !laserBookingPackageId) {
-      setFormErr('اختر الباكج التي ستُخصم منها هذه الجلسة قبل تأكيد الموعد.')
+    if (usesSelectedPackage && openPkgs.length > 1 && selectedLaserBookingPackages.length === 0) {
+      setFormErr('اختر باكجاً واحداً أو أكثر لتُنجز في هذه الجلسة قبل تأكيد الموعد.')
       return false
     }
     if (isLaserPackageWithAddonIntent(laserIntent) && selectedLaserItems.length === 0) {
@@ -835,14 +834,18 @@ export function ReceptionAppointmentPage() {
     const usePackageSlot = selectedService === 'laser' && isLaserUsePackageIntent(laserIntent)
     const continuePackageSlot = selectedService === 'laser' && isLaserContinuePackageIntent(laserIntent)
     const addonLabel = selectedLaserItems.map((item) => item.name).join(' + ').trim()
-    const remainingLabel = (
-      selectedLaserBookingPackage?.remainingAreas ||
-      laserBookingContext?.partialVisit?.remainingAreas ||
-      []
-    )
+    const remainingLabel = [
+      ...new Set(
+        selectedLaserBookingPackages.flatMap((p) => p.remainingAreas || []).map((x) => String(x || '').trim()),
+      ),
+    ]
+      .filter(Boolean)
       .join('، ')
       .trim()
-    const pkgTitle = String(selectedLaserBookingPackage?.title || '').trim()
+    const pkgTitle = selectedLaserBookingPackages
+      .map((p) => String(p.title || '').trim())
+      .filter(Boolean)
+      .join(' + ')
     const proc =
       selectedService === 'laser'
         ? continuePackageSlot
@@ -890,7 +893,13 @@ export function ReceptionAppointmentPage() {
                 ? {
                     laserPackageBookingMode: laserIntent,
                     laserBookingPackageId:
-                      laserIntent !== 'outside_package' ? laserBookingPackageId || undefined : undefined,
+                      laserIntent !== 'outside_package'
+                        ? selectedLaserBookingPackages[0]?.id || undefined
+                        : undefined,
+                    laserBookingPackageIds:
+                      laserIntent !== 'outside_package'
+                        ? selectedLaserBookingPackages.map((p) => p.id)
+                        : [],
                     ...(isLaserPackageWithAddonIntent(laserIntent)
                       ? { laserAddonProcedureOptionIds: selectedLaserItemIds }
                       : { laserAddonProcedureOptionIds: [] }),
@@ -917,7 +926,7 @@ export function ReceptionAppointmentPage() {
       setPatientHits([])
       setSelectedLaserItemIds([])
       setLaserPackageBookingIntent('')
-      setLaserBookingPackageId('')
+      setLaserBookingPackageIds([])
       await loadSlots()
       return true
     } catch (e) {
@@ -1398,16 +1407,19 @@ export function ReceptionAppointmentPage() {
                       <>
                         <p style={{ margin: '0 0 0.45rem', fontSize: '0.88rem', fontWeight: 600 }}>
                           {(laserBookingContext?.openPackages || []).length > 1
-                            ? 'لدى المريض أكثر من باكج — اختر الباكج التي ستُخصم منها هذه الجلسة:'
+                            ? 'لدى المريض أكثر من باكج — يمكن اختيار باكج واحدة أو أكثر لتُنجز في هذه الجلسة:'
                             : 'تفاصيل باكج الليزر الفعّال للمريض:'}
                         </p>
                         <LaserOpenPackagesDetails
                           packages={laserBookingContext?.openPackages || []}
-                          selectedId={laserBookingPackageId}
+                          selectedIds={selectedLaserBookingPackages.map((p) => p.id)}
                           onSelect={
                             (laserBookingContext?.openPackages || []).length > 1
                               ? (pkg) => {
-                                  setLaserBookingPackageId(pkg.id)
+                                  setLaserBookingPackageIds((prev) =>
+                                    prev.includes(pkg.id) ? prev.filter((id) => id !== pkg.id) : [...prev, pkg.id],
+                                  )
+                                  setLaserPackageBookingIntent('')
                                   setFormErr('')
                                 }
                               : undefined
@@ -1415,7 +1427,7 @@ export function ReceptionAppointmentPage() {
                         />
                       </>
                     ) : null}
-                    {(laserBookingContext?.openPackages || []).length > 1 && !selectedLaserBookingPackage ? (
+                    {(laserBookingContext?.openPackages || []).length > 1 && selectedLaserBookingPackages.length === 0 ? (
                       <p
                         style={{
                           margin: '0 0 0.75rem',
@@ -1424,7 +1436,7 @@ export function ReceptionAppointmentPage() {
                           lineHeight: 1.55,
                         }}
                       >
-                        اضغط على الباكج أعلاه أولاً، ثم اختاري نوع الحجز.
+                        اضغط على الباكج أو الباكجات أعلاه أولاً (يمكن أكثر من واحدة)، ثم اختاري نوع الحجز.
                       </p>
                     ) : selectedLaserBookingPackage && laserPackageAllowsContinue(selectedLaserBookingPackage) ? (
                       <>
@@ -1470,8 +1482,7 @@ export function ReceptionAppointmentPage() {
                   </>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {selectedLaserBookingPackage &&
-                  laserPackageAllowsContinue(selectedLaserBookingPackage) ? (
+                  {selectedLaserBookingPackages.some((p) => laserPackageAllowsContinue(p)) ? (
                     <>
                       <button
                         type="button"
@@ -1499,7 +1510,7 @@ export function ReceptionAppointmentPage() {
                       </button>
                     </>
                   ) : null}
-                  {selectedLaserBookingPackage && laserPackageAllowsFresh(selectedLaserBookingPackage) ? (
+                  {selectedLaserBookingPackages.some((p) => laserPackageAllowsFresh(p)) ? (
                     <>
                       <button
                         type="button"
@@ -1529,9 +1540,9 @@ export function ReceptionAppointmentPage() {
                       </button>
                     </>
                   ) : null}
-                  {selectedLaserBookingPackage &&
-                  !laserPackageAllowsContinue(selectedLaserBookingPackage) &&
-                  !laserPackageAllowsFresh(selectedLaserBookingPackage) ? (
+                  {selectedLaserBookingPackages.length > 0 &&
+                  !selectedLaserBookingPackages.some((p) => laserPackageAllowsContinue(p)) &&
+                  !selectedLaserBookingPackages.some((p) => laserPackageAllowsFresh(p)) ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1571,16 +1582,21 @@ export function ReceptionAppointmentPage() {
                   {(laserBookingContext?.openPackages || []).length > 0 ? (
                     <LaserOpenPackagesDetails
                       packages={
-                        selectedLaserBookingPackage
-                          ? [selectedLaserBookingPackage]
+                        selectedLaserBookingPackages.length
+                          ? selectedLaserBookingPackages
                           : laserBookingContext?.openPackages || []
                       }
+                      selectedIds={selectedLaserBookingPackages.map((p) => p.id)}
                       compact
                     />
                   ) : null}
-                  {laserPackageBookingIntent && laserPackageBookingIntent !== 'outside_package' && selectedLaserBookingPackage ? (
+                  {laserPackageBookingIntent &&
+                  laserPackageBookingIntent !== 'outside_package' &&
+                  selectedLaserBookingPackages.length > 0 ? (
                     <p style={{ margin: '0 0 0.45rem', fontSize: '0.88rem' }}>
-                      الجلسة ستُخصم من باكج: <strong>{selectedLaserBookingPackage.title}</strong>
+                      الجلسة ستُخصم من{' '}
+                      {selectedLaserBookingPackages.length > 1 ? 'الباكجات' : 'باكج'}:{' '}
+                      <strong>{selectedLaserBookingPackages.map((p) => p.title).join(' + ')}</strong>
                     </p>
                   ) : null}
                   <p style={{ margin: '0 0 0.65rem' }}>

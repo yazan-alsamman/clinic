@@ -23,7 +23,7 @@ import {
   findDebtSettlementsForBusinessDateFilter,
   mergeLaserDebtSettlementsIntoPaymentBreakdown,
 } from '../services/patientDebtSettlementAllocation.js'
-import { resolveLaserPackageSessionForBooking, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas } from '../services/laserPackageBooking.js'
+import { resolveLaserPackageSessionForBooking, resolveLaserPackagesForBooking, attachPackageSessionsToLaserSession, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas } from '../services/laserPackageBooking.js'
 import {
   areaBelongsToLaserPackage,
   buildPackageAreaBreakdown,
@@ -1389,9 +1389,10 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const scheduleSlotIdEarly = String(body.scheduleSlotId || '').trim()
     let slotPackageMode = ''
     let slotPackageId = ''
+    let slotPackageIds = []
     if (scheduleSlotIdEarly) {
       const slotLean = await ScheduleSlot.findById(scheduleSlotIdEarly)
-        .select('laserPackageBookingMode procedureType laserBookingPackageId')
+        .select('laserPackageBookingMode procedureType laserBookingPackageId laserBookingPackageIds')
         .lean()
       if (slotLean) {
         slotPackageMode = String(slotLean.laserPackageBookingMode || '').trim()
@@ -1399,6 +1400,16 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
           slotPackageMode = 'outside_package'
         }
         slotPackageId = String(slotLean.laserBookingPackageId || '').trim()
+        slotPackageIds = [
+          ...new Set(
+            [
+              ...(Array.isArray(slotLean.laserBookingPackageIds) ? slotLean.laserBookingPackageIds : []),
+              slotPackageId,
+            ]
+              .map((id) => String(id || '').trim())
+              .filter(Boolean),
+          ),
+        ]
       }
     }
     const resolvedSlotPackageMode = normalizeLaserSlotPackageModeForResolve(slotPackageMode)
@@ -1407,10 +1418,41 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       body.forceOutsidePackage === true ||
       slotPackageMode === 'outside_package'
 
-    const requestedPackageId = String(body.laserBookingPackageId || body.patientPackageId || slotPackageId || '').trim()
-    const packageMatch = skipLaserPackage
-      ? null
-      : await resolveLaserPackageSessionForBooking(patient, resolvedSlotPackageMode, requestedPackageId || undefined)
+    const requestedPackageIds = [
+      ...new Set(
+        [
+          ...(Array.isArray(body.laserBookingPackageIds) ? body.laserBookingPackageIds : []),
+          body.laserBookingPackageId,
+          body.patientPackageId,
+          ...slotPackageIds,
+        ]
+          .map((id) => String(id || '').trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 12)
+    let packageMatch = null
+    let packageMatches = []
+    if (!skipLaserPackage && requestedPackageIds.length > 1) {
+      const resolvedMany = await resolveLaserPackagesForBooking(
+        patient,
+        requestedPackageIds,
+        slotPackageMode || resolvedSlotPackageMode,
+      )
+      if (resolvedMany.error) {
+        res.status(400).json({ error: resolvedMany.error })
+        return
+      }
+      packageMatches = resolvedMany.matches || []
+      packageMatch = resolvedMany.primary || null
+    } else if (!skipLaserPackage) {
+      const requestedPackageId = requestedPackageIds[0] || ''
+      packageMatch = await resolveLaserPackageSessionForBooking(
+        patient,
+        resolvedSlotPackageMode,
+        requestedPackageId || undefined,
+      )
+      packageMatches = packageMatch ? [packageMatch] : []
+    }
     const patientGender = normalizePatientGender(patient.gender)
 
     let effectiveMainOptionIds = parseUniqueStringIds(body.procedureOptionIds)
@@ -1429,9 +1471,14 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     let addonProcedureOptionIds = addonProcedureOptionIdsEarly.filter(
       (id) => !effectiveMainOptionIds.includes(id),
     )
-    const packageIdList = Array.isArray(packageMatch?.pkg?.procedureOptionIds)
-      ? packageMatch.pkg.procedureOptionIds.map((x) => String(x || '').trim()).filter(Boolean)
-      : []
+    const packageIdList = [
+      ...new Set(
+        (packageMatches.length ? packageMatches : packageMatch ? [packageMatch] : [])
+          .flatMap((m) => (Array.isArray(m?.pkg?.procedureOptionIds) ? m.pkg.procedureOptionIds : []))
+          .map((x) => String(x || '').trim())
+          .filter(Boolean),
+      ),
+    ]
     const packageOptionIdSet = new Set(packageIdList)
     const allProcedureOptionIds = [
       ...new Set([
@@ -1973,6 +2020,17 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         console.error(auditErr)
       }
 
+      try {
+        await attachPackageSessionsToLaserSession({
+          patientId: patient._id,
+          matches: packageMatches,
+          laserSessionId: existingLs._id,
+          billingItemId: biExisting?._id || null,
+        })
+      } catch (linkErr) {
+        console.error('attachPackageSessionsToLaserSession:', linkErr)
+      }
+
       res.status(200).json({
         session: typeof existingLs.toJSON === 'function' ? existingLs.toJSON() : existingLs,
         billingItem: {
@@ -2067,21 +2125,13 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         s.clinicalSessionId = cs._id
         await s.save()
       }
-      if (isPackageSession && packageMatch?.pkg?._id && packageMatch?.session?._id) {
-        await Patient.updateOne(
-          { _id: patient._id },
-          {
-            $set: {
-              'sessionPackages.$[pkg].sessions.$[sess].linkedLaserSessionId': s._id,
-              ...(bi?._id
-                ? { 'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': bi._id }
-                : {}),
-            },
-          },
-          {
-            arrayFilters: [{ 'pkg._id': packageMatch.pkg._id }, { 'sess._id': packageMatch.session._id }],
-          },
-        )
+      if (isPackageSession && packageMatches.length > 0) {
+        await attachPackageSessionsToLaserSession({
+          patientId: patient._id,
+          matches: packageMatches,
+          laserSessionId: s._id,
+          billingItemId: bi?._id || null,
+        })
       }
       if (linkedSlot) {
         linkedSlot.laserSessionId = s._id

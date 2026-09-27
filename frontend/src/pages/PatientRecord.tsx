@@ -846,6 +846,15 @@ export function PatientRecord() {
   /** من جدول المواعيد — يحدد إن كان الحجز كجلسة ضمن الباكج */
   const bookedLaserSlotPkgMode = (searchParams.get('laserSlotPkgMode') || '').trim()
   const bookedLaserPkgId = (searchParams.get('laserPkgId') || '').trim()
+  const bookedLaserPkgIds = useMemo(() => {
+    const raw = (searchParams.get('laserPkgIds') || '').trim()
+    const many = raw
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+    if (many.length) return [...new Set(many)]
+    return bookedLaserPkgId ? [bookedLaserPkgId] : []
+  }, [searchParams, bookedLaserPkgId])
   /** معرّفات المناطق خارج الباكج من الحجز (موثوقة أكثر من نص procedureType) */
   const bookedLaserAddonIdsFromQuery = useMemo(() => {
     const raw = (searchParams.get('laserAddonIds') || '').trim()
@@ -2048,6 +2057,16 @@ export function PatientRecord() {
       }
       ids = [...new Set([...doneMainIds, ...remainingIds].filter(Boolean))]
     }
+    if (bookedLaserPkgIds.length > 1) {
+      for (const pid of bookedLaserPkgIds) {
+        const extra = patientPackages.find((p) => p.id === pid && p.department === 'laser' && !p.suspended)
+        for (const oid of extra?.procedureOptionIds || []) {
+          const s = String(oid || '').trim()
+          if (s) ids.push(s)
+        }
+      }
+      ids = [...new Set(ids.filter(Boolean))]
+    }
     if (!ids.length) return
     if (!ids.every((oid) => laserItemById.has(oid))) return
 
@@ -2075,6 +2094,8 @@ export function PatientRecord() {
     bookedLaserAddonIdsFromQuery,
     activeLaserPackage?.id,
     (activeLaserPackage?.procedureOptionIds || []).join(','),
+    bookedLaserPkgIds.join(','),
+    patientPackages,
     clinicalHistory,
     partialPackageLaserSession?.id,
     partialPackageLaserSession?.packageAreaBreakdown?.remainingAreas?.join(','),
@@ -2098,7 +2119,16 @@ export function PatientRecord() {
     if (!withAddonMode) return
     if (laserProcedureLoading || !laserProcedureGroups.length) return
 
-    const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
+    const packageIds = [
+      ...new Set(
+        [
+          ...(activeLaserPackage?.procedureOptionIds || []),
+          ...bookedLaserPkgIds.flatMap(
+            (pid) => patientPackages.find((p) => p.id === pid)?.procedureOptionIds || [],
+          ),
+        ].map((id) => String(id || '').trim()).filter(Boolean),
+      ),
+    ]
     let matchedIds: string[] = []
 
     if (bookedLaserAddonIdsFromQuery.length > 0) {
@@ -2143,6 +2173,8 @@ export function PatientRecord() {
     laserProcedureGroups,
     activeLaserPackage?.id,
     (activeLaserPackage?.procedureOptionIds || []).join(','),
+    bookedLaserPkgIds.join(','),
+    patientPackages,
   ])
 
   useEffect(() => {
@@ -4676,7 +4708,8 @@ export function PatientRecord() {
                     body: JSON.stringify({
                       patientId: id,
                       scheduleSlotId: bookedLaserSlotId || undefined,
-                      laserBookingPackageId: bookedLaserPkgId || undefined,
+                      laserBookingPackageId: bookedLaserPkgIds[0] || bookedLaserPkgId || undefined,
+                      laserBookingPackageIds: bookedLaserPkgIds,
                       room,
                       laserType,
                       pw: laserLineItemsWithPricing.map((x) => x.pw).filter(Boolean).join(' | '),

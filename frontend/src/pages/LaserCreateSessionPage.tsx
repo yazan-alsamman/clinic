@@ -21,6 +21,7 @@ type SlotRow = {
   laserPackageBookingMode?: '' | 'use_package' | 'outside_package' | 'continue_package' | 'continue_package_with_addon' | 'use_package_with_addon'
   laserAddonProcedureOptionIds?: string[]
   laserBookingPackageId?: string
+  laserBookingPackageIds?: string[]
 }
 
 function todayYmd() {
@@ -127,6 +128,16 @@ export function LaserCreateSessionPage() {
                   const addonIds = Array.isArray(s.laserAddonProcedureOptionIds)
                     ? s.laserAddonProcedureOptionIds.filter(Boolean)
                     : []
+                  const pkgIds = [
+                    ...new Set(
+                      [
+                        ...(Array.isArray(s.laserBookingPackageIds) ? s.laserBookingPackageIds : []),
+                        s.laserBookingPackageId,
+                      ]
+                        .map((id) => String(id || '').trim())
+                        .filter(Boolean),
+                    ),
+                  ]
                   return (
                   <tr
                     key={s.id}
@@ -141,8 +152,8 @@ export function LaserCreateSessionPage() {
                             ? `&laserAddonIds=${encodeURIComponent(addonIds.join(','))}`
                             : ''
                         }${
-                          s.laserBookingPackageId
-                            ? `&laserPkgId=${encodeURIComponent(String(s.laserBookingPackageId))}`
+                          pkgIds.length
+                            ? `&laserPkgId=${encodeURIComponent(pkgIds[0])}&laserPkgIds=${encodeURIComponent(pkgIds.join(','))}`
                             : ''
                         }`,
                       )
