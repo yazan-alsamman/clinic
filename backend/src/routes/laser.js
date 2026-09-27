@@ -1744,26 +1744,26 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const manualRaw = Array.isArray(body.manualAreaLabels) ? body.manualAreaLabels : []
     const manualAreaLabels =
       selectedMainOptions.length > 0
-        ? selectedMainOptions.map((row) => String(row?.name || '').trim()).filter(Boolean).slice(0, 20)
+        ? selectedMainOptions.map((row) => String(row?.name || '').trim()).filter(Boolean)
         : [
             ...new Set(
               manualRaw
                 .map((x) => String(x ?? '').trim().slice(0, 120))
                 .filter(Boolean),
             ),
-          ].slice(0, 20)
+          ]
 
     const addonRaw = Array.isArray(body.addonManualLabels) ? body.addonManualLabels : []
     const addonManualLabels =
       selectedAddonOptions.length > 0
-        ? selectedAddonOptions.map((row) => String(row?.name || '').trim()).filter(Boolean).slice(0, 20)
+        ? selectedAddonOptions.map((row) => String(row?.name || '').trim()).filter(Boolean)
         : [
             ...new Set(
               addonRaw
                 .map((x) => String(x ?? '').trim().slice(0, 120))
                 .filter(Boolean),
             ),
-          ].slice(0, 20)
+          ]
     /** خارج الباكج فقط (بدون استهلاك باكج): أظهر المناطق في الوصف كجلسة عادية */
     if (!isPackageSession && manualAreaLabels.length === 0) {
       const fromLines = [
@@ -1772,7 +1772,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
             .map((row) => String(row.areaLabel || '').trim())
             .filter(Boolean),
         ),
-      ].slice(0, 20)
+      ]
       if (fromLines.length > 0) {
         manualAreaLabels.push(...fromLines)
       } else if (addonManualLabels.length > 0) {
@@ -1838,14 +1838,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       ? areaIds.map((id) => labelByArea.get(id) || id).join('، ')
       : ''
     const manualPart = manualAreaLabels.length ? manualAreaLabels.join('، ') : ''
-    const areaPart = [catalogPart, manualPart].filter(Boolean).join(' — ') || 'بدون مناطق محددة'
-    const addonSuffix =
-      isPackageSession && addonManualLabels.length
-        ? ` — إضافات خارج الباكج: ${addonManualLabels.join('، ')}`
-        : ''
-    const laserCoverSuffix = laserCoverAppliedSyp > 0 ? ' — كفر ليزر' : ''
-    const procedureDescriptionBase =
-      `ليزر ${laserType} — ${areaPart}${isPackageSession ? ' (باكج)' : ''}${addonSuffix}${laserCoverSuffix}`.slice(0, 500)
+    const fallbackAreaPart = [catalogPart, manualPart].filter(Boolean).join(' — ')
 
     /** يظهر لدى الاستقبال على التحصيل عند وجود محاسبة بعدد الضربات */
     const pulseLineItems = normalizedLineItems.filter((row) => row.chargeByPulseCount)
@@ -1864,30 +1857,27 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         pulseBillingReceptionNote = 'تم إضافة محاسبة على عدد الضربات لهذه الجلسة'
       }
     } else if (legacyWholeSessionPulse) {
-      const hint = areaPart && areaPart !== 'بدون مناطق محددة' ? areaPart : 'المناطق المحددة'
+      const hint = fallbackAreaPart || 'المناطق المحددة'
       pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات (${hint})`
     }
 
-    const procedureDescription = (
-      pulseBillingReceptionNote
-        ? `${procedureDescriptionBase} — ${pulseBillingReceptionNote}`
-        : procedureDescriptionBase
-    ).slice(0, 500)
-
-    let procedureLabel = procedureDescription
-    if (procedureLabel.length > 200) {
-      if (pulseBillingReceptionNote) {
-        const sep = ' — '
-        const headLen = pulseBillingReceptionNote.length + sep.length
-        const tailRoom = 200 - headLen
-        procedureLabel =
-          tailRoom > 24
-            ? `${pulseBillingReceptionNote}${sep}${procedureDescriptionBase.slice(0, tailRoom)}`
-            : pulseBillingReceptionNote.slice(0, 200)
-      } else {
-        procedureLabel = procedureDescription.slice(0, 200)
+    const procedureTextFromLines = (rows) => {
+      const names = []
+      for (const row of rows || []) {
+        const label = String(row?.areaLabel || '').trim()
+        if (!label) continue
+        names.push(row.isAddon ? `${label} (خارج الباكج)` : label)
       }
+      const areaPart = names.length ? names.join('، ') : fallbackAreaPart || 'بدون مناطق محددة'
+      const cover = laserCoverAppliedSyp > 0 ? ' — كفر ليزر' : ''
+      const pkg = isPackageSession ? ' (باكج)' : ''
+      const base = `ليزر ${laserType} — ${areaPart}${pkg}${cover}`
+      const full = pulseBillingReceptionNote ? `${base} — ${pulseBillingReceptionNote}` : base
+      return full.slice(0, 4000)
     }
+
+    let procedureDescription = procedureTextFromLines(normalizedLineItems)
+    let procedureLabel = procedureDescription
 
     if (isPackageSession && packageMatch?.mode === 'continue') {
       const existingLs = await LaserSession.findById(packageMatch.existingLaserSession._id)
@@ -1953,6 +1943,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       }
 
       normalizedLineItems = [...mergedNonAddon, ...incomingAddons]
+      procedureDescription = procedureTextFromLines(normalizedLineItems)
+      procedureLabel = procedureDescription
       const linesPwAfterMerge = normalizedLineItems.map((row) => row.pw).filter(Boolean)
       const linesPulseAfterMerge = normalizedLineItems.map((row) => row.pulse).filter(Boolean)
       const linesShotsAfterMerge = normalizedLineItems.map((row) => row.shotCount).filter(Boolean)

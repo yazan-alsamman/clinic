@@ -18,6 +18,8 @@ type Item = {
   providerName: string
   department: string
   procedureLabel: string
+  /** كل مناطق جلسة الليزر بالترتيب، بدون قص */
+  laserAreaLabels?: string[]
   amountDueSyp: number
   listAmountDueSyp?: number
   discountPercent?: number
@@ -52,6 +54,27 @@ const deptLabel: Record<string, string> = {
   laser: 'ليزر',
   dermatology: 'جلدية',
   dental: 'أسنان',
+}
+
+function LaserSessionAreas({ labels }: { labels: string[] }) {
+  if (!labels.length) return null
+  return (
+    <div style={{ margin: '0.4rem 0 0' }}>
+      <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>كل المناطق ({labels.length})</div>
+      <ol
+        style={{
+          margin: '0.3rem 0 0',
+          paddingInlineStart: '1.25rem',
+          fontSize: '0.92rem',
+          lineHeight: 1.55,
+        }}
+      >
+        {labels.map((name, i) => (
+          <li key={`${i}-${name}`}>{name}</li>
+        ))}
+      </ol>
+    </div>
+  )
 }
 
 function stripPct(s: string) {
@@ -834,9 +857,18 @@ export function BillingPage() {
                       — {b.businessDate}
                     </span>
                   ) : null}
-                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                    {b.procedureLabel} — المقدّم: {b.providerName || '—'}
-                  </p>
+                  {b.department === 'laser' && (b.laserAreaLabels?.length ?? 0) > 0 ? (
+                    <>
+                      <LaserSessionAreas labels={b.laserAreaLabels || []} />
+                      <p style={{ margin: '0.3rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                        المقدّم: {b.providerName || '—'}
+                      </p>
+                    </>
+                  ) : (
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                      {b.procedureLabel} — المقدّم: {b.providerName || '—'}
+                    </p>
+                  )}
                   {b.isCreditTopUp ? (
                     <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: 'var(--success)' }}>
                       شحن رصيد أسنان إضافي — بعد القبض يُضاف لرصيد الأسنان ويُخصم لاحقاً من إجراءات الأسنان فقط.
@@ -1042,8 +1074,14 @@ export function BillingPage() {
                 : 'تأكيد استلام الدفع'}
             </h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem' }}>
-              {payItem.patientName} — {payItem.procedureLabel}
+              {payItem.patientName}
+              {payItem.department === 'laser' && (payItem.laserAreaLabels?.length ?? 0) > 0
+                ? ''
+                : ` — ${payItem.procedureLabel}`}
             </p>
+            {payItem.department === 'laser' && (payItem.laserAreaLabels?.length ?? 0) > 0 ? (
+              <LaserSessionAreas labels={payItem.laserAreaLabels || []} />
+            ) : null}
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }} dir={itemBillingCurrency(payItem) === 'USD' ? 'ltr' : undefined}>
               المستحق: {formatItemDueLabel(payItem)}
             </p>

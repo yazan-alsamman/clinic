@@ -460,6 +460,52 @@ function billingItemDto(b, patientName, providerName, usdSypBusinessDayRate = nu
   }
 }
 
+function laserAreaNamesFromSession(ls) {
+  const fromLines = []
+  for (const row of ls?.lineItems || []) {
+    const label = String(row?.areaLabel || '').trim()
+    if (!label) continue
+    fromLines.push(row.isAddon === true ? `${label} (خارج الباكج)` : label)
+  }
+  if (fromLines.length) return fromLines
+  return (ls?.manualAreaLabels || []).map((x) => String(x || '').trim()).filter(Boolean)
+}
+
+/** كل أسماء مناطق جلسة الليزر لشاشة التحصيل — من أسطر الجلسة وليس من النص المقصوص */
+async function attachLaserAreaLabels(billingItems, dtos) {
+  const laserIdx = []
+  for (let i = 0; i < billingItems.length; i++) {
+    if (String(billingItems[i]?.department || '') === 'laser') laserIdx.push(i)
+  }
+  if (!laserIdx.length) return
+  const billIds = laserIdx.map((i) => billingItems[i]._id)
+  const clinicalIds = laserIdx
+    .map((i) => billingItems[i].clinicalSessionId)
+    .filter((id) => id && mongoose.isValidObjectId(id))
+  const sessions = await LaserSession.find({
+    $or: [
+      { billingItemId: { $in: billIds } },
+      ...(clinicalIds.length ? [{ clinicalSessionId: { $in: clinicalIds } }] : []),
+    ],
+  })
+    .select('billingItemId clinicalSessionId lineItems manualAreaLabels')
+    .lean()
+  const byBill = new Map()
+  const byCs = new Map()
+  for (const s of sessions) {
+    if (s.billingItemId) byBill.set(String(s.billingItemId), s)
+    if (s.clinicalSessionId) byCs.set(String(s.clinicalSessionId), s)
+  }
+  for (const i of laserIdx) {
+    const b = billingItems[i]
+    const ls =
+      byBill.get(String(b._id)) ||
+      (b.clinicalSessionId ? byCs.get(String(b.clinicalSessionId)) : null)
+    const names = laserAreaNamesFromSession(ls)
+    if (names.length) dtos[i].laserAreaLabels = names
+  }
+}
+
 /** بنود في انتظار التحصيل */
 billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) => {
   try {
@@ -532,6 +578,7 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
         return dto
       }),
     )
+    await attachLaserAreaLabels(items, itemsOut)
 
     res.json({
       date,
@@ -585,15 +632,17 @@ billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) 
         return [d.businessDate, Number.isFinite(x) && x > 0 ? x : null]
       }),
     )
-    res.json({
-      items: items.map((b) =>
-        billingItemDto(
-          b,
-          resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
-          b.providerUserId?.name,
-          rateByDate.get(b.businessDate) ?? null,
-        ),
+    const itemsOut = items.map((b) =>
+      billingItemDto(
+        b,
+        resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
+        b.providerUserId?.name,
+        rateByDate.get(b.businessDate) ?? null,
       ),
+    )
+    await attachLaserAreaLabels(items, itemsOut)
+    res.json({
+      items: itemsOut,
     })
   } catch (e) {
     console.error(e)
