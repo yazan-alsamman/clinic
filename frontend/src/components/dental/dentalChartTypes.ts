@@ -89,6 +89,9 @@ export type DentalToothState = {
   status: ToothStatus
   /** preexisting = جاء هكذا، clinic = خلع/زراعة في العيادة */
   statusOrigin: SurfaceOrigin
+  /** إشارة الخلع تبقى مع الزراعة ومع أي علامة أخرى حتى يحذفها الطبيب */
+  extractionMark?: boolean
+  extractionOrigin?: SurfaceOrigin
   implantColor: ImplantColor | null
   surfaces: DentalSurfaceMark[]
   note: string
@@ -747,11 +750,23 @@ export function normalizeLabWorksList(
   return (list || []).map((x) => normalizeLabWork(x, fallbackRate)).filter(labWorkHasData)
 }
 
+export function toothShowsExtraction(t: Pick<DentalToothState, 'status' | 'extractionMark'>): boolean {
+  return t.extractionMark === true || t.status === 'missing'
+}
+
+export function toothExtractionOrigin(t: DentalToothState): SurfaceOrigin {
+  if (t.extractionMark) return t.extractionOrigin === 'clinic' ? 'clinic' : 'preexisting'
+  if (t.status === 'missing') return t.statusOrigin === 'clinic' ? 'clinic' : 'preexisting'
+  return 'preexisting'
+}
+
 export function defaultTooth(fdi: number): DentalToothState {
   return {
     fdi,
     status: 'present',
     statusOrigin: 'preexisting',
+    extractionMark: false,
+    extractionOrigin: 'preexisting',
     implantColor: null,
     surfaces: [],
     note: '',
@@ -784,11 +799,17 @@ export function teethMapFromChart(
   for (const fdi of FDI_ALL) map.set(fdi, defaultTooth(fdi))
   for (const t of teeth || []) {
     if (!map.has(t.fdi)) continue
+    const status = t.status === 'missing' || t.status === 'implant' ? t.status : 'present'
     map.set(t.fdi, {
       fdi: t.fdi,
-      status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
+      status,
       statusOrigin: t.statusOrigin === 'clinic' ? 'clinic' : 'preexisting',
-      implantColor: t.status === 'implant' ? (t.implantColor === 'red' ? 'red' : 'teal') : null,
+      extractionMark: t.extractionMark === true || status === 'missing',
+      extractionOrigin:
+        t.extractionOrigin === 'clinic' || (status === 'missing' && t.statusOrigin === 'clinic')
+          ? 'clinic'
+          : 'preexisting',
+      implantColor: status === 'implant' ? (t.implantColor === 'red' ? 'red' : 'teal') : null,
       surfaces: Array.isArray(t.surfaces) ? t.surfaces.map((s) => normalizeSurfaceMark(s)) : [],
       note: String(t.note || ''),
       treatments: normalizeTreatmentsList(t.treatments, t.treatment),
@@ -803,6 +824,7 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
     .filter(
       (t) =>
         t.status !== 'present' ||
+        t.extractionMark === true ||
         t.surfaces.length > 0 ||
         Boolean(t.note.trim()) ||
         treatmentsHaveData(t.treatments) ||
@@ -812,10 +834,10 @@ export function chartTeethPayload(map: Map<number, DentalToothState>): DentalToo
       fdi: t.fdi,
       status: t.status,
       statusOrigin: t.status === 'present' ? 'preexisting' : t.statusOrigin || 'preexisting',
+      extractionMark: t.extractionMark === true || t.status === 'missing',
+      extractionOrigin: toothExtractionOrigin(t),
       implantColor: t.status === 'implant' ? t.implantColor : null,
-      /** الزراعة تحتفظ بالعلامات السطحية (تاج/حشوة…)؛ المفقود بلا سطوح */
-      surfaces:
-        t.status === 'missing' ? [] : t.surfaces.map((s) => normalizeSurfaceMark(s)),
+      surfaces: t.surfaces.map((s) => normalizeSurfaceMark(s)),
       note: t.note,
       treatments: (t.treatments || [])
         .map((x) =>
@@ -840,13 +862,17 @@ export function toothForViewLayer(tooth: DentalToothState, layer: ChartViewLayer
   if (layer === 'all') return tooth
 
   if (layer === 'baseline') {
-    const status =
-      tooth.status !== 'present' && tooth.statusOrigin === 'clinic' ? 'present' : tooth.status
+    const extractionClinic = toothExtractionOrigin(tooth) === 'clinic' && toothShowsExtraction(tooth)
+    const keepExtraction = toothShowsExtraction(tooth) && !extractionClinic
+    const keepImplant = tooth.status === 'implant' && tooth.statusOrigin !== 'clinic'
+    const status: ToothStatus = keepImplant ? 'implant' : keepExtraction ? 'missing' : 'present'
     return {
       ...tooth,
       status,
       statusOrigin: 'preexisting',
-      implantColor: status === 'implant' ? tooth.implantColor : null,
+      extractionMark: keepExtraction && keepImplant,
+      extractionOrigin: 'preexisting',
+      implantColor: keepImplant ? tooth.implantColor : null,
       surfaces: tooth.surfaces.filter((s) => s.origin !== 'clinic'),
       /** أخفِ مؤشرات الإجراءات في طبقة الدخول */
       treatments: [],
@@ -871,7 +897,8 @@ export function toothHasClinicWork(t: DentalToothState): boolean {
     treatmentsHaveData(t.treatments) ||
     normalizeLabWorksList(t.labWorks).length > 0 ||
     t.surfaces.some((s) => s.origin === 'clinic') ||
-    (t.status !== 'present' && t.statusOrigin === 'clinic')
+    (t.status !== 'present' && t.statusOrigin === 'clinic') ||
+    (t.extractionMark === true && t.extractionOrigin === 'clinic')
   )
 }
 
@@ -882,8 +909,14 @@ export function toothStatusLabel(t: DentalToothState): string {
         ? ' (عمل العيادة)'
         : ' (عند القدوم)'
       : ''
-  if (t.status === 'missing') return `سن مفقود${originHint}`
-  if (t.status === 'implant')
+  const extracted = toothShowsExtraction(t)
+  const implanted = t.status === 'implant'
+  if (extracted && implanted) {
+    const implantLabel = t.implantColor === 'red' ? 'زراعة (حمراء)' : 'زراعة'
+    return `خلع + ${implantLabel}`
+  }
+  if (extracted) return `سن مخلوع${toothExtractionOrigin(t) === 'clinic' ? ' (عمل العيادة)' : ' (عند القدوم)'}`
+  if (implanted)
     return `${t.implantColor === 'red' ? 'زراعة (حمراء)' : 'زراعة'}${originHint}`
   const preexisting = t.surfaces.filter((s) => s.origin !== 'clinic')
   const clinicSurf = t.surfaces.filter((s) => s.origin === 'clinic')

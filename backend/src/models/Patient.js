@@ -185,6 +185,9 @@ const dentalChartToothSchema = new mongoose.Schema(
     status: { type: String, enum: ['present', 'missing', 'implant'], default: 'present' },
     /** preexisting = جاء هكذا، clinic = تغيّر في هذه العيادة (خلع/زراعة هنا) */
     statusOrigin: { type: String, enum: ['preexisting', 'clinic'], default: 'preexisting' },
+    /** تبقى إشارة الخلع حتى بعد الزراعة، ولا تُمسح إلا بحذف الطبيب */
+    extractionMark: { type: Boolean, default: false },
+    extractionOrigin: { type: String, enum: ['preexisting', 'clinic'], default: 'preexisting' },
     implantColor: { type: String, enum: ['teal', 'red'], default: undefined },
     surfaces: { type: [dentalChartSurfaceSchema], default: [] },
     note: { type: String, default: '', trim: true, maxlength: 500 },

@@ -12,6 +12,7 @@ import {
   markToolId,
   teethMapFromChart,
   toothForViewLayer,
+  toothShowsExtraction,
   toothStatusLabel,
   UPPER_ROW,
   type ChartPaintMode,
@@ -213,13 +214,24 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
       if (tool === 'healthy') {
         updateTooth(fdi, (prev) => {
           if (paintMode === 'clinic') {
-            const keepBaselineStatus =
-              prev.status !== 'present' && prev.statusOrigin === 'preexisting'
+            const keepExtraction =
+              (prev.extractionMark === true && prev.extractionOrigin !== 'clinic') ||
+              (prev.status === 'missing' && prev.statusOrigin !== 'clinic')
+            const keepImplant = prev.status === 'implant' && prev.statusOrigin !== 'clinic'
+            const status = keepImplant ? 'implant' : keepExtraction ? 'missing' : 'present'
             return {
               ...prev,
-              status: keepBaselineStatus ? prev.status : 'present',
-              statusOrigin: 'preexisting',
-              implantColor: keepBaselineStatus && prev.status === 'implant' ? prev.implantColor : null,
+              status,
+              statusOrigin: keepImplant
+                ? 'preexisting'
+                : keepExtraction
+                  ? prev.extractionOrigin === 'clinic'
+                    ? 'clinic'
+                    : 'preexisting'
+                  : 'preexisting',
+              extractionMark: keepExtraction && keepImplant,
+              extractionOrigin: keepExtraction ? prev.extractionOrigin || 'preexisting' : 'preexisting',
+              implantColor: keepImplant ? prev.implantColor : null,
               surfaces: prev.surfaces.filter((s) => s.origin !== 'clinic'),
             }
           }
@@ -227,6 +239,8 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             ...prev,
             status: 'present',
             statusOrigin: 'preexisting',
+            extractionMark: false,
+            extractionOrigin: 'preexisting',
             implantColor: null,
             surfaces: [],
             note: '',
@@ -236,35 +250,39 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         return
       }
       if (tool === 'missing') {
-        updateTooth(fdi, (prev) => ({
-          ...prev,
-          status: 'missing',
-          statusOrigin: originForPaint,
-          implantColor: null,
-          surfaces: [],
-        }))
+        updateTooth(fdi, (prev) => {
+          const keepImplant = prev.status === 'implant'
+          return {
+            ...prev,
+            status: keepImplant ? 'implant' : 'missing',
+            statusOrigin: keepImplant ? prev.statusOrigin : originForPaint,
+            implantColor: keepImplant ? prev.implantColor : null,
+            extractionMark: true,
+            extractionOrigin: originForPaint,
+            surfaces: prev.surfaces,
+          }
+        })
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
-      if (tool === 'implant_teal') {
-        updateTooth(fdi, (prev) => ({
-          ...prev,
-          status: 'implant',
-          statusOrigin: originForPaint,
-          implantColor: 'teal',
-          surfaces: prev.surfaces,
-        }))
-        if (openPanel) openTreatmentPanel(fdi, asBaseline)
-        return
-      }
-      if (tool === 'implant_red') {
-        updateTooth(fdi, (prev) => ({
-          ...prev,
-          status: 'implant',
-          statusOrigin: originForPaint,
-          implantColor: 'red',
-          surfaces: prev.surfaces,
-        }))
+      if (tool === 'implant_teal' || tool === 'implant_red') {
+        const color = tool === 'implant_red' ? 'red' : 'teal'
+        updateTooth(fdi, (prev) => {
+          const hadExtraction = prev.status === 'missing' || prev.extractionMark === true
+          return {
+            ...prev,
+            status: 'implant',
+            statusOrigin: originForPaint,
+            implantColor: color,
+            extractionMark: hadExtraction,
+            extractionOrigin: hadExtraction
+              ? prev.extractionMark
+                ? prev.extractionOrigin || prev.statusOrigin
+                : prev.statusOrigin
+              : prev.extractionOrigin,
+            surfaces: prev.surfaces,
+          }
+        })
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
         return
       }
@@ -283,19 +301,17 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
             color: opt.color,
             shape: opt.shape,
           }
-          const surfaces = prev.surfaces.filter(
-            (s) => !(s.view === view && s.region === r && s.origin === originForPaint),
+          const already = prev.surfaces.some(
+            (s) =>
+              s.view === view &&
+              s.region === r &&
+              s.origin === originForPaint &&
+              s.markOptionId === opt.id &&
+              s.label === opt.name,
           )
-          surfaces.push(mark)
-          if (prev.status === 'implant') {
-            return { ...prev, surfaces }
-          }
           return {
             ...prev,
-            status: 'present' as const,
-            statusOrigin: 'preexisting' as const,
-            implantColor: null,
-            surfaces,
+            surfaces: already ? prev.surfaces : [...prev.surfaces, mark],
           }
         })
         if (openPanel) openTreatmentPanel(fdi, asBaseline)
@@ -305,8 +321,24 @@ export function DentalOdontogram({ patientId, canEdit }: Props) {
         const r = region
         updateTooth(fdi, (prev) => {
           if (!r) {
+            const dropExtraction =
+              (prev.extractionMark === true && (prev.extractionOrigin || 'preexisting') === originForPaint) ||
+              (prev.status === 'missing' && prev.statusOrigin === originForPaint)
+            const dropImplant = prev.status === 'implant' && prev.statusOrigin === originForPaint
+            const keepExtraction = toothShowsExtraction(prev) && !dropExtraction
+            const keepImplant = prev.status === 'implant' && !dropImplant
+            const status = keepImplant ? 'implant' : keepExtraction ? 'missing' : 'present'
             return {
               ...prev,
+              status,
+              statusOrigin: keepImplant
+                ? prev.statusOrigin
+                : keepExtraction
+                  ? prev.extractionOrigin || prev.statusOrigin
+                  : 'preexisting',
+              extractionMark: keepExtraction && keepImplant,
+              extractionOrigin: keepExtraction ? prev.extractionOrigin || prev.statusOrigin : 'preexisting',
+              implantColor: keepImplant ? prev.implantColor : null,
               surfaces: prev.surfaces.filter((s) => s.origin !== originForPaint),
             }
           }

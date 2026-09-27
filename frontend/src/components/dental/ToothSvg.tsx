@@ -1,5 +1,12 @@
 import type { DentalSurfaceMark, DentalToothState, ImplantColor, SurfaceMarkShape } from './dentalChartTypes'
-import { isUpperFdi, toothHasClinicWork, toothKind, treatmentsHaveData } from './dentalChartTypes'
+import {
+  isUpperFdi,
+  toothExtractionOrigin,
+  toothHasClinicWork,
+  toothKind,
+  toothShowsExtraction,
+  treatmentsHaveData,
+} from './dentalChartTypes'
 
 const CROWN = '#f5f1ea'
 const CROWN_STROKE = '#c4b8a8'
@@ -139,37 +146,40 @@ function BuccalToothArt({
   const upper = isUpperFdi(fdi)
   const kind = toothKind(fdi)
   const flip = !upper
-  const clinicStatus = tooth.statusOrigin === 'clinic'
-  const missingStroke = clinicStatus ? MISSING_CLINIC : MISSING_STROKE
+  const extracted = toothShowsExtraction(tooth)
+  const missingStroke = toothExtractionOrigin(tooth) === 'clinic' ? MISSING_CLINIC : MISSING_STROKE
+  const extractionOutline =
+    kind === 'molar' ? (
+      <path
+        d="M6 6 Q20 2 34 6 L36 30 Q20 36 4 30 Z M10 30 L8 78 M20 32 L20 82 M30 30 L32 78"
+        fill="none"
+        stroke={missingStroke}
+        strokeWidth="1.6"
+        strokeDasharray="3 2"
+      />
+    ) : kind === 'premolar' ? (
+      <path
+        d="M10 6 Q20 2 30 6 L32 28 Q20 34 8 28 Z M14 28 L12 76 M26 28 L28 76"
+        fill="none"
+        stroke={missingStroke}
+        strokeWidth="1.6"
+        strokeDasharray="3 2"
+      />
+    ) : (
+      <path
+        d="M12 4 Q20 0 28 4 L30 26 Q20 32 10 26 Z M18 26 L18 78"
+        fill="none"
+        stroke={missingStroke}
+        strokeWidth="1.6"
+        strokeDasharray="3 2"
+      />
+    )
 
-  if (tooth.status === 'missing') {
+  if (extracted && tooth.status !== 'implant') {
     return (
       <g transform={flip ? 'translate(0,90) scale(1,-1)' : undefined}>
-        {kind === 'molar' ? (
-          <path
-            d="M6 6 Q20 2 34 6 L36 30 Q20 36 4 30 Z M10 30 L8 78 M20 32 L20 82 M30 30 L32 78"
-            fill="none"
-            stroke={missingStroke}
-            strokeWidth="1.6"
-            strokeDasharray="3 2"
-          />
-        ) : kind === 'premolar' ? (
-          <path
-            d="M10 6 Q20 2 30 6 L32 28 Q20 34 8 28 Z M14 28 L12 76 M26 28 L28 76"
-            fill="none"
-            stroke={missingStroke}
-            strokeWidth="1.6"
-            strokeDasharray="3 2"
-          />
-        ) : (
-          <path
-            d="M12 4 Q20 0 28 4 L30 26 Q20 32 10 26 Z M18 26 L18 78"
-            fill="none"
-            stroke={missingStroke}
-            strokeWidth="1.6"
-            strokeDasharray="3 2"
-          />
-        )}
+        {extractionOutline}
+        {surfaceHighlight(tooth.surfaces, 'buccal', kind)}
       </g>
     )
   }
@@ -177,6 +187,9 @@ function BuccalToothArt({
   if (tooth.status === 'implant') {
     return (
       <g>
+        {extracted ? (
+          <g transform={flip ? 'translate(0,90) scale(1,-1)' : undefined}>{extractionOutline}</g>
+        ) : null}
         <ImplantScrew color={tooth.implantColor === 'red' ? 'red' : 'teal'} flip={flip} />
         <g transform={flip ? 'translate(0,90) scale(1,-1)' : undefined}>
           {surfaceHighlight(tooth.surfaces, 'buccal', kind)}
@@ -223,11 +236,10 @@ function BuccalToothArt({
 
 function OcclusalToothArt({ fdi, tooth }: { fdi: number; tooth: DentalToothState }) {
   const kind = toothKind(fdi)
-  const clinicStatus = tooth.statusOrigin === 'clinic'
-  const missingStroke = clinicStatus ? MISSING_CLINIC : MISSING_STROKE
-
-  if (tooth.status === 'missing') {
-    return kind === 'molar' || kind === 'premolar' ? (
+  const extracted = toothShowsExtraction(tooth)
+  const missingStroke = toothExtractionOrigin(tooth) === 'clinic' ? MISSING_CLINIC : MISSING_STROKE
+  const extractionOutline =
+    kind === 'molar' || kind === 'premolar' ? (
       <rect
         x="6"
         y="8"
@@ -251,12 +263,21 @@ function OcclusalToothArt({ fdi, tooth }: { fdi: number; tooth: DentalToothState
         strokeDasharray="3 2"
       />
     )
+
+  if (extracted && tooth.status !== 'implant') {
+    return (
+      <g>
+        {extractionOutline}
+        {surfaceHighlight(tooth.surfaces, 'occlusal', kind)}
+      </g>
+    )
   }
 
   if (tooth.status === 'implant') {
     const fill = tooth.implantColor === 'red' ? '#e11d2e' : '#14b8a6'
     return (
       <g>
+        {extracted ? extractionOutline : null}
         <circle cx="20" cy="24" r="10" fill={fill} stroke="#0f172a" strokeWidth="1" opacity={0.85} />
         {surfaceHighlight(tooth.surfaces, 'occlusal', kind)}
       </g>
@@ -327,7 +348,7 @@ export function ToothCell({
       <svg viewBox={`0 0 40 ${h}`} width="40" height={h} aria-hidden>
         {view === 'buccal' ? <BuccalToothArt fdi={fdi} tooth={tooth} /> : <OcclusalToothArt fdi={fdi} tooth={tooth} />}
         {badge ? <circle cx="34" cy="6" r="3.5" fill="#0d9488" stroke="#fff" strokeWidth="1" /> : null}
-        {onSurfaceClick && tooth.status !== 'missing' ? (
+        {onSurfaceClick ? (
           <>
             <rect
               x="0"

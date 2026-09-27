@@ -9,104 +9,12 @@ function roundMoney(n) {
   return Math.round(Number(n) || 0)
 }
 
-function normalizeArText(v) {
-  return String(v || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[إأآا]/g, 'ا')
-    .replace(/ى/g, 'ي')
-    .replace(/ة/g, 'ه')
-    .replace(/\s+/g, ' ')
-}
-
-function treatmentHasData(tr) {
-  if (!tr) return false
-  const desc = String(tr.procedureDescription || '').trim()
-  const cost = roundMoney(tr.totalCostSyp) + Math.max(0, Number(tr.totalCostUsd) || 0)
-  const paid = Array.isArray(tr.payments)
-    ? tr.payments.reduce((s, p) => s + roundMoney(p?.amountSyp) + Math.max(0, Number(p?.amountUsd) || 0), 0)
-    : 0
-  const hasDoctor =
-    Boolean(tr.providerUserId) ||
-    Boolean(String(tr.providerKey || '').trim()) ||
-    Boolean(String(tr.doctorName || '').trim())
-  return cost > 0 || paid > 0 || Boolean(desc) || hasDoctor
-}
-
-function isExtractionProcedure(desc) {
-  const s = normalizeArText(desc)
-  return /خلع|قلع|extraction|extracted|قلعت/.test(s)
-}
-
-function isImplantProcedure(desc) {
-  const s = normalizeArText(desc)
-  return /زرع|زراع|implant/.test(s)
-}
-
-function surfaceMatchesProcedure(surface, desc) {
-  if (!surface || surface.origin !== 'clinic') return false
-  const label = normalizeArText(surface.label)
-  const procedure = normalizeArText(desc)
-  if (!label || !procedure) return false
-  if (label === procedure) return true
-  if (procedure.includes(label) || label.includes(procedure)) return true
-  return false
-}
-
-function remainingClinicTreatments(tooth, exceptId) {
-  return (tooth.treatments || []).filter(
-    (t) => String(t._id) !== String(exceptId) && treatmentHasData(t),
-  )
-}
-
 /**
- * إزالة علامة العيادة المرتبطة بالإجراء من مخطط السن.
- * إذا لم يبقَ إجراء عيادة على السن: تُمسح كل علامات العيادة ويُعاد الوضع الطبيعي إن كان الخلع/الزرعة من العيادة.
+ * علامات المخطط تبقى حتى يحذفها الطبيب من الرسم.
+ * حذف الإجراء المالي لا يمسح الخلع أو الزراعة أو الحشوات.
  */
-function stripClinicMarksForTreatment(tooth, treatment) {
-  if (!tooth || !treatment) return { surfacesRemoved: 0, statusReset: false }
-  const tid = String(treatment._id)
-  const desc = String(treatment.procedureDescription || '')
-  const remaining = remainingClinicTreatments(tooth, tid)
-  const beforeSurfaces = Array.isArray(tooth.surfaces) ? tooth.surfaces.length : 0
-  let statusReset = false
-
-  if (remaining.length === 0) {
-    tooth.surfaces = (tooth.surfaces || []).filter((s) => s.origin !== 'clinic')
-    if (tooth.statusOrigin === 'clinic' && tooth.status !== 'present') {
-      tooth.status = 'present'
-      tooth.statusOrigin = 'preexisting'
-      tooth.implantColor = undefined
-      statusReset = true
-    }
-  } else {
-    tooth.surfaces = (tooth.surfaces || []).filter((s) => !surfaceMatchesProcedure(s, desc))
-    if (tooth.statusOrigin === 'clinic') {
-      if (
-        tooth.status === 'missing' &&
-        isExtractionProcedure(desc) &&
-        !remaining.some((t) => isExtractionProcedure(t.procedureDescription))
-      ) {
-        tooth.status = 'present'
-        tooth.statusOrigin = 'preexisting'
-        statusReset = true
-      } else if (
-        tooth.status === 'implant' &&
-        isImplantProcedure(desc) &&
-        !remaining.some((t) => isImplantProcedure(t.procedureDescription))
-      ) {
-        tooth.status = 'present'
-        tooth.statusOrigin = 'preexisting'
-        tooth.implantColor = undefined
-        statusReset = true
-      }
-    }
-  }
-
-  return {
-    surfacesRemoved: Math.max(0, beforeSurfaces - (tooth.surfaces || []).length),
-    statusReset,
-  }
+function stripClinicMarksForTreatment(_tooth, _treatment) {
+  return { surfacesRemoved: 0, statusReset: false }
 }
 
 function findChartTreatment(patient, treatmentId) {

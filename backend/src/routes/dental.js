@@ -639,6 +639,11 @@ function chartToDto(chart, billingMap) {
         status: t.status === 'missing' || t.status === 'implant' ? t.status : 'present',
         statusOrigin: t.statusOrigin === 'clinic' ? 'clinic' : 'preexisting',
         implantColor: t.implantColor === 'teal' || t.implantColor === 'red' ? t.implantColor : null,
+        extractionMark: t.extractionMark === true || t.status === 'missing',
+        extractionOrigin:
+          t.extractionOrigin === 'clinic' || (t.status === 'missing' && t.statusOrigin === 'clinic')
+            ? 'clinic'
+            : 'preexisting',
         surfaces: (t.surfaces || []).map((s) => surfaceMarkToDto(s)),
         note: String(t.note || '').trim().slice(0, 500),
         treatments,
@@ -759,9 +764,14 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
     if (status === 'implant') {
       implantColor = row?.implantColor === 'red' ? 'red' : 'teal'
     }
+    const extractionMark = row?.extractionMark === true || status === 'missing'
+    const extractionOrigin =
+      row?.extractionOrigin === 'clinic' || (status === 'missing' && statusOrigin === 'clinic')
+        ? 'clinic'
+        : 'preexisting'
     const surfaces = []
-    /** المفقود بلا سطوح؛ الحاضر والزراعة يحتفظان بعلامات متعددة (تاج + زراعة…) */
-    if (status !== 'missing' && Array.isArray(row?.surfaces)) {
+    /** كل العلامات السطحية تبقى، بما فيها على سن مخلوع أو مزروع */
+    if (Array.isArray(row?.surfaces)) {
       for (const s of row.surfaces) {
         const view = String(s?.view || '').trim()
         const region = String(s?.region || '').trim().toUpperCase()
@@ -786,8 +796,10 @@ function normalizeChartTeeth(rawTeeth, fallbackUsdSypRate = 0) {
       fdi,
       status,
       statusOrigin: status === 'present' ? 'preexisting' : statusOrigin,
+      extractionMark,
+      extractionOrigin: extractionMark ? extractionOrigin : 'preexisting',
       ...(status === 'implant' ? { implantColor } : {}),
-      surfaces: status === 'missing' ? [] : surfaces.slice(0, 24),
+      surfaces: surfaces.slice(0, 80),
       note: String(row?.note || '').trim().slice(0, 500),
       treatments,
       labWorks,
