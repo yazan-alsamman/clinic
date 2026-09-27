@@ -660,19 +660,6 @@ export function ReceptionAppointmentPage() {
     return pkgs.find((p) => p.id === laserBookingPackageId) || (pkgs.length === 1 ? pkgs[0] : undefined)
   }, [laserBookingContext?.openPackages, laserBookingPackageId])
 
-  const openLaserPackageAreaIds = useMemo(() => {
-    const ids = new Set<string>()
-    const pkgs = selectedLaserBookingPackage
-      ? [selectedLaserBookingPackage]
-      : laserBookingContext?.openPackages || []
-    for (const pkg of pkgs) {
-      for (const oid of pkg.procedureOptionIds || []) {
-        if (oid) ids.add(String(oid))
-      }
-    }
-    return ids
-  }, [laserBookingContext?.openPackages, selectedLaserBookingPackage])
-
   const selectedGenderForLaserPricing: '' | 'male' | 'female' =
     picked?.gender === 'male' || picked?.gender === 'female' ? picked.gender : newPatientGenderPending
 
@@ -1719,12 +1706,6 @@ export function ReceptionAppointmentPage() {
                                 <p style={{ margin: '0 0 0.4rem', color: 'var(--text-muted)', fontSize: '0.86rem' }}>{g.title}</p>
                                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                   {g.items.map((item) => {
-                                    if (
-                                      isLaserPackageWithAddonIntent(laserPackageBookingIntent) &&
-                                      openLaserPackageAreaIds.has(item.id)
-                                    ) {
-                                      return null
-                                    }
                                     const selected = selectedLaserItemIds.includes(item.id)
                                     return (
                                       <button

@@ -29,7 +29,6 @@ import {
   parseBookedLaserAddonSegment,
   splitLaserOfferAreaLabels,
   laserProcedureMatchesRemainingPackageAreas,
-  laserItemIsCoveredByPackage,
 } from '../data/laserFullBody'
 import type { LaserCategory, Patient, Role } from '../types'
 
@@ -1809,20 +1808,8 @@ export function PatientRecord() {
           ]),
       )
       const nextMappedRows = combinedLaserSaveItems.flatMap((item) => {
-        const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
-        const packageItems = packageIds
-          .map((pid) => laserItemById.get(pid))
-          .filter((x): x is LaserProcedureItem => Boolean(x))
-        const coveredByPackage = laserItemIsCoveredByPackage(item, packageIds, packageItems)
         const pickedAsAddon = selectedLaserAddonItemIds.includes(item.id)
         const pickedAsMain = selectedLaserItemIds.includes(item.id)
-        let isAddon = pickedAsAddon && !pickedAsMain
-        if (sessionInPackageMode) {
-          // مناطق الباكج (بالمعرّف أو الاسم) تبقى ضمن الباكج حتى لو اختيرت خطأً من قسم الإضافات
-          if (coveredByPackage) isAddon = false
-          else if (pickedAsMain) isAddon = false
-          else if (pickedAsAddon) isAddon = true
-        }
         const parsedNames = item.kind === 'offer' ? splitLaserOfferAreaLabels(item.name) : []
         const neededRowsFromOffer =
           item.kind === 'offer' && isFullBodyLaserBookingText(item.name)
@@ -1830,19 +1817,24 @@ export function PatientRecord() {
             : Math.max(1, Math.trunc(Number(item.areaCount) || 1))
         const neededRows =
           item.kind === 'offer' ? Math.max(neededRowsFromOffer, parsedNames.length || 1) : 1
-        return Array.from({ length: neededRows }, (_, idx) => {
-          const optionInstance = idx + 1
-          const key = `${item.id}|${isAddon ? 1 : 0}|${optionInstance}`
-          const parsedLabel = parsedNames[idx] || ''
-          const fallbackLabel = neededRows > 1 ? `${item.name} (${optionInstance})` : item.name
-          return createLaserLineRow({
-            ...(mappedPrev.get(key) || {}),
-            procedureOptionId: item.id,
-            optionInstance,
-            areaLabel: parsedLabel || fallbackLabel,
-            isAddon,
+        const buildRows = (isAddon: boolean) =>
+          Array.from({ length: neededRows }, (_, idx) => {
+            const optionInstance = idx + 1
+            const key = `${item.id}|${isAddon ? 1 : 0}|${optionInstance}`
+            const parsedLabel = parsedNames[idx] || ''
+            const fallbackLabel = neededRows > 1 ? `${item.name} (${optionInstance})` : item.name
+            return createLaserLineRow({
+              ...(mappedPrev.get(key) || {}),
+              procedureOptionId: item.id,
+              optionInstance,
+              areaLabel: parsedLabel || fallbackLabel,
+              isAddon,
+            })
           })
-        })
+        return [
+          ...(pickedAsMain || !pickedAsAddon ? buildRows(false) : []),
+          ...(sessionInPackageMode && pickedAsAddon ? buildRows(true) : []),
+        ]
       })
       return nextMappedRows
     })
@@ -1851,8 +1843,6 @@ export function PatientRecord() {
     selectedLaserAddonItemIds,
     selectedLaserItemIds,
     sessionInPackageMode,
-    activeLaserPackage?.procedureOptionIds,
-    laserItemById,
   ])
 
   const partialPackageLaserSession = useMemo(() => {
@@ -2109,18 +2099,10 @@ export function PatientRecord() {
     if (laserProcedureLoading || !laserProcedureGroups.length) return
 
     const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
-    const packageItems = packageIds
-      .map((pid) => laserItemById.get(pid))
-      .filter((x): x is LaserProcedureItem => Boolean(x))
-    const isTrueAddon = (id: string) => {
-      const item = laserItemById.get(id)
-      if (!item) return !packageIds.includes(id)
-      return !laserItemIsCoveredByPackage(item, packageIds, packageItems)
-    }
     let matchedIds: string[] = []
 
     if (bookedLaserAddonIdsFromQuery.length > 0) {
-      matchedIds = bookedLaserAddonIdsFromQuery.filter((id) => laserItemById.has(id) && isTrueAddon(id))
+      matchedIds = bookedLaserAddonIdsFromQuery.filter((id) => laserItemById.has(id))
     }
 
     if (matchedIds.length === 0) {
@@ -2140,14 +2122,16 @@ export function PatientRecord() {
           .map((x) => normalizeLaserBookingText(x))
           .filter(Boolean)
           .map((name) => byName.get(name))
-          .filter((id): id is string => typeof id === 'string' && isTrueAddon(id))
+          .filter((id): id is string => typeof id === 'string')
       }
     }
 
     if (matchedIds.length > 0) {
       const unique = [...new Set(matchedIds)]
       setSelectedLaserAddonItemIds(unique)
-      setSelectedLaserItemIds((prev) => prev.filter((id) => !unique.includes(id)))
+      setSelectedLaserItemIds((prev) =>
+        prev.filter((id) => !unique.includes(id) || packageIds.includes(String(id))),
+      )
     }
   }, [
     tab,
@@ -2175,17 +2159,12 @@ export function PatientRecord() {
         const ids = (slot?.laserAddonProcedureOptionIds || []).map(String).filter(Boolean)
         if (ids.length > 0) {
           const packageIds = (activeLaserPackage?.procedureOptionIds || []).map(String)
-          const packageItems = packageIds
-            .map((pid) => laserItemById.get(pid))
-            .filter((x): x is LaserProcedureItem => Boolean(x))
-          const addonOnly = ids.filter((id) => {
-            const item = laserItemById.get(id)
-            if (!item) return !packageIds.includes(id)
-            return !laserItemIsCoveredByPackage(item, packageIds, packageItems)
-          })
-          if (addonOnly.length > 0) {
-            setSelectedLaserAddonItemIds((prev) => [...new Set([...prev, ...addonOnly])])
-            setSelectedLaserItemIds((prev) => prev.filter((id) => !addonOnly.includes(id)))
+          const addonIds = ids.filter((id) => laserItemById.has(id))
+          if (addonIds.length > 0) {
+            setSelectedLaserAddonItemIds((prev) => [...new Set([...prev, ...addonIds])])
+            setSelectedLaserItemIds((prev) =>
+              prev.filter((id) => !addonIds.includes(id) || packageIds.includes(String(id))),
+            )
           }
         }
       } catch {
@@ -4849,7 +4828,7 @@ export function PatientRecord() {
                               خارج الباكج — تُحسب على المريض
                             </p>
                             <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                              اختر هنا فقط المناطق الإضافية غير المشمولة بالباكج؛ يظهر السعر ويُحصّل في الاستقبال.
+                              تظهر كل المناطق، بما فيها المعمولة ضمن جلسة الباكج. ما يُختار هنا يُحسب على المريض ويُحصّل في الاستقبال.
                             </p>
                             {laserProcedureGroups.map((g) => (
                               <div key={`addon-${g.id}`}>
@@ -4857,14 +4836,6 @@ export function PatientRecord() {
                                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                   {g.items.map((item) => {
                                     const selected = selectedLaserAddonItemIds.includes(item.id)
-                                    const coveredByPackage = laserItemIsCoveredByPackage(
-                                      item,
-                                      activeLaserPackage?.procedureOptionIds,
-                                      (activeLaserPackage?.procedureOptionIds || [])
-                                        .map((pid) => laserItemById.get(pid))
-                                        .filter((x): x is LaserProcedureItem => Boolean(x)),
-                                    )
-                                    if (coveredByPackage) return null
                                     return (
                                       <button
                                         key={`addon-${item.id}`}

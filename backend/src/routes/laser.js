@@ -1497,15 +1497,24 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
           const label = row.areaLabel || meta?.name || ''
           const belongs = areaBelongsToLaserPackage(oid, label, packageIdList, optionMetaById)
           const pickedAsMain = Boolean(oid && explicitMain.has(oid) && !explicitAddon.has(oid))
-          const isAddon = !(belongs || pickedAsMain)
+          /** اختيار صريح من خارج الباكج يبقى إضافة مدفوعة حتى لو المنطقة ضمن جلسة الباكج */
+          const isAddon = row.isAddon === true || !(belongs || pickedAsMain)
           return { ...row, isAddon }
         })
+        const mainLineIds = new Set(
+          rawLineItems
+            .filter((row) => row.isAddon !== true)
+            .map((row) => String(row.procedureOptionId || '').trim())
+            .filter(Boolean),
+        )
         for (const row of rawLineItems) {
           const oid = String(row.procedureOptionId || '').trim()
           if (!oid) continue
           if (row.isAddon) {
             if (!addonProcedureOptionIds.includes(oid)) addonProcedureOptionIds.push(oid)
-            effectiveMainOptionIds = effectiveMainOptionIds.filter((id) => id !== oid)
+            if (!mainLineIds.has(oid)) {
+              effectiveMainOptionIds = effectiveMainOptionIds.filter((id) => id !== oid)
+            }
           } else if (!effectiveMainOptionIds.includes(oid)) {
             effectiveMainOptionIds.push(oid)
           }
