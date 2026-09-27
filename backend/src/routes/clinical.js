@@ -15,6 +15,7 @@ import { round2, round6 } from '../utils/money.js'
 import { resolveSolariumPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 import { normalizeHm, slotIntervalMinutes } from '../utils/scheduleTime.js'
 import { wallMinutesAsiaDamascus } from '../utils/shiftTime.js'
+import { deleteClinicalSessionFully } from '../services/deleteClinicalSession.js'
 
 export const clinicalRouter = Router()
 
@@ -1081,3 +1082,26 @@ clinicalRouter.patch(
     }
   },
 )
+
+/** حذف جلسة بالكامل (مدير النظام): التحصيل، الفاتورة، السجل المالي، وربط الباكج */
+clinicalRouter.delete('/sessions/:sessionId', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const result = await deleteClinicalSessionFully(req.params.sessionId)
+    await writeAudit({
+      user: req.user,
+      action: 'حذف جلسة بالكامل مع السجل المالي',
+      entityType: 'ClinicalSession',
+      entityId: result.sessionId || req.params.sessionId,
+      details: {
+        mode: result.mode,
+        department: result.department || null,
+        patientId: result.patientId || result.snapshot?.patientId || null,
+      },
+    })
+    res.json(result)
+  } catch (e) {
+    const status = Number(e?.status) || 500
+    if (status >= 500) console.error(e)
+    res.status(status).json({ error: status < 500 && e?.message ? e.message : 'خطأ في الخادم' })
+  }
+})

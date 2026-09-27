@@ -134,7 +134,7 @@ function findChartTreatment(patient, treatmentId) {
 /**
  * عكس أثر التحصيل على ذمة/رصيد المريض: الرصيد المخصوم + فرق التسوية.
  */
-async function reversePatientWalletFromPayment(patientId, pay, bi) {
+export async function reversePatientWalletFromPayment(patientId, pay, bi) {
   if (!patientId || !pay) return null
   const p = await Patient.findById(patientId)
   if (!p) return null
@@ -191,7 +191,7 @@ async function reversePatientWalletFromPayment(patientId, pay, bi) {
   }
 }
 
-async function purgeFinancialDocsForPayment(pay) {
+export async function purgeFinancialDocsForPayment(pay) {
   const clauses = [
     { sourceType: 'billing_payment', sourceId: pay._id },
     { 'parameterSnapshot.billingPaymentId': String(pay._id) },

@@ -916,6 +916,8 @@ export function PatientRecord() {
   const [sessionEditExistingMaterials, setSessionEditExistingMaterials] = useState<DermatologySessionRow['materials']>([])
   const [sessionEditSaving, setSessionEditSaving] = useState(false)
   const [sessionEditErr, setSessionEditErr] = useState('')
+  const [sessionDeleteId, setSessionDeleteId] = useState<string | null>(null)
+  const [sessionDeleteErr, setSessionDeleteErr] = useState('')
   const [clinicalHistory, setClinicalHistory] = useState<{
     laserSessions: ClinicalLaserRow[]
     dermatologyVisits: ClinicalDermRow[]
@@ -1049,6 +1051,60 @@ export function PatientRecord() {
       setSessionEditCatalog([])
     }
     setSessionEditOpen(true)
+  }
+
+  async function deleteClinicalSessionById(sessionId: string, label: string) {
+    if (!id || role !== 'super_admin') return
+    const ok = window.confirm(
+      `حذف جلسة «${label}» نهائياً؟\n\nيُحذف بند التحصيل والفاتورة والسجل المالي المرتبط بها، ويُعاد ضبط ذمة المريض ورصيده. جلسة الباكج تُفك عن الباكج. لا يمكن التراجع.`,
+    )
+    if (!ok) return
+    setSessionDeleteErr('')
+    setSessionDeleteId(sessionId)
+    try {
+      await api(`/api/clinical/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+      if (sessionEditId === sessionId) {
+        setSessionEditOpen(false)
+        setSessionEditId(null)
+      }
+      if (laserSessionDetail?.id === sessionId) setLaserSessionDetail(null)
+      await refreshClinicalSessionLists()
+      const [patientRes, historyRes] = await Promise.all([
+        api<{ patient: Patient }>(`/api/patients/${encodeURIComponent(id)}`),
+        api<{
+          laserSessions: ClinicalLaserRow[]
+          dermatologyVisits: ClinicalDermRow[]
+          appointments: ClinicalApptRow[]
+          dentalPlan: ClinicalDentalSummary
+        }>(`/api/patients/${encodeURIComponent(id)}/clinical-history`).catch(() => null),
+      ])
+      setPatient(patientRes.patient)
+      if (historyRes) setClinicalHistory(historyRes)
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : 'تعذر حذف الجلسة'
+      setSessionDeleteErr(msg)
+      window.alert(msg)
+    } finally {
+      setSessionDeleteId(null)
+    }
+  }
+
+  function sessionDeleteButton(sessionId: string, label: string) {
+    if (role !== 'super_admin') return null
+    return (
+      <button
+        type="button"
+        className="btn btn-danger"
+        style={{ fontSize: '0.78rem' }}
+        disabled={sessionDeleteId === sessionId}
+        onClick={(e) => {
+          e.stopPropagation()
+          void deleteClinicalSessionById(sessionId, label)
+        }}
+      >
+        {sessionDeleteId === sessionId ? 'جاري الحذف…' : 'حذف'}
+      </button>
+    )
   }
 
   function toggleSessionEditMaterial(materialId: string, checked: boolean) {
@@ -3000,6 +3056,9 @@ export function PatientRecord() {
                   <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     جلسات الليزر
                   </h4>
+                  {sessionDeleteErr ? (
+                    <p style={{ color: 'var(--danger)', margin: '0 0 0.5rem' }}>{sessionDeleteErr}</p>
+                  ) : null}
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 0.5rem' }}>
                     اضغط على صف لعرض كل بيانات الجلسة.
                   </p>
@@ -3020,6 +3079,7 @@ export function PatientRecord() {
                             <th>المناطق</th>
                             <th>التحصيل</th>
                             <th>ملاحظات</th>
+                            {role === 'super_admin' ? <th>إجراء</th> : null}
                           </tr>
                         </thead>
                         <tbody>
@@ -3074,6 +3134,14 @@ export function PatientRecord() {
                                 {formatLaserCollectedSyp(s.collectedAmountSyp ?? null)}
                               </td>
                               <td style={{ fontSize: '0.85rem' }}>{s.notes?.trim() || '—'}</td>
+                              {role === 'super_admin' ? (
+                                <td>
+                                  {sessionDeleteButton(
+                                    s.id,
+                                    `ليزر ${s.treatmentNumber}`,
+                                  )}
+                                </td>
+                              ) : null}
                             </tr>
                           ))}
                         </tbody>
@@ -3111,6 +3179,7 @@ export function PatientRecord() {
                             <th>الكلفة (ل.س)</th>
                             <th>الحسم</th>
                             <th>ملاحظات</th>
+                            {role === 'super_admin' ? <th>إجراء</th> : null}
                           </tr>
                         </thead>
                         <tbody>
@@ -3123,6 +3192,11 @@ export function PatientRecord() {
                               <td style={{ fontVariantNumeric: 'tabular-nums' }}>{v.costSyp}</td>
                               <td style={{ fontVariantNumeric: 'tabular-nums' }}>{v.discountPercent}%</td>
                               <td style={{ fontSize: '0.85rem' }}>{v.notes?.trim() || '—'}</td>
+                              {role === 'super_admin' ? (
+                                <td>
+                                  {sessionDeleteButton(v.id, v.areaTreatment || v.sessionType || 'جلدية')}
+                                </td>
+                              ) : null}
                             </tr>
                           ))}
                         </tbody>
@@ -4244,6 +4318,9 @@ export function PatientRecord() {
             <h3 className="card-title" style={{ marginTop: '1.5rem', fontSize: '0.95rem' }}>
               كل الجلسات السريرية لهذا المريض
             </h3>
+            {sessionDeleteErr ? (
+              <p style={{ color: 'var(--danger)', margin: '0.35rem 0 0' }}>{sessionDeleteErr}</p>
+            ) : null}
             {recvAllSessions.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', margin: 0 }}>لا توجد جلسات مسجّلة.</p>
             ) : (
@@ -4270,14 +4347,17 @@ export function PatientRecord() {
                         <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
                         <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
                         <td>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ fontSize: '0.8rem' }}
-                            onClick={() => void openSessionEdit(s)}
-                          >
-                            تكميل
-                          </button>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.8rem' }}
+                              onClick={() => void openSessionEdit(s)}
+                            >
+                              تكميل
+                            </button>
+                            {sessionDeleteButton(s.id, s.procedureDescription || clinicalDeptLabelAr(s.department))}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -4960,6 +5040,7 @@ export function PatientRecord() {
                                       تكميل
                                     </button>
                                   ) : null}
+                                  {sessionDeleteButton(s.id, s.procedureDescription || 'ليزر')}
                                 </div>
                               </td>
                             </tr>,
@@ -5302,7 +5383,7 @@ export function PatientRecord() {
                               : 'بانتظار التحصيل'}
                         </div>
                       </div>
-                      <div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                         {canEditClinicalSessionRow({ id: user?.id, role }, s) ? (
                           <button
                             type="button"
@@ -5313,6 +5394,7 @@ export function PatientRecord() {
                             تكميل
                           </button>
                         ) : null}
+                        {sessionDeleteButton(s.id, s.procedureDescription || 'جلدية')}
                       </div>
                     </div>
                     <ClinicalSessionDetailExtras session={s} />
@@ -5465,6 +5547,7 @@ export function PatientRecord() {
                                   تكميل
                                 </button>
                               ) : null}
+                              {sessionDeleteButton(s.id, s.procedureDescription || clinicalDeptLabelAr(s.department))}
                             </div>
                           </td>
                         </tr>,
