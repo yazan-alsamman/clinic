@@ -21,6 +21,10 @@ import {
 import { listDentalClinicSessions, listDentalPatientsAccounts } from '../services/dentalFinanceShares.js'
 import { deleteDentalTreatmentFully } from '../services/deleteDentalTreatment.js'
 import {
+  deleteOrthodonticCaseFully,
+  deleteOrthodonticInstallmentFully,
+} from '../services/deleteOrthodontic.js'
+import {
   dentalLabToAdminDto,
   labPaymentEffectiveSyp,
   listActiveDentalLabs,
@@ -1356,6 +1360,66 @@ dentalRouter.get('/chart/:patientId', async (req, res) => {
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
+
+async function respondOrthoDelete(req, res, run) {
+  try {
+    const result = await run()
+    const patient = await Patient.findById(req.params.patientId).select('dentalChart').lean()
+    await writeAudit({
+      user: req.user,
+      action: result.mode === 'ortho_case' ? 'حذف حالة تقويم مع السجل المالي' : 'حذف دفعة تقويم مع السجل المالي',
+      entityType: 'OrthodonticCase',
+      entityId: result.snapshot?.caseId || req.params.caseId,
+      details: {
+        patientId: result.patientId,
+        mode: result.mode,
+        snapshot: result.snapshot,
+        paymentsDeleted: result.finance?.finance?.paymentsDeleted || 0,
+        itemsDeleted: result.finance?.finance?.itemsDeleted || 0,
+      },
+    })
+    res.json({
+      ok: true,
+      mode: result.mode,
+      chart: patient ? await chartToDtoEnriched(patient.dentalChart) : null,
+    })
+  } catch (e) {
+    const status = Number(e?.status) || 500
+    if (status >= 500) console.error(e)
+    res.status(status).json({ error: status < 500 && e?.message ? e.message : 'خطأ في الخادم' })
+  }
+}
+
+/** حذف دفعة/قسط تقويم بالكامل — مدير النظام فقط */
+dentalRouter.delete(
+  '/chart/:patientId/orthodontics/:caseId/installments/:installmentId',
+  requireRoles('super_admin'),
+  async (req, res) => {
+    await respondOrthoDelete(req, res, () =>
+      deleteOrthodonticInstallmentFully({
+        patientId: req.params.patientId,
+        caseId: req.params.caseId,
+        installmentId: req.params.installmentId,
+        actorUserId: req.user?._id,
+      }),
+    )
+  },
+)
+
+/** حذف حالة تقويم وكل أقساطها وسجلها المالي — مدير النظام فقط */
+dentalRouter.delete(
+  '/chart/:patientId/orthodontics/:caseId',
+  requireRoles('super_admin'),
+  async (req, res) => {
+    await respondOrthoDelete(req, res, () =>
+      deleteOrthodonticCaseFully({
+        patientId: req.params.patientId,
+        caseId: req.params.caseId,
+        actorUserId: req.user?._id,
+      }),
+    )
+  },
+)
 
 dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
   try {

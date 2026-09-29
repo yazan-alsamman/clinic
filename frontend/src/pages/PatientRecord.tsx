@@ -5462,6 +5462,17 @@ export function PatientRecord() {
                 canEdit={
                   role === 'super_admin' || role === 'dental_branch' || role === 'dental_assistant'
                 }
+                onFinanceChanged={
+                  role === 'super_admin'
+                    ? async () => {
+                        await refreshClinicalSessionLists()
+                        const patientRes = await api<{ patient: Patient }>(
+                          `/api/patients/${encodeURIComponent(id)}`,
+                        )
+                        setPatient(patientRes.patient)
+                      }
+                    : undefined
+                }
               />
             ) : null}
             <div className="card">

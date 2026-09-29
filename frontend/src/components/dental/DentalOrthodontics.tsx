@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../../api/client'
+import { useAuth } from '../../context/AuthContext'
 import { useClinic } from '../../context/ClinicContext'
 import {
   emptyOrthodonticCase,
@@ -25,6 +26,8 @@ import type { DentalProviderOption } from './ToothTreatmentModal'
 type Props = {
   patientId: string
   canEdit: boolean
+  /** بعد حذف مدير النظام لحالة أو دفعة محصّلة، لتحديث الجلسات والرصيد في الملف */
+  onFinanceChanged?: () => void | Promise<void>
 }
 
 function todayIsoDate() {
@@ -35,7 +38,9 @@ function todayIsoDate() {
   return `${y}-${m}-${day}`
 }
 
-export function DentalOrthodontics({ patientId, canEdit }: Props) {
+export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Props) {
+  const { user } = useAuth()
+  const canForceDelete = user?.role === 'super_admin'
   const { usdSypRate } = useClinic()
   const rate = usdSypRate != null && usdSypRate > 0 ? usdSypRate : null
 
@@ -268,28 +273,90 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
     }
   }
 
+  function installmentIsCollected(inst: DentalOrthoInstallment | undefined) {
+    return Boolean(inst && (inst.billingStatus === 'paid' || installmentPaidTotal(inst) > 0))
+  }
+
+  async function forceDeleteCase(caseId: string) {
+    const data = await api<{ chart: DentalChartDto }>(
+      `/api/dental/chart/${encodeURIComponent(patientId)}/orthodontics/${encodeURIComponent(caseId)}`,
+      { method: 'DELETE' },
+    )
+    const list = (data.chart?.orthodonticCases || []).map((c) => normalizeOrthodonticCase(c, rate))
+    setCases(list.filter(orthodonticCaseHasData))
+    setOkMsg('تم حذف حالة التقويم مع أقساطها وسجلها المالي')
+    await onFinanceChanged?.()
+  }
+
+  async function forceDeleteInstallment(caseId: string, installmentId: string) {
+    const data = await api<{ chart: DentalChartDto }>(
+      `/api/dental/chart/${encodeURIComponent(patientId)}/orthodontics/${encodeURIComponent(caseId)}/installments/${encodeURIComponent(installmentId)}`,
+      { method: 'DELETE' },
+    )
+    const list = (data.chart?.orthodonticCases || []).map((c) => normalizeOrthodonticCase(c, rate))
+    setCases(list.filter(orthodonticCaseHasData))
+    setOkMsg('تم حذف الدفعة مع التحصيل والسجل المالي')
+    await onFinanceChanged?.()
+  }
+
   async function removeCase(idx: number) {
     if (!canEdit || saving) return
     const c = cases[idx]
-    const hasPaid = (c?.installments || []).some(
-      (x) => x.billingStatus === 'paid' || installmentPaidTotal(x) > 0,
-    )
-    if (hasPaid) {
+    const hasPaid = (c?.installments || []).some((x) => installmentIsCollected(x))
+    if (hasPaid && !canForceDelete) {
       setErr('لا يمكن حذف حالة تقويم فيها أقساط محصّلة')
       return
     }
-    if (!window.confirm('حذف حالة التقويم هذه وكل أقساطها غير المحصّلة؟')) return
+    const confirmed = window.confirm(
+      canForceDelete
+        ? 'حذف حالة التقويم وكل أقساطها؟\n\nإذا كان هناك تحصيل، يُحذف بند التحصيل والفاتورة والسجل المالي، وتُعاد ذمة المريض ورصيده. لا يمكن التراجع.'
+        : 'حذف حالة التقويم هذه وكل أقساطها غير المحصّلة؟',
+    )
+    if (!confirmed) return
+    if (canForceDelete && c?.id) {
+      setSaving(true)
+      setErr('')
+      setOkMsg('')
+      try {
+        await forceDeleteCase(c.id)
+      } catch (e) {
+        setErr(e instanceof ApiError ? e.message : 'تعذر حذف حالة التقويم')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     await saveAll(cases.filter((_, i) => i !== idx))
   }
 
   async function removeInstallment(caseIdx: number, instIdx: number) {
     if (!canEdit || saving) return
-    const inst = cases[caseIdx]?.installments?.[instIdx]
-    if (inst?.billingStatus === 'paid' || (inst && installmentPaidTotal(inst) > 0)) {
+    const orthoCase = cases[caseIdx]
+    const inst = orthoCase?.installments?.[instIdx]
+    const collected = installmentIsCollected(inst)
+    if (collected && !canForceDelete) {
       setErr('لا يمكن حذف قسط محصّل')
       return
     }
-    if (!window.confirm('حذف هذا القسط؟')) return
+    const confirmed = window.confirm(
+      canForceDelete && collected
+        ? 'حذف هذه الدفعة المحصّلة؟\n\nيُحذف بند التحصيل والفاتورة والسجل المالي، وتُعاد ذمة المريض ورصيده. لا يمكن التراجع.'
+        : 'حذف هذا القسط؟',
+    )
+    if (!confirmed) return
+    if (canForceDelete && orthoCase?.id && inst?.id) {
+      setSaving(true)
+      setErr('')
+      setOkMsg('')
+      try {
+        await forceDeleteInstallment(orthoCase.id, inst.id)
+      } catch (e) {
+        setErr(e instanceof ApiError ? e.message : 'تعذر حذف الدفعة')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     const next = cases.map((c, i) =>
       i === caseIdx
         ? { ...c, installments: (c.installments || []).filter((_, j) => j !== instIdx) }
@@ -323,6 +390,9 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
         عند إنشاء حالة التقويم اختر الطبيب وأضف المستلزمات (اسم وسعر) ضمن نفس النموذج. الأقساط تُضاف لاحقاً
         للتحصيل. المستلزمات تُطرح من المسدّد قبل حساب نسبة الطبيب (مثل المخبر).
+        {canForceDelete
+          ? ' مدير النظام يستطيع حذف الحالة أو أي دفعة حتى بعد التحصيل، ويُحذف معها السجل المالي.'
+          : ''}
       </p>
 
       {err ? (
@@ -387,7 +457,12 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                       {canEdit ? (
                         <button
                           type="button"
-                          className="btn btn-ghost"
+                          className={
+                            canForceDelete &&
+                            (c.installments || []).some((x) => installmentIsCollected(x))
+                              ? 'btn btn-danger'
+                              : 'btn btn-ghost'
+                          }
                           style={{ fontSize: '0.78rem' }}
                           disabled={saving}
                           onClick={() => void removeCase(caseIdx)}
@@ -490,13 +565,13 @@ export function DentalOrthodontics({ patientId, canEdit }: Props) {
                                     <td>
                                       <button
                                         type="button"
-                                        className="btn btn-ghost"
-                                        style={{ fontSize: '0.78rem' }}
-                                        disabled={
-                                          saving ||
-                                          inst.billingStatus === 'paid' ||
-                                          installmentPaidTotal(inst) > 0
+                                        className={
+                                          canForceDelete && installmentIsCollected(inst)
+                                            ? 'btn btn-danger'
+                                            : 'btn btn-ghost'
                                         }
+                                        style={{ fontSize: '0.78rem' }}
+                                        disabled={saving || (!canForceDelete && installmentIsCollected(inst))}
                                         onClick={() => void removeInstallment(caseIdx, instIdx)}
                                       >
                                         حذف

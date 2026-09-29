@@ -292,6 +292,30 @@ export async function syncCollectedDentalLabPayments() {
   return postAutoLabPayments(rows)
 }
 
+/** يلغي تسديد المخبر التلقائي المرتبط ببند تحصيل حُذف. */
+export async function removeAutoLabPaymentsForBillingItemIds(billingItemIds) {
+  const ids = [
+    ...new Set((billingItemIds || []).map((id) => String(id || '')).filter((id) => mongoose.Types.ObjectId.isValid(id))),
+  ]
+  if (!ids.length) return { removed: 0 }
+  const labs = await DentalLab.find({ 'payments.sourceBillingItemId': { $in: ids } })
+  let removed = 0
+  for (const lab of labs) {
+    const before = lab.payments.length
+    lab.payments = lab.payments.filter(
+      (p) =>
+        !(
+          p?.autoFromCollection &&
+          p?.sourceBillingItemId &&
+          ids.includes(String(p.sourceBillingItemId))
+        ),
+    )
+    removed += before - lab.payments.length
+    if (lab.payments.length !== before) await lab.save()
+  }
+  return { removed }
+}
+
 export async function removeAutoLabPaymentsForWorkIds(workIds) {
   const ids = [...new Set((workIds || []).map((id) => String(id || '')).filter((id) => mongoose.Types.ObjectId.isValid(id)))]
   if (!ids.length) return { removed: 0 }

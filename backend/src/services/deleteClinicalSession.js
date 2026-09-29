@@ -70,6 +70,29 @@ async function purgeBillingItems(itemIds) {
   return { paymentsDeleted, itemsDeleted, wallet }
 }
 
+/** بنود بقيت بلا جلسة بعد حذف القسط: التحصيل، المستند، والذمة. */
+export async function purgeCollectedBillingResidue(patientId, itemIds, sessionIds = []) {
+  const ids = [...new Set((itemIds || []).map(String))].filter((id) => mongoose.isValidObjectId(id))
+  const finance = await purgeBillingItems(ids)
+  const sessions = [...new Set((sessionIds || []).map(String))].filter((id) => mongoose.isValidObjectId(id))
+  if (sessions.length === 0) {
+    await detachDebtSettlements(patientId, ids, '')
+  } else {
+    for (const sid of sessions) {
+      await detachDebtSettlements(patientId, ids, sid)
+    }
+  }
+  if (ids.length) {
+    await FinancialDocument.deleteMany({
+      $or: ids.flatMap((iid) => [
+        { 'parameterSnapshot.billingItemId': iid },
+        { sourceId: iid },
+      ]),
+    })
+  }
+  return finance
+}
+
 async function sweepFinancialDocs(cs, laserIds, itemIds) {
   const or = [
     { 'parameterSnapshot.clinicalSessionId': String(cs._id) },
