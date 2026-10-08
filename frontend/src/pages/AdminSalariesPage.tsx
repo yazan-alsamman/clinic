@@ -4,9 +4,11 @@ import { api, ApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 
+type PayKind = 'salary' | 'advance' | 'bonus'
+
 type Payment = {
   id: string
-  kind?: 'salary' | 'bonus'
+  kind?: PayKind
   amountSyp: number
   amountUsd: number
   usdSypRate: number
@@ -22,8 +24,10 @@ type EmployeeRow = {
   monthlySalarySyp: number
   active: boolean
   paymentCount: number
+  advanceCount?: number
   bonusCount?: number
   paidSyp: number
+  advanceSyp?: number
   bonusSyp?: number
   remainingSyp: number
   lastPaymentDate: string
@@ -34,7 +38,15 @@ type Payload = {
   from: string
   to: string
   employees: EmployeeRow[]
-  totals: { employeeCount: number; paymentCount: number; bonusCount?: number; paidSyp: number; bonusSyp?: number }
+  totals: {
+    employeeCount: number
+    paymentCount: number
+    advanceCount?: number
+    bonusCount?: number
+    paidSyp: number
+    advanceSyp?: number
+    bonusSyp?: number
+  }
 }
 
 function monthStartYmd(businessDate: string) {
@@ -46,6 +58,24 @@ function monthStartYmd(businessDate: string) {
 
 function fmtSyp(n: number) {
   return `${new Intl.NumberFormat('ar-SY', { maximumFractionDigits: 0 }).format(Math.round(n || 0))} ل.س`
+}
+
+function kindLabel(kind?: PayKind) {
+  if (kind === 'bonus') return 'بونس'
+  if (kind === 'advance') return 'سلفة'
+  return 'راتب'
+}
+
+function amountErrorForKind(kind: PayKind) {
+  if (kind === 'bonus') return 'أدخل مبلغ البونس'
+  if (kind === 'advance') return 'أدخل مبلغ السلفة'
+  return 'أدخل مبلغ الدفعة (كامل أو جزء من الراتب)'
+}
+
+function successMsgForKind(kind: PayKind) {
+  if (kind === 'bonus') return 'سُجّل البونس ويُطرح من أرباح المركز دون خصمه من الراتب.'
+  if (kind === 'advance') return 'سُجّلت السلفة وتُخصم من المتبقي من الراتب ومن أرباح المركز.'
+  return 'سُجّلت الدفعة وتُخصم من أرباح المركز.'
 }
 
 const cell: CSSProperties = {
@@ -94,7 +124,7 @@ export function AdminSalariesPage() {
   const [newMonthly, setNewMonthly] = useState('')
 
   const [payEmp, setPayEmp] = useState<string | null>(null)
-  const [payKind, setPayKind] = useState<'salary' | 'bonus'>('salary')
+  const [payKind, setPayKind] = useState<PayKind>('salary')
   const [paySyp, setPaySyp] = useState('')
   const [payUsd, setPayUsd] = useState('')
   const [payDate, setPayDate] = useState('')
@@ -184,7 +214,7 @@ export function AdminSalariesPage() {
     const amountSyp = Math.round(Number(paySyp) || 0)
     const amountUsd = Math.round((Number(payUsd) || 0) * 100) / 100
     if (!(amountSyp > 0 || amountUsd > 0)) {
-      setErr(payKind === 'bonus' ? 'أدخل مبلغ البونس' : 'أدخل مبلغ الدفعة (كامل أو جزء من الراتب)')
+      setErr(amountErrorForKind(payKind))
       return
     }
     setSaving(true)
@@ -207,7 +237,7 @@ export function AdminSalariesPage() {
       setPayNote('')
       setPayEmp(null)
       setPayKind('salary')
-      setOkMsg(payKind === 'bonus' ? 'سُجّل البونس ويُطرح من أرباح المركز دون خصمه من الراتب.' : 'سُجّلت الدفعة وتُخصم من أرباح المركز.')
+      setOkMsg(successMsgForKind(payKind))
       setOpenId(employeeId)
       await load()
     } catch (e) {
@@ -218,7 +248,7 @@ export function AdminSalariesPage() {
   }
 
   async function deletePayment(p: Payment) {
-    const label = p.kind === 'bonus' ? 'البونس' : 'الدفعة'
+    const label = kindLabel(p.kind)
     if (!window.confirm(`حذف ${label} ${fmtSyp(p.effectiveAmountSyp)} بتاريخ ${p.businessDate}؟`)) return
     try {
       await api(`/api/finance/salaries/payments/${encodeURIComponent(p.id)}`, { method: 'DELETE' })
@@ -244,8 +274,8 @@ export function AdminSalariesPage() {
     <>
       <h1 className="page-title">الرواتب</h1>
       <p className="page-desc">
-        جدول موظفين شبيه بالإكسل: راتب شهري مرجعي، ودفعات (كاملة أو جزئية)، وبونس إضافي لا يُخصم من المتبقي من الراتب.
-        الدفعات والبونس تُطرح من صافي أرباح المركز في{' '}
+        جدول موظفين: راتب شهري مرجعي، ودفعات، وسلف تُخصم من المتبقي، وبونس إضافي لا يُخصم من المتبقي. الدفعات والسلف
+        والبونس تُطرح من صافي أرباح المركز في{' '}
         <Link to="/admin/finance-dashboard">لوحة المالية العامة</Link>
         {usdSypRate != null ? ` — سعر الصرف الحالي ${usdSypRate.toLocaleString('ar-SY')} ل.س` : ''}.
       </p>
@@ -292,6 +322,10 @@ export function AdminSalariesPage() {
             <div className="val">{fmtSyp(totals.paidSyp)}</div>
           </div>
           <div className="stat-card">
+            <div className="lbl">السلف في النطاق</div>
+            <div className="val">{fmtSyp(totals.advanceSyp || 0)}</div>
+          </div>
+          <div className="stat-card">
             <div className="lbl">البونس في النطاق</div>
             <div className="val">{fmtSyp(totals.bonusSyp || 0)}</div>
           </div>
@@ -299,7 +333,7 @@ export function AdminSalariesPage() {
       ) : null}
 
       <div className="card" style={{ padding: 0, overflow: 'auto', maxHeight: '70vh' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1040 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1120 }}>
           <thead>
             <tr>
               <th style={{ ...headCell, width: 36 }} />
@@ -308,6 +342,7 @@ export function AdminSalariesPage() {
               <th style={headCell}>الراتب الشهري</th>
               <th style={headCell}>الدفعات</th>
               <th style={headCell}>المدفوع في النطاق</th>
+              <th style={headCell}>السلف</th>
               <th style={headCell}>البونس</th>
               <th style={headCell}>المتبقي من الراتب</th>
               <th style={headCell}>آخر دفعة</th>
@@ -318,7 +353,7 @@ export function AdminSalariesPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={11} style={{ ...cell, color: 'var(--text-muted)', textAlign: 'center' }}>
+                <td colSpan={12} style={{ ...cell, color: 'var(--text-muted)', textAlign: 'center' }}>
                   لا موظفون بعد — أضف صفاً في أسفل الجدول.
                 </td>
               </tr>
@@ -380,7 +415,7 @@ export function AdminSalariesPage() {
                   placeholder="راتب شهري (اختياري)"
                 />
               </td>
-              <td colSpan={6} style={{ ...cell, background: '#f3fbf6', color: 'var(--text-muted)' }}>
+              <td colSpan={7} style={{ ...cell, background: '#f3fbf6', color: 'var(--text-muted)' }}>
                 صف إضافة — لا يُحفظ إلا بعد «إضافة»
               </td>
               <td style={{ ...cell, background: '#f3fbf6' }}>
@@ -426,8 +461,8 @@ function EmployeeBlock({
   onDeletePayment: (p: Payment) => void
   payEmp: string | null
   setPayEmp: (id: string | null) => void
-  payKind: 'salary' | 'bonus'
-  setPayKind: (k: 'salary' | 'bonus') => void
+  payKind: PayKind
+  setPayKind: (k: PayKind) => void
   paySyp: string
   setPaySyp: (v: string) => void
   payUsd: string
@@ -444,6 +479,7 @@ function EmployeeBlock({
   const [monthly, setMonthly] = useState(row.monthlySalarySyp ? String(row.monthlySalarySyp) : '')
   const showPay = payEmp === row.id
   const bonusMode = showPay && payKind === 'bonus'
+  const advanceMode = showPay && payKind === 'advance'
 
   useEffect(() => {
     setName(row.name)
@@ -452,6 +488,22 @@ function EmployeeBlock({
   }, [row.id, row.name, row.title, row.monthlySalarySyp])
 
   const dim = !row.active
+
+  function openPayForm(kind: PayKind) {
+    if (showPay && payKind === kind) setPayEmp(null)
+    else {
+      setPayKind(kind)
+      setPayEmp(row.id)
+      setOpenIdSafe(onToggle, opened)
+    }
+  }
+
+  function ensurePayForm(defaultKind: PayKind = 'salary') {
+    if (payEmp !== row.id) {
+      setPayKind(defaultKind)
+      setPayEmp(row.id)
+    }
+  }
 
   return (
     <>
@@ -496,6 +548,9 @@ function EmployeeBlock({
         </td>
         <td style={cell}>{row.paymentCount}</td>
         <td style={{ ...cell, fontWeight: 700 }}>{fmtSyp(row.paidSyp)}</td>
+        <td style={{ ...cell, fontWeight: 700, color: (row.advanceSyp || 0) > 0 ? '#0369a1' : undefined }}>
+          {(row.advanceSyp || 0) > 0 ? fmtSyp(row.advanceSyp || 0) : '—'}
+        </td>
         <td style={{ ...cell, fontWeight: 700, color: (row.bonusSyp || 0) > 0 ? '#b45309' : undefined }}>
           {(row.bonusSyp || 0) > 0 ? fmtSyp(row.bonusSyp || 0) : '—'}
         </td>
@@ -503,33 +558,22 @@ function EmployeeBlock({
         <td style={cell}>{row.lastPaymentDate || '—'}</td>
         <td style={cell}>{row.active ? 'نشط' : 'موقوف'}</td>
         <td style={cell}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ fontSize: '0.78rem' }}
-            onClick={() => {
-              if (showPay && payKind === 'salary') setPayEmp(null)
-              else {
-                setPayKind('salary')
-                setPayEmp(row.id)
-                setOpenIdSafe(onToggle, opened)
-              }
-            }}
-          >
+          <button type="button" className="btn btn-ghost" style={{ fontSize: '0.78rem' }} onClick={() => openPayForm('salary')}>
             دفعة
           </button>{' '}
           <button
             type="button"
             className="btn btn-ghost"
+            style={{ fontSize: '0.78rem', color: '#0369a1' }}
+            onClick={() => openPayForm('advance')}
+          >
+            سلفة
+          </button>{' '}
+          <button
+            type="button"
+            className="btn btn-ghost"
             style={{ fontSize: '0.78rem', color: '#b45309' }}
-            onClick={() => {
-              if (showPay && payKind === 'bonus') setPayEmp(null)
-              else {
-                setPayKind('bonus')
-                setPayEmp(row.id)
-                setOpenIdSafe(onToggle, opened)
-              }
-            }}
+            onClick={() => openPayForm('bonus')}
           >
             بونس
           </button>{' '}
@@ -548,11 +592,13 @@ function EmployeeBlock({
       </tr>
       {opened || showPay ? (
         <tr>
-          <td colSpan={11} style={{ ...cell, background: '#f8faf8', padding: '0.65rem 0.75rem' }}>
-            <div style={{ fontWeight: 700, marginBottom: '0.45rem' }}>سجل دفعات وبونس «{row.name}» ضمن النطاق</div>
+          <td colSpan={12} style={{ ...cell, background: '#f8faf8', padding: '0.65rem 0.75rem' }}>
+            <div style={{ fontWeight: 700, marginBottom: '0.45rem' }}>
+              سجل دفعات وسلف وبونس «{row.name}» ضمن النطاق
+            </div>
             {row.payments.length === 0 ? (
               <p style={{ margin: '0 0 0.6rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                لا دفعات في هذا النطاق — يمكن صرف جزء من الراتب أو الراتب كاملاً، أو إضافة بونس.
+                لا حركات في هذا النطاق — يمكن صرف دفعة راتب أو سلفة أو بونس.
               </p>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '0.65rem' }}>
@@ -569,8 +615,17 @@ function EmployeeBlock({
                 </thead>
                 <tbody>
                   {row.payments.map((p) => (
-                    <tr key={p.id} style={p.kind === 'bonus' ? { background: '#fff7ed' } : undefined}>
-                      <td style={cell}>{p.kind === 'bonus' ? 'بونس' : 'راتب'}</td>
+                    <tr
+                      key={p.id}
+                      style={
+                        p.kind === 'bonus'
+                          ? { background: '#fff7ed' }
+                          : p.kind === 'advance'
+                            ? { background: '#e0f2fe' }
+                            : undefined
+                      }
+                    >
+                      <td style={cell}>{kindLabel(p.kind)}</td>
                       <td style={cell}>{p.businessDate}</td>
                       <td style={cell}>{p.amountSyp ? fmtSyp(p.amountSyp) : '—'}</td>
                       <td style={cell}>
@@ -604,44 +659,70 @@ function EmployeeBlock({
               }}
             >
               <label style={{ display: 'grid', gap: '0.2rem', fontSize: '0.78rem' }}>
-                {bonusMode ? 'مبلغ البونس (ل.س)' : 'مبلغ الدفعة (ل.س)'}
-                <input className="input" type="number" min={0} value={showPay ? paySyp : ''} onChange={(e) => {
-                  if (payEmp !== row.id) setPayKind('salary')
-                  setPayEmp(row.id)
-                  setPaySyp(e.target.value)
-                }} placeholder={bonusMode ? 'بونس' : 'جزء أو كامل'} />
+                {bonusMode ? 'مبلغ البونس (ل.س)' : advanceMode ? 'مبلغ السلفة (ل.س)' : 'مبلغ الدفعة (ل.س)'}
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  value={showPay ? paySyp : ''}
+                  onChange={(e) => {
+                    ensurePayForm(payKind)
+                    setPaySyp(e.target.value)
+                  }}
+                  placeholder={bonusMode ? 'بونس' : advanceMode ? 'سلفة' : 'جزء أو كامل'}
+                />
               </label>
               <label style={{ display: 'grid', gap: '0.2rem', fontSize: '0.78rem' }}>
                 USD (اختياري)
-                <input className="input" type="number" min={0} step={0.01} value={showPay ? payUsd : ''} onChange={(e) => {
-                  if (payEmp !== row.id) setPayKind('salary')
-                  setPayEmp(row.id)
-                  setPayUsd(e.target.value)
-                }} />
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={showPay ? payUsd : ''}
+                  onChange={(e) => {
+                    ensurePayForm(payKind)
+                    setPayUsd(e.target.value)
+                  }}
+                />
               </label>
               <label style={{ display: 'grid', gap: '0.2rem', fontSize: '0.78rem' }}>
                 التاريخ
-                <input className="input" type="date" value={payDate} onChange={(e) => {
-                  if (payEmp !== row.id) setPayKind('salary')
-                  setPayEmp(row.id)
-                  setPayDate(e.target.value)
-                }} />
+                <input
+                  className="input"
+                  type="date"
+                  value={payDate}
+                  onChange={(e) => {
+                    ensurePayForm(payKind)
+                    setPayDate(e.target.value)
+                  }}
+                />
               </label>
               <label style={{ display: 'grid', gap: '0.2rem', fontSize: '0.78rem' }}>
                 ملاحظة
-                <input className="input" value={showPay ? payNote : ''} onChange={(e) => {
-                  if (payEmp !== row.id) setPayKind('salary')
-                  setPayEmp(row.id)
-                  setPayNote(e.target.value)
-                }} placeholder={bonusMode ? 'سبب البونس' : 'سلفة / دفعة أولى / …'} />
+                <input
+                  className="input"
+                  value={showPay ? payNote : ''}
+                  onChange={(e) => {
+                    ensurePayForm(payKind)
+                    setPayNote(e.target.value)
+                  }}
+                  placeholder={bonusMode ? 'سبب البونس' : advanceMode ? 'سبب السلفة' : 'دفعة أولى / …'}
+                />
               </label>
               <button type="button" className="btn btn-primary" disabled={saving} onClick={onAddPayment}>
-                {bonusMode ? 'تسجيل البونس' : 'تسجيل الدفعة'}
+                {bonusMode ? 'تسجيل البونس' : advanceMode ? 'تسجيل السلفة' : 'تسجيل الدفعة'}
               </button>
             </div>
             {bonusMode ? (
               <p style={{ margin: '0.45rem 0 0', fontSize: '0.78rem', color: '#b45309' }}>
                 البونس إضافي: يُطرح من أرباح المركز ولا يُخصم من المتبقي من الراتب الشهري.
+              </p>
+            ) : null}
+            {advanceMode ? (
+              <p style={{ margin: '0.45rem 0 0', fontSize: '0.78rem', color: '#0369a1' }}>
+                السلفة تُخصم من المتبقي من الراتب الشهري وتُطرح من أرباح المركز. لا يمكن تجاوز المتبقي لهذا الشهر
+                {row.monthlySalarySyp > 0 ? ` (المتبقي الحالي في النطاق: ${fmtSyp(row.remainingSyp)})` : ''}.
               </p>
             ) : null}
           </td>

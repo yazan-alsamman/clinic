@@ -22,7 +22,16 @@ function roundMoney(n) {
 }
 
 function paymentKind(raw) {
-  return raw === 'bonus' ? 'bonus' : 'salary'
+  const k = String(raw || '').trim().toLowerCase()
+  if (k === 'bonus') return 'bonus'
+  if (k === 'advance' || k === 'سلفة') return 'advance'
+  return 'salary'
+}
+
+function kindAuditLabel(kind) {
+  if (kind === 'bonus') return 'بونس موظف'
+  if (kind === 'advance') return 'سلفة على الراتب'
+  return 'دفعة راتب'
 }
 
 function serializePayment(p) {
@@ -74,11 +83,15 @@ salaryLedgerRouter.get('/', async (req, res) => {
     const rows = employees.map((e) => {
       const list = byEmp.get(String(e._id)) || []
       const salaryPaidSyp = roundMoney(
-        list.filter((p) => p.kind !== 'bonus').reduce((s, p) => s + p.effectiveAmountSyp, 0),
+        list.filter((p) => p.kind === 'salary').reduce((s, p) => s + p.effectiveAmountSyp, 0),
+      )
+      const advanceSyp = roundMoney(
+        list.filter((p) => p.kind === 'advance').reduce((s, p) => s + p.effectiveAmountSyp, 0),
       )
       const bonusSyp = roundMoney(
         list.filter((p) => p.kind === 'bonus').reduce((s, p) => s + p.effectiveAmountSyp, 0),
       )
+      const chargedAgainstSalarySyp = roundMoney(salaryPaidSyp + advanceSyp)
       const monthly = roundMoney(e.monthlySalarySyp)
       return {
         id: String(e._id),
@@ -86,11 +99,13 @@ salaryLedgerRouter.get('/', async (req, res) => {
         title: String(e.title || ''),
         monthlySalarySyp: monthly,
         active: e.active !== false,
-        paymentCount: list.filter((p) => p.kind !== 'bonus').length,
+        paymentCount: list.filter((p) => p.kind === 'salary').length,
+        advanceCount: list.filter((p) => p.kind === 'advance').length,
         bonusCount: list.filter((p) => p.kind === 'bonus').length,
         paidSyp: salaryPaidSyp,
+        advanceSyp,
         bonusSyp,
-        remainingSyp: monthly > 0 ? Math.max(0, monthly - salaryPaidSyp) : 0,
+        remainingSyp: monthly > 0 ? Math.max(0, monthly - chargedAgainstSalarySyp) : 0,
         lastPaymentDate: list[0]?.businessDate || '',
         payments: list,
       }
@@ -103,8 +118,10 @@ salaryLedgerRouter.get('/', async (req, res) => {
       totals: {
         employeeCount: rows.filter((r) => r.active).length,
         paymentCount: rows.reduce((s, r) => s + r.paymentCount, 0),
+        advanceCount: rows.reduce((s, r) => s + r.advanceCount, 0),
         bonusCount: rows.reduce((s, r) => s + r.bonusCount, 0),
         paidSyp: roundMoney(rows.reduce((s, r) => s + r.paidSyp, 0)),
+        advanceSyp: roundMoney(rows.reduce((s, r) => s + r.advanceSyp, 0)),
         bonusSyp: roundMoney(rows.reduce((s, r) => s + r.bonusSyp, 0)),
       },
     })
@@ -255,6 +272,30 @@ salaryLedgerRouter.post('/payments', async (req, res) => {
       }
     }
     const kind = paymentKind(body.kind)
+    if (kind === 'advance') {
+      const effectiveNew = expenseEffectiveAmountSyp({ amountSyp, amountUsd, usdSypRate })
+      const monthly = roundMoney(emp.monthlySalarySyp)
+      if (!(monthly > 0)) {
+        res.status(400).json({ error: 'حدّد الراتب الشهري للموظف قبل إعطاء سلفة.' })
+        return
+      }
+      const monthPrefix = businessDate.slice(0, 7)
+      const monthRows = await SalaryPayment.find({
+        employeeId,
+        businessDate: { $gte: `${monthPrefix}-01`, $lte: `${monthPrefix}-31` },
+        kind: { $in: ['salary', 'advance'] },
+      })
+        .select('amountSyp amountUsd usdSypRate')
+        .lean()
+      const charged = roundMoney(monthRows.reduce((s, r) => s + expenseEffectiveAmountSyp(r), 0))
+      const remaining = Math.max(0, monthly - charged)
+      if (effectiveNew > remaining) {
+        res.status(400).json({
+          error: `مبلغ السلفة أكبر من المتبقي من الراتب لهذا الشهر (${remaining.toLocaleString('ar-SY')} ل.س).`,
+        })
+        return
+      }
+    }
     const doc = await SalaryPayment.create({
       employeeId,
       amountSyp,
@@ -267,7 +308,7 @@ salaryLedgerRouter.post('/payments', async (req, res) => {
     })
     await writeAudit({
       user: req.user,
-      action: kind === 'bonus' ? 'بونس موظف' : 'دفعة راتب',
+      action: kindAuditLabel(kind),
       entityType: 'SalaryPayment',
       entityId: doc._id,
       details: { employeeId, employeeName: emp.name, amountSyp, amountUsd, businessDate, kind },
