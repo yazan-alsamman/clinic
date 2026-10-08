@@ -1549,8 +1549,9 @@ patientsRouter.patch('/:id/packages/:packageId', requireActiveDay, async (req, r
       res.status(404).json({ error: 'الباكج غير موجود' })
       return
     }
-    if (String(rows[pkgIndex]?.department || '') !== 'laser') {
-      res.status(400).json({ error: 'إيقاف الباكج يخص باكج الليزر فقط من هذا المسار' })
+    const dept = String(rows[pkgIndex]?.department || '')
+    if (dept !== 'laser' && dept !== 'solarium') {
+      res.status(400).json({ error: 'إيقاف الباكج يخص باكج الليزر أو السولاريوم' })
       return
     }
     const suspended = req.body?.suspended === true
@@ -1562,9 +1563,10 @@ patientsRouter.patch('/:id/packages/:packageId', requireActiveDay, async (req, r
     const pkg = Array.isArray(fresh?.sessionPackages)
       ? fresh.sessionPackages.find((x) => String(x?._id) === packageId)
       : null
+    const deptLabel = dept === 'solarium' ? 'سولاريوم' : 'ليزر'
     await writeAudit({
       user: req.user,
-      action: suspended ? 'إيقاف باكج ليزر لمريض' : 'تفعيل باكج ليزر لمريض',
+      action: suspended ? `إيقاف باكج ${deptLabel} لمريض` : `تفعيل باكج ${deptLabel} لمريض`,
       entityType: 'Patient',
       entityId: p._id,
       details: { packageId, suspended },
@@ -1576,13 +1578,9 @@ patientsRouter.patch('/:id/packages/:packageId', requireActiveDay, async (req, r
   }
 })
 
-/** حذف باكج لم يُستهلك منه أي جلسة — مدير النظام فقط */
+/** حذف باكج لم يُستهلك منه أي جلسة. السولاريوم: مدير النظام أو الاستقبال. الليزر: مدير النظام فقط */
 patientsRouter.delete('/:id/packages/:packageId', async (req, res) => {
   try {
-    if (req.user.role !== 'super_admin') {
-      res.status(403).json({ error: 'حذف الباكج متاح لمدير النظام فقط' })
-      return
-    }
     const patientId = String(req.params.id || '').trim()
     const packageId = String(req.params.packageId || '').trim()
     if (!mongoose.isValidObjectId(patientId) || !mongoose.isValidObjectId(packageId)) {
@@ -1598,6 +1596,13 @@ patientsRouter.delete('/:id/packages/:packageId', async (req, res) => {
     const pkg = rows.find((x) => String(x?._id) === packageId)
     if (!pkg) {
       res.status(404).json({ error: 'الباكج غير موجود' })
+      return
+    }
+    const isSolarium = String(pkg.department || '') === 'solarium'
+    const canDelete =
+      req.user.role === 'super_admin' || (req.user.role === 'reception' && isSolarium)
+    if (!canDelete) {
+      res.status(403).json({ error: 'حذف هذا الباكج متاح لمدير النظام فقط' })
       return
     }
     if (packageHasAnyUsedSession(pkg)) {
@@ -1748,6 +1753,10 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
     }
 
     const completed = req.body?.completed !== false
+    if (completed && pkg.suspended === true) {
+      res.status(400).json({ error: 'الباكج موقوف مؤقتاً. فعّله قبل تسجيل استهلاك جلسة.' })
+      return
+    }
     if (sess.completedByReception === true && !completed) {
       res.status(400).json({ error: 'لا يمكن إلغاء إتمام جلسة باكج بعد تثبيتها' })
       return

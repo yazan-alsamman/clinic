@@ -3668,7 +3668,10 @@ export function PatientRecord() {
             <div style={{ display: 'grid', gap: '0.8rem' }}>
               {patientPackages.map((pkg) => {
                 const pkgUsed = patientPackageHasUsedSession(pkg)
-                const canDeletePkg = role === 'super_admin' && !pkgUsed
+                const canDeletePkg =
+                  !pkgUsed &&
+                  (role === 'super_admin' || (role === 'reception' && pkg.department === 'solarium'))
+                const canPausePkg = pkg.department === 'laser' || pkg.department === 'solarium'
                 return (
                 <div key={pkg.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.8rem' }}>
                   {(() => {
@@ -3703,7 +3706,7 @@ export function PatientRecord() {
                       {pkg.createdAt ? formatClinicDate(pkg.createdAt) : '—'}
                     </span>
                   </div>
-                  {pkg.department === 'laser' ? (
+                  {canPausePkg ? (
                     <div
                       style={{
                         display: 'flex',
@@ -3721,7 +3724,7 @@ export function PatientRecord() {
                           موقوف مؤقتاً
                         </span>
                       ) : null}
-                      {pkg.areaCount ? (
+                      {pkg.department === 'laser' && pkg.areaCount ? (
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                           مناطق ضمن الباكج: <strong>{pkg.areaCount}</strong>
                         </span>
@@ -3735,6 +3738,8 @@ export function PatientRecord() {
                           if (!id) return
                           setPackageErr('')
                           setPackageOk('')
+                          setSolariumPkgErr('')
+                          setSolariumPkgOk('')
                           setPackageBusy(true)
                           try {
                             const data = await api<{ package: PatientPackage }>(
@@ -3754,9 +3759,13 @@ export function PatientRecord() {
                                   }
                                 : prev,
                             )
-                            setPackageOk(pkg.suspended ? 'تم تفعيل الباكج.' : 'تم إيقاف الباكج مؤقتاً.')
+                            const msg = pkg.suspended ? 'تم تفعيل الباكج.' : 'تم إيقاف الباكج مؤقتاً.'
+                            if (pkg.department === 'solarium') setSolariumPkgOk(msg)
+                            else setPackageOk(msg)
                           } catch (e) {
-                            setPackageErr(e instanceof ApiError ? e.message : 'تعذر تحديث الباكج')
+                            const msg = e instanceof ApiError ? e.message : 'تعذر تحديث الباكج'
+                            if (pkg.department === 'solarium') setSolariumPkgErr(msg)
+                            else setPackageErr(msg)
                           } finally {
                             setPackageBusy(false)
                           }
@@ -3819,9 +3828,10 @@ export function PatientRecord() {
                     >
                       حذف الباكج
                     </button>
-                  ) : role === 'super_admin' && pkgUsed ? (
+                  ) : pkgUsed &&
+                    (role === 'super_admin' || (role === 'reception' && pkg.department === 'solarium')) ? (
                     <p style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      لا يمكن حذف الباكج بعد استهلاك جلسة أو ربطها بجلسة علاجية.
+                      لا يمكن حذف الباكج بعد استهلاك جلسة. يمكن إيقافه مؤقتاً.
                     </p>
                   ) : null}
                   <p style={{ margin: '0.45rem 0', fontSize: '0.88rem' }}>
@@ -3856,7 +3866,9 @@ export function PatientRecord() {
                         <input
                           type="checkbox"
                           checked={s.completedByReception}
-                          disabled={s.completedByReception || packageBusy || pkgPayModalBusy}
+                          disabled={
+                            s.completedByReception || packageBusy || pkgPayModalBusy || pkg.suspended === true
+                          }
                           onChange={async (e) => {
                             if (!id) return
                             const nextCompleted = e.target.checked
