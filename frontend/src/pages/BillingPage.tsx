@@ -42,6 +42,8 @@ type Item = {
   packageExpectedAreaCount?: number
   laserRecordedPackageAreaCount?: number
   packagePartialAreasAcknowledgedByReception?: number
+  /** يجب أن يكون true من الخادم قبل أي إنقاص جلسة */
+  laserPackageMetricsReady?: boolean
   /** مناطق الباكج المتبقية غير المنجزة */
   laserPackageRemainingAreaLabels?: string[]
   /** رصيد إضافي مخزّن على المريض */
@@ -223,13 +225,23 @@ function hasLaserPackageAreaMetrics(item: Item): boolean {
   return (
     item.isPackagePrepaid === true &&
     item.department === 'laser' &&
+    item.laserPackageMetricsReady === true &&
     item.packageExpectedAreaCount != null &&
     item.laserRecordedPackageAreaCount != null
   )
 }
 
+function itemHasRemainingPackageAreas(item: Item): boolean {
+  return (item.laserPackageRemainingAreaLabels?.length ?? 0) > 0
+}
+
 function itemPackageNeedsPartialAreaSettle(item: Item): boolean {
   if (!hasLaserPackageAreaMetrics(item)) return false
+  if (itemHasRemainingPackageAreas(item) === false) {
+    const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
+    const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
+    if (rec >= exp) return false
+  }
   const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
   const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
   const ack = Math.trunc(Number(item.packagePartialAreasAcknowledgedByReception) || 0)
@@ -244,9 +256,11 @@ function itemPackageWaitingForMoreAreas(item: Item): boolean {
   return rec < exp && ack >= rec
 }
 
+/** لا يُسمح بإنقاص جلسة إلا بعد مقاييس جاهزة واكتمال كل مناطق الباكج بلا متبقي */
 function itemPackageReadyForSessionDecrement(item: Item): boolean {
   if (!item.isPackagePrepaid) return false
-  if (!hasLaserPackageAreaMetrics(item)) return true
+  if (!hasLaserPackageAreaMetrics(item)) return false
+  if (itemHasRemainingPackageAreas(item)) return false
   const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
   const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
   return rec >= exp
@@ -257,6 +271,29 @@ function itemIsAddonOnlyOutsidePackage(item: Item): boolean {
   if (!item.isPackagePrepaid) return false
   if (!hasLaserPackageAreaMetrics(item)) return false
   return Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0) === 0
+}
+
+function itemPackageMetricsMissing(item: Item): boolean {
+  return (
+    item.isPackagePrepaid === true &&
+    item.department === 'laser' &&
+    Boolean(item.patientPackageId) &&
+    !hasLaserPackageAreaMetrics(item)
+  )
+}
+
+function packageSessionDecrementBlockedReason(item: Item): string {
+  if (!item.isPackagePrepaid) return ''
+  if (itemPackageMetricsMissing(item)) {
+    return 'تعذر قراءة مناطق الباكج لهذا البند. اضغط «تحديث» ثم أعد المحاولة — لن يُسمح بإنقاص جلسة قبل اكتمال المقاييس.'
+  }
+  if (itemHasRemainingPackageAreas(item)) {
+    return `لا يمكن إنقاص جلسة الباكج وما زالت مناطق غير منجزة: ${item.laserPackageRemainingAreaLabels!.join('، ')}`
+  }
+  if (!itemPackageReadyForSessionDecrement(item)) {
+    return 'لا يمكن إنقاص جلسة الباكج قبل إكمال كل المناطق وتثبيتها بـ«إنقاص منطقة».'
+  }
+  return ''
 }
 
 function itemShowsPackageDecrementActions(item: Item): boolean {
@@ -568,6 +605,11 @@ export function BillingPage() {
       setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
       return
     }
+    const blocked = packageSessionDecrementBlockedReason(payItem)
+    if (blocked) {
+      setErr(blocked)
+      return
+    }
     setErr('')
     if (payDiscountEnabled) {
       const p = parseDiscountPercentInput(true, payDiscountPercent)
@@ -729,6 +771,11 @@ export function BillingPage() {
   async function consumePackageSession(item: Item) {
     if (!item.patientId || !item.patientPackageId || !item.patientPackageSessionId) {
       setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
+      return
+    }
+    const blocked = packageSessionDecrementBlockedReason(item)
+    if (blocked) {
+      setErr(blocked)
       return
     }
     setPackageBusyId(item.id)
@@ -974,7 +1021,9 @@ export function BillingPage() {
                       </button>
                     </>
                   ) : null}
-                  {itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) > 0 ? (
+                  {itemShowsPackageDecrementActions(b) &&
+                  itemEffectiveDueSyp(b) > 0 &&
+                  itemPackageReadyForSessionDecrement(b) ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -998,7 +1047,8 @@ export function BillingPage() {
                       {busyId === b.id ? 'جاري المعالجة…' : 'إنقاص جلسة و دفع'}
                     </button>
                   ) : null}
-                  {itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) <= 0 ? (
+                  {itemShowsPackageDecrementActions(b) &&
+                  (itemEffectiveDueSyp(b) <= 0 || !itemPackageReadyForSessionDecrement(b)) ? (
                     <>
                       {itemPackageNeedsPartialAreaSettle(b) ? (
                         <button
@@ -1012,7 +1062,7 @@ export function BillingPage() {
                           {partialPackageBusyId === b.id ? 'جاري المعالجة…' : 'إنقاص منطقة'}
                         </button>
                       ) : null}
-                      {itemPackageReadyForSessionDecrement(b) ? (
+                      {itemEffectiveDueSyp(b) <= 0 && itemPackageReadyForSessionDecrement(b) ? (
                         <button
                           type="button"
                           className="btn btn-secondary"
@@ -1056,13 +1106,12 @@ export function BillingPage() {
                     </span>
                   ) : null}
                 </div>
-                {itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) > 0 ? (
-                  <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                    جلسة باكج مع مناطق إضافية خارج الباكج — استخدم «إنقاص جلسة و دفع» لتسجيل الدفعة ثم خصم جلسة من
-                    الباكج.
-                  </p>
-                ) : itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) <= 0 ? (
-                  itemPackageWaitingForMoreAreas(b) ? (
+                {itemShowsPackageDecrementActions(b) ? (
+                  itemPackageMetricsMissing(b) ? (
+                    <p style={{ margin: '0.35rem 0 0', color: 'var(--danger)', fontSize: '0.82rem' }}>
+                      تعذر تحميل مقاييس مناطق الباكج — اضغط «تحديث». لن يظهر «إنقاص جلسة» قبل اكتمال قراءة المناطق.
+                    </p>
+                  ) : itemPackageWaitingForMoreAreas(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                       تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية
                       {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
@@ -1072,21 +1121,24 @@ export function BillingPage() {
                     </p>
                   ) : itemPackageNeedsPartialAreaSettle(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      باكج ليزر — عدد المناطق المسجّل أصغر من عدد مناطق الباكج
+                      باكج ليزر — مناطق غير مكتملة
                       {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
                         ? ` (متبقي: ${b.laserPackageRemainingAreaLabels!.join('، ')})`
                         : ''}
-                      . استخدم «إنقاص منطقة» لكل منطقة أنجزها الأخصائي ضمن المدخلات الحالية قبل إكمال باقي المناطق في
-                      الملف.
+                      . استخدم «إنقاص منطقة» لكل منطقة أنجزها الأخصائي قبل «إنقاص جلسة»
+                      {itemEffectiveDueSyp(b) > 0 ? ' أو «إنقاص جلسة و دفع»' : ''}.
                     </p>
-                  ) : !hasLaserPackageAreaMetrics(b) ? (
+                  ) : itemPackageReadyForSessionDecrement(b) && itemEffectiveDueSyp(b) > 0 ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      هذه الجلسة مدفوعة مسبقاً — تأكد من إتمام جلسة من ضمن الباكج لهذا المريض.
+                      جلسة باكج مكتملة المناطق مع إضافات مستحقة — استخدم «إنقاص جلسة و دفع».
+                    </p>
+                  ) : itemPackageReadyForSessionDecrement(b) ? (
+                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
+                      هذه الجلسة مدفوعة مسبقاً — كل مناطق الباكج مكتملة. استخدم «إنقاص جلسة» لتثبيت الخصم من الباكج.
                     </p>
                   ) : (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      هذه الجلسة مدفوعة مسبقاً — عند اكتمال كل مناطق الباكج استخدم «إنقاص جلسة» لتثبيت الخصم من
-                      الباكج.
+                      هذه الجلسة مدفوعة مسبقاً — أكمل مناطق الباكج ثم ثبّتها قبل إنقاص الجلسة.
                     </p>
                   )
                 ) : null}

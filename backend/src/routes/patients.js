@@ -1709,10 +1709,40 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
         res.status(400).json({ error: 'جلسة الليزر المرتبطة غير موجودة.' })
         return
       }
-      const recorded = (Array.isArray(ls.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
-      const expected = Math.max(1, Math.trunc(Number(pkg.areaCount) || 0))
+      const optionIds = new Set((pkg.procedureOptionIds || []).map((id) => String(id)))
+      for (const li of ls.lineItems || []) {
+        if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+      }
+      const optionRows =
+        optionIds.size > 0
+          ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+              .select('name kind')
+              .lean()
+          : []
+      const optionMetaById = new Map(
+        optionRows.map((r) => [
+          String(r._id),
+          { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+        ]),
+      )
+      const breakdown = buildPackageAreaBreakdown(ls, pkg, optionMetaById)
+      const nonAddonCount = (Array.isArray(ls.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
+      let recorded = breakdown
+        ? Math.max(0, Math.trunc(Number(breakdown.matchedPackageAreaCount) || 0))
+        : nonAddonCount
+      let expected = breakdown
+        ? Math.max(
+            1,
+            Math.trunc(Number(breakdown.expectedAreaCount) || 0),
+            Math.trunc(Number(pkg.areaCount) || 0),
+          )
+        : Math.max(1, Math.trunc(Number(pkg.areaCount) || 0))
+      const remaining = Array.isArray(breakdown?.remainingAreas) ? breakdown.remainingAreas : []
+      if (remaining.length > 0 && recorded >= expected) {
+        expected = recorded + remaining.length
+      }
       const currentAck = Math.max(0, Math.trunc(Number(sess.packagePartialAreasAcknowledgedByReception) || 0))
-      if (!(recorded < expected)) {
+      if (!(recorded < expected) || remaining.length === 0) {
         res.status(400).json({
           error: 'عند إكمال كل مناطق الباكج لهذه الزيارة استخدم «إنقاص جلسة» من التحصيل.',
         })
@@ -1721,7 +1751,9 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       if (currentAck >= recorded) {
         res.status(400).json({
           error:
-            'تم إنقاص كل المناطق المسجّلة حالياً. يُكمِل الأخصائي المناطق المتبقية في ملف المريض ثم يُعاد الحفظ.',
+            remaining.length > 0
+              ? `تم إنقاص كل المناطق المسجّلة حالياً. المتبقي على الأخصائي: ${remaining.join('، ')}.`
+              : 'تم إنقاص كل المناطق المسجّلة حالياً. يُكمِل الأخصائي المناطق المتبقية في ملف المريض ثم يُعاد الحفظ.',
         })
         return
       }
