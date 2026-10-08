@@ -466,10 +466,38 @@ function laserAreaNamesFromSession(ls) {
   for (const row of ls?.lineItems || []) {
     const label = String(row?.areaLabel || '').trim()
     if (!label) continue
-    fromLines.push(row.isAddon === true ? `${label} (خارج الباكج)` : label)
+    let name = row.isAddon === true ? `${label} (خارج الباكج)` : label
+    if (row.chargeByPulseCount === true) {
+      const shots = String(row.shotCount || '').trim()
+      name += shots
+        ? ` — محاسبة على عدد الضربات: ${shots}`
+        : ' — محاسبة على عدد الضربات'
+    }
+    fromLines.push(name)
   }
   if (fromLines.length) return fromLines
-  return (ls?.manualAreaLabels || []).map((x) => String(x || '').trim()).filter(Boolean)
+  const manual = (ls?.manualAreaLabels || []).map((x) => String(x || '').trim()).filter(Boolean)
+  if (ls?.chargeByPulseCount === true && manual.length) {
+    const shots = String(ls.shotCount || '').trim()
+    const suffix = shots ? ` — محاسبة على عدد الضربات: ${shots}` : ' — محاسبة على عدد الضربات'
+    return manual.map((name) => `${name}${suffix}`)
+  }
+  return manual
+}
+
+function laserPulseChargeNotesFromSession(ls) {
+  const notes = []
+  for (const row of ls?.lineItems || []) {
+    if (row?.chargeByPulseCount !== true) continue
+    const label = String(row.areaLabel || '').trim() || 'منطقة'
+    const shots = String(row.shotCount || '').trim()
+    notes.push(shots ? `${label}: ${shots} ضربة` : label)
+  }
+  if (!notes.length && ls?.chargeByPulseCount === true) {
+    const shots = String(ls.shotCount || '').trim()
+    notes.push(shots ? `الجلسة: ${shots} ضربة` : 'الجلسة')
+  }
+  return notes
 }
 
 /** كل أسماء مناطق جلسة الليزر لشاشة التحصيل — من أسطر الجلسة وليس من النص المقصوص */
@@ -489,7 +517,7 @@ async function attachLaserAreaLabels(billingItems, dtos) {
       ...(clinicalIds.length ? [{ clinicalSessionId: { $in: clinicalIds } }] : []),
     ],
   })
-    .select('billingItemId clinicalSessionId lineItems manualAreaLabels')
+    .select('billingItemId clinicalSessionId lineItems manualAreaLabels chargeByPulseCount shotCount')
     .lean()
   const byBill = new Map()
   const byCs = new Map()
@@ -503,7 +531,9 @@ async function attachLaserAreaLabels(billingItems, dtos) {
       byBill.get(String(b._id)) ||
       (b.clinicalSessionId ? byCs.get(String(b.clinicalSessionId)) : null)
     const names = laserAreaNamesFromSession(ls)
+    const pulseNotes = laserPulseChargeNotesFromSession(ls)
     if (names.length) dtos[i].laserAreaLabels = names
+    if (pulseNotes.length) dtos[i].laserPulseChargeNotes = pulseNotes
   }
 }
 

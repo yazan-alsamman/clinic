@@ -20,6 +20,8 @@ type Item = {
   procedureLabel: string
   /** كل مناطق جلسة الليزر بالترتيب، بدون قص */
   laserAreaLabels?: string[]
+  /** مناطق حُسبت بسعر الضربة × العدد */
+  laserPulseChargeNotes?: string[]
   amountDueSyp: number
   listAmountDueSyp?: number
   discountPercent?: number
@@ -54,6 +56,15 @@ const deptLabel: Record<string, string> = {
   laser: 'ليزر',
   dermatology: 'جلدية',
   dental: 'أسنان',
+}
+
+function LaserPulseChargeNote({ notes }: { notes?: string[] }) {
+  if (!notes?.length) return null
+  return (
+    <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', fontWeight: 700, color: 'var(--amber)', lineHeight: 1.5 }}>
+      محاسبة على عدد الضربات: {notes.join(' — ')}
+    </p>
+  )
 }
 
 function LaserSessionAreas({ labels }: { labels: string[] }) {
@@ -877,14 +888,18 @@ export function BillingPage() {
                   {b.department === 'laser' && (b.laserAreaLabels?.length ?? 0) > 0 ? (
                     <>
                       <LaserSessionAreas labels={b.laserAreaLabels || []} />
+                      <LaserPulseChargeNote notes={b.laserPulseChargeNotes} />
                       <p style={{ margin: '0.3rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                         المقدّم: {b.providerName || '—'}
                       </p>
                     </>
                   ) : (
-                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                      {b.procedureLabel} — المقدّم: {b.providerName || '—'}
-                    </p>
+                    <>
+                      <p style={{ margin: '0.35rem 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                        {b.procedureLabel} — المقدّم: {b.providerName || '—'}
+                      </p>
+                      <LaserPulseChargeNote notes={b.laserPulseChargeNotes} />
+                    </>
                   )}
                   {b.isCreditTopUp ? (
                     <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: 'var(--success)' }}>
@@ -1098,8 +1113,13 @@ export function BillingPage() {
                 : ` — ${payItem.procedureLabel}`}
             </p>
             {payItem.department === 'laser' && (payItem.laserAreaLabels?.length ?? 0) > 0 ? (
-              <LaserSessionAreas labels={payItem.laserAreaLabels || []} />
-            ) : null}
+              <>
+                <LaserSessionAreas labels={payItem.laserAreaLabels || []} />
+                <LaserPulseChargeNote notes={payItem.laserPulseChargeNotes} />
+              </>
+            ) : (
+              <LaserPulseChargeNote notes={payItem.laserPulseChargeNotes} />
+            )}
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }} dir={itemBillingCurrency(payItem) === 'USD' ? 'ltr' : undefined}>
               المستحق: {formatItemDueLabel(payItem)}
             </p>

@@ -1846,33 +1846,40 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       !isPackageSession && normalizedLineItems.length === 0 && Boolean(chargeByPulseCount)
     let pulseBillingReceptionNote = ''
     if (pulseLineItems.length > 0) {
-      const names = pulseLineItems
-        .map((row) => String(row.areaLabel || '').trim())
-        .filter((x) => Boolean(x))
-      if (names.length === 1) {
-        pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات للمنطقة: ${names[0]}`
-      } else if (names.length > 1) {
-        pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات للمناطق: ${names.join('، ')}`
-      } else {
-        pulseBillingReceptionNote = 'تم إضافة محاسبة على عدد الضربات لهذه الجلسة'
-      }
+      const parts = pulseLineItems.map((row) => {
+        const name = String(row.areaLabel || '').trim() || 'منطقة'
+        const shots = String(row.shotCount || '').trim()
+        return shots ? `${name} (${shots} ضربة)` : name
+      })
+      pulseBillingReceptionNote = `محاسبة على عدد الضربات: ${parts.join('، ')}`
     } else if (legacyWholeSessionPulse) {
+      const shots = String(body.shotCount || '').trim()
       const hint = fallbackAreaPart || 'المناطق المحددة'
-      pulseBillingReceptionNote = `تم إضافة محاسبة على عدد الضربات (${hint})`
+      pulseBillingReceptionNote = shots
+        ? `محاسبة على عدد الضربات: ${hint} (${shots} ضربة)`
+        : `محاسبة على عدد الضربات (${hint})`
     }
 
     const procedureTextFromLines = (rows) => {
       const names = []
+      const pulseParts = []
       for (const row of rows || []) {
         const label = String(row?.areaLabel || '').trim()
         if (!label) continue
         names.push(row.isAddon ? `${label} (خارج الباكج)` : label)
+        if (row.chargeByPulseCount) {
+          const shots = String(row.shotCount || '').trim()
+          pulseParts.push(shots ? `${label} (${shots} ضربة)` : label)
+        }
       }
       const areaPart = names.length ? names.join('، ') : fallbackAreaPart || 'بدون مناطق محددة'
       const cover = laserCoverAppliedSyp > 0 ? ' — كفر ليزر' : ''
       const pkg = isPackageSession ? ' (باكج)' : ''
       const base = `ليزر ${laserType} — ${areaPart}${pkg}${cover}`
-      const full = pulseBillingReceptionNote ? `${base} — ${pulseBillingReceptionNote}` : base
+      const pulseNote = pulseParts.length
+        ? `محاسبة على عدد الضربات: ${pulseParts.join('، ')}`
+        : pulseBillingReceptionNote
+      const full = pulseNote ? `${base} — ${pulseNote}` : base
       return full.slice(0, 4000)
     }
 
