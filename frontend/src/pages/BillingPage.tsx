@@ -42,6 +42,8 @@ type Item = {
   packageExpectedAreaCount?: number
   laserRecordedPackageAreaCount?: number
   packagePartialAreasAcknowledgedByReception?: number
+  /** مناطق الباكج المتبقية غير المنجزة */
+  laserPackageRemainingAreaLabels?: string[]
   /** رصيد إضافي مخزّن على المريض */
   prepaidCreditSyp?: number
   outstandingDebtSyp?: number
@@ -1062,13 +1064,20 @@ export function BillingPage() {
                 ) : itemShowsPackageDecrementActions(b) && itemEffectiveDueSyp(b) <= 0 ? (
                   itemPackageWaitingForMoreAreas(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية في ملف المريض ثم
-                      يُعاد «إنقاص منطقة» حتى اكتمال العدد، وبعدها يظهر «إنقاص جلسة».
+                      تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية
+                      {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
+                        ? ` (${b.laserPackageRemainingAreaLabels!.join('، ')})`
+                        : ''}{' '}
+                      في ملف المريض ثم يُعاد «إنقاص منطقة» حتى اكتمال العدد، وبعدها يظهر «إنقاص جلسة».
                     </p>
                   ) : itemPackageNeedsPartialAreaSettle(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      باكج ليزر — عدد المناطق المسجّل أصغر من عدد مناطق الباكج. استخدم «إنقاص منطقة» لكل منطقة أنجزها
-                      الأخصائي ضمن المدخلات الحالية قبل إكمال باقي المناطق في الملف.
+                      باكج ليزر — عدد المناطق المسجّل أصغر من عدد مناطق الباكج
+                      {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
+                        ? ` (متبقي: ${b.laserPackageRemainingAreaLabels!.join('، ')})`
+                        : ''}
+                      . استخدم «إنقاص منطقة» لكل منطقة أنجزها الأخصائي ضمن المدخلات الحالية قبل إكمال باقي المناطق في
+                      الملف.
                     </p>
                   ) : !hasLaserPackageAreaMetrics(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>

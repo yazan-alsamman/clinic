@@ -6,6 +6,7 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { BusinessDay } from '../models/BusinessDay.js'
 import { CashMovement } from '../models/CashMovement.js'
 import { LaserSession } from '../models/LaserSession.js'
+import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { Patient } from '../models/Patient.js'
 import { PaymentSettings } from '../models/PaymentSettings.js'
 import { writeAudit } from '../utils/audit.js'
@@ -26,6 +27,7 @@ import {
 } from '../services/billingPaymentCompletion.js'
 import { normalizePayCurrency } from '../services/billingPaymentReceipt.js'
 import { demoteAddonOnlyLinkedPackageSession } from '../services/laserPackageBooking.js'
+import { buildPackageAreaBreakdown } from '../services/laserPackageAreaBreakdown.js'
 import { repairUnbilledSessions } from '../services/repairUnbilledSessions.js'
 
 /** يُرجع { discountPercent, listAmountDueSyp, effectiveAmountDueSyp } — يرمي إن كانت النسبة غير صالحة */
@@ -500,6 +502,88 @@ function laserPulseChargeNotesFromSession(ls) {
   return notes
 }
 
+/**
+ * يرفق مقاييس باكج الليزر (المتوقع / المسجّل / المُثبَّت بالاستقبال)
+ * حتى تظهر «إنقاص منطقة» بدل «إنقاص جلسة» عند نقص مناطق — بما فيها بنود الأيام الأخرى.
+ */
+async function enrichLaserPackageAreaMetrics(billingItems, dtos) {
+  for (let i = 0; i < billingItems.length; i++) {
+    const b = billingItems[i]
+    const dto = dtos[i]
+    if (!dto) continue
+    if (
+      b.isPackagePrepaid !== true ||
+      String(b.department || '') !== 'laser' ||
+      !b.patientPackageSessionId ||
+      !b.patientPackageId
+    ) {
+      continue
+    }
+    const pidRaw = b.patientId?._id || b.patientId
+    const pid = pidRaw ? String(pidRaw) : ''
+    if (!pid || !mongoose.isValidObjectId(pid)) continue
+
+    const [ls, p] = await Promise.all([
+      LaserSession.findOne({ billingItemId: b._id }).select('_id lineItems').lean(),
+      Patient.findById(pid).select('sessionPackages').lean(),
+    ])
+    const nonAddonLines = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon)
+    if (nonAddonLines.length === 0) {
+      await demoteAddonOnlyLinkedPackageSession({
+        patientId: pid,
+        packageId: b.patientPackageId,
+        packageSessionId: b.patientPackageSessionId,
+        laserSessionId: ls?._id,
+        billingItemId: b._id,
+      })
+      dto.isPackagePrepaid = false
+      dto.patientPackageId = undefined
+      dto.patientPackageSessionId = undefined
+      continue
+    }
+
+    const pkgRows = Array.isArray(p?.sessionPackages) ? p.sessionPackages : []
+    const pkg = pkgRows.find((x) => String(x._id) === String(b.patientPackageId))
+    const pkgIds = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
+    const fallbackExpected = Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0), pkgIds.length)
+
+    const optionIds = new Set(pkgIds.map((id) => String(id)).filter(Boolean))
+    for (const li of nonAddonLines) {
+      if (li?.procedureOptionId) optionIds.add(String(li.procedureOptionId))
+    }
+    const optionRows =
+      optionIds.size > 0
+        ? await LaserProcedureOption.find({ _id: { $in: [...optionIds] } })
+            .select('name kind')
+            .lean()
+        : []
+    const optionMetaById = new Map(
+      optionRows.map((r) => [
+        String(r._id),
+        { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+      ]),
+    )
+    const breakdown = pkg ? buildPackageAreaBreakdown(ls, pkg, optionMetaById) : null
+    const recorded = breakdown
+      ? Math.max(0, Math.trunc(Number(breakdown.matchedPackageAreaCount) || 0))
+      : nonAddonLines.length
+    const expected = breakdown
+      ? Math.max(1, Math.trunc(Number(breakdown.expectedAreaCount) || 0), fallbackExpected)
+      : fallbackExpected
+
+    const pkgSessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
+    const pSess = pkgSessions.find((s) => String(s._id) === String(b.patientPackageSessionId))
+    const ack = Math.max(0, Math.trunc(Number(pSess?.packagePartialAreasAcknowledgedByReception) || 0))
+
+    dto.packageExpectedAreaCount = expected
+    dto.laserRecordedPackageAreaCount = recorded
+    dto.packagePartialAreasAcknowledgedByReception = ack
+    if (Array.isArray(breakdown?.remainingAreas) && breakdown.remainingAreas.length) {
+      dto.laserPackageRemainingAreaLabels = breakdown.remainingAreas
+    }
+  }
+}
+
 /** كل أسماء مناطق جلسة الليزر لشاشة التحصيل — من أسطر الجلسة وليس من النص المقصوص */
 async function attachLaserAreaLabels(billingItems, dtos) {
   const laserIdx = []
@@ -556,60 +640,15 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
     const br = Number(bdDay?.usdSypRate)
     const usdSypBusinessDayRate = Number.isFinite(br) && br > 0 ? br : null
 
-    const itemsOut = await Promise.all(
-      items.map(async (b) => {
-        const dto = billingItemDto(
-          b,
-          resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
-          b.providerUserId?.name,
-          usdSypBusinessDayRate,
-        )
-        if (
-          b.isPackagePrepaid === true &&
-          b.department === 'laser' &&
-          b.patientPackageSessionId &&
-          b.patientPackageId
-        ) {
-          const pidRaw = b.patientId?._id || b.patientId
-          const pid = pidRaw ? String(pidRaw) : ''
-          if (pid && mongoose.isValidObjectId(pid)) {
-            const [ls, p] = await Promise.all([
-              LaserSession.findOne({ billingItemId: b._id }).select('_id lineItems').lean(),
-              Patient.findById(pid).select('sessionPackages').lean(),
-            ])
-            const recorded = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon).length
-            if (recorded === 0) {
-              await demoteAddonOnlyLinkedPackageSession({
-                patientId: pid,
-                packageId: b.patientPackageId,
-                packageSessionId: b.patientPackageSessionId,
-                laserSessionId: ls?._id,
-                billingItemId: b._id,
-              })
-              dto.isPackagePrepaid = false
-              dto.patientPackageId = undefined
-              dto.patientPackageSessionId = undefined
-              return dto
-            }
-            const pkgRows = Array.isArray(p?.sessionPackages) ? p.sessionPackages : []
-            const pkg = pkgRows.find((x) => String(x._id) === String(b.patientPackageId))
-            const pkgIds = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
-            const expected = Math.max(
-              1,
-              Math.trunc(Number(pkg?.areaCount) || 0),
-              pkgIds.length,
-            )
-            const pkgSessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
-            const pSess = pkgSessions.find((s) => String(s._id) === String(b.patientPackageSessionId))
-            const ack = Math.max(0, Math.trunc(Number(pSess?.packagePartialAreasAcknowledgedByReception) || 0))
-            dto.packageExpectedAreaCount = expected
-            dto.laserRecordedPackageAreaCount = recorded
-            dto.packagePartialAreasAcknowledgedByReception = ack
-          }
-        }
-        return dto
-      }),
+    const itemsOut = items.map((b) =>
+      billingItemDto(
+        b,
+        resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
+        b.providerUserId?.name,
+        usdSypBusinessDayRate,
+      ),
     )
+    await enrichLaserPackageAreaMetrics(items, itemsOut)
     await attachLaserAreaLabels(items, itemsOut)
 
     const otherRaw = await BillingItem.find({
@@ -629,6 +668,7 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
         null,
       ),
     )
+    await enrichLaserPackageAreaMetrics(otherRaw, otherDateItems)
     await attachLaserAreaLabels(otherRaw, otherDateItems)
 
     res.json({
@@ -693,6 +733,7 @@ billingRouter.get('/pending-all', requireRoles('super_admin'), async (req, res) 
         rateByDate.get(b.businessDate) ?? null,
       ),
     )
+    await enrichLaserPackageAreaMetrics(items, itemsOut)
     await attachLaserAreaLabels(items, itemsOut)
     res.json({
       items: itemsOut,
