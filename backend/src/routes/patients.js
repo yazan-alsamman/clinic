@@ -1742,7 +1742,7 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
         expected = recorded + remaining.length
       }
       const currentAck = Math.max(0, Math.trunc(Number(sess.packagePartialAreasAcknowledgedByReception) || 0))
-      if (!(recorded < expected) || remaining.length === 0) {
+      if (!(recorded < expected)) {
         res.status(400).json({
           error: 'عند إكمال كل مناطق الباكج لهذه الزيارة استخدم «إنقاص جلسة» من التحصيل.',
         })
