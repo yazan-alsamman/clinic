@@ -41,6 +41,7 @@ dentalRouter.use(authMiddleware, loadBusinessDay)
 
 const DENTAL_READ = ['super_admin', 'dental_branch', 'dental_assistant', 'reception']
 const DENTAL_CHART_WRITE = ['super_admin', 'dental_branch', 'dental_assistant']
+const DENTAL_LAB_ROLES = ['super_admin', 'dental_branch', 'dental_assistant']
 const FDI_VALID = new Set([
   11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45,
   46, 47, 48,
@@ -1043,7 +1044,7 @@ dentalRouter.delete(
 )
 
 /** قائمة المخابر النشطة — لاختيار المخبر عند تسجيل إجراء على السن */
-dentalRouter.get('/labs', requireRoles('super_admin', 'dental_branch'), async (_req, res) => {
+dentalRouter.get('/labs', requireRoles(...DENTAL_LAB_ROLES), async (_req, res) => {
   try {
     const labs = await listActiveDentalLabs()
     res.json({ labs })
@@ -1054,7 +1055,7 @@ dentalRouter.get('/labs', requireRoles('super_admin', 'dental_branch'), async (_
 })
 
 /** حسابات المخابر: الإجمالي / المسدّد / المتبقي + تفاصيل الأعمال والدفعات */
-dentalRouter.get('/labs/accounts', requireRoles('super_admin', 'dental_branch'), async (_req, res) => {
+dentalRouter.get('/labs/accounts', requireRoles(...DENTAL_LAB_ROLES), async (_req, res) => {
   try {
     const data = await listDentalLabAccounts({ includeInactive: true })
     res.json(data)
@@ -1064,7 +1065,7 @@ dentalRouter.get('/labs/accounts', requireRoles('super_admin', 'dental_branch'),
   }
 })
 
-dentalRouter.post('/labs', requireRoles('super_admin', 'dental_branch'), async (req, res) => {
+dentalRouter.post('/labs', requireRoles(...DENTAL_LAB_ROLES), async (req, res) => {
   try {
     const name = String(req.body?.name || '').trim().slice(0, 200)
     if (!name) {
@@ -1099,7 +1100,7 @@ dentalRouter.post('/labs', requireRoles('super_admin', 'dental_branch'), async (
   }
 })
 
-dentalRouter.patch('/labs/:id', requireRoles('super_admin', 'dental_branch'), async (req, res) => {
+dentalRouter.patch('/labs/:id', requireRoles(...DENTAL_LAB_ROLES), async (req, res) => {
   try {
     const id = String(req.params.id || '').trim()
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -1150,7 +1151,7 @@ dentalRouter.patch('/labs/:id', requireRoles('super_admin', 'dental_branch'), as
 })
 
 /** تسجيل دفعة مسدّدة للمخبر */
-dentalRouter.post('/labs/:id/payments', requireRoles('super_admin', 'dental_branch'), async (req, res) => {
+dentalRouter.post('/labs/:id/payments', requireRoles(...DENTAL_LAB_ROLES), async (req, res) => {
   try {
     const id = String(req.params.id || '').trim()
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -1225,7 +1226,7 @@ dentalRouter.post('/labs/:id/payments', requireRoles('super_admin', 'dental_bran
 
 dentalRouter.delete(
   '/labs/:id/payments/:paymentId',
-  requireRoles('super_admin', 'dental_branch'),
+  requireRoles(...DENTAL_LAB_ROLES),
   async (req, res) => {
     try {
       const id = String(req.params.id || '').trim()

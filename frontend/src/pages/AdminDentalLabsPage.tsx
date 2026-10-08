@@ -76,7 +76,8 @@ function todayIsoDate() {
 export function AdminDentalLabsPage() {
   const { user } = useAuth()
   const { usdSypRate } = useClinic()
-  const allowed = user?.role === 'super_admin' || user?.role === 'dental_branch'
+  const allowed =
+    user?.role === 'super_admin' || user?.role === 'dental_branch' || user?.role === 'dental_assistant'
 
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
@@ -115,7 +116,7 @@ export function AdminDentalLabsPage() {
     return (
       <>
         <h1 className="page-title">المخابر</h1>
-        <p className="page-desc">هذه الصفحة لمدير النظام وأطباء الأسنان.</p>
+        <p className="page-desc">هذه الصفحة لمدير النظام وأطباء الأسنان ومساعديهم.</p>
       </>
     )
   }
