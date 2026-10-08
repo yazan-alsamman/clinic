@@ -67,6 +67,67 @@ export function addDermatologyRevenueToTotals(totals, collectedSyp, matSyp, prov
   totals.totalMaterialSyp += mat
 }
 
+/** قيمة الإجراء بالليرة كما سُجّلت، سواء حُصّلت أم لا */
+export function dermatologyProcedureAmountSyp(bi) {
+  const effective = roundMoney(bi?.effectiveAmountDueSyp)
+  if (effective > 0) return effective
+  const amount = roundMoney(bi?.amountDueSyp)
+  if (amount > 0) return amount
+  return roundMoney(bi?.listAmountDueSyp)
+}
+
+export async function loadDermatologyProcedureItems({ from, to, providerUserId = null }) {
+  const match = {
+    department: 'dermatology',
+    status: { $in: ['pending_payment', 'paid'] },
+    isCreditTopUp: { $ne: true },
+    businessDate: { $gte: from, $lte: to },
+  }
+  if (providerUserId) match.providerUserId = providerUserId
+  return BillingItem.find(match)
+    .sort({ businessDate: 1, createdAt: 1 })
+    .populate('patientId', 'name')
+    .populate('providerUserId', 'name')
+    .lean()
+}
+
+/**
+ * يضيف قيمة كل إجراء جلدية (محصّل أو بانتظار التحصيل) لحصة الطبيب.
+ * تكلفة مواد الجلسة تُخصم مرة واحدة حتى لو لم يُحصَّل المبلغ.
+ */
+export function applyDermatologyProcedureItems(totals, items, sessionById) {
+  const materialsCounted = new Set()
+  for (const bi of items || []) {
+    const amount = dermatologyProcedureAmountSyp(bi)
+    if (!(amount > 0)) continue
+    const sid = bi?.clinicalSessionId ? String(bi.clinicalSessionId) : ''
+    const cs = sid ? sessionById.get(sid) : null
+    let mat = 0
+    if (sid && cs && !materialsCounted.has(sid)) {
+      mat = roundMoney(cs.materialCostSypTotal)
+      materialsCounted.add(sid)
+    }
+    const providerName =
+      bi?.providerUserId && typeof bi.providerUserId === 'object'
+        ? String(bi.providerUserId.name || '').trim()
+        : ''
+    addDermatologyRevenueToTotals(totals, amount, mat, providerName)
+  }
+}
+
+/** تسديد ذمة مربوط ببند إجراء يُحتسب مع تاريخ الإجراء، فلا يُعاد هنا */
+export function dermatologyDebtSettlementsWithoutProcedure(debtSettlements) {
+  const out = []
+  for (const ds of debtSettlements || []) {
+    const allocs = (ds.departmentAllocations || []).filter(
+      (a) => a?.department === 'dermatology' && !a?.billingItemId,
+    )
+    if (!allocs.length) continue
+    out.push({ ...ds, departmentAllocations: allocs })
+  }
+  return out
+}
+
 export function finalizeDermatologyShares(totals, sharePercentOrPercents = 50) {
   let defaultPct
   let loraPct

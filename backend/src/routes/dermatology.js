@@ -2,8 +2,6 @@ import { Router } from 'express'
 import { Patient } from '../models/Patient.js'
 import { InventoryItem } from '../models/InventoryItem.js'
 import { DermatologyVisit } from '../models/DermatologyVisit.js'
-import { BillingItem } from '../models/BillingItem.js'
-import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { BusinessDay } from '../models/BusinessDay.js'
 import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
@@ -14,11 +12,14 @@ import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
 import { postDermatologyVisit } from '../services/postingService.js'
 import {
-  addDermatologyRevenueToTotals,
   applyDermatologyDebtSettlements,
+  applyDermatologyProcedureItems,
   createEmptyDermatologyShareTotals,
+  dermatologyDebtSettlementsWithoutProcedure,
+  dermatologyProcedureAmountSyp,
   finalizeDermatologyShares,
   loadDermatologyDebtSettlementLookup,
+  loadDermatologyProcedureItems,
   resolveDermatologySharePercents,
 } from '../services/dermatologyFinanceShares.js'
 
@@ -74,16 +75,7 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       return
     }
 
-    const items = await BillingItem.find({
-      department: 'dermatology',
-      status: 'paid',
-      paymentId: { $ne: null },
-      businessDate: { $gte: range.from, $lte: range.to },
-    })
-      .sort({ paidAt: 1, businessDate: 1 })
-      .populate('patientId', 'name')
-      .populate('providerUserId', 'name')
-      .lean()
+    const items = await loadDermatologyProcedureItems({ from: range.from, to: range.to })
 
     const sessionIds = [...new Set(items.map((i) => i.clinicalSessionId).filter(Boolean).map(String))]
     const sessions =
@@ -93,11 +85,6 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
             .lean()
         : []
     const sessionById = new Map(sessions.map((s) => [String(s._id), s]))
-
-    const payIds = [...new Set(items.map((i) => i.paymentId).filter(Boolean).map(String))]
-    const payments =
-      payIds.length > 0 ? await BillingPayment.find({ _id: { $in: payIds } }).select('amountSyp').lean() : []
-    const payById = new Map(payments.map((p) => [String(p._id), p]))
 
     const datesForRate = [...new Set(items.map((i) => String(i.businessDate || '').trim()).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))]
     const bdays =
@@ -123,41 +110,48 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
     let totalMaterialUsdPricedUsd = 0
 
     const shareTotals = createEmptyDermatologyShareTotals()
+    applyDermatologyProcedureItems(shareTotals, items, sessionById)
     const rows = []
+    const materialSessionsCounted = new Set()
 
     for (const bi of items) {
-      const pay = payById.get(String(bi.paymentId))
-      const collected = Math.round(Number(pay?.amountSyp) || 0)
-      const cs = sessionById.get(String(bi.clinicalSessionId))
+      const procedureSyp = dermatologyProcedureAmountSyp(bi)
+      if (!(procedureSyp > 0)) continue
+      const sid = bi.clinicalSessionId ? String(bi.clinicalSessionId) : ''
+      const cs = sid ? sessionById.get(sid) : null
       const matTotal = Math.round(Number(cs?.materialCostSypTotal) || 0)
       const providerName = String(bi.providerUserId?.name || '—').trim()
       const patientName = String(bi.patientId?.name || '—').trim()
       const bd = String(bi.businessDate || '').trim()
       const rate = rateByDate.get(bd) || 0
+      const countMaterials = Boolean(sid) && !materialSessionsCounted.has(sid)
+      if (countMaterials) materialSessionsCounted.add(sid)
 
       let rowMatSyp = 0
       let rowMatUsd = 0
-      for (const line of cs?.materials || []) {
-        const inv = invById.get(String(line.inventoryItemId))
-        const sp = splitMaterialLineCost(line.lineCostSyp, inv, rate)
-        rowMatSyp += Math.round(sp.sypPricedSyp)
-        rowMatUsd += Number.isFinite(sp.usdPricedUsd) ? sp.usdPricedUsd : 0
+      if (countMaterials) {
+        for (const line of cs?.materials || []) {
+          const inv = invById.get(String(line.inventoryItemId))
+          const sp = splitMaterialLineCost(line.lineCostSyp, inv, rate)
+          rowMatSyp += Math.round(sp.sypPricedSyp)
+          rowMatUsd += Number.isFinite(sp.usdPricedUsd) ? sp.usdPricedUsd : 0
+        }
+        totalMaterialSypPricedSyp += rowMatSyp
+        totalMaterialUsdPricedUsd += rowMatUsd
       }
 
-      totalCollectedSyp += collected
-      totalMaterialSypPricedSyp += rowMatSyp
-      totalMaterialUsdPricedUsd += rowMatUsd
-      addDermatologyRevenueToTotals(shareTotals, collected, matTotal, providerName)
+      totalCollectedSyp += procedureSyp
 
       rows.push({
         id: String(bi._id),
         businessDate: bd,
         patientName,
         providerName,
-        collectedSyp: collected,
+        collectedSyp: procedureSyp,
+        billingStatus: bi.status === 'paid' ? 'paid' : 'pending_payment',
         materialCostSypPriced: rowMatSyp,
         materialCostUsdPriced: Math.round(rowMatUsd * 10000) / 10000,
-        materialCostSypTotal: matTotal,
+        materialCostSypTotal: countMaterials ? matTotal : 0,
       })
     }
 
@@ -168,7 +162,12 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       .lean()
 
     const debtLookup = await loadDermatologyDebtSettlementLookup(debtSettlements)
-    const debtRows = applyDermatologyDebtSettlements(shareTotals, debtSettlements, debtLookup, { buildRows: true })
+    const debtRows = applyDermatologyDebtSettlements(
+      shareTotals,
+      dermatologyDebtSettlementsWithoutProcedure(debtSettlements),
+      debtLookup,
+      { buildRows: true },
+    )
     for (const dr of debtRows) {
       totalCollectedSyp += dr.collectedSyp
       rows.push(dr)
@@ -236,11 +235,11 @@ dermatologyRouter.get('/finance-summary', async (req, res) => {
       clinicNetSyp,
       rows,
       notes: [
-        'الإيراد = مجموع مبالغ التحصيل (دفعات الاستقبال) لبنود جلدية مسدّدة في النطاق — تاريخ السطر هو يوم التحصيل المخزّن على البند.',
-        'تسديد ذمم مرتبطة بجلدية يُضاف للإيراد حسب الجلسة الأصلية ومقدّمها، مع خصم مواد الجلسة عند تسديد ذمة كاملة دون تحصيل سابق.',
-        'تكلفة المواد: تُجمع من جلسات الجلدية المرتبطة؛ تُقسَّم للعرض بين مواد بسعر ليرة (unitCost) ومواد بسعر دولار (unitCostUsd) مع تحويل عرض الدولار باستخدام سعر الصرف المسجّل لذلك اليوم.',
-        `حصة د.لورا = (مجموع تحصيل جلساتها − تكلفة المواد في جلساتها) × ${loraSharePercent}%.`,
-        `حصة د.سامر = (مجموع تحصيل جلساته − تكلفة المواد في جلساته) × ${samerSharePercent}%.`,
+        'الإيراد = قيمة إجراء الجلدية يوم تسجيله، سواء حُصّل من المريض أم بقي بانتظار التحصيل.',
+        'تسديد ذمة مربوط بإجراء لا يُعاد احتسابه، لأن قيمة الإجراء دخلت في النسبة يوم تنفيذه.',
+        'تكلفة المواد تُخصم من حصة الطبيب فور تسجيل الجلسة، مرة واحدة لكل جلسة.',
+        `حصة د.لورا = (قيمة إجراءاتها − تكلفة المواد في جلساتها) × ${loraSharePercent}%.`,
+        `حصة د.سامر = (قيمة إجراءاته − تكلفة المواد في جلساته) × ${samerSharePercent}%.`,
         `صافي ربح المركز في البطاقة = ${clinicLoraRemainPercent}% المتبقية من د.لورا + ${clinicSamerRemainPercent}% المتبقية من د.سامر + صافي جلسات أطباء آخرين (كامل الصافي لصالح المركز).`,
       ],
     })

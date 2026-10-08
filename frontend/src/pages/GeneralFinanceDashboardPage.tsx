@@ -488,6 +488,9 @@ export function GeneralFinanceDashboardPage() {
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>إجمالي الإيرادات</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dermatology.totalRevenueSyp || 0)}</p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              قيمة الإجراءات عند تسجيلها، بما فيها ما لم يُحصَّل من المريض بعد.
+            </p>
           </div>
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>إجمالي المصاريف</h3>
@@ -501,7 +504,7 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>حصة الدكتورة لورا</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dermatology.lauraShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              (تحصيل جلسات الدكتورة لورا − مواد جلساتها) × {data?.dermatology.loraSharePercent ?? data?.dermatology.sharePercent ?? 50}٪ — التحصيل:{' '}
+              (قيمة إجراءات الدكتورة لورا − مواد جلساتها) × {data?.dermatology.loraSharePercent ?? data?.dermatology.sharePercent ?? 50}٪ — الإجراءات:{' '}
               {fmtSyp(data?.dermatology.lauraSessionRevenueSyp || 0)}، المواد: {fmtSyp(data?.dermatology.lauraMaterialSyp || 0)}.
             </p>
           </div>
@@ -509,7 +512,7 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>حصة الدكتور سامر</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dermatology.samerShareSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              (تحصيل جلسات الدكتور سامر − مواد جلساته) × {data?.dermatology.samerSharePercent ?? data?.dermatology.sharePercent ?? 50}٪ — التحصيل:{' '}
+              (قيمة إجراءات الدكتور سامر − مواد جلساته) × {data?.dermatology.samerSharePercent ?? data?.dermatology.sharePercent ?? 50}٪ — الإجراءات:{' '}
               {fmtSyp(data?.dermatology.samerSessionRevenueSyp || 0)}، المواد: {fmtSyp(data?.dermatology.samerMaterialSyp || 0)}.
             </p>
           </div>

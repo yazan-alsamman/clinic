@@ -11,6 +11,7 @@ type FinanceRow = {
   patientName: string
   providerName: string
   collectedSyp: number
+  billingStatus?: 'paid' | 'pending_payment' | string
   materialCostSypPriced: number
   materialCostUsdPriced: number
   materialCostSypTotal: number
@@ -151,8 +152,7 @@ export function DermatologyFinancePage() {
     <>
       <h1 className="page-title">مالية الجلدية</h1>
       <p className="page-desc">
-        أرقام مبنية على تحصيل الاستقبال لبنود الجلدية المسدّدة في النطاق، وتكلفة المواد من الجلسات المرتبطة، وحصص
-        الأطباء بعد خصم المواد حسب النسب المحفوظة لكل طبيب.
+        أرقام مبنية على قيمة إجراء الجلدية يوم تسجيله، حتى لو لم يُحصَّل من المريض بعد. تُخصم تكلفة المواد من حصة الطبيب، ثم تُحسب النسبة المحفوظة لكل طبيب.
       </p>
 
       <div className="toolbar" style={{ marginTop: '0.95rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -196,7 +196,7 @@ export function DermatologyFinancePage() {
             {renderSyp(data?.totals.collectedRevenueSyp || 0)}
           </p>
           <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: '#047857' }}>
-            مجموع مبالغ التحصيل (استقبال) لجميع الجلسات الجلدية المسدّدة في النطاق — يتحدّث مع كل تحصيل.
+            مجموع قيمة إجراءات الجلدية في النطاق، بما فيها ما لم يُحصَّل بعد.
           </p>
         </div>
 
@@ -248,13 +248,13 @@ export function DermatologyFinancePage() {
 
       {hasOthers ? (
         <p style={{ marginTop: '0.75rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-          يوجد تحصيل لجلدية بمقدّمين آخرين: إيراد {renderSyp(data?.others?.sessionRevenueSyp || 0)} — مواد{' '}
+          يوجد إجراءات جلدية لمقدّمين آخرين: إيراد {renderSyp(data?.others?.sessionRevenueSyp || 0)} — مواد{' '}
           {renderSyp(data?.others?.materialCostSyp || 0)} — يُحسب صافيهم بالكامل لصالح المركز ضمن «صافي الربح».
         </p>
       ) : null}
 
       <div className="card" style={{ marginTop: '1rem' }}>
-        <h2 className="card-title">تفصيل التحصيلات</h2>
+        <h2 className="card-title">تفصيل الإجراءات</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginBottom: '0.7rem' }}>
           النطاق: {data?.from || '—'} إلى {data?.to || '—'}.
         </p>
@@ -274,7 +274,7 @@ export function DermatologyFinancePage() {
                 <th>التاريخ</th>
                 <th>المريض</th>
                 <th>الطبيب</th>
-                <th>المحصّل</th>
+                <th>قيمة الإجراء</th>
                 <th>مواد (ل.س)</th>
                 <th>مواد (USD)</th>
                 <th>إجمالي مواد</th>
@@ -288,7 +288,7 @@ export function DermatologyFinancePage() {
               ) : !data || data.rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ color: 'var(--text-muted)' }}>
-                    لا توجد تحصيلات جلدية مسدّدة في هذا النطاق.
+                    لا توجد إجراءات جلدية في هذا النطاق.
                   </td>
                 </tr>
               ) : (
@@ -297,7 +297,12 @@ export function DermatologyFinancePage() {
                     <td>{row.businessDate || '—'}</td>
                     <td>{row.patientName || '—'}</td>
                     <td>{row.providerName || '—'}</td>
-                    <td style={{ color: '#047857', fontWeight: 700 }}>{renderSyp(row.collectedSyp)}</td>
+                    <td style={{ color: '#047857', fontWeight: 700 }}>
+                      {renderSyp(row.collectedSyp)}
+                      {row.billingStatus === 'pending_payment' ? (
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--amber)' }}>بانتظار التحصيل</div>
+                      ) : null}
+                    </td>
                     <td style={{ color: '#b45309' }}>{renderSyp(row.materialCostSypPriced)}</td>
                     <td style={{ color: '#0369a1' }}>{renderUsd(row.materialCostUsdPriced)}</td>
                     <td style={{ color: '#57534e' }}>{renderSyp(row.materialCostSypTotal)}</td>

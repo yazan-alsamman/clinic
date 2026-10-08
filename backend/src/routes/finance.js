@@ -17,11 +17,13 @@ import { PatientDebtSettlement } from '../models/PatientDebtSettlement.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
 import {
-  addDermatologyRevenueToTotals,
   applyDermatologyDebtSettlements,
+  applyDermatologyProcedureItems,
   createEmptyDermatologyShareTotals,
+  dermatologyDebtSettlementsWithoutProcedure,
   finalizeDermatologyShares,
   loadDermatologyDebtSettlementLookup,
+  loadDermatologyProcedureItems,
   resolveDermatologySharePercents,
 } from '../services/dermatologyFinanceShares.js'
 import { summarizeDentalChartFinance } from '../services/dentalFinanceShares.js'
@@ -232,21 +234,23 @@ function collectedForItem(bi, payById) {
   return Math.round(Number(pay?.amountSyp) || 0)
 }
 
-async function computeDermatologyShares(items, sessionById, payById, debtSettlements = [], debtLookup = null) {
+async function computeDermatologyShares({ from, to, providerUserId = null, debtSettlements = [], debtLookup = null }) {
   const percents = await resolveDermatologySharePercents()
   const totals = createEmptyDermatologyShareTotals()
+  const items = await loadDermatologyProcedureItems({ from, to, providerUserId })
+  const sessionIds = [...new Set(items.map((i) => i.clinicalSessionId).filter(Boolean).map(String))]
+  const sessions =
+    sessionIds.length > 0
+      ? await ClinicalSession.find({ _id: { $in: sessionIds } })
+          .select('materialCostSypTotal')
+          .lean()
+      : []
+  const sessionById = new Map(sessions.map((s) => [String(s._id), s]))
+  applyDermatologyProcedureItems(totals, items, sessionById)
 
-  for (const bi of items) {
-    if (bi.department !== 'dermatology') continue
-    const collected = collectedForItem(bi, payById)
-    const cs = sessionById.get(String(bi.clinicalSessionId))
-    const matTotal = Math.round(Number(cs?.materialCostSypTotal) || 0)
-    const providerName = String(bi.providerUserId?.name || '').trim()
-    addDermatologyRevenueToTotals(totals, collected, matTotal, providerName)
-  }
-
-  if (debtSettlements.length > 0 && debtLookup) {
-    applyDermatologyDebtSettlements(totals, debtSettlements, debtLookup)
+  const unlinkedDebts = dermatologyDebtSettlementsWithoutProcedure(debtSettlements)
+  if (unlinkedDebts.length > 0 && debtLookup) {
+    applyDermatologyDebtSettlements(totals, unlinkedDebts, debtLookup)
   }
 
   return finalizeDermatologyShares(totals, percents)
@@ -544,7 +548,24 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
       overallExpensesTablesSyp = Math.round(expenseTotals[deptFilter] || 0)
     }
 
-    const dermShares = await computeDermatologyShares(items, sessionById, payById, debtSettlements, debtLookup)
+    const includeDerm = !deptFilter || deptFilter === 'dermatology'
+    const dermShares = await computeDermatologyShares({
+      from: range.from,
+      to: range.to,
+      providerUserId: includeDerm ? providerOid : null,
+      debtSettlements: includeDerm ? debtSettlements : [],
+      debtLookup: includeDerm ? debtLookup : null,
+    })
+    if (includeDerm) {
+      const cashDerm = revenueByDept.dermatology || 0
+      const procedureDerm = Math.round(
+        (dermShares.loraSessionRevenueSyp || 0) +
+          (dermShares.samerSessionRevenueSyp || 0) +
+          (dermShares.otherSessionRevenueSyp || 0),
+      )
+      revenueByDept.dermatology = procedureDerm
+      totalRevenueSyp = Math.round(totalRevenueSyp - cashDerm + procedureDerm)
+    }
     const discounts = buildDiscountRows(items, payById)
 
     const laserRev = revenueByDept.laser
