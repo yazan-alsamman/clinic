@@ -27,6 +27,9 @@ import {
   resolveDermatologySharePercents,
 } from '../services/dermatologyFinanceShares.js'
 import { summarizeDentalChartFinance } from '../services/dentalFinanceShares.js'
+import { applyLaserDebtAllocationsToSpecialistRows } from '../services/patientDebtSettlementAllocation.js'
+import { clampSharePercent } from '../services/doctorShareSettings.js'
+import { User } from '../models/User.js'
 
 export const financeRouter = Router()
 
@@ -306,6 +309,58 @@ function laserSpecialistTop(items, payById) {
   return best
 }
 
+/**
+ * حصص أخصائيي الليزر: إيراد التحصيل (ومخصصات تسديد الذمم) × نسبة كل أخصائي.
+ * @returns {{ specialists: object[], specialistSharesTotalSyp: number, defaultSharePercent: number }}
+ */
+async function computeLaserSpecialistShares({ items, payById, debtSettlements = [], providerUserId = null }) {
+  const q = { role: 'laser' }
+  if (providerUserId) q._id = providerUserId
+  const specialists = await User.find(q).select('_id name active doctorSharePercent').sort({ name: 1 }).lean()
+  const specialistIdSet = new Set(specialists.map((s) => String(s._id)))
+
+  const revenueById = new Map()
+  for (const bi of items || []) {
+    if (bi.department !== 'laser') continue
+    const id = String(bi.providerUserId?._id || bi.providerUserId || '')
+    if (!id || !specialistIdSet.has(id)) continue
+    revenueById.set(id, (revenueById.get(id) || 0) + collectedForItem(bi, payById))
+  }
+
+  const baseRows = specialists.map((sp) => {
+    const userId = String(sp._id)
+    return {
+      userId,
+      name: String(sp.name || '').trim() || '—',
+      active: sp.active !== false,
+      totalAmountSyp: Math.round(revenueById.get(userId) || 0),
+      sharePercent: clampSharePercent(sp.doctorSharePercent),
+    }
+  })
+
+  const { rows } = applyLaserDebtAllocationsToSpecialistRows(baseRows, debtSettlements, specialistIdSet)
+
+  const pctById = new Map(baseRows.map((r) => [r.userId, r.sharePercent]))
+  const out = rows
+    .map((r) => {
+      const sharePercent = pctById.get(r.userId) ?? 0
+      const revenueSyp = Math.round(Number(r.totalAmountSyp) || 0)
+      const shareSyp = Math.round((revenueSyp * sharePercent) / 100)
+      return {
+        userId: r.userId,
+        name: r.name,
+        active: r.active !== false,
+        revenueSyp,
+        sharePercent,
+        shareSyp,
+      }
+    })
+    .sort((a, b) => b.shareSyp - a.shareSyp || b.revenueSyp - a.revenueSyp || a.name.localeCompare(b.name, 'ar'))
+
+  const specialistSharesTotalSyp = Math.round(out.reduce((s, r) => s + r.shareSyp, 0))
+  return { specialists: out, specialistSharesTotalSyp, defaultSharePercent: 0 }
+}
+
 financeRouter.get('/expenses', requireRoles(...EXPENSE_ROLES), async (req, res) => {
   try {
     const range = parseRange(req.query.from, req.query.to)
@@ -572,6 +627,15 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
     const laserExp = expenseTotals.laser || 0
     const laserProfit = Math.round(laserRev - laserExp)
     const laserTop = laserSpecialistTop(items, payById)
+    const includeLaser = !deptFilter || deptFilter === 'laser'
+    const laserShares = includeLaser
+      ? await computeLaserSpecialistShares({
+          items,
+          payById,
+          debtSettlements,
+          providerUserId: providerOid,
+        })
+      : { specialists: [], specialistSharesTotalSyp: 0, defaultSharePercent: 0 }
 
     const dermRev = revenueByDept.dermatology
     const dermTable = expenseTotals.dermatology || 0
@@ -660,6 +724,9 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
         totalExpensesSyp: laserExp,
         totalProfitSyp: laserProfit,
         highestRevenueSpecialist: laserTop,
+        specialists: laserShares.specialists,
+        specialistSharesTotalSyp: laserShares.specialistSharesTotalSyp,
+        defaultSharePercent: laserShares.defaultSharePercent,
       },
       dermatology: {
         totalRevenueSyp: dermRev,

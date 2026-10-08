@@ -39,6 +39,16 @@ type DashboardPayload = {
     totalExpensesSyp: number
     totalProfitSyp: number
     highestRevenueSpecialist: { userId: string; name: string; revenueSyp: number } | null
+    specialists?: {
+      userId: string
+      name: string
+      active?: boolean
+      revenueSyp: number
+      sharePercent: number
+      shareSyp: number
+    }[]
+    specialistSharesTotalSyp?: number
+    defaultSharePercent?: number
   }
   dermatology: {
     totalRevenueSyp: number
@@ -479,7 +489,52 @@ export function GeneralFinanceDashboardPage() {
               <p style={{ margin: '0.35rem 0 0', color: 'var(--text-muted)' }}>لا بيانات في النطاق.</p>
             )}
           </div>
+          <div className="card" style={{ borderColor: '#0d9488' }}>
+            <h3 style={{ margin: 0, fontSize: '0.92rem' }}>مجموع حصص الأخصائيين</h3>
+            <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>
+              {fmtSyp(data?.laser.specialistSharesTotalSyp || 0)}
+            </p>
+            <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+              مجموع المستحق لكل أخصائي حسب نسبته من إيراد تحصيل جلساته.
+            </p>
+          </div>
         </div>
+        {(data?.laser.specialists?.length || 0) > 0 ? (
+          <div className="card" style={{ marginTop: '0.75rem', overflowX: 'auto' }}>
+            <h3 style={{ margin: '0 0 0.55rem', fontSize: '0.95rem' }}>نسب أخصائيي الليزر والمستحق</h3>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ textAlign: 'right', padding: '0.5rem 0.65rem' }}>الأخصائي</th>
+                  <th style={{ textAlign: 'right', padding: '0.5rem 0.65rem' }}>نسبته</th>
+                  <th style={{ textAlign: 'right', padding: '0.5rem 0.65rem' }}>إيراد جلساته</th>
+                  <th style={{ textAlign: 'right', padding: '0.5rem 0.65rem' }}>المستحق حسب النسبة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.laser.specialists || []).map((sp) => (
+                  <tr key={sp.userId} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '0.5rem 0.65rem' }}>
+                      {sp.name}
+                      {sp.active === false ? (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}> (غير نشط)</span>
+                      ) : null}
+                    </td>
+                    <td style={{ padding: '0.5rem 0.65rem' }} dir="ltr">
+                      {sp.sharePercent}٪
+                    </td>
+                    <td style={{ padding: '0.5rem 0.65rem' }}>{fmtSyp(sp.revenueSyp)}</td>
+                    <td style={{ padding: '0.5rem 0.65rem', fontWeight: 700 }}>{fmtSyp(sp.shareSyp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="page-desc" style={{ margin: '0.55rem 0 0', fontSize: '0.78rem' }}>
+              المستحق = إيراد تحصيل جلسات الأخصائي (بما فيها تسديد الذمم المرتبطة به) × نسبته. تُضبط النسب من صفحة «نسب
+              الأطباء».
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <section style={{ marginTop: '1.35rem' }}>
