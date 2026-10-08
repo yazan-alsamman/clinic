@@ -488,29 +488,11 @@ billingRouter.get('/pending', requireRoles(...BILLING_ROLES), async (req, res) =
     )
     await finalizePendingBillingDtos(items, itemsOut)
 
-    const otherRaw = await BillingItem.find({
-      status: 'pending_payment',
-      businessDate: { $ne: date },
-    })
-      .sort({ businessDate: -1, createdAt: -1 })
-      .limit(40)
-      .populate('patientId', 'name prepaidCreditSyp prepaidCreditDentalSyp outstandingDebtSyp outstandingDebtUsd')
-      .populate('providerUserId', 'name')
-      .lean()
-    const otherDateItems = otherRaw.map((b) =>
-      billingItemDto(
-        b,
-        resolveBillingPatientDisplayName(b, b.procedureLabel, b.department),
-        b.providerUserId?.name,
-        null,
-      ),
-    )
-    await finalizePendingBillingDtos(otherRaw, otherDateItems)
-
+    /** تاريخ اليوم/المحدّد فقط — بنود الأيام الأخرى عبر pending-all عند تفعيل «عرض كل المعلّقة» */
     res.json({
       date,
       items: itemsOut,
-      otherDateItems,
+      otherDateItems: [],
     })
   } catch (e) {
     console.error(e)

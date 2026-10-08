@@ -308,7 +308,6 @@ export function BillingPage() {
   const [date, setDate] = useState('')
   const [viewAllPending, setViewAllPending] = useState(false)
   const [items, setItems] = useState<Item[]>([])
-  const [otherDateItems, setOtherDateItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -413,23 +412,20 @@ export function BillingPage() {
       if (viewAllPending && user?.role === 'super_admin') {
         const data = await api<{ items: Item[] }>('/api/billing/pending-all?limit=100')
         setItems(data.items)
-        setOtherDateItems([])
         return
       }
       if (!date) {
         setItems([])
-        setOtherDateItems([])
         return
       }
-      const data = await api<{ items: Item[]; otherDateItems?: Item[] }>(
+      const data = await api<{ items: Item[] }>(
         `/api/billing/pending?date=${encodeURIComponent(date)}`,
       )
+      /** بدون «عرض كل المعلّقة»: بنود تاريخ يوم العمل فقط */
       setItems(data.items)
-      setOtherDateItems(data.otherDateItems || [])
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'تعذر التحميل')
       setItems([])
-      setOtherDateItems([])
     } finally {
       setLoading(false)
     }
@@ -902,19 +898,23 @@ export function BillingPage() {
         <div className="card" style={{ marginTop: '1rem' }}>
           <p style={{ margin: 0 }}>جاري التحميل…</p>
         </div>
-      ) : items.length === 0 && otherDateItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="card" style={{ marginTop: '1rem' }}>
-          <p style={{ margin: 0, color: 'var(--text-muted)' }}>لا توجد بنود معلّقة.</p>
+          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+            {viewAllPending
+              ? 'لا توجد بنود معلّقة.'
+              : 'لا توجد بنود معلّقة لهذا التاريخ. لعرض كل الأيام فعّل «عرض كل المعلّقة».'}
+          </p>
         </div>
       ) : (
         <>
-        {otherDateItems.length > 0 ? (
+        {viewAllPending ? (
           <p style={{ margin: '1rem 0 0', color: 'var(--warning)', fontSize: '0.88rem' }}>
-            بنود معلّقة من أيام أخرى ظاهرة في آخر القائمة حتى يمكن تحصيلها، ومنها جلسات لم يُنشأ لها بند في يومها.
+            عرض كل البنود المعلّقة من أي تاريخ.
           </p>
         ) : null}
         <ul style={{ listStyle: 'none', padding: 0, marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-          {[...items, ...otherDateItems].map((b) => (
+          {items.map((b) => (
             <li key={b.id} className="card">
               <div
                 style={{
