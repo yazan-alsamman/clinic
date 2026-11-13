@@ -60,6 +60,13 @@ const clinicalSessionSchema = new mongoose.Schema(
     /** معرف إجراء المخطط أو قسط التقويم (مثل ortho:<ObjectId>) */
     dentalTreatmentId: { type: String, default: '', trim: true, maxlength: 64 },
     isPackageSession: { type: Boolean, default: false },
+    /** بند إضافات (خارج الباكج + كفر) لجلسة ليزر ضمن باكج — يُحصَّل مستقلاً عن بند الباكج */
+    packageAddonForLaserSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'LaserSession',
+      default: undefined,
+      index: true,
+    },
     /** شحن رصيد إضافي (ليس إجراء سريري) */
     isCreditTopUp: { type: Boolean, default: false },
     patientPackageId: { type: String, default: '' },

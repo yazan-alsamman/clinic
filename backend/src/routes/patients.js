@@ -285,6 +285,22 @@ async function resolveLaserPackageTemplatesFromBody(body) {
   }
 }
 
+/** فشل تحصيل شراء الباكج: احذف الجلسة والبند المعلّقين حتى لا يبقى بند يتيم في قائمة التحصيل */
+async function discardUnpaidPackagePurchase(clinicalSessionId) {
+  if (!clinicalSessionId) return
+  try {
+    const biRows = await BillingItem.find({ clinicalSessionId }).select('_id status').lean()
+    if (biRows.some((row) => row.status === 'paid')) return
+    for (const row of biRows) {
+      await BillingPayment.deleteMany({ billingItemId: row._id })
+    }
+    await BillingItem.deleteMany({ clinicalSessionId })
+    await ClinicalSession.findByIdAndDelete(clinicalSessionId)
+  } catch (cleanErr) {
+    console.error('package purchase rollback after payment failure:', cleanErr)
+  }
+}
+
 function serializePackage(pkg) {
   return {
     id: String(pkg?._id || ''),
@@ -1239,6 +1255,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
               skipPatientDebtUpdate: true,
             })
           } catch (payErr) {
+            await discardUnpaidPackagePurchase(cs?._id)
             res.status(400).json({ error: String(payErr?.message || payErr) })
             return
           }
@@ -1444,6 +1461,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
             skipPatientDebtUpdate: true,
           })
         } catch (payErr) {
+          await discardUnpaidPackagePurchase(purchaseCs?._id)
           res.status(400).json({ error: String(payErr?.message || payErr) })
           return
         }
@@ -1833,6 +1851,23 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
       if (breakdown?.hasUnusedPackageAreas) {
         res.status(400).json({
           error: `لا يمكن إنقاص جلسة الباكج وما زالت مناطق غير منجزة: ${(breakdown.remainingAreas || []).join('، ')}`,
+        })
+        return
+      }
+    }
+
+    /** لا يُغلق بند باكج عليه مبلغ إضافات غير محصّل — يُحصّل أولاً ثم تُنقص الجلسة */
+    if (completed && sess.linkedBillingItemId && mongoose.isValidObjectId(sess.linkedBillingItemId)) {
+      const linkedBi = await BillingItem.findById(sess.linkedBillingItemId)
+        .select('status isPackagePrepaid amountDueSyp effectiveAmountDueSyp')
+        .lean()
+      const linkedDueSyp = Math.max(
+        0,
+        Math.round(Number(linkedBi?.effectiveAmountDueSyp || linkedBi?.amountDueSyp) || 0),
+      )
+      if (linkedBi && linkedBi.status === 'pending_payment' && linkedDueSyp > 0) {
+        res.status(400).json({
+          error: `على هذه الجلسة مبلغ إضافات غير محصّل (${linkedDueSyp.toLocaleString('en-US')} ل.س). حصّله من صفحة التحصيل عبر «إنقاص جلسة و دفع».`,
         })
         return
       }
