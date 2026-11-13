@@ -115,6 +115,26 @@ function orthoSupplyCostSyp(s) {
   )
 }
 
+/** إجمالي خطة التقويم بالليرة (ل.س + دولار×سعر صرف الحالة) */
+function orthoCasePlanCostSyp(orthoCase) {
+  return treatmentCostSyp({
+    totalCostSyp: orthoCase?.totalCostSyp,
+    totalCostUsd: orthoCase?.totalCostUsd,
+    costUsdSypRate: orthoCase?.costUsdSypRate,
+  })
+}
+
+/** تاريخ احتساب خطة التقويم للطبيب: تاريخ بدء الحالة، وإلا أول قسط */
+function orthoCasePlanBusinessDate(orthoCase) {
+  const started = String(orthoCase?.startedAt || '').trim().slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(started)) return started
+  for (const inst of orthoCase?.installments || []) {
+    const bd = String(inst?.businessDate || '').trim().slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bd)) return bd
+  }
+  return ''
+}
+
 /** تاريخ المستلزم: تاريخه المُدخل، وإلا تاريخ بدء الحالة */
 function orthoSupplyBusinessDate(orthoCase, s) {
   let bd = String(s?.businessDate || '').trim().slice(0, 10)
@@ -367,22 +387,32 @@ export async function summarizeDentalChartFinance({ from, to }) {
     }
 
     /**
-     * التقويم: كل قسط يُحتسب للطبيب بتاريخ القسط بكامل قيمته فور تسجيله (حتى لو لم يسدّد المريض بعد)،
+     * التقويم: إجمالي الخطة يُحتسب للطبيب كاملاً بتاريخ بدء الحالة (حتى لو لم يسدّد المريض شيئاً)،
      * والمستلزمات تُطرح من أساس حصته بتاريخها مثل المخبر.
+     * حالة بلا إجمالي خطة: يُحتسب كل قسط بتاريخه بكامل قيمته.
      */
     for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
       const meta = resolveDoctorMeta(orthoCase, userById)
       const uid = meta.userId || ''
       const name = meta.isElias ? DENTAL_ELIAS_DISPLAY_NAME : meta.name === '—' ? '' : meta.name
       const matchName = name || userById.get(uid) || ''
-      for (const inst of orthoCase.installments || []) {
-        const tr = orthoInstallmentAsTreatment(orthoCase, inst)
-        const cost = treatmentCostSyp(tr)
-        if (!(cost > 0)) continue
-        const bd = treatmentBusinessDate(tr)
-        if (!bd || !inRange(bd, from, to)) continue
-        totalRevenueSyp += cost
-        addDoctorProcedure({ isElias: meta.isElias, uid, name, matchName, cost })
+      const planCost = orthoCasePlanCostSyp(orthoCase)
+      if (planCost > 0) {
+        const bd = orthoCasePlanBusinessDate(orthoCase)
+        if (bd && inRange(bd, from, to)) {
+          totalRevenueSyp += planCost
+          addDoctorProcedure({ isElias: meta.isElias, uid, name, matchName, cost: planCost })
+        }
+      } else {
+        for (const inst of orthoCase.installments || []) {
+          const tr = orthoInstallmentAsTreatment(orthoCase, inst)
+          const cost = treatmentCostSyp(tr)
+          if (!(cost > 0)) continue
+          const bd = treatmentBusinessDate(tr)
+          if (!bd || !inRange(bd, from, to)) continue
+          totalRevenueSyp += cost
+          addDoctorProcedure({ isElias: meta.isElias, uid, name, matchName, cost })
+        }
       }
       for (const sup of orthoCase.supplies || []) {
         const amt = orthoSupplyCostSyp(sup)
@@ -911,8 +941,58 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
 
     for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
       const meta = resolveDoctorMeta(orthoCase, userById)
+      /** إجمالي الخطة يدخل حصة الطبيب كاملاً بتاريخ بدء الحالة؛ الأقساط عندها للعرض والتحصيل فقط */
+      const planCost = orthoCasePlanCostSyp(orthoCase)
+      const planIsShareBase = planCost > 0
+
+      if (planIsShareBase && !(filterKey && meta.key !== filterKey && meta.userId !== filterKey)) {
+        let bd = orthoCasePlanBusinessDate(orthoCase)
+        const undated = !bd
+        if (undated || inRange(bd, from, to)) {
+          if (undated) bd = 'بدون تاريخ'
+          let planPaid = 0
+          for (const inst of orthoCase.installments || []) {
+            planPaid += treatmentPaidSyp(orthoInstallmentAsTreatment(orthoCase, inst))
+          }
+          planPaid = roundMoney(Math.min(planCost, planPaid))
+          const clinic = ensureClinic(meta)
+          if (clinic) {
+            clinic.treatmentCount += 1
+            clinic.proceduresSyp += planCost
+            clinic.paidSyp += planPaid
+            clinic.remainingSyp += Math.max(0, planCost - planPaid)
+          }
+          const title = String(orthoCase.title || 'تقويم').trim() || 'تقويم'
+          rows.push({
+            kind: 'treatment',
+            id: orthoCase._id ? `ortho-plan-${String(orthoCase._id)}` : `ortho-plan-${patientId}-${rows.length}`,
+            patientId,
+            patientName,
+            fileNumber,
+            fdi: 0,
+            isGeneral: true,
+            isOrthodontic: true,
+            isOrthoPlan: true,
+            businessDate: bd,
+            undated,
+            clinicKey: meta.key,
+            clinicLabel: meta.clinicLabel,
+            doctorName: meta.name,
+            providerUserId: meta.userId,
+            noShare: meta.noShare,
+            procedureDescription: `تقويم — ${title} (إجمالي الخطة)`,
+            totalCostSyp: planCost,
+            totalCostUsd: Math.max(0, Number(orthoCase.totalCostUsd) || 0),
+            paidSyp: planPaid,
+            remainingSyp: Math.max(0, planCost - planPaid),
+            payments: [],
+          })
+        }
+      }
 
       for (const inst of orthoCase.installments || []) {
+        /** الأقساط محسوبة ضمن إجمالي الخطة أعلاه */
+        if (planIsShareBase) continue
         const tr = orthoInstallmentAsTreatment(orthoCase, inst)
         const cost = treatmentCostSyp(tr)
         const hasContent =

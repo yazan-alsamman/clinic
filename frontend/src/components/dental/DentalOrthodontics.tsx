@@ -218,7 +218,7 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
       )
       setCases(list.filter(orthodonticCaseHasData))
       setOkMsg(
-        'تم الحفظ — نسبة الطبيب تُحتسب على الأقساط فور تسجيلها؛ المستلزمات تُطرح من أساس حصته قبل النسبة (مثل المخبر)',
+        'تم الحفظ — إجمالي الخطة يدخل حصة الطبيب فوراً بعد طرح المستلزمات (مثل المخبر)',
       )
       return true
     } catch (e) {
@@ -438,8 +438,8 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
       <h2 className="card-title">تقويم</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
         عند إنشاء حالة التقويم اختر الطبيب وأضف المستلزمات (اسم وسعر). يمكن إضافة أقساط ومستلزمات للحالة لاحقاً.
-        نسبة الطبيب تُحتسب على كل قسط فور تسجيله حتى لو لم يسدّده المريض بعد، والمستلزمات تُطرح من أساس الحصة
-        بتاريخها قبل حساب النسبة (مثل المخبر).
+        إجمالي الخطة يُضاف لحصة الطبيب كاملاً بتاريخ بدء الحالة بعد طرح المستلزمات، حتى لو لم يسدّد المريض بعد؛
+        الأقساط للتحصيل فقط. إن لم يُدخل إجمالي الخطة تُحتسب الحصة على كل قسط بتاريخه.
         {canForceDelete
           ? ' مدير النظام يستطيع حذف الحالة أو أي دفعة حتى بعد التحصيل، ويُحذف معها السجل المالي.'
           : ''}
@@ -925,7 +925,7 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
                   />
                 </div>
                 <div>
-                  <label className="form-label">إجمالي الخطة (ل.س) اختياري</label>
+                  <label className="form-label">إجمالي الخطة (ل.س) — تُحسب عليه حصة الطبيب</label>
                   <input
                     className="input"
                     inputMode="numeric"
@@ -939,7 +939,7 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
                   />
                 </div>
                 <div>
-                  <label className="form-label">إجمالي الخطة (USD) اختياري</label>
+                  <label className="form-label">إجمالي الخطة (USD)</label>
                   <input
                     className="input"
                     inputMode="decimal"
