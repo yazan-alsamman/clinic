@@ -36,7 +36,9 @@ jobs:
 
             echo "--- Pulling latest code ---"
             cd $APP
-            git pull origin main
+            # Lock files are regenerated on the server by npm; drop local edits so the pull never conflicts.
+            git checkout -- backend/package-lock.json frontend/package-lock.json
+            git pull --ff-only origin main
 
             echo "--- Writing backend .env ---"
             printf '%s' "$VPS_BACKEND_ENV_B64" | base64 -d > $APP/backend/.env
