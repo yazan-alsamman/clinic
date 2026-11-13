@@ -1111,16 +1111,6 @@ export function BillingPage() {
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--danger)', fontSize: '0.82rem' }}>
                       تعذر تحميل مقاييس مناطق الباكج — اضغط «تحديث». لن يظهر «إنقاص جلسة» قبل اكتمال قراءة المناطق.
                     </p>
-                  ) : !itemPackageReadyForSessionDecrement(b) && itemEffectiveDueSyp(b) > 0 ? (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      باكج ليزر — مناطق غير مكتملة
-                      {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
-                        ? ` (متبقي: ${b.laserPackageRemainingAreaLabels!.join('، ')})`
-                        : ''}
-                      . مبلغ الإضافات خارج الباكج ({itemEffectiveDueSyp(b).toLocaleString('ar-SY')} ل.س) محفوظ على هذا
-                      البند ويتراكم مع إضافات زيارة الاستكمال، ويُحصَّل كاملاً عند «إنقاص جلسة و دفع» بعد اكتمال المناطق.
-                      {itemPackageNeedsPartialAreaSettle(b) ? ' استخدم «إنقاص منطقة» لكل منطقة أنجزها الأخصائي.' : ''}
-                    </p>
                   ) : itemPackageWaitingForMoreAreas(b) ? (
                     <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
                       تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية

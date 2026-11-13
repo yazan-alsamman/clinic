@@ -4794,6 +4794,7 @@ export function PatientRecord() {
                 try {
                   const created = await api<{
                     billingItem: { amountDueSyp: number; isPackagePrepaid?: boolean } | null
+                    addonBillingItem?: { amountDueSyp: number } | null
                     packageVisitIncomplete?: boolean
                   }>('/api/laser/sessions', {
                     method: 'POST',
@@ -4835,6 +4836,12 @@ export function PatientRecord() {
                   })
                   const due = Number(created.billingItem?.amountDueSyp || 0)
                   const dueFmt = due.toLocaleString('ar-SY')
+                  /** جلسة باكج: الإضافات في بند مستقل يُحصَّل فوراً من صفحة التحصيل */
+                  const addonDue = Number(created.addonBillingItem?.amountDueSyp || 0)
+                  const addonNote =
+                    addonDue > 0.0001
+                      ? ` مبلغ الإضافات خارج الباكج (${addonDue.toLocaleString('ar-SY')} ل.س) أُرسل كبند مستقل إلى صفحة التحصيل ويُحصَّل الآن.`
+                      : ''
                   const incompleteVisit =
                     created.packageVisitIncomplete === true && created.billingItem?.isPackagePrepaid === true
 
@@ -4842,7 +4849,7 @@ export function PatientRecord() {
                     setLaserSessionOk(
                       due > 0.0001
                         ? `تم حفظ المناطق مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع»، ويظهر «إنقاص منطقة» لكل منطقة من الباكج حتى اكتمال العدد ثم «إنقاص جلسة».`
-                        : 'تم حفظ المناطق ضمن الباكج. عدد المناطق المدخلة أقل من عدد مناطق جلسة الباكج — في التحصيل استخدم «إنقاص منطقة» لكل منطقة أُنجِزت، ثم يُكمِل الأخصائي المناطق المتبقية في الملف حتى يظهر «إنقاص جلسة».',
+                        : `تم حفظ المناطق ضمن الباكج. عدد المناطق المدخلة أقل من عدد مناطق جلسة الباكج — في التحصيل استخدم «إنقاص منطقة» لكل منطقة أُنجِزت، ثم يُكمِل الأخصائي المناطق المتبقية في الملف حتى يظهر «إنقاص جلسة».${addonNote}`,
                     )
                     try {
                       const ch = await api<ClinicalHistorySnapshot>(
@@ -4858,7 +4865,7 @@ export function PatientRecord() {
                       created.billingItem?.isPackagePrepaid
                         ? due > 0.0001
                           ? `تم حفظ الجلسة ضمن الباكج مع إضافات خارج الباكج. المستحق للتحصيل: ${dueFmt} ل.س — في التحصيل استخدم «إنقاص جلسة و دفع».`
-                          : 'تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة» عند عدم وجود إضافات.'
+                          : `تم حفظ الجلسة ضمن الباكج كجلسة مدفوعة مسبقاً. في التحصيل استخدم «إنقاص جلسة».${addonNote}`
                         : due > 0.0001
                           ? `تم حفظ الجلسة وبند الفوترة. المستحق للتحصيل: ${dueFmt} ل.س (صفحة التحصيل للاستقبال).`
                           : 'تم حفظ الجلسة بسعر صفر — بدون بند تحصيل.',

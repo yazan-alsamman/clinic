@@ -205,6 +205,22 @@ async function clearOrthoInstallment(cs, itemIds) {
   }
 }
 
+/** بنود إضافات جلسة الباكج (مناطق خارج الباكج + كفر) تُحذف مع جلسة الليزر التي تتبعها */
+async function deletePackageAddonCharges(patientId, laserIds) {
+  const ids = (laserIds || []).filter((id) => mongoose.isValidObjectId(id))
+  if (!ids.length) return
+  const addonRows = await ClinicalSession.find({ packageAddonForLaserSessionId: { $in: ids } })
+  for (const addonCs of addonRows) {
+    const addonItemIds = (await BillingItem.find({ clinicalSessionId: addonCs._id }).select('_id').lean()).map((r) =>
+      String(r._id),
+    )
+    await purgeBillingItems(addonItemIds)
+    await detachDebtSettlements(patientId, addonItemIds, addonCs._id)
+    await sweepFinancialDocs(addonCs, [], addonItemIds)
+    await ClinicalSession.deleteOne({ _id: addonCs._id })
+  }
+}
+
 async function deleteLaserSessions(laserIds) {
   for (const lid of laserIds) {
     if (!mongoose.isValidObjectId(lid)) continue
@@ -242,6 +258,7 @@ export async function deleteClinicalSessionFully(sessionId) {
     const ls = await LaserSession.findById(id)
     if (ls?.clinicalSessionId) cs = await ClinicalSession.findById(ls.clinicalSessionId)
     if (!cs && ls) {
+      await deletePackageAddonCharges(ls.patientId, [String(ls._id)])
       await deleteLaserSessions([String(ls._id)])
       if (ls.billingItemId) {
         const finance = await purgeBillingItems([String(ls.billingItemId)])
@@ -297,6 +314,7 @@ export async function deleteClinicalSessionFully(sessionId) {
   await detachDebtSettlements(cs.patientId, itemIds, cs._id)
   await clearOrthoInstallment(cs, itemIds)
   await releasePackageSessions(cs.patientId, cs, laserIds, itemIds)
+  await deletePackageAddonCharges(cs.patientId, laserIds)
   await deleteLaserSessions(laserIds)
   await sweepFinancialDocs(cs, laserIds, itemIds)
   await ClinicalSession.deleteOne({ _id: cs._id })

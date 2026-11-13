@@ -968,6 +968,19 @@ laserRouter.get('/shots-daily', requireRoles('super_admin'), async (req, res) =>
   }
 })
 
+/** بنود إضافات جلسات الباكج: إيراد ليزر مستقل يُحسب عند تحصيله (لا ينتظر إنقاص جلسة الباكج) */
+async function findPackageAddonClinicalIds(clinicalIds) {
+  const ids = (clinicalIds || []).filter(Boolean)
+  if (!ids.length) return []
+  const rows = await ClinicalSession.find({
+    _id: { $in: ids },
+    packageAddonForLaserSessionId: { $ne: null },
+  })
+    .select('_id')
+    .lean()
+  return rows.map((r) => String(r._id))
+}
+
 /** تفصيل تحصيل ليزر: كاش مقابل بنوك (من BillingPayment) — ل.س و USD حسب عملة التحصيل؛ جلسة ليزر completed فقط */
 async function buildLaserPaymentBreakdown(businessDateFilter) {
   const empty = () => ({
@@ -989,6 +1002,7 @@ async function buildLaserPaymentBreakdown(businessDateFilter) {
     .select('clinicalSessionId')
     .lean()
   const completedSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
+  for (const id of await findPackageAddonClinicalIds(cids)) completedSet.add(id)
   const items = itemsRaw.filter((i) => completedSet.has(String(i.clinicalSessionId || '')))
   if (!items.length) {
     const debtSettlements = await findDebtSettlementsForBusinessDateFilter(businessDateFilter)
@@ -1092,6 +1106,7 @@ async function buildLaserFinanceRowsBySpecialist(businessDateFilter) {
     .select('clinicalSessionId')
     .lean()
   const completedClinicalIdSet = new Set(completedLasers.map((l) => String(l.clinicalSessionId || '')))
+  for (const id of await findPackageAddonClinicalIds(clinicalIds)) completedClinicalIdSet.add(id)
 
   const payIds = [...new Set(paidItems.map((i) => i.paymentId).filter(Boolean).map(String))]
   const payments =
@@ -1376,6 +1391,74 @@ laserRouter.get('/sessions', async (req, res) => {
     res.status(500).json({ error: 'خطأ في الخادم' })
   }
 })
+
+/**
+ * بند تحصيل مستقل لإضافات جلسة باكج (مناطق خارج الباكج + كفر الليزر) لزيارة واحدة.
+ * الباكج مدفوع مسبقاً، فالإضافات تُحصَّل فوراً دون انتظار اكتمال مناطق الباكج.
+ */
+async function createLaserPackageAddonCharge({
+  patientId,
+  laserSessionId,
+  providerUserId,
+  businessDate,
+  amountSyp,
+  lineItems,
+  laserCoverSyp,
+  notes,
+}) {
+  const amount = Math.max(0, Math.round(Number(amountSyp) || 0))
+  if (!(amount > 0)) return null
+  const names = (Array.isArray(lineItems) ? lineItems : [])
+    .map((row) => String(row?.areaLabel || '').trim())
+    .filter(Boolean)
+  const parts = [names.length ? names.join('، ') : '']
+  if (Number(laserCoverSyp) > 0) parts.push('كفر ليزر')
+  const label = `ليزر — إضافات خارج الباكج: ${parts.filter(Boolean).join(' — ') || 'إضافات'}`.slice(0, 4000)
+  const addonCs = await ClinicalSession.create({
+    patientId,
+    providerUserId,
+    department: 'laser',
+    procedureDescription: label,
+    sessionFeeSyp: amount,
+    businessDate,
+    notes: String(notes ?? '').trim().slice(0, 2000),
+    materials: [],
+    materialCostSypTotal: 0,
+    packageAddonForLaserSessionId: laserSessionId,
+  })
+  try {
+    const addonBi = await BillingItem.create({
+      clinicalSessionId: addonCs._id,
+      patientId,
+      providerUserId,
+      department: 'laser',
+      procedureLabel: label.slice(0, 200),
+      listAmountDueSyp: amount,
+      discountPercent: 0,
+      effectiveAmountDueSyp: amount,
+      amountDueSyp: amount,
+      currency: 'SYP',
+      businessDate,
+      status: 'pending_payment',
+    })
+    addonCs.billingItemId = addonBi._id
+    await addonCs.save()
+    return addonBi
+  } catch (e) {
+    await ClinicalSession.deleteOne({ _id: addonCs._id })
+    throw e
+  }
+}
+
+function addonBillingItemDto(addonBi) {
+  if (!addonBi) return null
+  return {
+    id: String(addonBi._id),
+    status: addonBi.status,
+    amountDueSyp: addonBi.amountDueSyp,
+    isPackagePrepaid: false,
+  }
+}
 
 laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CREATE), async (req, res) => {
   try {
@@ -1996,17 +2079,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         res.status(500).json({ error: 'بيانات الجلسة السريرية أو الفوترة غير مكتملة.' })
         return
       }
-      const billStillPending = biExisting.status === 'pending_payment'
-      if (!billStillPending && amountDueSyp > 0) {
-        res.status(400).json({
-          error:
-            'بند تحصيل جلسة الباكج هذه مُغلق مسبقاً، فلا يمكن إضافة مناطق مدفوعة عليه. سجّل المناطق خارج الباكج كجلسة عادية منفصلة.',
-        })
-        return
-      }
-      /** المستحق = ما تراكم على البند من زيارات سابقة + إضافات وكفر هذه الزيارة */
-      const previousDueSyp = Math.max(0, Math.round(Number(biExisting.amountDueSyp) || 0))
-      const accumulatedDueSyp = billStillPending ? previousDueSyp + amountDueSyp : previousDueSyp
+      const previousCostSyp = Math.max(0, Math.round(Number(existingLs.costSyp) || 0))
       const accumulatedCoverSyp =
         Math.max(0, Math.round(Number(existingLs.laserCoverSyp) || 0)) + laserCoverAppliedSyp
 
@@ -2023,24 +2096,38 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       existingLs.areaIds = areaIds
       existingLs.manualAreaLabels = manualAreaLabels
       existingLs.lineItems = normalizedLineItems
-      existingLs.costSyp = accumulatedDueSyp
+      /** سجل تراكمي للإضافات والكفر — التحصيل نفسه في بند إضافات مستقل لكل زيارة */
+      existingLs.costSyp = previousCostSyp + amountDueSyp
       existingLs.laserCoverApplied = accumulatedCoverSyp > 0
       existingLs.laserCoverSyp = accumulatedCoverSyp
-      if (billStillPending) existingLs.status = 'completed_pending_collection'
+      if (biExisting.status === 'pending_payment') existingLs.status = 'completed_pending_collection'
       await existingLs.save()
 
       csExisting.procedureDescription = procedureDescription
-      csExisting.sessionFeeSyp = accumulatedDueSyp
       csExisting.notes = String(body.notes ?? '').trim().slice(0, 2000)
       await csExisting.save()
 
+      /** مبلغ بند الباكج لا يُمس هنا (صفر للجلسات الجديدة، ويبقى أي مبلغ قديم كما هو) */
       biExisting.procedureLabel = procedureLabel || 'ليزر'
-      if (billStillPending) {
-        biExisting.amountDueSyp = accumulatedDueSyp
-        biExisting.listAmountDueSyp = accumulatedDueSyp
-        biExisting.effectiveAmountDueSyp = accumulatedDueSyp
-      }
       await biExisting.save()
+
+      let addonBi = null
+      try {
+        addonBi = await createLaserPackageAddonCharge({
+          patientId: patient._id,
+          laserSessionId: existingLs._id,
+          providerUserId: req.user._id,
+          businessDate,
+          amountSyp: amountDueSyp,
+          lineItems: incomingAddons,
+          laserCoverSyp: laserCoverAppliedSyp,
+          notes: body.notes,
+        })
+      } catch (addonErr) {
+        console.error('createLaserPackageAddonCharge (continue):', addonErr)
+        res.status(500).json({ error: 'تم حفظ المناطق لكن تعذر إنشاء بند تحصيل الإضافات.' })
+        return
+      }
 
       if (linkedSlot && !linkedSlot.laserSessionId) {
         linkedSlot.laserSessionId = existingLs._id
@@ -2084,6 +2171,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
           amountDueSyp: biExisting.amountDueSyp,
           isPackagePrepaid: biExisting.isPackagePrepaid === true,
         },
+        addonBillingItem: addonBillingItemDto(addonBi),
         packageInfo: {
           packageId: String(packageMatch.pkg._id || ''),
           packageSessionId: String(packageMatch.session._id || ''),
@@ -2099,6 +2187,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     let s = null
     let cs = null
     let bi = null
+    let addonBi = null
     try {
       s = await LaserSession.create({
         treatmentNumber,
@@ -2132,7 +2221,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         providerUserId: req.user._id,
         department: 'laser',
         procedureDescription,
-        sessionFeeSyp: amountDueSyp,
+        sessionFeeSyp: isPackageSession ? 0 : amountDueSyp,
         businessDate,
         notes: String(body.notes ?? '').trim().slice(0, 2000),
         laserSessionId: s._id,
@@ -2143,6 +2232,8 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         patientPackageSessionId: isPackageSession ? String(packageMatch?.session?._id || '') : '',
       })
 
+      /** جلسة باكج: بند الباكج بصفر، والإضافات في بند مستقل يُحصَّل فوراً */
+      const packageBillAmountSyp = isPackageSession ? 0 : amountDueSyp
       const createBilling = isPackageSession || amountDueSyp > 0
       if (createBilling) {
         bi = await BillingItem.create({
@@ -2151,10 +2242,10 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
           providerUserId: req.user._id,
           department: 'laser',
           procedureLabel: procedureLabel || 'ليزر',
-          listAmountDueSyp: amountDueSyp,
+          listAmountDueSyp: packageBillAmountSyp,
           discountPercent: 0,
-          effectiveAmountDueSyp: amountDueSyp,
-          amountDueSyp,
+          effectiveAmountDueSyp: packageBillAmountSyp,
+          amountDueSyp: packageBillAmountSyp,
           currency: 'SYP',
           businessDate,
           status: 'pending_payment',
@@ -2181,11 +2272,27 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
           billingItemId: bi?._id || null,
         })
       }
+      if (isPackageSession) {
+        addonBi = await createLaserPackageAddonCharge({
+          patientId: patient._id,
+          laserSessionId: s._id,
+          providerUserId: req.user._id,
+          businessDate,
+          amountSyp: amountDueSyp,
+          lineItems: normalizedLineItems.filter((row) => row.isAddon),
+          laserCoverSyp: laserCoverAppliedSyp,
+          notes: body.notes,
+        })
+      }
       if (linkedSlot) {
         linkedSlot.laserSessionId = s._id
         await linkedSlot.save()
       }
     } catch (inner) {
+      if (addonBi?._id) {
+        await BillingItem.deleteOne({ _id: addonBi._id })
+        await ClinicalSession.deleteOne({ _id: addonBi.clinicalSessionId })
+      }
       if (bi?._id) await BillingItem.deleteOne({ _id: bi._id })
       if (cs?._id) await ClinicalSession.deleteOne({ _id: cs._id })
       if (s?._id) await LaserSession.findByIdAndDelete(s._id)
@@ -2228,6 +2335,7 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
             isPackagePrepaid: bi.isPackagePrepaid === true,
           }
         : null,
+      addonBillingItem: addonBillingItemDto(addonBi),
       packageInfo: isPackageSession
         ? {
             packageId: String(packageMatch?.pkg?._id || ''),
