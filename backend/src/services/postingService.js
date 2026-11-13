@@ -280,8 +280,9 @@ export async function postBillingPayment(paymentId, postedBy) {
   if (department === 'dermatology' || department === 'solarium') {
     paramKey = 'calc.profile.dermatology'
   } else if (department === 'dental') {
-    paramKey = material > 0 ? 'calc.profile.dental_ortho' : 'calc.profile.dental_general'
-    fallback = material > 0 ? 'CLINIC_NET_SHARE' : 'CLINIC_SHARE_ON_GROSS'
+    /** ملف الأسنان العام دائماً: وجود تكلفة مواد على الجلسة لا يجعلها «تقويم» (كان يقلب ملف الحساب) */
+    paramKey = 'calc.profile.dental_general'
+    fallback = 'CLINIC_SHARE_ON_GROSS'
   }
   const profileCode = await resolveProfileCode(
     { department, userId: String(providerId) },

@@ -106,9 +106,7 @@ function orthoInstallmentAsTreatment(orthoCase, inst) {
   }
 }
 
-/**
- * حصة التقويم: من المسدّد بعد طرح مستلزمات الحالة (مثل المخبر قبل نسبة الطبيب).
- */
+/** تكلفة مستلزم التقويم بالليرة = ل.س + دولار×سعر الصرف */
 function orthoSupplyCostSyp(s) {
   const rate = Math.max(0, Number(s?.costUsdSypRate) || 0)
   const usdPart = Math.max(0, Number(s?.amountUsd) || 0)
@@ -117,68 +115,33 @@ function orthoSupplyCostSyp(s) {
   )
 }
 
-function orthoSuppliesInRange(orthoCase, from, to) {
-  let total = 0
-  for (const s of orthoCase?.supplies || []) {
-    const amt = orthoSupplyCostSyp(s)
-    if (!(amt > 0)) continue
-    let bd = String(s.businessDate || '').trim().slice(0, 10)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
-      bd = String(orthoCase?.startedAt || '').trim().slice(0, 10)
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) continue
-    if (!inRange(bd, from, to)) continue
-    total += amt
-  }
-  return roundMoney(total)
+/** إجمالي خطة التقويم بالليرة (ل.س + دولار×سعر صرف الحالة) */
+function orthoCasePlanCostSyp(orthoCase) {
+  return treatmentCostSyp({
+    totalCostSyp: orthoCase?.totalCostSyp,
+    totalCostUsd: orthoCase?.totalCostUsd,
+    costUsdSypRate: orthoCase?.costUsdSypRate,
+  })
 }
 
-function accumulateOrthoPaidShare({
-  orthoCase,
-  from,
-  to,
-  userById,
-  byDoctor,
-  bumpNamed,
-  addRevenue,
-  addLabs,
-}) {
-  let paidInRange = 0
+/** تاريخ احتساب خطة التقويم للطبيب: تاريخ بدء الحالة، وإلا أول قسط */
+function orthoCasePlanBusinessDate(orthoCase) {
+  const started = String(orthoCase?.startedAt || '').trim().slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(started)) return started
   for (const inst of orthoCase?.installments || []) {
-    for (const pay of inst.payments || []) {
-      const paidAt = String(pay.paidAt || '').trim().slice(0, 10)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) continue
-      if (!inRange(paidAt, from, to)) continue
-      const amount = roundMoney(pay.amountSyp)
-      if (!(amount > 0)) continue
-      paidInRange += amount
-    }
+    const bd = String(inst?.businessDate || '').trim().slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bd)) return bd
   }
-  const suppliesInRange = orthoSuppliesInRange(orthoCase, from, to)
-  if (!(paidInRange > 0) && !(suppliesInRange > 0)) return 0
+  return ''
+}
 
-  const uid = orthoCase.providerUserId ? String(orthoCase.providerUserId) : ''
-  const name = String(orthoCase.doctorName || userById.get(uid) || '').trim()
-  const matchName = name || userById.get(uid) || ''
-  const isElias = isEliasProviderRef({
-    providerUserId: uid || orthoCase.providerUserId,
-    providerKey: orthoCase.providerKey,
-    doctorName: matchName,
-  })
-
-  if (addRevenue && paidInRange > 0) addRevenue(paidInRange)
-  if (addLabs && suppliesInRange > 0) addLabs(suppliesInRange, isElias)
-
-  /** أساس الحصة = المسدّد − المستلزمات (لا يقل عن صفر) */
-  const shareBase = Math.max(0, paidInRange - suppliesInRange)
-  if (!(shareBase > 0) && !(suppliesInRange > 0)) return 0
-
-  if (shareBase > 0) {
-    const prev = ensureDoctorBucket(byDoctor, { isElias, uid, name })
-    prev.proceduresSyp += shareBase
-    if (typeof bumpNamed === 'function') bumpNamed(shareBase, isElias, matchName)
+/** تاريخ المستلزم: تاريخه المُدخل، وإلا تاريخ بدء الحالة */
+function orthoSupplyBusinessDate(orthoCase, s) {
+  let bd = String(s?.businessDate || '').trim().slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
+    bd = String(orthoCase?.startedAt || '').trim().slice(0, 10)
   }
-  return shareBase
+  return /^\d{4}-\d{2}-\d{2}$/.test(bd) ? bd : ''
 }
 
 function emptyDoctorBucket({ isElias, uid, name }) {
@@ -423,25 +386,41 @@ export async function summarizeDentalChartFinance({ from, to }) {
       })
     }
 
+    /**
+     * التقويم: إجمالي الخطة يُحتسب للطبيب كاملاً بتاريخ بدء الحالة (حتى لو لم يسدّد المريض شيئاً)،
+     * والمستلزمات تُطرح من أساس حصته بتاريخها مثل المخبر.
+     * حالة بلا إجمالي خطة: يُحتسب كل قسط بتاريخه بكامل قيمته.
+     */
     for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
-      accumulateOrthoPaidShare({
-        orthoCase,
-        from,
-        to,
-        userById,
-        byDoctor,
-        addRevenue: (amt) => {
-          totalRevenueSyp += amt
-        },
-        addLabs: (amt) => {
-          /** المستلزمات مخصومة مسبقاً من أساس الحصة (proceduresSyp) في accumulateOrthoPaidShare؛
-           * هنا نُسجّلها ضمن إجمالي المخابر فقط دون طرحها مرة ثانية من نسب الأطباء */
-          labWorksTotalSyp += amt
-        },
-        bumpNamed: (amt, isElias, matchName) => {
-          bumpNamedProcedures(amt, isElias, matchName)
-        },
-      })
+      const meta = resolveDoctorMeta(orthoCase, userById)
+      const uid = meta.userId || ''
+      const name = meta.isElias ? DENTAL_ELIAS_DISPLAY_NAME : meta.name === '—' ? '' : meta.name
+      const matchName = name || userById.get(uid) || ''
+      const planCost = orthoCasePlanCostSyp(orthoCase)
+      if (planCost > 0) {
+        const bd = orthoCasePlanBusinessDate(orthoCase)
+        if (bd && inRange(bd, from, to)) {
+          totalRevenueSyp += planCost
+          addDoctorProcedure({ isElias: meta.isElias, uid, name, matchName, cost: planCost })
+        }
+      } else {
+        for (const inst of orthoCase.installments || []) {
+          const tr = orthoInstallmentAsTreatment(orthoCase, inst)
+          const cost = treatmentCostSyp(tr)
+          if (!(cost > 0)) continue
+          const bd = treatmentBusinessDate(tr)
+          if (!bd || !inRange(bd, from, to)) continue
+          totalRevenueSyp += cost
+          addDoctorProcedure({ isElias: meta.isElias, uid, name, matchName, cost })
+        }
+      }
+      for (const sup of orthoCase.supplies || []) {
+        const amt = orthoSupplyCostSyp(sup)
+        if (!(amt > 0)) continue
+        const bd = orthoSupplyBusinessDate(orthoCase, sup)
+        if (!bd || !inRange(bd, from, to)) continue
+        addDoctorLab({ isElias: meta.isElias, uid, name, matchName, amt })
+      }
     }
   }
 
@@ -455,7 +434,8 @@ export async function summarizeDentalChartFinance({ from, to }) {
       const noShare = sharePercent <= 0
       const proceduresSyp = roundMoney(r.proceduresSyp)
       const labsSyp = roundMoney(r.labsSyp || 0)
-      const shareBaseSyp = Math.max(0, proceduresSyp - labsSyp)
+      /** قد يكون سالباً: تكاليف الفترة (مخابر/مستلزمات) أكبر من إجراءاتها تُخصم من حساب الطبيب ولا تضيع */
+      const shareBaseSyp = proceduresSyp - labsSyp
       return {
         ...r,
         proceduresSyp,
@@ -473,10 +453,10 @@ export async function summarizeDentalChartFinance({ from, to }) {
   const omarSharePercent = namedDentalPercent(providerNameMatchesOmar, ctx)
   const eliasSharePercent = dentalSharePercentFor({ isElias: true }, ctx)
 
-  const ayhamShareBaseSyp = Math.max(0, ayhamProceduresSyp - ayhamLabsSyp)
-  const iyadShareBaseSyp = Math.max(0, iyadProceduresSyp - iyadLabsSyp)
-  const omarShareBaseSyp = Math.max(0, omarProceduresSyp - omarLabsSyp)
-  const eliasShareBaseSyp = Math.max(0, eliasProceduresSyp - eliasLabWorksSyp)
+  const ayhamShareBaseSyp = ayhamProceduresSyp - ayhamLabsSyp
+  const iyadShareBaseSyp = iyadProceduresSyp - iyadLabsSyp
+  const omarShareBaseSyp = omarProceduresSyp - omarLabsSyp
+  const eliasShareBaseSyp = eliasProceduresSyp - eliasLabWorksSyp
 
   const ayhamShareSyp = roundMoney((ayhamShareBaseSyp * ayhamSharePercent) / 100)
   const iyadShareSyp = roundMoney((iyadShareBaseSyp * iyadSharePercent) / 100)
@@ -484,7 +464,7 @@ export async function summarizeDentalChartFinance({ from, to }) {
   const eliasShareSyp = roundMoney((eliasShareBaseSyp * eliasSharePercent) / 100)
   const doctorSharesTotalSyp = roundMoney(doctorRows.reduce((s, r) => s + r.shareSyp, 0))
   const otherShareSyp = roundMoney(
-    Math.max(0, doctorSharesTotalSyp - ayhamShareSyp - iyadShareSyp - omarShareSyp - eliasShareSyp),
+    doctorSharesTotalSyp - ayhamShareSyp - iyadShareSyp - omarShareSyp - eliasShareSyp,
   )
 
   totalRevenueSyp = roundMoney(totalRevenueSyp)
@@ -961,8 +941,58 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
 
     for (const orthoCase of p.dentalChart?.orthodonticCases || []) {
       const meta = resolveDoctorMeta(orthoCase, userById)
+      /** إجمالي الخطة يدخل حصة الطبيب كاملاً بتاريخ بدء الحالة؛ الأقساط عندها للعرض والتحصيل فقط */
+      const planCost = orthoCasePlanCostSyp(orthoCase)
+      const planIsShareBase = planCost > 0
+
+      if (planIsShareBase && !(filterKey && meta.key !== filterKey && meta.userId !== filterKey)) {
+        let bd = orthoCasePlanBusinessDate(orthoCase)
+        const undated = !bd
+        if (undated || inRange(bd, from, to)) {
+          if (undated) bd = 'بدون تاريخ'
+          let planPaid = 0
+          for (const inst of orthoCase.installments || []) {
+            planPaid += treatmentPaidSyp(orthoInstallmentAsTreatment(orthoCase, inst))
+          }
+          planPaid = roundMoney(Math.min(planCost, planPaid))
+          const clinic = ensureClinic(meta)
+          if (clinic) {
+            clinic.treatmentCount += 1
+            clinic.proceduresSyp += planCost
+            clinic.paidSyp += planPaid
+            clinic.remainingSyp += Math.max(0, planCost - planPaid)
+          }
+          const title = String(orthoCase.title || 'تقويم').trim() || 'تقويم'
+          rows.push({
+            kind: 'treatment',
+            id: orthoCase._id ? `ortho-plan-${String(orthoCase._id)}` : `ortho-plan-${patientId}-${rows.length}`,
+            patientId,
+            patientName,
+            fileNumber,
+            fdi: 0,
+            isGeneral: true,
+            isOrthodontic: true,
+            isOrthoPlan: true,
+            businessDate: bd,
+            undated,
+            clinicKey: meta.key,
+            clinicLabel: meta.clinicLabel,
+            doctorName: meta.name,
+            providerUserId: meta.userId,
+            noShare: meta.noShare,
+            procedureDescription: `تقويم — ${title} (إجمالي الخطة)`,
+            totalCostSyp: planCost,
+            totalCostUsd: Math.max(0, Number(orthoCase.totalCostUsd) || 0),
+            paidSyp: planPaid,
+            remainingSyp: Math.max(0, planCost - planPaid),
+            payments: [],
+          })
+        }
+      }
 
       for (const inst of orthoCase.installments || []) {
+        /** الأقساط محسوبة ضمن إجمالي الخطة أعلاه */
+        if (planIsShareBase) continue
         const tr = orthoInstallmentAsTreatment(orthoCase, inst)
         const cost = treatmentCostSyp(tr)
         const hasContent =
@@ -993,7 +1023,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         const clinic = ensureClinic(meta)
         if (clinic) {
           clinic.treatmentCount += 1
-          clinic.proceduresSyp += paidFinal
+          /** الحصة تُحتسب على قيمة القسط فور تسجيله، لا على المسدّد */
+          clinic.proceduresSyp += cost
           clinic.paidSyp += paidFinal
           clinic.remainingSyp += remaining
         }
@@ -1034,11 +1065,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         const amt = orthoSupplyCostSyp(s)
         const name = String(s?.name || '').trim() || 'مستلزم'
         if (!(amt > 0) && !String(s?.name || '').trim()) continue
-        let bd = String(s.businessDate || '').trim().slice(0, 10)
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
-          bd = String(orthoCase.startedAt || '').trim().slice(0, 10)
-        }
-        const undated = !/^\d{4}-\d{2}-\d{2}$/.test(bd)
+        let bd = orthoSupplyBusinessDate(orthoCase, s)
+        const undated = !bd
         if (!undated && !inRange(bd, from, to)) continue
         if (undated) bd = 'بدون تاريخ'
         if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
@@ -1047,10 +1075,8 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         if (clinic) {
           clinic.labCount += 1
           clinic.labsSyp += amt
+          /** يُطرح المستلزم من أساس حصة الطبيب قبل النسبة مثل المخبر */
           clinic.orthoSupplySyp = roundMoney((clinic.orthoSupplySyp || 0) + amt)
-          /** طرح المستلزم من أساس حصة الطبيب قبل النسبة */
-          const deduct = Math.min(amt, Math.max(0, clinic.proceduresSyp))
-          clinic.proceduresSyp = Math.max(0, clinic.proceduresSyp - deduct)
         }
 
         rows.push({
@@ -1091,9 +1117,10 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       const proceduresSyp = roundMoney(c.proceduresSyp)
       const labsSyp = roundMoney(c.labsSyp)
       const orthoSupplySyp = roundMoney(c.orthoSupplySyp || 0)
-      /** مخابر/مواد عادية فقط — مستلزمات التقويم طُرحت مسبقاً من proceduresSyp */
-      const labsForShareSyp = Math.max(0, labsSyp - orthoSupplySyp)
-      const shareBaseSyp = Math.max(0, proceduresSyp - labsForShareSyp)
+      /** المخابر + التخدير العام + مستلزمات التقويم — كلها تُطرح قبل النسبة */
+      const labsForShareSyp = labsSyp
+      /** قد يكون سالباً حتى لا تضيع تكاليف الفترة عند الفلترة الشهرية */
+      const shareBaseSyp = proceduresSyp - labsForShareSyp
       const shareSyp = roundMoney((shareBaseSyp * sharePercent) / 100)
       return {
         ...c,
@@ -1107,8 +1134,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         sharePercent,
         shareSyp,
         noShare,
-        /** المستلزمات طُرحت مسبقاً من proceduresSyp وتظهر في labsSyp — نعيد إضافتها مرة حتى لا تُطرح مرتين */
-        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp + orthoSupplySyp),
+        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp),
       }
     })
     .filter((c) => !filterKey || c.key === filterKey || c.userId === filterKey)

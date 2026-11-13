@@ -38,7 +38,10 @@ export function InventoryPage() {
   const isDermWarehouseManager = user?.role === 'dermatology_manager'
   const isDermWarehouseAssistant = user?.role === 'dermatology_assistant_manager'
   const isDermWarehouseStaff = isDermWarehouseManager || isDermWarehouseAssistant
-  const isReceptionSkinWarehouse = user?.role === 'reception'
+  /** أمين مستودع قسم واحد: الاستقبال ← البشرة، مساعد الأسنان ← الأسنان */
+  const ownWarehouseDept: Item['department'] | null =
+    user?.role === 'reception' ? 'skin' : user?.role === 'dental_assistant' ? 'dental' : null
+  const isReceptionSkinWarehouse = ownWarehouseDept != null
   const canRead = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
   const canCreate = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
   const canEdit = user?.role === 'super_admin' || isDermWarehouseStaff || isReceptionSkinWarehouse
@@ -137,7 +140,7 @@ export function InventoryPage() {
     ? DEPARTMENT_OPTIONS
     : isDermWarehouseStaff
       ? DEPARTMENT_OPTIONS.filter((d) => d.value === 'dermatology_private')
-      : DEPARTMENT_OPTIONS.filter((d) => d.value === 'skin')
+      : DEPARTMENT_OPTIONS.filter((d) => d.value === ownWarehouseDept)
 
   const showDermDualPricingCreate =
     isDermWarehouseManager || (isAdmin && createForm.department === 'dermatology_private')
@@ -145,7 +148,7 @@ export function InventoryPage() {
   const showDermManagerFullEdit =
     !isAdmin && isDermWarehouseManager && editItem?.department === 'dermatology_private'
   const showReceptionSkinFullEdit =
-    !isAdmin && isReceptionSkinWarehouse && editItem?.department === 'skin'
+    !isAdmin && isReceptionSkinWarehouse && editItem?.department === ownWarehouseDept
 
   return (
     <>
@@ -168,7 +171,9 @@ export function InventoryPage() {
               ? 'خصومات تلقائية مع الإجراءات — تنبيهات الحد الأدنى'
               : isDermWarehouseStaff
                 ? 'مستودع جلدية الخاص بالقسم — عرض وتعديل حسب الصلاحية'
-                : 'مستودع البشرة الخاص بالقسم — عرض وتعديل حسب الصلاحية'}
+                : ownWarehouseDept === 'dental'
+                  ? 'مستودع الأسنان — عرض وتعديل حسب الصلاحية'
+                  : 'مستودع البشرة الخاص بالقسم — عرض وتعديل حسب الصلاحية'}
           </p>
         </div>
         {canCreate ? (
@@ -476,7 +481,7 @@ export function InventoryPage() {
                         ? createForm.department
                         : isDermWarehouseStaff
                           ? 'dermatology_private'
-                          : 'skin',
+                          : ownWarehouseDept,
                       quantity: Number(createForm.quantity) || 0,
                       safetyStockLevel: Number(createForm.safetyStockLevel) || 0,
                     }
@@ -826,7 +831,7 @@ export function InventoryPage() {
                       body.sku = editForm.sku.trim()
                       body.name = editForm.name.trim()
                       body.unit = editForm.unit.trim()
-                      body.department = 'skin'
+                      body.department = ownWarehouseDept
                       body.unitCost = Number(editForm.unitCost) || 0
                       body.unitCostUsd = 0
                       body.active = editForm.active

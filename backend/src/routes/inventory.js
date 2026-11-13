@@ -9,7 +9,16 @@ export const inventoryRouter = Router()
 
 inventoryRouter.use(authMiddleware, loadBusinessDay)
 
-const READ_ROLES = ['super_admin', 'reception', 'dermatology', 'dermatology_manager', 'dermatology_assistant_manager', 'laser', 'dental_branch']
+const READ_ROLES = [
+  'super_admin',
+  'reception',
+  'dermatology',
+  'dermatology_manager',
+  'dermatology_assistant_manager',
+  'laser',
+  'dental_branch',
+  'dental_assistant',
+]
 const ALLOWED_DEPARTMENTS = ['laser', 'dermatology', 'dermatology_private', 'dental', 'skin', 'solarium']
 
 function normalizeDepartment(raw, fallback = 'dermatology') {
@@ -39,6 +48,10 @@ function isDermWarehouseStaffRole(role) {
 }
 function canAccessSkinInventory(role) {
   return role === 'super_admin' || role === 'reception'
+}
+/** مساعد الأسنان يدير مستودع الأسنان فقط */
+function isDentalWarehouseRole(role) {
+  return role === 'dental_assistant'
 }
 
 async function generateInventorySku(department) {
@@ -98,6 +111,8 @@ inventoryRouter.get('/items', async (req, res) => {
     const q = {}
     if (isDermWarehouseStaffRole(req.user.role)) {
       q.department = 'dermatology_private'
+    } else if (isDentalWarehouseRole(req.user.role)) {
+      q.department = 'dental'
     } else {
       const deptsRaw = String(req.query.departments || '')
         .split(',')
@@ -116,7 +131,7 @@ inventoryRouter.get('/items', async (req, res) => {
   }
 })
 
-inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager', 'reception'), async (req, res) => {
+inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager', 'reception', 'dental_assistant'), async (req, res) => {
   try {
     const body = req.body ?? {}
     const name = String(body.name || '').trim()
@@ -126,7 +141,9 @@ inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager'
     }
     const department = isDermWarehouseStaffRole(req.user.role)
       ? 'dermatology_private'
-      : canAccessSkinInventory(req.user.role)
+      : isDentalWarehouseRole(req.user.role)
+        ? 'dental'
+        : canAccessSkinInventory(req.user.role)
         ? 'skin'
         : normalizeDepartment(body.department)
     const sku = await generateInventorySku(department)
@@ -165,7 +182,7 @@ inventoryRouter.post('/items', requireRoles('super_admin', 'dermatology_manager'
   }
 })
 
-inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager', 'reception'), async (req, res) => {
+inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_manager', 'dermatology_assistant_manager', 'reception', 'dental_assistant'), async (req, res) => {
   try {
     const item = await InventoryItem.findById(req.params.id)
     if (!item) {
@@ -177,6 +194,10 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
       return
     }
     if (canAccessSkinInventory(req.user.role) && item.department !== 'skin') {
+      res.status(403).json({ error: 'لا صلاحية لتعديل هذا الصنف' })
+      return
+    }
+    if (isDentalWarehouseRole(req.user.role) && item.department !== 'dental') {
       res.status(403).json({ error: 'لا صلاحية لتعديل هذا الصنف' })
       return
     }
@@ -209,7 +230,9 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
     if (body.department != null) {
       item.department = isDermWarehouseStaffRole(req.user.role)
         ? 'dermatology_private'
-        : canAccessSkinInventory(req.user.role)
+        : isDentalWarehouseRole(req.user.role)
+          ? 'dental'
+          : canAccessSkinInventory(req.user.role)
           ? 'skin'
           : normalizeDepartment(body.department, item.department)
     }
@@ -246,7 +269,7 @@ inventoryRouter.patch('/items/:id', requireRoles('super_admin', 'dermatology_man
 /** حذف مادة من المستودع (جلدية خاصة / بشرة / أي قسم للمدير) */
 inventoryRouter.delete(
   '/items/:id',
-  requireRoles('super_admin', 'dermatology_manager', 'reception'),
+  requireRoles('super_admin', 'dermatology_manager', 'reception', 'dental_assistant'),
   async (req, res) => {
     try {
       const item = await InventoryItem.findById(req.params.id)
@@ -259,6 +282,10 @@ inventoryRouter.delete(
         return
       }
       if (req.user.role === 'reception' && item.department !== 'skin') {
+        res.status(403).json({ error: 'لا صلاحية لحذف هذا الصنف' })
+        return
+      }
+      if (isDentalWarehouseRole(req.user.role) && item.department !== 'dental') {
         res.status(403).json({ error: 'لا صلاحية لحذف هذا الصنف' })
         return
       }
