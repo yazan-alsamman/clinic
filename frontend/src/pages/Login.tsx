@@ -8,9 +8,6 @@ import {
   resetPatientWelcomeSeen,
 } from './patient-portal/patientWelcomeGate'
 
-const prodMissingApiBase =
-  import.meta.env.PROD && !(import.meta.env.VITE_API_BASE_URL ?? '').toString().trim()
-
 export function Login() {
   const { user, loading: staffLoading, login } = useAuth()
   const nav = useNavigate()
@@ -117,27 +114,6 @@ export function Login() {
           <img className="brand-logo-img" src={logoEliasClinic} alt="Elias dahdal clinic" />
           <div className="sidebar-brand-sub">تسجيل الدخول — موظفون ومرضى</div>
         </div>
-        {prodMissingApiBase ? (
-          <p
-            role="alert"
-            style={{
-              margin: '0 0 1rem',
-              padding: '0.75rem 1rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              lineHeight: 1.55,
-              background: 'rgba(220, 53, 69, 0.12)',
-              border: '1px solid rgba(220, 53, 69, 0.35)',
-              color: '#f8a8b2',
-            }}
-          >
-            <strong>إعداد النشر:</strong> الواجهة بُنيت بدون عنوان الـ API. في لوحة Hostinger → Environment
-            variables للتطبيق <strong>frontend</strong> أضف{' '}
-            <code style={{ wordBreak: 'break-all' }}>VITE_API_BASE_URL</code> = رابط الباكند كاملاً (مثال:{' '}
-            <code style={{ wordBreak: 'break-all' }}>https://your-api.hostingersite.com</code>) ثم{' '}
-            <strong>أعد النشر</strong> حتى يُعاد بناء المشروع.
-          </p>
-        ) : null}
         <p
           style={{
             margin: '0 0 1rem',
