@@ -19,6 +19,8 @@ jobs:
   deploy:
     name: SSH deploy → 187.127.76.76
     runs-on: ubuntu-latest
+    # Secrets live in the "VPS_HOST" GitHub Environment (not repo secrets).
+    environment: VPS_HOST
 
     steps:
       - name: Deploy via SSH
