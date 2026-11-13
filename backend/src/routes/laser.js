@@ -1645,6 +1645,25 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
     const isPackageSession = Boolean(packageMatch) && recordedPackageAreaCount > 0
     const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
 
+    /** إضافة خارج الباكج بعدد الضربات: لا تُسعَّر صفراً بصمت */
+    if (isPackageSession) {
+      const addonPulseRows = normalizedLineItems.filter((row) => row.isAddon && row.chargeByPulseCount)
+      if (addonPulseRows.length > 0 && !(ppuSyp > 0)) {
+        res.status(400).json({
+          error:
+            'سعر الضربة غير محدد — يحدده المدير في «الغرف وتعيين أخصائيي الليزر» ضمن قسم أسعار المناطق والعروض.',
+        })
+        return
+      }
+      const invalidAddonPulseRow = addonPulseRows.find((row) => !(parseShotCount(row.shotCount) > 0))
+      if (invalidAddonPulseRow) {
+        res.status(400).json({
+          error: `أدخل عدد ضربات أكبر من صفر للمنطقة خارج الباكج: ${invalidAddonPulseRow.areaLabel || 'بدون اسم'}.`,
+        })
+        return
+      }
+    }
+
     /** جلسة باكج: المبلغ المطلوب = مناطق خارج الباكج فقط (ليرة) */
     let packageAddOnGrossSyp = 0
     if (isPackageSession) {
@@ -1949,7 +1968,14 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         return
       }
 
-      normalizedLineItems = [...mergedNonAddon, ...incomingAddons]
+      /** إضافات الزيارات السابقة تبقى على البند — لا تُمسح عند الاستكمال */
+      const existingAddons = existingLines
+        .filter((r) => r.isAddon)
+        .map((r) => {
+          const plain = typeof r.toObject === 'function' ? r.toObject() : { ...r }
+          return { ...plain, isAddon: true }
+        })
+      normalizedLineItems = [...mergedNonAddon, ...existingAddons, ...incomingAddons]
       procedureDescription = procedureTextFromLines(normalizedLineItems)
       procedureLabel = procedureDescription
       const linesPwAfterMerge = normalizedLineItems.map((row) => row.pw).filter(Boolean)
@@ -1970,6 +1996,19 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         res.status(500).json({ error: 'بيانات الجلسة السريرية أو الفوترة غير مكتملة.' })
         return
       }
+      const billStillPending = biExisting.status === 'pending_payment'
+      if (!billStillPending && amountDueSyp > 0) {
+        res.status(400).json({
+          error:
+            'بند تحصيل جلسة الباكج هذه مُغلق مسبقاً، فلا يمكن إضافة مناطق مدفوعة عليه. سجّل المناطق خارج الباكج كجلسة عادية منفصلة.',
+        })
+        return
+      }
+      /** المستحق = ما تراكم على البند من زيارات سابقة + إضافات وكفر هذه الزيارة */
+      const previousDueSyp = Math.max(0, Math.round(Number(biExisting.amountDueSyp) || 0))
+      const accumulatedDueSyp = billStillPending ? previousDueSyp + amountDueSyp : previousDueSyp
+      const accumulatedCoverSyp =
+        Math.max(0, Math.round(Number(existingLs.laserCoverSyp) || 0)) + laserCoverAppliedSyp
 
       existingLs.room = resolvedRoom
       existingLs.laserType = laserType
@@ -1984,22 +2023,29 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       existingLs.areaIds = areaIds
       existingLs.manualAreaLabels = manualAreaLabels
       existingLs.lineItems = normalizedLineItems
-      existingLs.costSyp = costGrossSyp
-      existingLs.laserCoverApplied = laserCoverAppliedSyp > 0
-      existingLs.laserCoverSyp = laserCoverAppliedSyp
-      existingLs.status = 'completed_pending_collection'
+      existingLs.costSyp = accumulatedDueSyp
+      existingLs.laserCoverApplied = accumulatedCoverSyp > 0
+      existingLs.laserCoverSyp = accumulatedCoverSyp
+      if (billStillPending) existingLs.status = 'completed_pending_collection'
       await existingLs.save()
 
       csExisting.procedureDescription = procedureDescription
-      csExisting.sessionFeeSyp = amountDueSyp
+      csExisting.sessionFeeSyp = accumulatedDueSyp
       csExisting.notes = String(body.notes ?? '').trim().slice(0, 2000)
       await csExisting.save()
 
       biExisting.procedureLabel = procedureLabel || 'ليزر'
-      biExisting.amountDueSyp = amountDueSyp
-      biExisting.listAmountDueSyp = amountDueSyp
-      biExisting.effectiveAmountDueSyp = amountDueSyp
+      if (billStillPending) {
+        biExisting.amountDueSyp = accumulatedDueSyp
+        biExisting.listAmountDueSyp = accumulatedDueSyp
+        biExisting.effectiveAmountDueSyp = accumulatedDueSyp
+      }
       await biExisting.save()
+
+      if (linkedSlot && !linkedSlot.laserSessionId) {
+        linkedSlot.laserSessionId = existingLs._id
+        await linkedSlot.save()
+      }
 
       const packageVisitIncomplete = newRecorded < packageMatch.expectedAreas
 

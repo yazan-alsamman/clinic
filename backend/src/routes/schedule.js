@@ -13,6 +13,8 @@ import { todayBusinessDate, addCalendarDaysYmd, isValidYmd } from '../utils/date
 import { writeAudit } from '../utils/audit.js'
 import { notifyAppointmentCancelled } from '../services/scheduleCancelNotify.js'
 import { getLaserBookingContextForPatient, resolveLaserPackagesForBooking } from '../services/laserPackageBooking.js'
+import { areaBelongsToLaserPackage } from '../services/laserPackageAreaBreakdown.js'
+import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import {
   normalizeHm,
   hmToMinutes,
@@ -781,8 +783,23 @@ async function runScheduleAssign(req, res, allowWalkInOverlapBypass) {
             if (s) packageAreaIds.add(s)
           }
         }
+        /** مطابقة بالمعرّف وبالاسم (مثل «إبطين» ضمن عرض «إبطين و بكيني») — نفس منطق حفظ الجلسة */
+        const packageAreaIdList = [...packageAreaIds]
+        const optionRows = await LaserProcedureOption.find({
+          _id: { $in: [...new Set([...packageAreaIdList, ...laserAddonProcedureOptionIds])] },
+        })
+          .select('name kind')
+          .lean()
+        const optionMetaById = new Map(
+          optionRows.map((r) => [
+            String(r._id),
+            { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
+          ]),
+        )
         for (let i = laserAddonProcedureOptionIds.length - 1; i >= 0; i -= 1) {
-          if (packageAreaIds.has(laserAddonProcedureOptionIds[i])) {
+          const addonId = laserAddonProcedureOptionIds[i]
+          const addonName = optionMetaById.get(addonId)?.name || ''
+          if (areaBelongsToLaserPackage(addonId, addonName, packageAreaIdList, optionMetaById)) {
             laserAddonProcedureOptionIds.splice(i, 1)
           }
         }

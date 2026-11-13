@@ -144,32 +144,37 @@ async function detachDebtSettlements(patientId, itemIds, clinicalSessionId) {
   }
 }
 
+/** يفك ربط جلسات الباكج بالجلسة المحذوفة ويعيدها متاحة للمريض */
 async function releasePackageSessions(patientId, cs, laserIds, itemIds) {
-  const patient = await Patient.findById(patientId)
-  if (!patient?.packages?.length) return
+  const patient = await Patient.findById(patientId).select('sessionPackages').lean()
+  const packages = Array.isArray(patient?.sessionPackages) ? patient.sessionPackages : []
+  if (!packages.length) return
   const laserSet = new Set(laserIds.map(String))
   const billSet = new Set(itemIds.map(String))
   const pkgId = String(cs.patientPackageId || '')
   const pkgSessId = String(cs.patientPackageSessionId || '')
-  let changed = false
-  for (const pkg of patient.packages) {
+  for (const pkg of packages) {
     for (const sess of pkg.sessions || []) {
       const linkedLaser = sess.linkedLaserSessionId ? String(sess.linkedLaserSessionId) : ''
       const linkedBill = sess.linkedBillingItemId ? String(sess.linkedBillingItemId) : ''
       const idMatch = pkgId && pkgSessId && String(pkg._id) === pkgId && String(sess._id) === pkgSessId
-      if ((linkedLaser && laserSet.has(linkedLaser)) || (linkedBill && billSet.has(linkedBill)) || idMatch) {
-        sess.completedByReception = false
-        sess.completedAt = null
-        sess.completedByUserId = null
-        sess.linkedLaserSessionId = null
-        sess.linkedBillingItemId = null
-        changed = true
-      }
+      if (!((linkedLaser && laserSet.has(linkedLaser)) || (linkedBill && billSet.has(linkedBill)) || idMatch)) continue
+      await Patient.updateOne(
+        { _id: patient._id },
+        {
+          $set: {
+            'sessionPackages.$[pkg].sessions.$[sess].completedByReception': false,
+            'sessionPackages.$[pkg].sessions.$[sess].completedAt': null,
+            'sessionPackages.$[pkg].sessions.$[sess].completedByUserId': null,
+            'sessionPackages.$[pkg].sessions.$[sess].linkedLaserSessionId': null,
+            'sessionPackages.$[pkg].sessions.$[sess].linkedBillingItemId': null,
+            'sessionPackages.$[pkg].sessions.$[sess].packagePartialAreasAcknowledgedByReception': 0,
+            'sessionPackages.$[pkg].sessions.$[sess].areasAdjustedOnly': false,
+          },
+        },
+        { arrayFilters: [{ 'pkg._id': pkg._id }, { 'sess._id': sess._id }] },
+      )
     }
-  }
-  if (changed) {
-    patient.markModified('packages')
-    await patient.save()
   }
 }
 
