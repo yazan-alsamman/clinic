@@ -88,6 +88,7 @@ const roleNav: Record<Role, NavKey[]> = {
     'admin_dental_patients',
     'admin_dental_labs',
     'admin_expenses',
+    'inventory',
     'account_password',
   ],
 }

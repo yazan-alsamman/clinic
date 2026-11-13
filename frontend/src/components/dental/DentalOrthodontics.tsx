@@ -69,6 +69,13 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
   const [instDate, setInstDate] = useState(todayIsoDate)
   const [instNote, setInstNote] = useState('')
 
+  /** إضافة مستلزم لحالة تقويم موجودة */
+  const [supplyCaseIdx, setSupplyCaseIdx] = useState<number | null>(null)
+  const [extraSupplyName, setExtraSupplyName] = useState('')
+  const [extraSupplySyp, setExtraSupplySyp] = useState(0)
+  const [extraSupplyUsd, setExtraSupplyUsd] = useState(0)
+  const [extraSupplyDate, setExtraSupplyDate] = useState(todayIsoDate)
+
   const load = useCallback(async () => {
     setErr('')
     setLoading(true)
@@ -115,6 +122,48 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
     setInstAmountUsd(0)
     setInstDate(todayIsoDate())
     setInstNote('')
+  }
+
+  function resetExtraSupplyForm() {
+    setExtraSupplyName('')
+    setExtraSupplySyp(0)
+    setExtraSupplyUsd(0)
+    setExtraSupplyDate(todayIsoDate())
+  }
+
+  async function addSupplyToCase() {
+    if (supplyCaseIdx == null || !cases[supplyCaseIdx]) {
+      setErr('اختر حالة تقويم لإضافة مستلزم')
+      return
+    }
+    const name = extraSupplyName.trim()
+    if (!name) {
+      setErr('أدخل اسم المستلزم')
+      return
+    }
+    if (!(extraSupplySyp > 0) && !(extraSupplyUsd > 0)) {
+      setErr('أدخل سعر المستلزم بالليرة أو بالدولار')
+      return
+    }
+    const supply = normalizeOrthoSupply(
+      {
+        ...emptyOrthoSupply(),
+        name,
+        amountSyp: extraSupplySyp,
+        amountUsd: extraSupplyUsd,
+        costUsdSypRate: extraSupplyUsd > 0 ? rate || 0 : 0,
+        businessDate: extraSupplyDate || todayIsoDate(),
+      },
+      rate,
+    )
+    const next = cases.map((c, i) =>
+      i === supplyCaseIdx ? { ...c, supplies: [...(c.supplies || []), supply] } : c,
+    )
+    const ok = await saveAll(next)
+    if (ok) {
+      resetExtraSupplyForm()
+      setSupplyCaseIdx(null)
+    }
   }
 
   function resetDraftSupplyFields() {
@@ -169,7 +218,7 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
       )
       setCases(list.filter(orthodonticCaseHasData))
       setOkMsg(
-        'تم الحفظ — الأقساط للتحصيل؛ المستلزمات تُطرح من أساس حصة الطبيب قبل النسبة (مثل المخبر)',
+        'تم الحفظ — نسبة الطبيب تُحتسب على الأقساط فور تسجيلها؛ المستلزمات تُطرح من أساس حصته قبل النسبة (مثل المخبر)',
       )
       return true
     } catch (e) {
@@ -388,8 +437,9 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
     <div className="card" style={{ marginBottom: '1rem' }}>
       <h2 className="card-title">تقويم</h2>
       <p style={{ marginTop: '-0.35rem', marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-        عند إنشاء حالة التقويم اختر الطبيب وأضف المستلزمات (اسم وسعر) ضمن نفس النموذج. الأقساط تُضاف لاحقاً
-        للتحصيل. المستلزمات تُطرح من المسدّد قبل حساب نسبة الطبيب (مثل المخبر).
+        عند إنشاء حالة التقويم اختر الطبيب وأضف المستلزمات (اسم وسعر). يمكن إضافة أقساط ومستلزمات للحالة لاحقاً.
+        نسبة الطبيب تُحتسب على كل قسط فور تسجيله حتى لو لم يسدّده المريض بعد، والمستلزمات تُطرح من أساس الحصة
+        بتاريخها قبل حساب النسبة (مثل المخبر).
         {canForceDelete
           ? ' مدير النظام يستطيع حذف الحالة أو أي دفعة حتى بعد التحصيل، ويُحذف معها السجل المالي.'
           : ''}
@@ -594,6 +644,7 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
                         disabled={saving}
                         onClick={() => {
                           setInstallCaseIdx(caseIdx)
+                          setSupplyCaseIdx(null)
                           resetInstallForm()
                           setErr('')
                           setOkMsg('')
@@ -602,11 +653,125 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
                         + إضافة قسط لهذه الحالة
                       </button>
                     ) : null}
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.82rem' }}
+                        disabled={saving}
+                        onClick={() => {
+                          setSupplyCaseIdx(caseIdx)
+                          setInstallCaseIdx(null)
+                          resetExtraSupplyForm()
+                          setErr('')
+                          setOkMsg('')
+                        }}
+                      >
+                        + إضافة مستلزم لهذه الحالة
+                      </button>
+                    ) : null}
                   </div>
                 )
               })}
             </div>
           )}
+
+          {canEdit && supplyCaseIdx != null && cases[supplyCaseIdx] ? (
+            <div
+              style={{
+                display: 'grid',
+                gap: '0.65rem',
+                padding: '0.85rem',
+                borderRadius: 12,
+                border: '1px solid var(--border)',
+                marginBottom: '1rem',
+                background: 'var(--surface-2)',
+              }}
+            >
+              <strong style={{ fontSize: '0.92rem' }}>
+                مستلزم جديد — {cases[supplyCaseIdx].title || 'تقويم'} ({cases[supplyCaseIdx].doctorName})
+              </strong>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                يُطرح من أساس حصة الطبيب بتاريخ المستلزم قبل حساب النسبة.
+              </p>
+              <div>
+                <label className="form-label">اسم المستلزم</label>
+                <input
+                  className="input"
+                  value={extraSupplyName}
+                  onChange={(e) => setExtraSupplyName(e.target.value)}
+                  placeholder="مثال: أسلاك / حلقات"
+                  disabled={saving}
+                />
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                  gap: '0.55rem',
+                }}
+              >
+                <div>
+                  <label className="form-label">السعر (ل.س)</label>
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    value={String(extraSupplySyp)}
+                    onChange={(e) =>
+                      setExtraSupplySyp(
+                        Math.max(0, Math.round(Number(e.target.value.replace(/[^\d]/g, '')) || 0)),
+                      )
+                    }
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">السعر (USD)</label>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    value={String(extraSupplyUsd)}
+                    onChange={(e) => {
+                      const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                      setExtraSupplyUsd(Math.max(0, Number(cleaned) || 0))
+                    }}
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">التاريخ</label>
+                  <input
+                    className="input"
+                    type="date"
+                    value={extraSupplyDate}
+                    onChange={(e) => setExtraSupplyDate(e.target.value)}
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={saving}
+                  onClick={() => {
+                    setSupplyCaseIdx(null)
+                    resetExtraSupplyForm()
+                  }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving}
+                  onClick={() => void addSupplyToCase()}
+                >
+                  {saving ? 'جاري الحفظ…' : 'حفظ المستلزم'}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {canEdit && installCaseIdx != null && cases[installCaseIdx] ? (
             <div

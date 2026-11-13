@@ -472,6 +472,42 @@ function normalizeOrthoSupply(row, fallbackUsdSypRate = 0) {
   return item
 }
 
+function orthoSupplyAuditRow(orthoCase, sup) {
+  return {
+    caseId: orthoCase?._id ? String(orthoCase._id) : '',
+    caseTitle: String(orthoCase?.title || 'تقويم'),
+    doctorName: String(orthoCase?.doctorName || ''),
+    supplyId: sup?._id ? String(sup._id) : '',
+    name: String(sup?.name || ''),
+    amountSyp: Math.max(0, Math.round(Number(sup?.amountSyp) || 0)),
+    amountUsd: Math.max(0, Number(sup?.amountUsd) || 0),
+    businessDate: String(sup?.businessDate || ''),
+  }
+}
+
+/** فرق مستلزمات التقويم قبل/بعد الحفظ — لسجل التدقيق */
+function diffOrthoSupplies(prevCases, nextCases) {
+  const index = (cases) => {
+    const m = new Map()
+    for (const c of cases || []) {
+      for (const sup of c?.supplies || []) {
+        const row = orthoSupplyAuditRow(c, sup)
+        const key = row.supplyId || `${row.caseId}|${row.name}|${row.amountSyp}|${row.amountUsd}|${row.businessDate}`
+        m.set(key, row)
+      }
+    }
+    return m
+  }
+  const before = index(prevCases)
+  const after = index(nextCases)
+  const suppliesAdded = [...after.entries()].filter(([k]) => !before.has(k)).map(([, v]) => v)
+  const suppliesRemoved = [...before.entries()].filter(([k]) => !after.has(k)).map(([, v]) => v)
+  const out = {}
+  if (suppliesAdded.length) out.orthoSuppliesAdded = suppliesAdded
+  if (suppliesRemoved.length) out.orthoSuppliesRemoved = suppliesRemoved
+  return out
+}
+
 function normalizeOrthodonticCases(raw, fallbackUsdSypRate = 0) {
   if (!Array.isArray(raw)) return []
   const out = []
@@ -1501,6 +1537,7 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
         generalTreatmentCount: generalTreatments.length,
         generalLabWorkCount: generalLabWorks.length,
         orthodonticCaseCount: orthodonticCases.length,
+        ...(bodyHasOrtho ? diffOrthoSupplies(prevOrtho, patient.dentalChart.orthodonticCases) : {}),
       },
     })
     res.json({ chart: await chartToDtoEnriched(patient.dentalChart) })
