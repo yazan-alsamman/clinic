@@ -313,7 +313,11 @@ function laserSpecialistTop(items, payById) {
  * حصص أخصائيي الليزر: إيراد التحصيل (ومخصصات تسديد الذمم) × نسبة كل أخصائي.
  * @returns {{ specialists: object[], specialistSharesTotalSyp: number, defaultSharePercent: number }}
  */
-async function computeLaserSpecialistShares({ items, payById, debtSettlements = [], providerUserId = null }) {
+export function laserProfitSyp({ revenueSyp = 0, expensesSyp = 0, specialistSharesSyp = 0 }) {
+  return Math.round((Number(revenueSyp) || 0) - (Number(expensesSyp) || 0) - (Number(specialistSharesSyp) || 0))
+}
+
+export async function computeLaserSpecialistShares({ items, payById, debtSettlements = [], providerUserId = null }) {
   const q = { role: 'laser' }
   if (providerUserId) q._id = providerUserId
   const specialists = await User.find(q).select('_id name active doctorSharePercent').sort({ name: 1 }).lean()
@@ -625,7 +629,6 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
 
     const laserRev = revenueByDept.laser
     const laserExp = expenseTotals.laser || 0
-    const laserProfit = Math.round(laserRev - laserExp)
     const laserTop = laserSpecialistTop(items, payById)
     const includeLaser = !deptFilter || deptFilter === 'laser'
     const laserShares = includeLaser
@@ -636,6 +639,15 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
           providerUserId: providerOid,
         })
       : { specialists: [], specialistSharesTotalSyp: 0, defaultSharePercent: 0 }
+    /**
+     * ربح الليزر = الإيراد − مصاريف الليزر − حصص الأخصائيين المستحقة (مثل الجلدية والأسنان).
+     * الحصص لا تُخصم من الصندوق تلقائياً؛ دفعها يدوياً يجب ألا يُسجَّل أيضاً كمصروف ليزر وإلا خُصمت مرتين.
+     */
+    const laserProfit = laserProfitSyp({
+      revenueSyp: laserRev,
+      expensesSyp: laserExp,
+      specialistSharesSyp: laserShares.specialistSharesTotalSyp,
+    })
 
     const dermRev = revenueByDept.dermatology
     const dermTable = expenseTotals.dermatology || 0
@@ -653,9 +665,11 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
     const dentalRev = dentalChart.totalRevenueSyp
     const dentalExp = expenseTotals.dental || 0
     const dentalLabs = dentalChart.labWorksTotalSyp
+    /** مستهلكات جلسات الإجراءات العامة — تكلفة على القسم (تُطرح مرة واحدة) */
+    const dentalConsumables = dentalChart.generalConsumablesTotalSyp || 0
     const dentalSharesTotal = dentalChart.doctorSharesTotalSyp
-    /** الربح الصافي = المتبقي بعد حصص الأطباء − المخابر − جدول مصاريف الأسنان */
-    const dentalProfit = Math.round(dentalRev - dentalSharesTotal - dentalLabs - dentalExp)
+    /** الربح الصافي = المتبقي بعد حصص الأطباء − المخابر − المستهلكات − جدول مصاريف الأسنان */
+    const dentalProfit = Math.round(dentalRev - dentalSharesTotal - dentalLabs - dentalConsumables - dentalExp)
     revenueByDept.dental = dentalRev
     totalRevenueSyp = Math.round(totalRevenueSyp - billingDentalRev + dentalRev)
 
@@ -754,7 +768,9 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
         totalRevenueSyp: dentalRev,
         expensesTableSyp: dentalExp,
         labWorksTotalSyp: dentalLabs,
-        totalExpensesSyp: Math.round(dentalExp + dentalLabs),
+        generalConsumablesTotalSyp: dentalConsumables,
+        generalCashSharePercent: dentalChart.generalCashSharePercent,
+        totalExpensesSyp: Math.round(dentalExp + dentalLabs + dentalConsumables),
         ayhamShareSyp: dentalChart.ayhamShareSyp,
         iyadShareSyp: dentalChart.iyadShareSyp,
         omarShareSyp: dentalChart.omarShareSyp,

@@ -79,6 +79,76 @@ const dentalChartPaymentSchema = new mongoose.Schema(
     usdSypRateUsed: { type: Number, default: 0, min: 0 },
     paidAt: { type: String, default: '' },
     note: { type: String, default: '', trim: true, maxlength: 300 },
+    /** الإجراءات العامة (قاعدة الجلسات): الجلسة التي حُصّلت فيها الدفعة */
+    sessionId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  },
+  { _id: true },
+)
+
+/** مستهلك مستخدم في جلسة إجراء عام — يُطرح من المحصّل قبل احتساب عمولة الطبيب */
+const generalSessionConsumableSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: '', trim: true, maxlength: 200 },
+    quantity: { type: Number, default: 1, min: 0 },
+    amountSyp: { type: Number, default: 0, min: 0 },
+    amountUsd: { type: Number, default: 0, min: 0 },
+    costUsdSypRate: { type: Number, default: 0, min: 0 },
+    /** تاريخ الأثر المالي: تاريخ الجلسة، أو تاريخ التصحيح إن أُضيف بعد إغلاقها */
+    effectiveDate: { type: String, default: '' },
+    addedAfterClose: { type: Boolean, default: false },
+    addedAt: { type: Date, default: null },
+    addedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    addedByName: { type: String, default: '' },
+    correctionReason: { type: String, default: '', maxlength: 500 },
+    /** حذف منطقي — يبقى المستهلك في السجل */
+    removedAt: { type: Date, default: null },
+    removedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    removedByName: { type: String, default: '' },
+    removedReason: { type: String, default: '', maxlength: 500 },
+    removedAfterClose: { type: Boolean, default: false },
+    removedEffectiveDate: { type: String, default: '' },
+  },
+  { _id: true },
+)
+
+/** تسوية صريحة عند تصحيح مستهلكات جلسة مغلقة (القيم قبل وبعد + فرق العمولة) */
+const generalSessionAdjustmentSchema = new mongoose.Schema(
+  {
+    action: { type: String, enum: ['consumable_added', 'consumable_removed'], required: true },
+    consumableId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    consumableName: { type: String, default: '' },
+    amountSyp: { type: Number, default: 0 },
+    businessDate: { type: String, default: '' },
+    reason: { type: String, default: '', maxlength: 500 },
+    at: { type: Date, default: null },
+    byUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    byName: { type: String, default: '' },
+    previousConsumablesSyp: { type: Number, default: 0 },
+    newConsumablesSyp: { type: Number, default: 0 },
+    previousNetSyp: { type: Number, default: 0 },
+    newNetSyp: { type: Number, default: 0 },
+    previousCommissionSyp: { type: Number, default: 0 },
+    newCommissionSyp: { type: Number, default: 0 },
+    commissionDeltaSyp: { type: Number, default: 0 },
+  },
+  { _id: true },
+)
+
+/** جلسة ضمن إجراء عام — لكل جلسة مستهلكاتها وحسابها المستقل */
+const generalTreatmentSessionSchema = new mongoose.Schema(
+  {
+    sessionDate: { type: String, default: '' },
+    note: { type: String, default: '', trim: true, maxlength: 500 },
+    autoCreated: { type: Boolean, default: false },
+    consumables: { type: [generalSessionConsumableSchema], default: [] },
+    adjustments: { type: [generalSessionAdjustmentSchema], default: [] },
+    createdAt: { type: Date, default: null },
+    createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    createdByName: { type: String, default: '' },
+    closedAt: { type: Date, default: null },
+    closedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    closedByName: { type: String, default: '' },
+    closedAutomatically: { type: Boolean, default: false },
   },
   { _id: true },
 )
@@ -105,6 +175,12 @@ const dentalChartTreatmentSchema = new mongoose.Schema(
     generalAnesthesiaAmountSyp: { type: Number, default: 0, min: 0 },
     generalAnesthesiaAmountUsd: { type: Number, default: 0, min: 0 },
     generalAnesthesiaUsdSypRate: { type: Number, default: 0, min: 0 },
+    /**
+     * قاعدة عمولة الإجراء العام: '' = القاعدة القديمة (سجلات سابقة لا يُعاد احتسابها)،
+     * 'cash_sessions_v1' = (المحصّل في الجلسة − مستهلكاتها) ÷ 3
+     */
+    commissionRule: { type: String, default: '', trim: true, maxlength: 40 },
+    sessions: { type: [generalTreatmentSessionSchema], default: [] },
   },
   { _id: true },
 )

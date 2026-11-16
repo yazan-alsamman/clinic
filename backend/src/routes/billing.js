@@ -100,7 +100,7 @@ async function fetchPaidBillingItemsWithPayments(businessDate) {
   return { items, payById }
 }
 
-function aggregateReceptionPaidItems(items, payById) {
+export function aggregateReceptionPaidItems(items, payById) {
   const cash = { totalSyp: 0, totalUsd: 0 }
   const bankMap = new Map()
   let refundsRecordedSyp = 0
@@ -310,7 +310,7 @@ async function buildReceptionRollupWithDebtSettlements(items, payById, settlemen
   return mergeDebtSettlementsIntoRollup(rollup, settlementRows)
 }
 
-function composeReceptionInventoryPayload(rollup, movementRowsFiltered, pendingCount, meta) {
+export function composeReceptionInventoryPayload(rollup, movementRowsFiltered, pendingCount, meta) {
   const { businessDate, dayActive, usdSypRate } = meta
   const { cash, bankMap, refundsRecordedSyp, refundsRecordedUsd, byDept, transactions } = rollup
   const banks = [...bankMap.values()].sort((a, b) => String(a.bankName).localeCompare(String(b.bankName), 'ar'))

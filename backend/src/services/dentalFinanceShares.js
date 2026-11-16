@@ -16,6 +16,42 @@ import {
   loadDentalSettlementPaidMaps,
   settlementPaidForDentalTreatment,
 } from './dentalChartBilling.js'
+import {
+  GENERAL_PROCEDURE_DOCTOR_SHARE_DENOMINATOR,
+  generalTreatmentCommissionEntries,
+  isCashSessionRule,
+} from './generalProcedureSessions.js'
+
+/**
+ * نسبة عمولة الإجراءات العامة (قاعدة الجلسات): ثلث بالضبط لكل طبيب بنسبة.
+ * د. الياس يبقى على نسبته الخاصة (افتراضياً 0) — لا تُفرض عليه نسبة الثلث.
+ */
+export function generalCashShareRatio({ isElias, eliasPercent = 0 } = {}) {
+  if (isElias) return Math.max(0, Math.min(100, Number(eliasPercent) || 0)) / 100
+  return 1 / GENERAL_PROCEDURE_DOCTOR_SHARE_DENOMINATOR
+}
+
+/** حصة = (أساس القاعدة القديمة × النسبة) + (صافي الجلسات المحصّل × نسبة الثلث) — كل جزء يُقرّب مرة واحدة */
+export function combinedShareSyp({ accrualBaseSyp = 0, sharePercent = 0, cashBaseSyp = 0, cashRatio = 0 }) {
+  const accrual = Math.round(((Number(accrualBaseSyp) || 0) * (Number(sharePercent) || 0)) / 100)
+  const cash = Math.round((Number(cashBaseSyp) || 0) * (Number(cashRatio) || 0))
+  const v = accrual + cash
+  return Object.is(v, -0) ? 0 : v
+}
+
+/** المخابر المرتبطة بإجراء عام بقاعدة الجلسات */
+function cashRuleLinkedLab(lab, cashRuleIds) {
+  const link = lab?.linkedGeneralTreatmentId ? String(lab.linkedGeneralTreatmentId) : ''
+  return Boolean(link && cashRuleIds.has(link))
+}
+
+function cashRuleIdSet(chart) {
+  const out = new Set()
+  for (const tr of chart?.generalTreatments || []) {
+    if (tr?._id && isCashSessionRule(tr)) out.add(String(tr._id))
+  }
+  return out
+}
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -154,6 +190,11 @@ function emptyDoctorBucket({ isElias, uid, name }) {
     labsSyp: 0,
     shareSyp: 0,
     noShare: isElias,
+    /** إجراءات عامة بقاعدة الجلسات (المحصّل − المستهلكات) ÷ 3 */
+    cashRuleProceduresSyp: 0,
+    cashRuleLabsSyp: 0,
+    cashRuleCollectedSyp: 0,
+    cashRuleConsumablesSyp: 0,
   }
 }
 
@@ -196,7 +237,22 @@ export async function summarizeDentalChartFinance({ from, to }) {
   let omarLabsSyp = 0
   let otherProceduresSyp = 0
   let otherLabsSyp = 0
+  let generalConsumablesTotalSyp = 0
   const byDoctor = new Map()
+  /** مجاميع قاعدة الجلسات لكل مجموعة طبيب مسمّاة (لا تدخل أساس القاعدة القديمة) */
+  const cashNamed = Object.fromEntries(
+    ['elias', 'ayham', 'iyad', 'omar', 'other'].map((k) => [
+      k,
+      { proceduresSyp: 0, labsSyp: 0, collectedSyp: 0, consumablesSyp: 0 },
+    ]),
+  )
+  function namedGroup(isElias, matchName) {
+    if (isElias) return 'elias'
+    if (providerNameMatchesAyham(matchName)) return 'ayham'
+    if (providerNameMatchesIyad(matchName)) return 'iyad'
+    if (providerNameMatchesOmar(matchName)) return 'omar'
+    return 'other'
+  }
 
   function bumpNamedProcedures(amt, isElias, matchName) {
     if (!(amt > 0)) return
@@ -356,12 +412,52 @@ export async function summarizeDentalChartFinance({ from, to }) {
       if (cost > 0) totalRevenueSyp += cost
       addDoctorProcedure({ isElias, uid, name, matchName, cost })
 
+      const cashRule = isCashSessionRule(tr)
+      const group = namedGroup(isElias, matchName)
+      if (cashRule && cost > 0) {
+        ensureDoctorBucket(byDoctor, { isElias, uid, name }).cashRuleProceduresSyp += cost
+        cashNamed[group].proceduresSyp += cost
+      }
+
       const gaAmt = generalAnesthesiaCostSyp(tr)
       if (gaAmt > 0) {
         addDoctorLab({ isElias, uid, name, matchName, amt: gaAmt })
+        if (cashRule) {
+          ensureDoctorBucket(byDoctor, { isElias, uid, name }).cashRuleLabsSyp += gaAmt
+          cashNamed[group].labsSyp += gaAmt
+        }
       }
     }
 
+    /** قاعدة الجلسات: المحصّل والمستهلكات بتاريخها الفعلي (مستقلة عن تاريخ الإجراء) */
+    for (const tr of p.dentalChart?.generalTreatments || []) {
+      if (!isCashSessionRule(tr)) continue
+      let collected = 0
+      let consumables = 0
+      for (const e of generalTreatmentCommissionEntries(tr)) {
+        if (!inRange(e.date, from, to)) continue
+        if (e.kind === 'payment') collected += e.amountSyp
+        else consumables -= e.amountSyp
+      }
+      if (!collected && !consumables) continue
+      const uid = tr.providerUserId ? String(tr.providerUserId) : ''
+      const name = String(tr.doctorName || userById.get(uid) || '').trim()
+      const matchName = name || userById.get(uid) || ''
+      const isElias = isEliasProviderRef({
+        providerUserId: uid || tr.providerUserId,
+        providerKey: tr.providerKey,
+        doctorName: matchName,
+      })
+      const bucket = ensureDoctorBucket(byDoctor, { isElias, uid, name })
+      bucket.cashRuleCollectedSyp += collected
+      bucket.cashRuleConsumablesSyp += consumables
+      const group = namedGroup(isElias, matchName)
+      cashNamed[group].collectedSyp += collected
+      cashNamed[group].consumablesSyp += consumables
+      generalConsumablesTotalSyp += consumables
+    }
+
+    const cashRuleIds = cashRuleIdSet(p.dentalChart)
     for (const lab of p.dentalChart?.generalLabWorks || []) {
       const amt = labEffectiveAmountSyp(lab)
       if (!(amt > 0)) continue
@@ -384,6 +480,14 @@ export async function summarizeDentalChartFinance({ from, to }) {
         matchName,
         amt,
       })
+      if (cashRuleLinkedLab(lab, cashRuleIds)) {
+        ensureDoctorBucket(byDoctor, {
+          isElias: labIsElias,
+          uid: labUid,
+          name: labIsElias ? DENTAL_ELIAS_DISPLAY_NAME : labName || matchName,
+        }).cashRuleLabsSyp += amt
+        cashNamed[namedGroup(labIsElias, matchName)].labsSyp += amt
+      }
     }
 
     /**
@@ -424,6 +528,7 @@ export async function summarizeDentalChartFinance({ from, to }) {
     }
   }
 
+  const eliasPct = dentalSharePercentFor({ isElias: true }, ctx)
   const doctorRows = [...byDoctor.values()]
     .map((r) => {
       const isElias = r.providerKey === DENTAL_ELIAS_PROVIDER_KEY
@@ -431,18 +536,32 @@ export async function summarizeDentalChartFinance({ from, to }) {
         { isElias, userId: r.userId, name: r.name },
         ctx,
       )
-      const noShare = sharePercent <= 0
       const proceduresSyp = roundMoney(r.proceduresSyp)
       const labsSyp = roundMoney(r.labsSyp || 0)
       /** قد يكون سالباً: تكاليف الفترة (مخابر/مستلزمات) أكبر من إجراءاتها تُخصم من حساب الطبيب ولا تضيع */
-      const shareBaseSyp = proceduresSyp - labsSyp
+      const accrualBaseSyp =
+        proceduresSyp - roundMoney(r.cashRuleProceduresSyp) - (labsSyp - roundMoney(r.cashRuleLabsSyp))
+      const cashBaseSyp =
+        roundMoney(r.cashRuleCollectedSyp) - roundMoney(r.cashRuleConsumablesSyp) - roundMoney(r.cashRuleLabsSyp)
+      const cashRatio = generalCashShareRatio({ isElias, eliasPercent: eliasPct })
+      const shareSyp = combinedShareSyp({ accrualBaseSyp, sharePercent, cashBaseSyp, cashRatio })
+      const hasCashRule =
+        roundMoney(r.cashRuleCollectedSyp) !== 0 ||
+        roundMoney(r.cashRuleConsumablesSyp) !== 0 ||
+        roundMoney(r.cashRuleLabsSyp) !== 0
+      const noShare = sharePercent <= 0 && !(hasCashRule && cashRatio > 0)
       return {
         ...r,
         proceduresSyp,
         labsSyp,
-        shareBaseSyp,
+        shareBaseSyp: accrualBaseSyp + cashBaseSyp,
+        accrualShareBaseSyp: accrualBaseSyp,
+        generalCashBaseSyp: cashBaseSyp,
+        generalCashSharePercent: Math.round(cashRatio * 1e6) / 1e4,
+        cashRuleCollectedSyp: roundMoney(r.cashRuleCollectedSyp),
+        cashRuleConsumablesSyp: roundMoney(r.cashRuleConsumablesSyp),
         sharePercent,
-        shareSyp: roundMoney((shareBaseSyp * sharePercent) / 100),
+        shareSyp,
         noShare,
       }
     })
@@ -453,15 +572,50 @@ export async function summarizeDentalChartFinance({ from, to }) {
   const omarSharePercent = namedDentalPercent(providerNameMatchesOmar, ctx)
   const eliasSharePercent = dentalSharePercentFor({ isElias: true }, ctx)
 
-  const ayhamShareBaseSyp = ayhamProceduresSyp - ayhamLabsSyp
-  const iyadShareBaseSyp = iyadProceduresSyp - iyadLabsSyp
-  const omarShareBaseSyp = omarProceduresSyp - omarLabsSyp
-  const eliasShareBaseSyp = eliasProceduresSyp - eliasLabWorksSyp
+  /** أساس القاعدة القديمة يستثني الإجراءات العامة بقاعدة الجلسات (لها أساسها المحصّل) */
+  const accrualBase = (proc, labs, g) =>
+    proc - roundMoney(cashNamed[g].proceduresSyp) - (labs - roundMoney(cashNamed[g].labsSyp))
+  const cashBase = (g) =>
+    roundMoney(cashNamed[g].collectedSyp) -
+    roundMoney(cashNamed[g].consumablesSyp) -
+    roundMoney(cashNamed[g].labsSyp)
+  const thirdRatio = generalCashShareRatio({ isElias: false })
+  const eliasCashRatio = generalCashShareRatio({ isElias: true, eliasPercent: eliasSharePercent })
 
-  const ayhamShareSyp = roundMoney((ayhamShareBaseSyp * ayhamSharePercent) / 100)
-  const iyadShareSyp = roundMoney((iyadShareBaseSyp * iyadSharePercent) / 100)
-  const omarShareSyp = roundMoney((omarShareBaseSyp * omarSharePercent) / 100)
-  const eliasShareSyp = roundMoney((eliasShareBaseSyp * eliasSharePercent) / 100)
+  const ayhamAccrualBaseSyp = accrualBase(ayhamProceduresSyp, ayhamLabsSyp, 'ayham')
+  const iyadAccrualBaseSyp = accrualBase(iyadProceduresSyp, iyadLabsSyp, 'iyad')
+  const omarAccrualBaseSyp = accrualBase(omarProceduresSyp, omarLabsSyp, 'omar')
+  const eliasAccrualBaseSyp = accrualBase(eliasProceduresSyp, eliasLabWorksSyp, 'elias')
+
+  const ayhamShareBaseSyp = ayhamAccrualBaseSyp + cashBase('ayham')
+  const iyadShareBaseSyp = iyadAccrualBaseSyp + cashBase('iyad')
+  const omarShareBaseSyp = omarAccrualBaseSyp + cashBase('omar')
+  const eliasShareBaseSyp = eliasAccrualBaseSyp + cashBase('elias')
+
+  const ayhamShareSyp = combinedShareSyp({
+    accrualBaseSyp: ayhamAccrualBaseSyp,
+    sharePercent: ayhamSharePercent,
+    cashBaseSyp: cashBase('ayham'),
+    cashRatio: thirdRatio,
+  })
+  const iyadShareSyp = combinedShareSyp({
+    accrualBaseSyp: iyadAccrualBaseSyp,
+    sharePercent: iyadSharePercent,
+    cashBaseSyp: cashBase('iyad'),
+    cashRatio: thirdRatio,
+  })
+  const omarShareSyp = combinedShareSyp({
+    accrualBaseSyp: omarAccrualBaseSyp,
+    sharePercent: omarSharePercent,
+    cashBaseSyp: cashBase('omar'),
+    cashRatio: thirdRatio,
+  })
+  const eliasShareSyp = combinedShareSyp({
+    accrualBaseSyp: eliasAccrualBaseSyp,
+    sharePercent: eliasSharePercent,
+    cashBaseSyp: cashBase('elias'),
+    cashRatio: eliasCashRatio,
+  })
   const doctorSharesTotalSyp = roundMoney(doctorRows.reduce((s, r) => s + r.shareSyp, 0))
   const otherShareSyp = roundMoney(
     doctorSharesTotalSyp - ayhamShareSyp - iyadShareSyp - omarShareSyp - eliasShareSyp,
@@ -471,9 +625,14 @@ export async function summarizeDentalChartFinance({ from, to }) {
   labWorksTotalSyp = roundMoney(labWorksTotalSyp)
   eliasProceduresSyp = roundMoney(eliasProceduresSyp)
   eliasLabWorksSyp = roundMoney(eliasLabWorksSyp)
-  const eliasNetToClinicSyp = roundMoney(eliasProceduresSyp - eliasShareSyp - eliasLabWorksSyp)
+  generalConsumablesTotalSyp = roundMoney(generalConsumablesTotalSyp)
+  const eliasNetToClinicSyp = roundMoney(
+    eliasProceduresSyp - eliasShareSyp - eliasLabWorksSyp - roundMoney(cashNamed.elias.consumablesSyp),
+  )
   const clinicRemainderAfterSharesSyp = roundMoney(totalRevenueSyp - doctorSharesTotalSyp)
-  const netProfitBeforeExpensesSyp = roundMoney(clinicRemainderAfterSharesSyp - labWorksTotalSyp)
+  const netProfitBeforeExpensesSyp = roundMoney(
+    clinicRemainderAfterSharesSyp - labWorksTotalSyp - generalConsumablesTotalSyp,
+  )
 
   return {
     sharePercent: dentalDefault,
@@ -483,6 +642,9 @@ export async function summarizeDentalChartFinance({ from, to }) {
     eliasSharePercent,
     totalRevenueSyp,
     labWorksTotalSyp,
+    /** مستهلكات جلسات الإجراءات العامة ضمن النطاق (تكلفة على القسم، تُطرح قبل عمولة الطبيب) */
+    generalConsumablesTotalSyp,
+    generalCashSharePercent: Math.round(thirdRatio * 1e6) / 1e4,
     eliasProceduresSyp,
     eliasLabWorksSyp,
     eliasShareBaseSyp: roundMoney(eliasShareBaseSyp),
@@ -622,6 +784,10 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         labsSyp: 0,
         orthoSupplySyp: 0,
         shareSyp: 0,
+        cashRuleProceduresSyp: 0,
+        cashRuleLabsSyp: 0,
+        cashRuleCollectedSyp: 0,
+        cashRuleConsumablesSyp: 0,
       })
     }
     return clinicsMap.get(meta.key)
@@ -830,15 +996,21 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
 
       const clinic = ensureClinic(meta)
+      const cashRule = isCashSessionRule(tr)
       if (clinic) {
         clinic.treatmentCount += 1
         clinic.proceduresSyp += cost
         clinic.paidSyp += paidFinal
         clinic.remainingSyp += remaining
+        if (cashRule) {
+          clinic.cashRuleProceduresSyp += cost
+          if (gaAmt > 0) clinic.cashRuleLabsSyp += gaAmt
+        }
       }
 
       rows.push({
         kind: 'treatment',
+        commissionRule: cashRule ? 'cash_sessions_v1' : '',
         id: tr._id ? String(tr._id) : `g-${patientId}-${bd}-${rows.length}`,
         patientId,
         patientName,
@@ -897,6 +1069,67 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       }
     }
 
+    /** قاعدة الجلسات: تحصيل كل جلسة ومستهلكاتها (وتصحيحاتها) بتاريخها ضمن النطاق */
+    for (const tr of p.dentalChart?.generalTreatments || []) {
+      if (!isCashSessionRule(tr)) continue
+      const meta = resolveDoctorMeta(tr, userById)
+      if (filterKey && meta.key !== filterKey && meta.userId !== filterKey) continue
+      const sessionsById = new Map((tr.sessions || []).map((s) => [String(s._id), s]))
+      const desc = generalProcedureLabel(tr.procedureDescription)
+      for (const e of generalTreatmentCommissionEntries(tr)) {
+        if (!inRange(e.date, from, to)) continue
+        const clinic = ensureClinic(meta)
+        const session = e.sessionId ? sessionsById.get(String(e.sessionId)) : null
+        const sessionDate = session ? String(session.sessionDate || '').slice(0, 10) : ''
+        const base = {
+          patientId,
+          patientName,
+          fileNumber,
+          fdi: 0,
+          isGeneral: true,
+          businessDate: e.date,
+          undated: false,
+          clinicKey: meta.key,
+          clinicLabel: meta.clinicLabel,
+          doctorName: meta.name,
+          providerUserId: meta.userId,
+          noShare: meta.noShare,
+          treatmentId: tr._id ? String(tr._id) : '',
+          sessionId: e.sessionId || '',
+          sessionDate,
+        }
+        if (e.kind === 'payment') {
+          if (clinic) clinic.cashRuleCollectedSyp += e.amountSyp
+          rows.push({
+            ...base,
+            kind: 'collection',
+            id: `col-${String(tr._id)}-${rows.length}`,
+            procedureDescription: `${desc} — تحصيل جلسة${sessionDate ? ` ${sessionDate}` : ''}`,
+            amountSyp: e.amountSyp,
+          })
+        } else {
+          const cost = -e.amountSyp
+          if (clinic) clinic.cashRuleConsumablesSyp += cost
+          const label =
+            e.kind === 'consumable_reversal'
+              ? 'عكس مستهلك (تصحيح جلسة مغلقة)'
+              : e.kind === 'consumable_correction'
+                ? 'مستهلك مضاف بعد الإغلاق (تصحيح)'
+                : 'مستهلك جلسة'
+          rows.push({
+            ...base,
+            kind: 'consumable',
+            isCorrection: e.kind !== 'consumable',
+            id: `con-${e.consumableId}-${e.kind}`,
+            labName: e.name || 'مستهلك',
+            procedureDescription: `${label} — ${desc}${sessionDate ? ` (جلسة ${sessionDate})` : ''}`,
+            amountSyp: cost,
+          })
+        }
+      }
+    }
+
+    const cashRuleIds = cashRuleIdSet(p.dentalChart)
     for (const lab of p.dentalChart?.generalLabWorks || []) {
       const amt = labEffectiveAmountSyp(lab)
       if (!(amt > 0) && !String(lab.labName || '').trim() && !String(lab.procedureDescription || '').trim()) {
@@ -914,6 +1147,7 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       if (clinic) {
         clinic.labCount += 1
         clinic.labsSyp += amt
+        if (cashRuleLinkedLab(lab, cashRuleIds)) clinic.cashRuleLabsSyp += amt
       }
 
       rows.push({
@@ -1113,15 +1347,30 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         { isElias, userId: c.userId, name: c.name },
         ctx,
       )
-      const noShare = sharePercent <= 0
       const proceduresSyp = roundMoney(c.proceduresSyp)
       const labsSyp = roundMoney(c.labsSyp)
       const orthoSupplySyp = roundMoney(c.orthoSupplySyp || 0)
       /** المخابر + التخدير العام + مستلزمات التقويم — كلها تُطرح قبل النسبة */
       const labsForShareSyp = labsSyp
+      const cashRuleProceduresSyp = roundMoney(c.cashRuleProceduresSyp)
+      const cashRuleLabsSyp = roundMoney(c.cashRuleLabsSyp)
+      const cashRuleCollectedSyp = roundMoney(c.cashRuleCollectedSyp)
+      const cashRuleConsumablesSyp = roundMoney(c.cashRuleConsumablesSyp)
       /** قد يكون سالباً حتى لا تضيع تكاليف الفترة عند الفلترة الشهرية */
-      const shareBaseSyp = proceduresSyp - labsForShareSyp
-      const shareSyp = roundMoney((shareBaseSyp * sharePercent) / 100)
+      const accrualShareBaseSyp =
+        proceduresSyp - cashRuleProceduresSyp - (labsForShareSyp - cashRuleLabsSyp)
+      /** الإجراءات العامة (قاعدة الجلسات): المحصّل − المستهلكات − مخابرها/تخديرها */
+      const generalCashBaseSyp = cashRuleCollectedSyp - cashRuleConsumablesSyp - cashRuleLabsSyp
+      const eliasPct = dentalSharePercentFor({ isElias: true }, ctx)
+      const cashRatio = generalCashShareRatio({ isElias, eliasPercent: eliasPct })
+      const shareSyp = combinedShareSyp({
+        accrualBaseSyp: accrualShareBaseSyp,
+        sharePercent,
+        cashBaseSyp: generalCashBaseSyp,
+        cashRatio,
+      })
+      const hasCashRule = cashRuleCollectedSyp !== 0 || cashRuleConsumablesSyp !== 0 || cashRuleLabsSyp !== 0
+      const noShare = sharePercent <= 0 && !(hasCashRule && cashRatio > 0)
       return {
         ...c,
         proceduresSyp,
@@ -1129,12 +1378,19 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
         remainingSyp: roundMoney(c.remainingSyp),
         labsSyp,
         labsForShareSyp: roundMoney(labsForShareSyp),
-        shareBaseSyp: roundMoney(shareBaseSyp),
+        shareBaseSyp: roundMoney(accrualShareBaseSyp + generalCashBaseSyp),
+        accrualShareBaseSyp: roundMoney(accrualShareBaseSyp),
+        generalCashBaseSyp: roundMoney(generalCashBaseSyp),
+        generalCashSharePercent: Math.round(cashRatio * 1e6) / 1e4,
+        cashRuleProceduresSyp,
+        cashRuleLabsSyp,
+        cashRuleCollectedSyp,
+        cashRuleConsumablesSyp,
         orthoSupplySyp,
         sharePercent,
         shareSyp,
         noShare,
-        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp),
+        netToClinicSyp: roundMoney(proceduresSyp - shareSyp - labsSyp - cashRuleConsumablesSyp),
       }
     })
     .filter((c) => !filterKey || c.key === filterKey || c.userId === filterKey)
@@ -1161,6 +1417,10 @@ export async function listDentalClinicSessions({ from, to, clinicKey = '' }) {
       paidSyp: roundMoney(clinics.reduce((s, c) => s + c.paidSyp, 0)),
       remainingSyp: roundMoney(clinics.reduce((s, c) => s + c.remainingSyp, 0)),
       labsSyp: roundMoney(clinics.reduce((s, c) => s + c.labsSyp, 0)),
+      collectionCount: rows.filter((r) => r.kind === 'collection').length,
+      consumableCount: rows.filter((r) => r.kind === 'consumable').length,
+      generalCollectedSyp: roundMoney(clinics.reduce((s, c) => s + c.cashRuleCollectedSyp, 0)),
+      generalConsumablesSyp: roundMoney(clinics.reduce((s, c) => s + c.cashRuleConsumablesSyp, 0)),
     },
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
 import { useClinic } from '../../context/ClinicContext'
@@ -22,6 +22,7 @@ import {
   type DentalToothTreatment,
 } from './dentalChartTypes'
 import type { DentalLabOption, DentalProviderOption } from './ToothTreatmentModal'
+import { GeneralProcedureSessionsPanel } from './GeneralProcedureSessionsPanel'
 
 type Props = {
   patientId: string
@@ -114,6 +115,36 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
     void load()
   }, [load])
 
+  /** تحديث الجدول من ردّ الخادم بعد عمليات الجلسات/المستهلكات */
+  const applyChart = useCallback(
+    (chart: DentalChartDto) => {
+      const list = (chart?.generalTreatments || []).map((t) => normalizeTreatment(t, rate))
+      setRows(list.filter(treatmentHasData))
+      const labsList = (chart?.generalLabWorks || []).map((x) => normalizeLabWork(x, rate))
+      setLabRows(labsList.filter(labWorkHasData))
+    },
+    [rate],
+  )
+
+  /** التقرير النهائي: تجميع كل الجلسات للعرض فقط (لا خصم إضافي) */
+  const report = useMemo(() => {
+    const acc = { sessions: 0, collected: 0, consumables: 0, net: 0, commission: 0, price: 0, remaining: 0 }
+    let any = false
+    for (const t of rows) {
+      const v = t.sessionsView
+      if (!v) continue
+      any = true
+      acc.sessions += v.sessions.length
+      acc.collected += v.totals.collectedSyp
+      acc.consumables += v.totals.consumablesSyp
+      acc.net += v.totals.netSyp
+      acc.commission += v.totals.sessionsCommissionSyp + v.totals.unassignedCommissionSyp
+      acc.price += v.totals.priceSyp
+      acc.remaining += v.totals.remainingSyp
+    }
+    return any ? acc : null
+  }, [rows])
+
   const labByTreatmentId = useMemo(() => {
     const map = new Map<string, DentalLabWork>()
     const used = new Set<string>()
@@ -180,6 +211,8 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
           }),
         )
         .filter(treatmentHasData)
+        /** الجلسات ومستهلكاتها يديرها الخادم — لا تُرسل مع حفظ المخطط */
+        .map((t) => ({ ...t, sessionsView: undefined }))
       const labsPayload = nextLabs
         .map((x) =>
           normalizeLabWork(
@@ -409,7 +442,8 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                     const labEffective = linkedLab ? labEffectiveAmountSyp(linkedLab, rate) : 0
                     const gaEffective = generalAnesthesiaEffectiveSyp(t, rate)
                     return (
-                      <tr key={t.id || `g-${idx}`}>
+                      <Fragment key={t.id || `g-${idx}`}>
+                      <tr>
                         <td>{t.businessDate || '—'}</td>
                         <td>{t.procedureDescription.trim() || '—'}</td>
                         <td>{t.doctorName || '—'}</td>
@@ -485,6 +519,21 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                           </td>
                         ) : null}
                       </tr>
+                      {t.sessionsView ? (
+                        <tr>
+                          <td colSpan={canEdit ? 8 : 7} style={{ paddingTop: 0 }}>
+                            <GeneralProcedureSessionsPanel
+                              patientId={patientId}
+                              treatment={t}
+                              canEdit={canEdit}
+                              isSuperAdmin={isSuperAdmin}
+                              defaultDate={todayIsoDate()}
+                              onChart={applyChart}
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     )
                   })}
                   {orphanLabs.map((lab, idx) => {
@@ -524,6 +573,30 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
               </table>
             </div>
           )}
+
+          {report ? (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.9rem',
+                padding: '0.65rem 0.85rem',
+                borderRadius: 12,
+                border: '1px solid var(--border)',
+                marginBottom: '1rem',
+                fontSize: '0.86rem',
+              }}
+            >
+              <strong>التقرير النهائي للإجراءات العامة</strong>
+              <span>الجلسات: {report.sessions}</span>
+              <span>إجمالي الأسعار: {report.price.toLocaleString('ar-SY')} ل.س</span>
+              <span>المدفوع: {report.collected.toLocaleString('ar-SY')} ل.س</span>
+              <span>المتبقي: {report.remaining.toLocaleString('ar-SY')} ل.س</span>
+              <span>المستهلكات: {report.consumables.toLocaleString('ar-SY')} ل.س</span>
+              <span>الصافي: {report.net.toLocaleString('ar-SY')} ل.س</span>
+              <span>عمولات الطبيب (⅓): {report.commission.toLocaleString('ar-SY')} ل.س</span>
+            </div>
+          ) : null}
 
           {canEdit ? (
             <div

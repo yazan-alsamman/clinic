@@ -72,6 +72,8 @@ type DashboardPayload = {
     totalRevenueSyp: number
     expensesTableSyp?: number
     labWorksTotalSyp?: number
+    /** مستهلكات جلسات الإجراءات العامة (تُطرح قبل عمولة الثلث) */
+    generalConsumablesTotalSyp?: number
     totalExpensesSyp: number
     ayhamShareSyp?: number
     iyadShareSyp?: number
@@ -475,7 +477,8 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>إجمالي الربح</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.laser.totalProfitSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إيراد الليزر − مصاريف الليزر.
+              إيراد الليزر − مصاريف الليزر − حصص الأخصائيين ({fmtSyp(data?.laser.specialistSharesTotalSyp || 0)}). لا
+              تسجّل دفع الحصص كمصروف ليزر حتى لا تُطرح مرتين.
             </p>
           </div>
           <div className="card" style={{ borderColor: '#a78bfa' }}>
@@ -652,6 +655,17 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>مجموع مبالغ المخابر</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.labWorksTotalSyp || 0)}</p>
           </div>
+          {(data?.dental.generalConsumablesTotalSyp || 0) !== 0 ? (
+            <div className="card">
+              <h3 style={{ margin: 0, fontSize: '0.92rem' }}>مستهلكات جلسات الإجراءات العامة</h3>
+              <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>
+                {fmtSyp(data?.dental.generalConsumablesTotalSyp || 0)}
+              </p>
+              <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
+                عمولة الطبيب في الإجراءات العامة = (المحصّل في الجلسة − مستهلكاتها) ÷ 3، ومضمّنة في حصة كل طبيب أعلاه.
+              </p>
+            </div>
+          ) : null}
           <div className="card">
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>جدول مصاريف الأسنان</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.expensesTableSyp || 0)}</p>
@@ -661,7 +675,11 @@ export function GeneralFinanceDashboardPage() {
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.dental.totalProfitSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
               إيرادات القسم − حصص الأطباء ذوي النسبة ({fmtSyp(data?.dental.doctorSharesTotalSyp || 0)}) − المخابر (
-              {fmtSyp(data?.dental.labWorksTotalSyp || 0)}) − جدول المصاريف ({fmtSyp(data?.dental.expensesTableSyp || 0)}
+              {fmtSyp(data?.dental.labWorksTotalSyp || 0)})
+              {(data?.dental.generalConsumablesTotalSyp || 0) !== 0
+                ? ` − مستهلكات الجلسات (${fmtSyp(data?.dental.generalConsumablesTotalSyp || 0)})`
+                : ''}{' '}
+              − جدول المصاريف ({fmtSyp(data?.dental.expensesTableSyp || 0)}
               ). صافي د. الياس للقسم {fmtSyp(data?.dental.eliasNetToClinicSyp || 0)}.
             </p>
           </div>
