@@ -8,7 +8,8 @@
     "dev": "node --watch src/index.js",
     "seed": "node scripts/seed.js",
     "seed:fresh": "npm install --no-audit --no-fund && node scripts/seed.js --fresh",
-    "fix:clinical-laser-field": "node scripts/fixClinicalSessionLaserField.js"
+    "fix:clinical-laser-field": "node scripts/fixClinicalSessionLaserField.js",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.js\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

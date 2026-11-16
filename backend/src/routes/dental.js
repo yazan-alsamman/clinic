@@ -34,6 +34,16 @@ import { DentalLab } from '../models/DentalLab.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { isValidYmd, todayBusinessDate } from '../utils/date.js'
+import {
+  GENERAL_PROCEDURE_COMMISSION_RULE,
+  addConsumable,
+  buildGeneralProceduresReport,
+  buildGeneralTreatmentSessionsView,
+  closeSession,
+  isCashSessionRule,
+  openSession,
+  removeConsumable,
+} from '../services/generalProcedureSessions.js'
 import { round6 } from '../utils/money.js'
 
 export const dentalRouter = Router()
@@ -294,7 +304,10 @@ function treatmentToDto(t, billingMap) {
       usdSypRateUsed: Math.max(0, Number(p.usdSypRateUsed) || 0),
       paidAt: String(p.paidAt || ''),
       note: String(p.note || ''),
+      sessionId: rawPays[idx]?.sessionId ? String(rawPays[idx].sessionId) : null,
     })),
+    commissionRule: isCashSessionRule(t) ? GENERAL_PROCEDURE_COMMISSION_RULE : '',
+    sessionsView: isCashSessionRule(t) ? buildGeneralTreatmentSessionsView(t) : null,
     generalAnesthesia: Boolean(n.generalAnesthesia),
     generalAnesthesiaAmountSyp: Math.max(0, Math.round(Number(n.generalAnesthesiaAmountSyp) || 0)),
     generalAnesthesiaAmountUsd: Math.max(0, round6(Number(n.generalAnesthesiaAmountUsd) || 0)),
@@ -755,7 +768,7 @@ function mergePreviousBillingLinks(prevTeeth, nextTeeth) {
   return nextTeeth
 }
 
-function mergePreviousGeneralBillingLinks(prevList, nextList) {
+export function mergePreviousGeneralBillingLinks(prevList, nextList) {
   const prevById = new Map()
   for (const tr of prevList || []) {
     if (tr._id) prevById.set(String(tr._id), tr)
@@ -763,6 +776,17 @@ function mergePreviousGeneralBillingLinks(prevList, nextList) {
   for (const tr of nextList || []) {
     const id = tr._id ? String(tr._id) : ''
     const prev = id ? prevById.get(id) : null
+    /**
+     * الجلسات ومستهلكاتها وقاعدة العمولة يديرها الخادم فقط (لا تُقبل من حفظ المخطط الكامل).
+     * إجراء عام جديد → قاعدة الجلسات (المحصّل − المستهلكات) ÷ 3؛ السجلات السابقة تبقى على قاعدتها.
+     */
+    if (prev) {
+      tr.commissionRule = String(prev.commissionRule || '')
+      tr.sessions = Array.isArray(prev.sessions) ? prev.sessions : []
+    } else {
+      tr.commissionRule = GENERAL_PROCEDURE_COMMISSION_RULE
+      tr.sessions = []
+    }
     if (prev?.billingItemId) {
       tr.billingItemId = prev.billingItemId
       tr.clinicalSessionId = prev.clinicalSessionId || tr.clinicalSessionId
@@ -1546,6 +1570,198 @@ dentalRouter.put('/chart/:patientId', requireActiveDay, async (req, res) => {
     res.status(500).json({ error: e?.message ? String(e.message).slice(0, 200) : 'خطأ في الخادم' })
   }
 })
+
+/* ───────── جلسات الإجراءات العامة ومستهلكاتها ───────── */
+
+async function loadGeneralTreatmentForWrite(req, res) {
+  if (!DENTAL_CHART_WRITE.includes(req.user.role)) {
+    res.status(403).json({ error: 'لا صلاحية لتعديل مخطط الأسنان' })
+    return null
+  }
+  const patient = await Patient.findById(req.params.patientId)
+  if (!patient) {
+    res.status(404).json({ error: 'المريض غير موجود' })
+    return null
+  }
+  const tid = String(req.params.treatmentId || '')
+  const tr = (patient.dentalChart?.generalTreatments || []).find((x) => String(x._id) === tid)
+  if (!tr) {
+    res.status(404).json({ error: 'الإجراء العام غير موجود' })
+    return null
+  }
+  if (!isCashSessionRule(tr)) {
+    res.status(400).json({
+      error: 'هذا الإجراء مسجّل قبل اعتماد قاعدة الجلسات — لا يُعاد احتسابه ولا تُضاف له جلسات',
+    })
+    return null
+  }
+  return { patient, tr }
+}
+
+function sessionAuditSnapshot(tr, sessionId) {
+  const view = buildGeneralTreatmentSessionsView(tr)
+  const s = view.sessions.find((x) => x.id === String(sessionId))
+  return s
+    ? {
+        sessionId: s.id,
+        sessionDate: s.sessionDate,
+        closed: s.closed,
+        collectedSyp: s.collectedSyp,
+        consumablesSyp: s.consumablesSyp,
+        netSyp: s.netSyp,
+        commissionSyp: s.commissionSyp,
+      }
+    : null
+}
+
+async function respondGeneralSessionWrite(req, res, run) {
+  try {
+    const loaded = await loadGeneralTreatmentForWrite(req, res)
+    if (!loaded) return
+    const { patient, tr } = loaded
+    const result = run({ patient, tr })
+    patient.markModified('dentalChart')
+    await patient.save()
+    await writeAudit({
+      user: req.user,
+      action: result.auditAction,
+      entityType: 'DentalGeneralTreatment',
+      entityId: String(tr._id),
+      details: { patientId: String(patient._id), ...result.auditDetails },
+    })
+    res.json({
+      ok: true,
+      treatmentId: String(tr._id),
+      sessionsView: buildGeneralTreatmentSessionsView(tr),
+      chart: await chartToDtoEnriched(patient.dentalChart),
+    })
+  } catch (e) {
+    const status = Number(e?.status) || 500
+    if (status >= 500) console.error(e)
+    res.status(status).json({ error: status < 500 && e?.message ? e.message : 'خطأ في الخادم' })
+  }
+}
+
+/** سجل الإجراءات العامة للمريض وتقريره النهائي (جلسات، تحصيل، مستهلكات، عمولات) */
+dentalRouter.get('/chart/:patientId/general-report', async (req, res) => {
+  try {
+    if (!DENTAL_READ.includes(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const patient = await Patient.findById(req.params.patientId).select('dentalChart name fileNumber').lean()
+    if (!patient) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    res.json({
+      patientId: String(patient._id),
+      patientName: patient.name || '',
+      fileNumber: patient.fileNumber || '',
+      ...buildGeneralProceduresReport(patient.dentalChart),
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** فتح جلسة جديدة لإجراء عام (تُغلق الجلسة المفتوحة السابقة تلقائياً) */
+dentalRouter.post(
+  '/chart/:patientId/general/:treatmentId/sessions',
+  requireActiveDay,
+  async (req, res) => {
+    await respondGeneralSessionWrite(req, res, ({ tr }) => {
+      const sessionDate = normalizeYmd(req.body?.sessionDate, req.businessDate || todayBusinessDate())
+      const s = openSession(tr, { sessionDate, actor: req.user, note: req.body?.note })
+      return {
+        auditAction: 'فتح جلسة إجراء عام',
+        auditDetails: { sessionId: String(s._id), sessionDate },
+      }
+    })
+  },
+)
+
+/** إغلاق جلسة — بعدها لا تُعدّل مستهلكاتها إلا بتصحيح من مدير النظام */
+dentalRouter.post(
+  '/chart/:patientId/general/:treatmentId/sessions/:sessionId/close',
+  requireActiveDay,
+  async (req, res) => {
+    await respondGeneralSessionWrite(req, res, ({ tr }) => {
+      closeSession(tr, req.params.sessionId, { actor: req.user })
+      return {
+        auditAction: 'إغلاق جلسة إجراء عام',
+        auditDetails: { session: sessionAuditSnapshot(tr, req.params.sessionId) },
+      }
+    })
+  },
+)
+
+/** إضافة مستهلك إلى جلسة محددة (أو تصحيح جلسة مغلقة — مدير النظام مع سبب) */
+dentalRouter.post(
+  '/chart/:patientId/general/:treatmentId/sessions/:sessionId/consumables',
+  requireActiveDay,
+  async (req, res) => {
+    await respondGeneralSessionWrite(req, res, ({ tr }) => {
+      const before = sessionAuditSnapshot(tr, req.params.sessionId)
+      const row = addConsumable(tr, req.params.sessionId, req.body || {}, {
+        actor: req.user,
+        businessDate: req.businessDate || todayBusinessDate(),
+        canCorrectClosed: req.user.role === 'super_admin',
+        reason: req.body?.reason,
+        fallbackRate: Math.max(0, Number(req.businessDay?.usdSypRate) || 0),
+      })
+      const after = sessionAuditSnapshot(tr, req.params.sessionId)
+      return {
+        auditAction: row.addedAfterClose
+          ? 'تصحيح مستهلكات جلسة مغلقة — إضافة'
+          : 'إضافة مستهلك لجلسة إجراء عام',
+        auditDetails: {
+          consumable: {
+            id: String(row._id),
+            name: row.name,
+            amountSyp: row.amountSyp,
+            amountUsd: row.amountUsd,
+            costUsdSypRate: row.costUsdSypRate,
+            effectiveDate: row.effectiveDate,
+          },
+          reason: row.correctionReason || '',
+          before,
+          after,
+        },
+      }
+    })
+  },
+)
+
+/** إزالة مستهلك (حذف منطقي يبقى في السجل) */
+dentalRouter.post(
+  '/chart/:patientId/general/:treatmentId/sessions/:sessionId/consumables/:consumableId/remove',
+  requireActiveDay,
+  async (req, res) => {
+    await respondGeneralSessionWrite(req, res, ({ tr }) => {
+      const before = sessionAuditSnapshot(tr, req.params.sessionId)
+      const row = removeConsumable(tr, req.params.sessionId, req.params.consumableId, {
+        actor: req.user,
+        businessDate: req.businessDate || todayBusinessDate(),
+        canCorrectClosed: req.user.role === 'super_admin',
+        reason: req.body?.reason,
+      })
+      const after = sessionAuditSnapshot(tr, req.params.sessionId)
+      return {
+        auditAction: row.removedAfterClose
+          ? 'تصحيح مستهلكات جلسة مغلقة — حذف'
+          : 'حذف مستهلك من جلسة إجراء عام',
+        auditDetails: {
+          consumable: { id: String(row._id), name: row.name, amountSyp: row.amountSyp, amountUsd: row.amountUsd },
+          reason: row.removedReason || '',
+          before,
+          after,
+        },
+      }
+    })
+  },
+)
 
 dentalRouter.get('/plans/:patientId', async (req, res) => {
   try {

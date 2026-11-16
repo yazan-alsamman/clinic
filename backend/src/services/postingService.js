@@ -6,6 +6,11 @@ import { BillingPayment } from '../models/BillingPayment.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { User } from '../models/User.js'
+import { Patient } from '../models/Patient.js'
+import {
+  GENERAL_PROCEDURE_DOCTOR_SHARE_DENOMINATOR,
+  isCashSessionRule,
+} from './generalProcedureSessions.js'
 import { runCalculationProfile } from './calculationEngine.js'
 import { buildParamBagForCalculation, resolveNumber, resolveString } from './parameterService.js'
 import { round2 } from '../utils/money.js'
@@ -273,7 +278,19 @@ export async function postBillingPayment(paymentId, postedBy) {
   const providerId = bi.providerUserId
   const material = round2(Number(cs.materialCostSypTotal) || 0)
 
-  const sharePct = await resolveDoctorSharePercent(providerId, department)
+  let sharePct = await resolveDoctorSharePercent(providerId, department)
+  /** إجراء عام أسنان بقاعدة الجلسات: نسبة الطبيب ثلث بالضبط (لا نسبة الحساب) */
+  let generalCashRule = false
+  if (department === 'dental' && cs.dentalTreatmentId && !(Number(cs.dentalToothFdi) >= 11)) {
+    const pat = await Patient.findById(bi.patientId).select('dentalChart.generalTreatments').lean()
+    const tr = (pat?.dentalChart?.generalTreatments || []).find(
+      (x) => String(x._id) === String(cs.dentalTreatmentId),
+    )
+    if (tr && isCashSessionRule(tr)) {
+      generalCashRule = true
+      sharePct = 100 / GENERAL_PROCEDURE_DOCTOR_SHARE_DENOMINATOR
+    }
+  }
 
   let paramKey = 'calc.profile.laser'
   let fallback = 'CLINIC_NET_SHARE'
@@ -311,6 +328,12 @@ export async function postBillingPayment(paymentId, postedBy) {
     clinicalSessionId: String(cs._id),
     creditAppliedSyp: creditSyp,
     cashAppliedSyp: cashSyp,
+    ...(generalCashRule
+      ? {
+          generalProcedureCommissionRule: 'cash_sessions_v1',
+          note: 'حصة مرجعية بنسبة الثلث على المحصّل؛ مستهلكات الجلسة تُطرح في تقارير عيادات الأسنان',
+        }
+      : {}),
   }
 
   const revenueGl =

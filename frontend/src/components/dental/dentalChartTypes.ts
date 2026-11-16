@@ -39,6 +39,83 @@ export type DentalPayment = {
   usdSypRateUsed: number
   paidAt: string
   note: string
+  /** الإجراءات العامة (قاعدة الجلسات): الجلسة التي حُصّلت فيها الدفعة */
+  sessionId?: string | null
+}
+
+/** مستهلك ضمن جلسة إجراء عام */
+export type GeneralSessionConsumable = {
+  id: string
+  name: string
+  quantity: number
+  amountSyp: number
+  amountUsd: number
+  costUsdSypRate: number
+  costSyp: number
+  effectiveDate: string
+  addedAfterClose: boolean
+  addedAt: string | null
+  addedByName: string
+  correctionReason: string
+  removed: boolean
+  removedAt: string | null
+  removedByName: string
+  removedReason: string
+  removedAfterClose: boolean
+}
+
+export type GeneralSessionAdjustment = {
+  id: string
+  action: 'consumable_added' | 'consumable_removed' | string
+  consumableName: string
+  amountSyp: number
+  businessDate: string
+  reason: string
+  at: string | null
+  byName: string
+  previousConsumablesSyp: number
+  newConsumablesSyp: number
+  previousNetSyp: number
+  newNetSyp: number
+  previousCommissionSyp: number
+  newCommissionSyp: number
+  commissionDeltaSyp: number
+}
+
+export type GeneralTreatmentSession = {
+  id: string
+  sessionDate: string
+  note: string
+  autoCreated: boolean
+  closed: boolean
+  closedAt: string | null
+  closedByName: string
+  closedAutomatically: boolean
+  createdByName: string
+  payments: { id: string; amountSyp: number; amountUsd: number; currency: string; paidAt: string; note: string }[]
+  consumables: GeneralSessionConsumable[]
+  adjustments: GeneralSessionAdjustment[]
+  collectedSyp: number
+  consumablesSyp: number
+  netSyp: number
+  commissionSyp: number
+}
+
+/** حساب الإجراء العام جلسةً جلسة (من الخادم) */
+export type GeneralTreatmentSessionsView = {
+  rule: string
+  sessions: GeneralTreatmentSession[]
+  unassignedPayments: { id: string; amountSyp: number; paidAt: string; note: string }[]
+  totals: {
+    priceSyp: number
+    collectedSyp: number
+    remainingSyp: number
+    consumablesSyp: number
+    netSyp: number
+    sessionsCommissionSyp: number
+    unassignedCommissionSyp: number
+    commissionSyp: number
+  }
 }
 
 export type DentalToothTreatment = {
@@ -60,6 +137,10 @@ export type DentalToothTreatment = {
   generalAnesthesiaAmountSyp?: number
   generalAnesthesiaAmountUsd?: number
   generalAnesthesiaUsdSypRate?: number
+  /** '' = قاعدة قديمة، 'cash_sessions_v1' = (المحصّل في الجلسة − مستهلكاتها) ÷ 3 */
+  commissionRule?: string
+  /** للعرض فقط — يديره الخادم */
+  sessionsView?: GeneralTreatmentSessionsView | null
 }
 
 export type DentalLabWork = {
@@ -338,6 +419,7 @@ export function normalizeTreatment(
       usdSypRateUsed: currency === 'usd' ? rateUsed : 0,
       paidAt: String(p.paidAt || ''),
       note: String(p.note || ''),
+      sessionId: p.sessionId ? String(p.sessionId) : null,
     })
     paid += amount
   }
@@ -384,6 +466,8 @@ export function normalizeTreatment(
     generalAnesthesiaAmountSyp,
     generalAnesthesiaAmountUsd,
     generalAnesthesiaUsdSypRate,
+    commissionRule: raw?.commissionRule ? String(raw.commissionRule) : '',
+    sessionsView: raw?.sessionsView ?? null,
   }
 }
 

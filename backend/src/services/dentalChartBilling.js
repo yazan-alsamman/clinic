@@ -9,6 +9,7 @@ import {
 } from './dentalDoctorConstants.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
+import { isCashSessionRule, sessionForIncomingPayment } from './generalProcedureSessions.js'
 
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
@@ -565,6 +566,12 @@ export async function applyDentalBillingPaymentToChart(bi, payment) {
   }
   if (!tr) return false
 
+  /** إجراء عام بقاعدة الجلسات: الدفعة تُنسب للجلسة التي حُصّلت فيها (تُنشأ جلسة لليوم إن لم توجد) */
+  if (!tooth && isCashSessionRule(tr)) {
+    const session = sessionForIncomingPayment(tr, paidAt)
+    if (session?._id) paymentRow.sessionId = session._id
+  }
+
   tr.payments = [paymentRow]
   if (!tr.billingItemId) tr.billingItemId = bi._id
   if (!tr.clinicalSessionId && cs?._id) tr.clinicalSessionId = cs._id
@@ -690,13 +697,17 @@ function appendDentalChartDebtPayment(tr, amountSyp, meta) {
   if (!(take > 0)) return 0
   if (!Array.isArray(tr.payments)) tr.payments = []
   const currency = String(meta?.currency || 'syp').toLowerCase() === 'usd' ? 'usd' : 'syp'
+  const paidAt = String(meta?.paidAt || todayBusinessDate()).slice(0, 10)
+  /** قسط على إجراء عام بقاعدة الجلسات: يُنسب لجلسة يوم التحصيل فقط */
+  const session = isCashSessionRule(tr) ? sessionForIncomingPayment(tr, paidAt) : null
   tr.payments.push({
     amountSyp: take,
     amountUsd: currency === 'usd' ? Math.max(0, Number(meta?.amountUsd) || 0) : 0,
     currency,
     usdSypRateUsed: currency === 'usd' ? roundMoney(Number(meta?.usdSypRateUsed) || 0) : 0,
-    paidAt: String(meta?.paidAt || todayBusinessDate()).slice(0, 10),
+    paidAt,
     note: String(meta?.note || 'تسديد ذمة').slice(0, 300),
+    ...(session?._id ? { sessionId: session._id } : {}),
   })
   return take
 }

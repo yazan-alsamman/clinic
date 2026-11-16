@@ -22,10 +22,16 @@ type ClinicSummary = {
   shareSyp: number
   sharePercent?: number
   netToClinicSyp: number
+  /** الإجراءات العامة (قاعدة الجلسات): المحصّل − المستهلكات، عمولة ⅓ */
+  generalCashBaseSyp?: number
+  cashRuleCollectedSyp?: number
+  cashRuleConsumablesSyp?: number
 }
 
 type SessionRow = {
-  kind: 'treatment' | 'lab'
+  kind: 'treatment' | 'lab' | 'collection' | 'consumable'
+  isCorrection?: boolean
+  sessionDate?: string
   id: string
   patientId: string
   patientName: string
@@ -266,6 +272,12 @@ export function AdminDentalClinicsPage() {
                     ? `بدون نسبة — صافي للقسم ${fmtSyp(c.netToClinicSyp)}`
                     : `(إجراءات − مخابر/مواد) × ${c.sharePercent ?? data?.sharePercent ?? 40}٪ = ${fmtSyp(c.shareSyp)} · متبقي ${fmtSyp(c.remainingSyp)}`}
                 </p>
+                {(c.cashRuleCollectedSyp || 0) !== 0 || (c.cashRuleConsumablesSyp || 0) !== 0 ? (
+                  <p style={{ margin: '0.2rem 0 0', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    منها إجراءات عامة: (محصّل {fmtSyp(c.cashRuleCollectedSyp || 0)} − مستهلكات{' '}
+                    {fmtSyp(c.cashRuleConsumablesSyp || 0)}) ÷ 3
+                  </p>
+                ) : null}
               </button>
             ))}
           </div>
@@ -351,9 +363,21 @@ export function AdminDentalClinicsPage() {
                         ) : null}
                       </td>
                       <td dir="ltr">{r.isGeneral ? 'عام' : r.fdi || '—'}</td>
-                      <td>{r.kind === 'lab' ? 'مخبر' : r.isGeneral ? 'إجراء عام' : 'إجراء'}</td>
                       <td>
-                        {r.kind === 'lab' ? (
+                        {r.kind === 'lab'
+                          ? 'مخبر'
+                          : r.kind === 'collection'
+                            ? 'تحصيل جلسة'
+                            : r.kind === 'consumable'
+                              ? r.isCorrection
+                                ? 'تسوية مستهلكات'
+                                : 'مستهلكات جلسة'
+                              : r.isGeneral
+                                ? 'إجراء عام'
+                                : 'إجراء'}
+                      </td>
+                      <td>
+                        {r.kind === 'lab' || r.kind === 'consumable' ? (
                           <>
                             <div>{r.labName || '—'}</div>
                             {r.procedureDescription ? (
@@ -376,6 +400,8 @@ export function AdminDentalClinicsPage() {
                               </div>
                             ) : null}
                           </>
+                        ) : r.kind === 'collection' ? (
+                          '—'
                         ) : (
                           <>
                             {fmtSyp(r.amountSyp || 0)}
@@ -390,7 +416,13 @@ export function AdminDentalClinicsPage() {
                           </>
                         )}
                       </td>
-                      <td dir="ltr">{r.kind === 'treatment' ? fmtSyp(r.paidSyp || 0) : '—'}</td>
+                      <td dir="ltr">
+                        {r.kind === 'treatment'
+                          ? fmtSyp(r.paidSyp || 0)
+                          : r.kind === 'collection'
+                            ? fmtSyp(r.amountSyp || 0)
+                            : '—'}
+                      </td>
                       <td dir="ltr">
                         {r.kind === 'treatment' ? fmtSyp(r.remainingSyp || 0) : '—'}
                       </td>

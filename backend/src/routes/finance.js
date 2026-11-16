@@ -313,7 +313,7 @@ function laserSpecialistTop(items, payById) {
  * حصص أخصائيي الليزر: إيراد التحصيل (ومخصصات تسديد الذمم) × نسبة كل أخصائي.
  * @returns {{ specialists: object[], specialistSharesTotalSyp: number, defaultSharePercent: number }}
  */
-async function computeLaserSpecialistShares({ items, payById, debtSettlements = [], providerUserId = null }) {
+export async function computeLaserSpecialistShares({ items, payById, debtSettlements = [], providerUserId = null }) {
   const q = { role: 'laser' }
   if (providerUserId) q._id = providerUserId
   const specialists = await User.find(q).select('_id name active doctorSharePercent').sort({ name: 1 }).lean()
@@ -653,9 +653,11 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
     const dentalRev = dentalChart.totalRevenueSyp
     const dentalExp = expenseTotals.dental || 0
     const dentalLabs = dentalChart.labWorksTotalSyp
+    /** مستهلكات جلسات الإجراءات العامة — تكلفة على القسم (تُطرح مرة واحدة) */
+    const dentalConsumables = dentalChart.generalConsumablesTotalSyp || 0
     const dentalSharesTotal = dentalChart.doctorSharesTotalSyp
-    /** الربح الصافي = المتبقي بعد حصص الأطباء − المخابر − جدول مصاريف الأسنان */
-    const dentalProfit = Math.round(dentalRev - dentalSharesTotal - dentalLabs - dentalExp)
+    /** الربح الصافي = المتبقي بعد حصص الأطباء − المخابر − المستهلكات − جدول مصاريف الأسنان */
+    const dentalProfit = Math.round(dentalRev - dentalSharesTotal - dentalLabs - dentalConsumables - dentalExp)
     revenueByDept.dental = dentalRev
     totalRevenueSyp = Math.round(totalRevenueSyp - billingDentalRev + dentalRev)
 
@@ -754,7 +756,9 @@ financeRouter.get('/dashboard', requireRoles('super_admin'), async (req, res) =>
         totalRevenueSyp: dentalRev,
         expensesTableSyp: dentalExp,
         labWorksTotalSyp: dentalLabs,
-        totalExpensesSyp: Math.round(dentalExp + dentalLabs),
+        generalConsumablesTotalSyp: dentalConsumables,
+        generalCashSharePercent: dentalChart.generalCashSharePercent,
+        totalExpensesSyp: Math.round(dentalExp + dentalLabs + dentalConsumables),
         ayhamShareSyp: dentalChart.ayhamShareSyp,
         iyadShareSyp: dentalChart.iyadShareSyp,
         omarShareSyp: dentalChart.omarShareSyp,
