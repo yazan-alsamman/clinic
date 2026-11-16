@@ -3,8 +3,8 @@ import {
   buildBillingPaymentRequestBody,
   computePaymentSettlementPreview,
   defaultBillingPaymentFormState,
-  effectiveDueFromListAndPct,
-  parseDiscountPercentInput,
+  discountBaseSyp,
+  paymentDiscountPreview,
   resolveEffectiveDueSyp,
   resolveUsdCashOffer,
   validateBillingPaymentForm,
@@ -13,6 +13,7 @@ import {
   type BillingPaymentRequestBody,
 } from '../utils/billingPaymentForm'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
+import { DiscountEntryFields } from './DiscountEntryFields'
 
 export type BillingPaymentModalProps = {
   open: boolean
@@ -104,16 +105,21 @@ export function BillingPaymentModal({
     setLocalErr('')
   }, [open, listDueSyp, billingCurrency, effectiveDueUsd, listDueUsd])
 
-  const effectiveDueSyp = useMemo(
+  const discountPreview = useMemo(
     () =>
-      resolveEffectiveDueSyp({
+      paymentDiscountPreview({
         listDueSyp,
         presetDiscountPercent,
         payDiscountEnabled: form.payDiscountEnabled,
         payDiscountPercent: form.payDiscountPercent,
+        payDiscountMode: form.payDiscountMode,
+        payDiscountAmount: form.payDiscountAmount,
       }),
-    [listDueSyp, presetDiscountPercent, form.payDiscountEnabled, form.payDiscountPercent],
+    [listDueSyp, presetDiscountPercent, form.payDiscountEnabled, form.payDiscountPercent, form.payDiscountMode, form.payDiscountAmount],
   )
+  const effectiveDueSyp = discountPreview.valid
+    ? discountPreview.priceAfterSyp
+    : discountBaseSyp(listDueSyp, presetDiscountPercent)
 
   const payPreviewRate = useMemo(() => {
     const fromItem = usdSypBusinessDayRate != null ? Number(usdSypBusinessDayRate) : NaN
@@ -198,7 +204,7 @@ export function BillingPaymentModal({
       setLocalErr(validationErr)
       return
     }
-    await onConfirm(buildBillingPaymentRequestBody({ form, presetDiscountPercent }))
+    await onConfirm(buildBillingPaymentRequestBody({ form, presetDiscountPercent, listDueSyp }))
   }
 
   if (!open) return null
@@ -224,7 +230,7 @@ export function BillingPaymentModal({
           {formatDueLabel({
             billingCurrency,
             listDueSyp,
-            effectiveDueSyp,
+            effectiveDueSyp: discountBaseSyp(listDueSyp, presetDiscountPercent),
             presetDiscountPercent,
             listDueUsd,
             effectiveDueUsd,
@@ -273,97 +279,43 @@ export function BillingPaymentModal({
         ) : null}
 
         <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid var(--border)' }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.45rem',
-              cursor: presetPct > 0 ? 'default' : 'pointer',
-              fontWeight: 600,
-              opacity: presetPct > 0 ? 0.6 : 1,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={form.payDiscountEnabled}
-              disabled={presetPct > 0 || busy}
-              onChange={(e) => {
-                const on = e.target.checked
-                let pct = parseDiscountPercentInput(on, form.payDiscountPercent)
-                if (on && !form.payDiscountPercent.trim()) pct = 10
-                const eff = effectiveDueFromListAndPct(listDueSyp, on ? pct : 0)
-                patchForm({
-                  payDiscountEnabled: on,
-                  payDiscountPercent: on && !form.payDiscountPercent.trim() ? '10' : on ? form.payDiscountPercent : '',
-                  paySyp: form.payCurrency === 'SYP' ? String(eff) : form.paySyp,
-                })
-              }}
-            />
-            تطبيق خصم (نسبة مئوية على المستحق)
-          </label>
           {presetPct > 0 ? (
-            <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              هذا البند عليه خصم مُدخل مسبقاً، وسيتم التحصيل تلقائياً على السعر بعد الخصم.
+            <p style={{ margin: '0 0 0.4rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              هذا البند عليه خصم مُدخل مسبقاً ({presetPct.toLocaleString('ar-SY', { maximumFractionDigits: 2 })}%)، وسيتم
+              التحصيل على السعر بعد الخصم. يمكنك إضافة خصم آخر يُحسب على المتبقي ويُسجَّل كسطر مستقل.
             </p>
           ) : null}
-          {form.payDiscountEnabled ? (
-            <>
-              <p style={{ margin: '0.45rem 0 0', fontWeight: 700 }}>
-                المستحق بعد الخصم: {effectiveDueSyp.toLocaleString('ar-SY')} ل.س
-                {payPreviewRate && payPreviewRate > 0 ? (
-                  <span dir="ltr" style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginRight: '0.45rem' }}>
-                    {' '}
-                    (≈ {(effectiveDueSyp / payPreviewRate).toLocaleString('en-US', { maximumFractionDigits: 4 })} USD)
-                  </span>
-                ) : null}
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.45rem' }}>
-                {([5, 10, 15, 20] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ fontSize: '0.82rem', padding: '0.25rem 0.5rem' }}
-                    disabled={busy}
-                    onClick={() => {
-                      const eff = effectiveDueFromListAndPct(listDueSyp, p)
-                      patchForm({
-                        payDiscountPercent: String(p),
-                        paySyp: form.payCurrency === 'SYP' ? String(eff) : form.paySyp,
-                      })
-                    }}
-                  >
-                    {p}%
-                  </button>
-                ))}
-              </div>
-              <label className="form-label" style={{ display: 'block', marginTop: '0.45rem' }}>
-                نسبة الخصم %
-              </label>
-              <input
-                className="input"
-                inputMode="decimal"
-                dir="ltr"
-                disabled={busy}
-                value={form.payDiscountPercent}
-                onChange={(e) => {
-                  const pct = parseDiscountPercentInput(true, e.target.value)
-                  const eff = effectiveDueFromListAndPct(listDueSyp, pct)
-                  patchForm({
-                    payDiscountPercent: e.target.value,
-                    paySyp: form.payCurrency === 'SYP' ? String(eff) : form.paySyp,
-                  })
-                }}
-                placeholder="مثال: 10 أو 12.5"
-                style={{ marginTop: '0.25rem', maxWidth: 220 }}
-              />
-              <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                قيمة الخصم من القائمة:{' '}
-                <strong>{(listDueSyp - effectiveDueSyp).toLocaleString('ar-SY')} ل.س</strong> — يُحسب قبض التحصيل
-                والترجيع مقابل <strong>المستحق بعد الخصم</strong>.
-              </p>
-            </>
-          ) : null}
+          <DiscountEntryFields
+            value={{
+              enabled: form.payDiscountEnabled,
+              mode: form.payDiscountMode,
+              percent: form.payDiscountPercent,
+              amount: form.payDiscountAmount,
+            }}
+            onChange={(patch) => {
+              const next: BillingPaymentFormState = {
+                ...form,
+                ...(patch.enabled != null ? { payDiscountEnabled: patch.enabled } : {}),
+                ...(patch.mode != null ? { payDiscountMode: patch.mode } : {}),
+                ...(patch.percent != null ? { payDiscountPercent: patch.percent } : {}),
+                ...(patch.amount != null ? { payDiscountAmount: patch.amount } : {}),
+              }
+              const eff = resolveEffectiveDueSyp({
+                listDueSyp,
+                presetDiscountPercent,
+                payDiscountEnabled: next.payDiscountEnabled,
+                payDiscountPercent: next.payDiscountPercent,
+                payDiscountMode: next.payDiscountMode,
+                payDiscountAmount: next.payDiscountAmount,
+              })
+              setForm({ ...next, paySyp: next.payCurrency === 'SYP' ? String(eff) : next.paySyp })
+            }}
+            baseSyp={discountBaseSyp(listDueSyp, presetDiscountPercent)}
+            preview={discountPreview}
+            disabled={busy}
+            allowAmount={billingCurrency !== 'USD'}
+            isAdditional={presetPct > 0}
+          />
         </div>
 
         <div style={{ marginTop: '0.55rem' }}>

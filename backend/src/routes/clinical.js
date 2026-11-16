@@ -15,6 +15,8 @@ import { round2, round6 } from '../utils/money.js'
 import { resolveSolariumPatientDisplayName } from '../services/solariumWalkInDisplay.js'
 import { normalizeHm, slotIntervalMinutes } from '../utils/scheduleTime.js'
 import { wallMinutesAsiaDamascus } from '../utils/shiftTime.js'
+import { DiscountInputError, resolveDiscountEntry } from '../services/discountMath.js'
+import { recordDiscount } from '../services/discountRecords.js'
 import { deleteClinicalSessionFully } from '../services/deleteClinicalSession.js'
 
 export const clinicalRouter = Router()
@@ -568,13 +570,44 @@ clinicalRouter.post(
       const listAmountDueSyp = sessionFeeSyp + materialChargeSypTotal
       const listAmountDueUsd =
         billingCurrency === 'USD' ? round6(sessionFeeUsd) : 0
-      const discountPercent = department === 'dermatology' ? parseDiscountPercent(body.discountPercent) : 0
+      let discountPercent = department === 'dermatology' ? parseDiscountPercent(body.discountPercent) : 0
       if (discountPercent == null) {
         await restoreMaterialsFromSnapshot(materialLines)
         res.status(400).json({ error: 'نسبة الخصم يجب أن تكون بين 0 و 100.' })
         return
       }
-      const amountDueSyp = Math.round(listAmountDueSyp * (1 - discountPercent / 100))
+      /** خصم بمبلغ ثابت (ليرة) — تُحسب نسبته تلقائياً */
+      let dermAmountEntry = null
+      if (department === 'dermatology' && body.discountAmountSyp != null && Number(body.discountAmountSyp) > 0) {
+        if (billingCurrency === 'USD') {
+          await restoreMaterialsFromSnapshot(materialLines)
+          res.status(400).json({ error: 'الخصم بمبلغ ثابت متاح للجلسات المسعّرة بالليرة فقط — استخدم النسبة المئوية.' })
+          return
+        }
+        if (discountPercent > 0) {
+          await restoreMaterialsFromSnapshot(materialLines)
+          res.status(400).json({ error: 'أدخل الخصم إما كنسبة مئوية أو كمبلغ ثابت، وليس الاثنين معاً.' })
+          return
+        }
+        try {
+          dermAmountEntry = resolveDiscountEntry({
+            baseSyp: listAmountDueSyp,
+            amountSyp: body.discountAmountSyp,
+            minPriceAfterSyp: 0,
+          })
+        } catch (discErr) {
+          await restoreMaterialsFromSnapshot(materialLines)
+          if (discErr instanceof DiscountInputError) {
+            res.status(400).json({ error: discErr.message })
+            return
+          }
+          throw discErr
+        }
+        if (dermAmountEntry) discountPercent = dermAmountEntry.discountPercent
+      }
+      const amountDueSyp = dermAmountEntry
+        ? dermAmountEntry.priceAfterSyp
+        : Math.round(listAmountDueSyp * (1 - discountPercent / 100))
       const amountDueUsd =
         billingCurrency === 'USD' ? round6(listAmountDueUsd * (1 - discountPercent / 100)) : 0
       if (amountDueSyp < 0) {
@@ -648,6 +681,28 @@ clinicalRouter.post(
             materialChargeSypTotal,
           },
         })
+
+        if (bi?._id && discountPercent > 0 && listAmountDueSyp > amountDueSyp) {
+          await recordDiscount({
+            patientId: patient._id,
+            department,
+            targetType: 'billing_item',
+            billingItemId: bi._id,
+            clinicalSessionId: cs._id,
+            serviceLabel: procedureDescription || 'إجراء',
+            entry: dermAmountEntry || {
+              entryMode: 'percent',
+              discountPercent,
+              discountAmountSyp: listAmountDueSyp - amountDueSyp,
+              priceBeforeSyp: listAmountDueSyp,
+              priceAfterSyp: amountDueSyp,
+            },
+            listPriceSyp: listAmountDueSyp,
+            basis: 'list',
+            source: 'dermatology_session',
+            user: req.user,
+          })
+        }
 
         res.status(201).json({
           clinicalSession: {

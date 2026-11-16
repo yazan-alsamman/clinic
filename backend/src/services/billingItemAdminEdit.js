@@ -16,6 +16,11 @@ async function getOrCreateLaserSettings() {
 }
 import { writeAudit } from '../utils/audit.js'
 import {
+  activeDiscountRecordsForBillingItem,
+  recordDiscount,
+  reverseActiveDiscountsForBillingItem,
+} from './discountRecords.js'
+import {
   isSolariumWalkInPlaceholderPatient,
   resolveSolariumPatientDisplayName,
 } from './solariumWalkInDisplay.js'
@@ -427,11 +432,64 @@ export async function applyBillingItemAdminFullEdit(billingItemId, body, user) {
     if (bd) bi.businessDate = bd
   }
 
+  const prevListSyp = Math.round(Number(bi.listAmountDueSyp || bi.amountDueSyp) || 0)
+  const prevEffectiveSyp = Math.round(Number(bi.effectiveAmountDueSyp || bi.amountDueSyp) || 0)
+  const prevDiscountSyp = Math.max(0, prevListSyp - prevEffectiveSyp)
+  const prevDiscountPercent = Number(bi.discountPercent) || 0
+  /** الخصم «الحقيقي» قبل التعديل: من السجلات الفعّالة إن وجدت (مثل خصم جلسة الليزر غير المحفوظ على البند) */
+  const prevActiveRecords = await activeDiscountRecordsForBillingItem(bi._id)
+  const prevOriginalSyp = prevActiveRecords.length
+    ? Math.round(Number(prevActiveRecords[0].listPriceSyp || prevActiveRecords[0].priceBeforeSyp) || 0)
+    : prevListSyp
+  const prevTotalDiscountSyp = prevActiveRecords.length
+    ? prevActiveRecords.reduce((n, r) => n + Math.round(Number(r.discountAmountSyp) || 0), 0)
+    : prevDiscountSyp
+
   bi.listAmountDueSyp = resolved.listAmountDueSyp
   bi.discountPercent = resolved.discountPercent
   bi.effectiveAmountDueSyp = resolved.effectiveAmountDueSyp
   bi.amountDueSyp = resolved.amountDueSyp
   await bi.save()
+
+  /**
+   * تغيير الخصم من مدير النظام: لا يُحذف السجل السابق — يُعلَّم «ملغى» مع من ومتى،
+   * ويُنشأ سجل جديد بالخصم الجديد يشير إلى ما صحّحه.
+   */
+  const newDiscountSyp = Math.max(0, resolved.listAmountDueSyp - resolved.effectiveAmountDueSyp)
+  const discountChanged =
+    newDiscountSyp !== prevTotalDiscountSyp ||
+    (newDiscountSyp > 0 && resolved.listAmountDueSyp !== prevOriginalSyp)
+  if (discountChanged) {
+    const reason = String(billingBody.discountChangeReason || body?.reason || '').trim()
+    const reversedIds = await reverseActiveDiscountsForBillingItem(bi._id, {
+      user,
+      reason: reason || 'تعديل الخصم من مدير النظام',
+    })
+    if (newDiscountSyp > 0) {
+      await recordDiscount({
+        patientId: bi.patientId,
+        department: bi.department,
+        targetType: 'billing_item',
+        billingItemId: bi._id,
+        clinicalSessionId: bi.clinicalSessionId,
+        laserSessionId: laser?._id || null,
+        serviceLabel: bi.procedureLabel,
+        entry: {
+          entryMode: 'percent',
+          discountPercent: Number(resolved.discountPercent) || 0,
+          discountAmountSyp: newDiscountSyp,
+          priceBeforeSyp: resolved.listAmountDueSyp,
+          priceAfterSyp: resolved.effectiveAmountDueSyp,
+        },
+        listPriceSyp: resolved.listAmountDueSyp,
+        basis: 'list',
+        source: 'admin_edit',
+        user,
+        note: reason,
+        correctsRecordIds: reversedIds,
+      })
+    }
+  }
 
   await writeAudit({
     user,
@@ -443,6 +501,9 @@ export async function applyBillingItemAdminFullEdit(billingItemId, body, user) {
       amountDueSyp: bi.amountDueSyp,
       listAmountDueSyp: bi.listAmountDueSyp,
       discountPercent: bi.discountPercent,
+      previousListAmountDueSyp: prevListSyp,
+      previousEffectiveAmountDueSyp: prevEffectiveSyp,
+      previousDiscountPercent: prevDiscountPercent,
       clinicalSessionId: cs?._id ? String(cs._id) : undefined,
       laserSessionId: laser?._id ? String(laser._id) : undefined,
     },

@@ -10,6 +10,8 @@ import {
 } from '../utils/usdExactDue'
 import { BillingItemAdminEditModal } from '../components/BillingItemAdminEditModal'
 import { mixedNetReceivedSyp, type PayCurrency } from '../utils/billingPaymentForm'
+import { computeDiscountPreview, discountRequestFields, type DiscountMode } from '../utils/discountEntry'
+import { DiscountEntryFields } from '../components/DiscountEntryFields'
 
 type Item = {
   id: string
@@ -101,13 +103,6 @@ function parseDiscountPercentInput(enabled: boolean, percentStr: string): number
   const n = parseFloat(normalizeDecimalDigits(stripPct(percentStr)))
   if (!Number.isFinite(n) || n <= 0) return 0
   return Math.min(100, n)
-}
-
-function effectiveDueFromListAndPct(list: number, pct: number): number {
-  const L = Math.round(Number(list) || 0)
-  if (!(L > 0)) return 0
-  if (!(pct > 0)) return L
-  return Math.max(1, Math.round(L * (1 - pct / 100)))
 }
 
 function itemListDueSyp(item: Item | null): number {
@@ -329,14 +324,34 @@ export function BillingPage() {
   const [payDiscountEnabled, setPayDiscountEnabled] = useState(false)
   const [payDiscountPercent, setPayDiscountPercent] = useState('')
 
+  const [payDiscountMode, setPayDiscountMode] = useState<DiscountMode>('percent')
+  const [payDiscountAmount, setPayDiscountAmount] = useState('')
+  useEffect(() => {
+    setPayDiscountMode('percent')
+    setPayDiscountAmount('')
+  }, [payItem?.id])
+
+  /** أساس الخصم الجديد: المتبقي بعد الخصم المحفوظ على البند، وإلا السعر الأصلي */
+  const discountBaseSyp = useMemo(() => {
+    if (!payItem) return 0
+    const presetPct = Number(payItem.discountPercent) || 0
+    return presetPct > 0 ? itemEffectiveDueSyp(payItem) : itemListDueSyp(payItem)
+  }, [payItem])
+
+  const discountPreview = useMemo(
+    () =>
+      computeDiscountPreview({
+        baseSyp: discountBaseSyp,
+        mode: payDiscountMode,
+        value: payDiscountEnabled ? (payDiscountMode === 'amount' ? payDiscountAmount : payDiscountPercent) : '',
+      }),
+    [discountBaseSyp, payDiscountEnabled, payDiscountMode, payDiscountPercent, payDiscountAmount],
+  )
+
   const effectiveDueSyp = useMemo(() => {
     if (!payItem) return 0
-    const list = itemListDueSyp(payItem)
-    const presetPct = Number(payItem.discountPercent) || 0
-    if (presetPct > 0) return itemEffectiveDueSyp(payItem)
-    const pct = parseDiscountPercentInput(payDiscountEnabled, payDiscountPercent)
-    return effectiveDueFromListAndPct(list, pct)
-  }, [payItem, payDiscountEnabled, payDiscountPercent])
+    return discountPreview.valid ? discountPreview.priceAfterSyp : discountBaseSyp
+  }, [payItem, discountPreview, discountBaseSyp])
 
   const creditTowardDueSyp = useMemo(() => {
     if (!payItem) return 0
@@ -441,12 +456,12 @@ export function BillingPage() {
       setErr('لا يوجد مبلغ مستحق على هذا البند — راجع التسعير في ملف المريض.')
       return
     }
-    if (payDiscountEnabled) {
-      const p = parseDiscountPercentInput(true, payDiscountPercent)
-      if (!(p > 0) || p > 100) {
-        setErr('أدخل نسبة خصم صالحة بين 1 و 100%.')
-        return
-      }
+    if (payDiscountEnabled && !discountPreview.valid) {
+      setErr(
+        discountPreview.error ||
+          (payDiscountMode === 'amount' ? 'أدخل مبلغ خصم صالحاً بالليرة.' : 'أدخل نسبة خصم صالحة بين 1 و 100%.'),
+      )
+      return
     }
     if (payChannel === 'bank') {
       const sypCheck = Number(normalizeDecimalDigits(paySyp))
@@ -548,12 +563,12 @@ export function BillingPage() {
           : payCurrency === 'USD'
             ? { refundCurrency: payRefundCurrency }
             : {}
-      const discountPct =
-        payItem && (Number(payItem.discountPercent) || 0) > 0
-          ? 0
-          : payDiscountEnabled
-            ? parseDiscountPercentInput(true, payDiscountPercent)
-            : 0
+      /** خصم جديد (نسبة أو مبلغ). إن كان على البند خصم سابق يُطبَّق هذا على المتبقي ويُسجَّل سطراً مستقلاً */
+      const discountFields = payDiscountEnabled
+        ? payDiscountMode === 'amount'
+          ? discountRequestFields('amount', discountPreview)
+          : { discountPercent: parseDiscountPercentInput(true, payDiscountPercent) }
+        : { discountPercent: 0 }
       await api(`/api/billing/${encodeURIComponent(id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -568,7 +583,7 @@ export function BillingPage() {
             (payCurrency === 'USD' || payCurrency === 'MIXED') && Number.isFinite(usd) && usd >= 0
               ? usd
               : undefined,
-          discountPercent: discountPct > 0 ? discountPct : 0,
+          ...discountFields,
           ...refundPayload,
         }),
       })
@@ -607,12 +622,12 @@ export function BillingPage() {
       return
     }
     setErr('')
-    if (payDiscountEnabled) {
-      const p = parseDiscountPercentInput(true, payDiscountPercent)
-      if (!(p > 0) || p > 100) {
-        setErr('أدخل نسبة خصم صالحة بين 1 و 100%.')
-        return
-      }
+    if (payDiscountEnabled && !discountPreview.valid) {
+      setErr(
+        discountPreview.error ||
+          (payDiscountMode === 'amount' ? 'أدخل مبلغ خصم صالحاً بالليرة.' : 'أدخل نسبة خصم صالحة بين 1 و 100%.'),
+      )
+      return
     }
     if (payChannel === 'bank') {
       const sypCheck = Number(normalizeDecimalDigits(paySyp))
@@ -714,12 +729,12 @@ export function BillingPage() {
           : payCurrency === 'USD'
             ? { refundCurrency: payRefundCurrency }
             : {}
-      const discountPct =
-        payItem && (Number(payItem.discountPercent) || 0) > 0
-          ? 0
-          : payDiscountEnabled
-            ? parseDiscountPercentInput(true, payDiscountPercent)
-            : 0
+      /** خصم جديد (نسبة أو مبلغ). إن كان على البند خصم سابق يُطبَّق هذا على المتبقي ويُسجَّل سطراً مستقلاً */
+      const discountFields = payDiscountEnabled
+        ? payDiscountMode === 'amount'
+          ? discountRequestFields('amount', discountPreview)
+          : { discountPercent: parseDiscountPercentInput(true, payDiscountPercent) }
+        : { discountPercent: 0 }
       await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
         method: 'POST',
         body: JSON.stringify({
@@ -734,7 +749,7 @@ export function BillingPage() {
             (payCurrency === 'USD' || payCurrency === 'MIXED') && Number.isFinite(usd) && usd >= 0
               ? usd
               : undefined,
-          discountPercent: discountPct > 0 ? discountPct : 0,
+          ...discountFields,
           ...refundPayload,
         }),
       })
@@ -1277,108 +1292,45 @@ export function BillingPage() {
             ) : null}
             {payItem.isCreditTopUp ? null : (
             <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid var(--border)' }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  opacity: (Number(payItem.discountPercent) || 0) > 0 ? 0.6 : 1,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={payDiscountEnabled}
-                  disabled={(Number(payItem.discountPercent) || 0) > 0}
-                  onChange={(e) => {
-                    const on = e.target.checked
-                    setPayDiscountEnabled(on)
-                    if (!payItem) return
-                    const list = itemListDueSyp(payItem)
-                    let pct = parseDiscountPercentInput(on, payDiscountPercent)
-                    if (on && !payDiscountPercent.trim()) {
-                      setPayDiscountPercent('10')
-                      pct = 10
-                    }
-                    if (!on) {
-                      setPayDiscountPercent('')
-                      pct = 0
-                    }
-                    const eff = effectiveDueFromListAndPct(list, pct)
-                    if (payCurrency === 'SYP' && payItem) {
-                      setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
-                    }
-                  }}
-                />
-                تطبيق خصم (نسبة مئوية على المستحق)
-              </label>
               {(Number(payItem.discountPercent) || 0) > 0 ? (
-                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  هذا البند عليه خصم مُدخل مسبقاً من قسم الجلدية، وسيتم التحصيل تلقائياً على السعر بعد الخصم.
+                <p style={{ margin: '0 0 0.4rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  هذا البند عليه خصم مُدخل مسبقاً، وسيتم التحصيل على السعر بعد الخصم. يمكنك إضافة خصم آخر يُحسب على
+                  المتبقي ويُسجَّل كسطر مستقل في ملف المريض.
                 </p>
               ) : null}
-              {payDiscountEnabled ? (
-                <>
-                  <p style={{ margin: '0.45rem 0 0', fontWeight: 700 }}>
-                    المستحق بعد الخصم: {effectiveDueSyp.toLocaleString('ar-SY')} ل.س
-                    {payPreviewRate && payPreviewRate > 0 ? (
-                      <span dir="ltr" style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginRight: '0.45rem' }}>
-                        {' '}
-                        (≈{' '}
-                        {(effectiveDueSyp / payPreviewRate).toLocaleString('en-US', { maximumFractionDigits: 4 })} USD)
-                      </span>
-                    ) : null}
-                  </p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.45rem' }}>
-                    {([5, 10, 15, 20] as const).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.82rem', padding: '0.25rem 0.5rem' }}
-                        onClick={() => {
-                          setPayDiscountPercent(String(p))
-                          if (payCurrency === 'SYP' && payItem) {
-                            const list = itemListDueSyp(payItem)
-                            const eff = effectiveDueFromListAndPct(list, p)
-                            setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
-                          }
-                        }}
-                      >
-                        {p}%
-                      </button>
-                    ))}
-                  </div>
-                  <label className="form-label" style={{ display: 'block', marginTop: '0.45rem' }}>
-                    نسبة الخصم %
-                  </label>
-                  <input
-                    className="input"
-                    inputMode="decimal"
-                    dir="ltr"
-                    value={payDiscountPercent}
-                    onChange={(e) => {
-                      setPayDiscountPercent(e.target.value)
-                      const pct = parseDiscountPercentInput(true, e.target.value)
-                      if (payCurrency === 'SYP' && payItem) {
-                        const list = itemListDueSyp(payItem)
-                        const eff = effectiveDueFromListAndPct(list, pct)
-                        setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
-                      }
-                    }}
-                    placeholder="مثال: 10 أو 12.5"
-                    style={{ marginTop: '0.25rem', maxWidth: 220 }}
-                  />
-                  <p style={{ margin: '0.45rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                    قيمة الخصم من القائمة:{' '}
-                    <strong>
-                      {(itemListDueSyp(payItem) - effectiveDueSyp).toLocaleString('ar-SY')} ل.س
-                    </strong>
-                    — يُحسب قبض التحصيل والترجيع مقابل <strong>المستحق بعد الخصم</strong>.
-                  </p>
-                </>
-              ) : null}
+              <DiscountEntryFields
+                value={{
+                  enabled: payDiscountEnabled,
+                  mode: payDiscountMode,
+                  percent: payDiscountPercent,
+                  amount: payDiscountAmount,
+                }}
+                onChange={(patch) => {
+                  const next = {
+                    enabled: patch.enabled ?? payDiscountEnabled,
+                    mode: patch.mode ?? payDiscountMode,
+                    percent: patch.percent ?? payDiscountPercent,
+                    amount: patch.amount ?? payDiscountAmount,
+                  }
+                  setPayDiscountEnabled(next.enabled)
+                  setPayDiscountMode(next.mode)
+                  setPayDiscountPercent(next.percent)
+                  setPayDiscountAmount(next.amount)
+                  if (payCurrency === 'SYP' && payItem) {
+                    const pv = computeDiscountPreview({
+                      baseSyp: discountBaseSyp,
+                      mode: next.mode,
+                      value: next.enabled ? (next.mode === 'amount' ? next.amount : next.percent) : '',
+                    })
+                    const eff = pv.valid ? pv.priceAfterSyp : discountBaseSyp
+                    setPaySyp(String(itemCashDueAfterCreditSyp(payItem, eff)))
+                  }
+                }}
+                baseSyp={discountBaseSyp}
+                preview={discountPreview}
+                allowAmount={itemBillingCurrency(payItem) !== 'USD'}
+                isAdditional={(Number(payItem.discountPercent) || 0) > 0}
+              />
             </div>
             )}
             <div style={{ marginTop: '0.55rem' }}>

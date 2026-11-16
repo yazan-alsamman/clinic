@@ -1,4 +1,5 @@
 import { normalizeDecimalDigits } from './normalizeDigits'
+import { computeDiscountPreview, discountRequestFields, type DiscountMode } from './discountEntry'
 import {
   netReceivedSypAfterUsdCollection,
   settlementDeltaAfterUsdCashNetAbsorb,
@@ -15,6 +16,8 @@ export type BillingPaymentRequestBody = {
   amountSyp?: number
   amountUsd?: number
   discountPercent?: number
+  /** خصم بمبلغ ثابت (ل.س) — بديل عن النسبة */
+  discountAmountSyp?: number
   refundCurrency?: 'SYP' | 'USD'
   refundAmount?: number
 }
@@ -29,6 +32,9 @@ export type BillingPaymentFormState = {
   payRefundAmount: string
   payDiscountEnabled: boolean
   payDiscountPercent: string
+  /** نسبة أو مبلغ ثابت */
+  payDiscountMode: DiscountMode
+  payDiscountAmount: string
 }
 
 function stripPct(s: string) {
@@ -58,18 +64,39 @@ export function effectiveDueFromListAndPct(list: number, pct: number): number {
   return Math.max(1, Math.round(L * (1 - pct / 100)))
 }
 
+/** أساس الخصم الجديد: المتبقي بعد الخصم المحفوظ على البند (إن وجد) وإلا السعر الأصلي */
+export function discountBaseSyp(listDueSyp: number, presetDiscountPercent?: number): number {
+  const preset = Number(presetDiscountPercent) || 0
+  return preset > 0 ? effectiveDueFromListAndPct(listDueSyp, preset) : Math.round(Number(listDueSyp) || 0)
+}
+
+export function paymentDiscountPreview(opts: {
+  listDueSyp: number
+  presetDiscountPercent?: number
+  payDiscountEnabled: boolean
+  payDiscountPercent: string
+  payDiscountMode?: DiscountMode
+  payDiscountAmount?: string
+}) {
+  const mode: DiscountMode = opts.payDiscountMode === 'amount' ? 'amount' : 'percent'
+  return computeDiscountPreview({
+    baseSyp: discountBaseSyp(opts.listDueSyp, opts.presetDiscountPercent),
+    mode,
+    value: opts.payDiscountEnabled ? (mode === 'amount' ? opts.payDiscountAmount || '' : opts.payDiscountPercent) : '',
+  })
+}
+
 export function resolveEffectiveDueSyp(opts: {
   listDueSyp: number
   presetDiscountPercent?: number
   payDiscountEnabled: boolean
   payDiscountPercent: string
+  payDiscountMode?: DiscountMode
+  payDiscountAmount?: string
 }): number {
-  const preset = Number(opts.presetDiscountPercent) || 0
-  if (preset > 0) {
-    return effectiveDueFromListAndPct(opts.listDueSyp, preset)
-  }
-  const pct = parseDiscountPercentInput(opts.payDiscountEnabled, opts.payDiscountPercent)
-  return effectiveDueFromListAndPct(opts.listDueSyp, pct)
+  const preview = paymentDiscountPreview(opts)
+  if (preview.valid) return preview.priceAfterSyp
+  return discountBaseSyp(opts.listDueSyp, opts.presetDiscountPercent)
 }
 
 export function resolveUsdCashOffer(opts: {
@@ -102,6 +129,8 @@ export function defaultBillingPaymentFormState(
     payRefundAmount: '',
     payDiscountEnabled: false,
     payDiscountPercent: '',
+    payDiscountMode: 'percent',
+    payDiscountAmount: '',
   }
 }
 
@@ -174,8 +203,20 @@ export function validateBillingPaymentForm(opts: {
   const { form } = opts
   const allowZero = opts.allowZeroAmount !== false
   if (form.payDiscountEnabled) {
-    const p = parseDiscountPercentInput(true, form.payDiscountPercent)
-    if (!(p > 0) || p > 100) return 'أدخل نسبة خصم صالحة بين 1 و 100%.'
+    const preview = paymentDiscountPreview({
+      listDueSyp: opts.listDueSyp,
+      presetDiscountPercent: opts.presetDiscountPercent,
+      payDiscountEnabled: true,
+      payDiscountPercent: form.payDiscountPercent,
+      payDiscountMode: form.payDiscountMode,
+      payDiscountAmount: form.payDiscountAmount,
+    })
+    if (preview.error) return preview.error
+    if (!preview.valid) {
+      return form.payDiscountMode === 'amount'
+        ? 'أدخل مبلغ خصم صالحاً بالليرة.'
+        : 'أدخل نسبة خصم صالحة بين 1 و 100%.'
+    }
   }
   const hasReceived = hasPositiveReceivedAmount(form)
   if (form.payChannel === 'bank' && hasReceived && !form.payBankName.trim()) {
@@ -245,6 +286,8 @@ export function validateBillingPaymentForm(opts: {
 export function buildBillingPaymentRequestBody(opts: {
   form: BillingPaymentFormState
   presetDiscountPercent?: number
+  /** السعر الأصلي للبند — مطلوب لحساب الخصم الإضافي بالمبلغ أو بالنسبة على المتبقي */
+  listDueSyp?: number
 }): BillingPaymentRequestBody {
   const { form } = opts
   const syp = Number(normalizeDecimalDigits(form.paySyp))
@@ -263,9 +306,20 @@ export function buildBillingPaymentRequestBody(opts: {
       : form.payCurrency === 'USD'
         ? { refundCurrency: form.payRefundCurrency }
         : {}
-  const preset = Number(opts.presetDiscountPercent) || 0
-  const discountPct =
-    preset > 0 ? 0 : form.payDiscountEnabled ? parseDiscountPercentInput(true, form.payDiscountPercent) : 0
+  const preview = paymentDiscountPreview({
+    listDueSyp: Number(opts.listDueSyp) || 0,
+    presetDiscountPercent: opts.presetDiscountPercent,
+    payDiscountEnabled: form.payDiscountEnabled,
+    payDiscountPercent: form.payDiscountPercent,
+    payDiscountMode: form.payDiscountMode,
+    payDiscountAmount: form.payDiscountAmount,
+  })
+  /** النسبة تُرسل كما أدخلها المستخدم؛ المبلغ يُرسل كمبلغ (الخادم يحسب الآخر) */
+  const discountFields = form.payDiscountEnabled
+    ? form.payDiscountMode === 'amount'
+      ? discountRequestFields('amount', preview)
+      : { discountPercent: parseDiscountPercentInput(true, form.payDiscountPercent) }
+    : { discountPercent: 0 }
   const includeSyp = form.payCurrency === 'SYP' || form.payCurrency === 'MIXED'
   const includeUsd = form.payCurrency === 'USD' || form.payCurrency === 'MIXED'
   return {
@@ -274,7 +328,7 @@ export function buildBillingPaymentRequestBody(opts: {
     bankName: form.payChannel === 'bank' ? form.payBankName.trim() : undefined,
     amountSyp: includeSyp && Number.isFinite(syp) && syp >= 0 ? Math.round(syp) : undefined,
     amountUsd: includeUsd && Number.isFinite(usd) && usd >= 0 ? usd : undefined,
-    discountPercent: discountPct > 0 ? discountPct : 0,
+    ...discountFields,
     ...refundPayload,
   }
 }

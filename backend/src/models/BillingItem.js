@@ -40,6 +40,8 @@ const billingItemSchema = new mongoose.Schema(
     isCreditTopUp: { type: Boolean, default: false, index: true },
     patientPackageId: { type: String, default: '' },
     patientPackageSessionId: { type: String, default: '' },
+    /** بند شراء باكج (تحصيل ثمن الباكج نفسه) — معرّف الباكج داخل Patient.sessionPackages */
+    packagePurchaseId: { type: String, default: '' },
   },
   { timestamps: true },
 )
