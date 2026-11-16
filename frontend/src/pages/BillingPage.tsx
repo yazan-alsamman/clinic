@@ -16,6 +16,7 @@ import {
   LaserAreaDeductionModal,
   type LaserVisitDeductionPreview,
 } from '../components/LaserAreaDeductionModal'
+import { LaserVisitBillingBreakdown, type LaserVisitBreakdown } from '../components/LaserVisitBillingBreakdown'
 
 type Item = {
   id: string
@@ -50,6 +51,8 @@ type Item = {
   laserSessionId?: string
   /** معاينة إنقاص مناطق الباكج لهذه الزيارة (رصيد كل منطقة وما عولج فيها) */
   laserPackageDeduction?: LaserVisitDeductionPreview
+  /** ملخص الزيارة: ما غطّاه الباكج منفصلاً عن الخدمات الإضافية ومجموعها */
+  laserVisitBreakdown?: LaserVisitBreakdown
   /** رصيد إضافي مخزّن على المريض */
   prepaidCreditSyp?: number
   outstandingDebtSyp?: number
@@ -244,6 +247,21 @@ function itemPendingAreaLabels(item: Item): string[] {
   )
 }
 
+/** سبب منع حذف بند معلّق (يُعرض بدل رسالة عامة) — الخادم يتحقق من نفس القاعدة */
+function itemDeleteBlockedReason(item: Item): string {
+  const deducted = (item.laserPackageDeduction?.packages || []).some((p) => p.areas.some((a) => a.alreadyDeductedForVisit))
+  if (deducted) {
+    return 'أُنقصت جلسات مناطق باكج لهذه الزيارة — صحّح الإنقاص من سجل الباكج في ملف المريض أولاً، أو احذف جلسة الليزر نفسها.'
+  }
+  return ''
+}
+
+type BulkCancelResult = {
+  results: { id: string; ok: boolean; alreadyCancelled?: boolean; code?: string; error?: string }[]
+  cancelledCount: number
+  failedCount: number
+}
+
 export function BillingPage() {
   const { user } = useAuth()
   const { businessDate, usdSypRate } = useClinic()
@@ -256,6 +274,10 @@ export function BillingPage() {
   const [err, setErr] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
+  /** نتيجة الحذف (لا تُمسح عند إعادة تحميل القائمة) */
+  const [deleteNotice, setDeleteNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
   const [deductItem, setDeductItem] = useState<Item | null>(null)
   const [payOpen, setPayOpen] = useState(false)
@@ -555,21 +577,71 @@ export function BillingPage() {
     }
   }
 
+  /** سبب الحذف اختياري — يُحفظ مع البند وفي سجل التدقيق. null = إلغاء العملية */
+  function askDeleteReason(message: string): string | null {
+    const r = window.prompt(`${message}\n\nسبب الحذف (اختياري — يُحفظ في سجل التدقيق):`, '')
+    return r === null ? null : r.trim()
+  }
+
   async function deletePendingItem(item: Item) {
     if (user?.role !== 'super_admin') return
-    const ok = window.confirm(
-      `هل تريد حذف بند التحصيل لهذا المريض؟\n${item.patientName || 'مريض'} — ${item.procedureLabel}`,
+    const blocked = itemDeleteBlockedReason(item)
+    if (blocked) {
+      setDeleteNotice({ tone: 'error', text: blocked })
+      return
+    }
+    const reason = askDeleteReason(
+      `حذف بند التحصيل لهذا المريض؟ (يُلغى البند ويبقى في السجل)\n${item.patientName || 'مريض'} — ${item.procedureLabel}`,
     )
-    if (!ok) return
-    setErr('')
+    if (reason === null) return
+    setDeleteNotice(null)
     setDeleteBusyId(item.id)
     try {
-      await api(`/api/billing/${encodeURIComponent(item.id)}`, { method: 'DELETE' })
-      await load()
+      const res = await api<{ alreadyCancelled?: boolean; message?: string }>(
+        `/api/billing/${encodeURIComponent(item.id)}`,
+        { method: 'DELETE', body: JSON.stringify({ reason }) },
+      )
+      setDeleteNotice({
+        tone: 'ok',
+        text: res.alreadyCancelled ? `${res.message || 'البند محذوف مسبقاً.'} أُزيل من القائمة.` : 'تم حذف البند.',
+      })
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'تعذر حذف بند التحصيل')
+      /** غالباً تغيّرت حالة البند (حُصّل أو حُذف من مكان آخر) — نعرض السبب ونحدّث القائمة */
+      setDeleteNotice({ tone: 'error', text: e instanceof ApiError ? e.message : 'تعذر حذف بند التحصيل' })
     } finally {
       setDeleteBusyId(null)
+      await load()
+    }
+  }
+
+  async function deleteSelectedItems() {
+    if (user?.role !== 'super_admin') return
+    const ids = items.filter((x) => selectedIds.has(x.id) && !itemDeleteBlockedReason(x)).map((x) => x.id)
+    if (!ids.length) return
+    const reason = askDeleteReason(`حذف ${ids.length} بند تحصيل معلّق؟ (تُلغى البنود وتبقى في السجل)`)
+    if (reason === null) return
+    setDeleteNotice(null)
+    setBulkBusy(true)
+    try {
+      const res = await api<BulkCancelResult>('/api/billing/bulk-cancel', {
+        method: 'POST',
+        body: JSON.stringify({ ids, reason }),
+      })
+      const byId = new Map(items.map((x) => [x.id, x]))
+      const failed = res.results.filter((r) => !r.ok)
+      const lines = failed.map((r) => `• ${byId.get(r.id)?.patientName || 'بند'}: ${r.error || 'تعذر الحذف'}`)
+      setDeleteNotice({
+        tone: failed.length ? 'error' : 'ok',
+        text:
+          `حُذف ${res.cancelledCount} بند` +
+          (failed.length ? ` — لم يُحذف ${failed.length}:\n${lines.join('\n')}` : '.'),
+      })
+      setSelectedIds(new Set())
+    } catch (e) {
+      setDeleteNotice({ tone: 'error', text: e instanceof ApiError ? e.message : 'تعذر حذف البنود' })
+    } finally {
+      setBulkBusy(false)
+      await load()
     }
   }
 
@@ -629,6 +701,45 @@ export function BillingPage() {
       </div>
 
       {err ? <p style={{ color: 'var(--danger)', marginTop: '1rem' }}>{err}</p> : null}
+      {deleteNotice ? (
+        <p
+          style={{
+            color: deleteNotice.tone === 'ok' ? 'var(--success)' : 'var(--danger)',
+            marginTop: '1rem',
+            whiteSpace: 'pre-line',
+          }}
+        >
+          {deleteNotice.text}{' '}
+          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0 0.4rem' }} onClick={() => setDeleteNotice(null)}>
+            إخفاء
+          </button>
+        </p>
+      ) : null}
+      {user?.role === 'super_admin' && items.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center', marginTop: '0.75rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.88rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={items.filter((x) => !itemDeleteBlockedReason(x)).every((x) => selectedIds.has(x.id))}
+              onChange={(e) =>
+                setSelectedIds(e.target.checked ? new Set(items.filter((x) => !itemDeleteBlockedReason(x)).map((x) => x.id)) : new Set())
+              }
+            />
+            تحديد كل البنود القابلة للحذف
+          </label>
+          {items.some((x) => selectedIds.has(x.id)) ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ color: 'var(--danger)' }}
+              disabled={bulkBusy}
+              onClick={() => void deleteSelectedItems()}
+            >
+              {bulkBusy ? 'جاري الحذف…' : `حذف المحدد (${items.filter((x) => selectedIds.has(x.id)).length})`}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="card" style={{ marginTop: '1rem' }}>
@@ -661,6 +772,24 @@ export function BillingPage() {
                 }}
               >
                 <div>
+                  {user?.role === 'super_admin' ? (
+                    <input
+                      type="checkbox"
+                      aria-label="تحديد البند للحذف"
+                      style={{ marginInlineEnd: '0.4rem' }}
+                      disabled={bulkBusy || Boolean(itemDeleteBlockedReason(b))}
+                      title={itemDeleteBlockedReason(b) || 'تحديد للحذف'}
+                      checked={selectedIds.has(b.id)}
+                      onChange={() =>
+                        setSelectedIds((prev) => {
+                          const n = new Set(prev)
+                          if (n.has(b.id)) n.delete(b.id)
+                          else n.add(b.id)
+                          return n
+                        })
+                      }
+                    />
+                  ) : null}
                   <strong>{b.patientName || 'مريض'}</strong>
                   <span style={{ color: 'var(--text-muted)', marginRight: '0.5rem' }}>
                     {deptLabel[b.department] ?? b.department}
@@ -694,6 +823,7 @@ export function BillingPage() {
                   <p style={{ margin: '0.25rem 0 0', fontWeight: 600 }} dir={itemBillingCurrency(b) === 'USD' ? 'ltr' : undefined}>
                     {formatItemDueLabel(b)}
                   </p>
+                  {b.department === 'laser' ? <LaserVisitBillingBreakdown breakdown={b.laserVisitBreakdown} /> : null}
                   {itemPrepaidCreditSyp(b) > 0 && !b.isCreditTopUp ? (
                     <p style={{ margin: '0.25rem 0 0', fontSize: '0.88rem', color: 'var(--success)' }}>
                       {b.department === 'dental' ? 'رصيد أسنان إضافي' : 'رصيد إضافي للمريض'}:{' '}
@@ -744,12 +874,14 @@ export function BillingPage() {
                         type="button"
                         className="btn btn-secondary"
                         disabled={
+                          bulkBusy ||
                           deleteBusyId === b.id ||
                           busyId === b.id ||
                           packageBusyId === b.id
                         }
+                        title={itemDeleteBlockedReason(b) || 'يُلغى البند ويبقى في السجل مع اسم من حذفه'}
                         onClick={() => void deletePendingItem(b)}
-                        style={{ color: 'var(--danger)' }}
+                        style={{ color: 'var(--danger)', opacity: itemDeleteBlockedReason(b) ? 0.6 : 1 }}
                       >
                         {deleteBusyId === b.id ? 'جاري الحذف…' : 'حذف البند'}
                       </button>
@@ -848,6 +980,7 @@ export function BillingPage() {
             ) : (
               <LaserPulseChargeNote notes={payItem.laserPulseChargeNotes} />
             )}
+            {payItem.department === 'laser' ? <LaserVisitBillingBreakdown breakdown={payItem.laserVisitBreakdown} /> : null}
             <p style={{ margin: '0.35rem 0', fontWeight: 600 }} dir={itemBillingCurrency(payItem) === 'USD' ? 'ltr' : undefined}>
               المستحق: {formatItemDueLabel(payItem)}
             </p>

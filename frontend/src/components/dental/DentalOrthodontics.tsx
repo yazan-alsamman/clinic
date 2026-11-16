@@ -429,6 +429,7 @@ export function DentalOrthodontics({ patientId, canEdit, onFinanceChanged }: Pro
     const paid = installmentPaidTotal(inst)
     const remaining = installmentRemaining(inst, rate)
     if (inst.billingStatus === 'paid' || (paid > 0 && remaining <= 0)) return 'محصّل'
+    if (inst.billingStatus === 'cancelled') return 'محذوف من التحصيل'
     if (inst.billingStatus === 'pending_payment' || inst.billingItemId) return 'بانتظار التحصيل'
     return '—'
   }

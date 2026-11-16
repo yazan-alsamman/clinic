@@ -42,6 +42,13 @@ const billingItemSchema = new mongoose.Schema(
     patientPackageSessionId: { type: String, default: '' },
     /** بند شراء باكج (تحصيل ثمن الباكج نفسه) — معرّف الباكج داخل Patient.sessionPackages */
     packagePurchaseId: { type: String, default: '' },
+    /** حذف البند من شاشة التحصيل (إلغاء لا يمحو السجل): من ومتى ولماذا */
+    cancelledAt: { type: Date, default: null },
+    cancelledByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    cancelledByName: { type: String, default: '' },
+    cancelReason: { type: String, default: '' },
+    /** billing_delete = حذف يدوي من التحصيل (لا يُعاد إنشاؤه تلقائياً من مخطط الأسنان) */
+    cancelSource: { type: String, default: '' },
   },
   { timestamps: true },
 )

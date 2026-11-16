@@ -435,7 +435,9 @@ export function DentalGeneralProcedures({ patientId, canEdit }: Props) {
                     const statusLabel =
                       t.billingStatus === 'paid' || (paid > 0 && remaining <= 0)
                         ? 'محصّل'
-                        : t.billingStatus === 'pending_payment' || t.billingItemId
+                        : t.billingStatus === 'cancelled'
+                          ? 'محذوف من التحصيل'
+                          : t.billingStatus === 'pending_payment' || t.billingItemId
                           ? 'بانتظار التحصيل'
                           : '—'
                     const linkedLab = t.id ? labByTreatmentId.get(String(t.id)) : undefined

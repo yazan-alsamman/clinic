@@ -4,6 +4,7 @@ import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { Patient } from '../models/Patient.js'
 import { demoteAddonOnlyLinkedPackageSession } from './laserPackageBooking.js'
 import { buildVisitDeductionPreviewFromData } from './laserAreaDeductions.js'
+import { attachLaserVisitBreakdowns } from './laserVisitBillingBreakdown.js'
 
 function laserAreaNamesFromSession(ls) {
   const fromLines = []
@@ -174,6 +175,7 @@ export async function finalizePendingBillingDtos(billingItems, dtos) {
     throw new Error('finalizePendingBillingDtos: items/dtos length mismatch')
   }
   await enrichLaserPackageAreaMetrics(billingItems, dtos)
+  await attachLaserVisitBreakdowns(billingItems, dtos)
   await attachLaserAreaLabels(billingItems, dtos)
   return dtos
 }

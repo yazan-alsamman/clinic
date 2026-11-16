@@ -25,6 +25,7 @@ import {
 import { normalizePayCurrency } from '../services/billingPaymentReceipt.js'
 import { finalizePendingBillingDtos } from '../services/billingPendingListEnrichment.js'
 import { repairUnbilledSessions } from '../services/repairUnbilledSessions.js'
+import { BillingCancelError, cancelPendingBillingItem, cancelPendingBillingItems } from '../services/billingItemCancel.js'
 
 /** يُرجع { discountPercent, listAmountDueSyp, effectiveAmountDueSyp } — يرمي إن كانت النسبة غير صالحة */
 function resolveBillingDiscount(listDueSyp, discountPercentBody) {
@@ -1096,52 +1097,36 @@ billingRouter.patch('/:id/admin-full-edit', requireRoles('super_admin'), async (
   }
 })
 
-/** إلغاء بند تحصيل معلّق (مدير النظام فقط) — يُخفى من جدول التحصيل */
+/** إلغاء بند تحصيل معلّق (مدير النظام فقط) — يُخفى من جدول التحصيل ويبقى في السجل */
+function sendCancelError(res, e) {
+  if (e instanceof BillingCancelError) {
+    res.status(e.status).json({ error: e.message, code: e.code, ...e.extra })
+    return
+  }
+  console.error(e)
+  res.status(500).json({ error: 'خطأ في الخادم' })
+}
+
 billingRouter.delete('/:id', requireRoles('super_admin'), async (req, res) => {
   try {
-    const id = String(req.params.id || '').trim()
-    if (!mongoose.isValidObjectId(id)) {
-      res.status(400).json({ error: 'معرّف غير صالح' })
-      return
-    }
-
-    const bi = await BillingItem.findById(id)
-    if (!bi) {
-      res.status(404).json({ error: 'البند غير موجود' })
-      return
-    }
-    if (bi.status !== 'pending_payment') {
-      res.status(400).json({ error: 'يمكن حذف البنود المعلّقة فقط' })
-      return
-    }
-
-    bi.status = 'cancelled'
-    bi.paymentId = null
-    bi.paidAt = null
-    await bi.save()
-
-    try {
-      await writeAudit({
-        user: req.user,
-        action: 'إلغاء بند تحصيل معلّق',
-        entityType: 'BillingItem',
-        entityId: bi._id,
-        details: {
-          previousStatus: 'pending_payment',
-          nextStatus: 'cancelled',
-          department: bi.department,
-          businessDate: bi.businessDate,
-          amountDueSyp: Math.round(Number(bi.amountDueSyp) || 0),
-          procedureLabel: String(bi.procedureLabel || ''),
-        },
-      })
-    } catch (auditErr) {
-      console.error('writeAudit (cancel billing item):', auditErr)
-    }
-
-    res.json({ ok: true, billingItem: { id: String(bi._id), status: bi.status } })
+    const reason = String(req.body?.reason ?? req.query?.reason ?? '')
+    const out = await cancelPendingBillingItem({ id: req.params.id, user: req.user, reason })
+    res.json(out)
   } catch (e) {
-    console.error(e)
-    res.status(500).json({ error: 'خطأ في الخادم' })
+    sendCancelError(res, e)
+  }
+})
+
+/** حذف عدة بنود معلّقة دفعة واحدة — نتيجة مستقلة لكل بند */
+billingRouter.post('/bulk-cancel', requireRoles('super_admin'), async (req, res) => {
+  try {
+    const out = await cancelPendingBillingItems({
+      ids: req.body?.ids,
+      user: req.user,
+      reason: String(req.body?.reason ?? ''),
+    })
+    res.json(out)
+  } catch (e) {
+    sendCancelError(res, e)
   }
 })
