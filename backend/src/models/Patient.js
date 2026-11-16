@@ -46,7 +46,13 @@ const patientPackageSchema = new mongoose.Schema(
     suspended: { type: Boolean, default: false },
     title: { type: String, default: '' },
     sessionsCount: { type: Number, default: 0, min: 1 },
+    /** السعر المعتمد للباكج بعد كل الخصومات — هو أساس الذمة/الرصيد */
     packageTotalSyp: { type: Number, default: 0, min: 0 },
+    /** السعر قبل الخصم (سعر القالب أو السعر المُدخل قبل الخصم) — 0 في الباكجات القديمة */
+    listPriceSyp: { type: Number, default: 0, min: 0 },
+    /** إجمالي الخصم على الباكج (تفصيل كل خصم في DiscountRecord) */
+    discountAmountSyp: { type: Number, default: 0, min: 0 },
+    discountPercent: { type: Number, default: 0, min: 0, max: 100 },
     paidAmountSyp: { type: Number, default: 0, min: 0 },
     settlementDeltaSyp: { type: Number, default: 0 },
     notes: { type: String, default: '' },

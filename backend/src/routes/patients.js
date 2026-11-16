@@ -30,6 +30,12 @@ import {
   fetchUsdSypRateForBusinessDate,
 } from '../services/billingPaymentReceipt.js'
 import { round6 } from '../utils/money.js'
+import { DiscountInputError, percentFromAmount, resolveDiscountEntry } from '../services/discountMath.js'
+import {
+  discountOverviewDepartmentsForRole,
+  loadPatientDiscountOverview,
+  recordDiscount,
+} from '../services/discountRecords.js'
 
 function dtoOptsForRole(role) {
   return role === 'dental_branch' ? { hidePhone: true } : {}
@@ -301,6 +307,82 @@ async function discardUnpaidPackagePurchase(clinicalSessionId) {
   }
 }
 
+/**
+ * خصم بيع الباكج.
+ * يُحسب الخصم على السعر المُدخل للباكج، ويُخفَّض السعر المعتمد للباكج نفسه (packageTotalSyp)، ثم تُحسب الذمة/الرصيد
+ * على السعر بعد الخصم. الخصم لا يُمرَّر لتحصيل بند الشراء (البند = المبلغ المقبوض فعلاً)، لذا لا يُخصم مرتين
+ * ولا يتحوّل فرق الخصم إلى ذمة على المريض.
+ *
+ * إن كان السعر المُدخل أقل من مجموع أسعار القوالب، يُسجَّل الفرق كخصم مستقل (تخفيض سعر عن سعر القالب).
+ */
+export function resolvePackageSaleDiscount(body, enteredTotalSyp, { templateListPriceSyp = 0 } = {}) {
+  const entered = Math.max(0, Math.round(Number(enteredTotalSyp) || 0))
+  const templateList = Math.max(0, Math.round(Number(templateListPriceSyp) || 0))
+  const priceEntry =
+    templateList > entered && entered > 0
+      ? {
+          entryMode: 'amount',
+          discountPercent: percentFromAmount(templateList, templateList - entered),
+          discountAmountSyp: templateList - entered,
+          priceBeforeSyp: templateList,
+          priceAfterSyp: entered,
+        }
+      : null
+  const saleEntry =
+    entered > 0
+      ? resolveDiscountEntry({
+          baseSyp: entered,
+          percent: body?.discountPercent,
+          amountSyp: body?.discountAmountSyp,
+        })
+      : null
+  const listPriceSyp = priceEntry ? templateList : entered
+  const packageTotalSyp = saleEntry ? saleEntry.priceAfterSyp : entered
+  const totalDiscount = Math.max(0, listPriceSyp - packageTotalSyp)
+  return {
+    packageTotalSyp,
+    listPriceSyp,
+    priceEntry,
+    saleEntry,
+    packageFields: {
+      listPriceSyp,
+      discountAmountSyp: totalDiscount,
+      discountPercent: Math.min(100, percentFromAmount(listPriceSyp, totalDiscount)),
+    },
+  }
+}
+
+/** جسم التحصيل لبند شراء الباكج دون حقول الخصم (الخصم طُبّق على سعر الباكج) */
+export function packagePaymentBodyWithoutDiscount(body) {
+  const out = { ...(body || {}) }
+  out.discountPercent = 0
+  delete out.discountAmountSyp
+  return out
+}
+
+async function recordPackageSaleDiscounts({ patient, packageId, department, title, saleDiscount, user }) {
+  const common = {
+    patientId: patient._id,
+    department,
+    targetType: 'patient_package',
+    packageId: String(packageId),
+    serviceLabel: title,
+    listPriceSyp: saleDiscount.listPriceSyp,
+    user,
+  }
+  if (saleDiscount.priceEntry) {
+    await recordDiscount({ ...common, entry: saleDiscount.priceEntry, basis: 'list', source: 'package_price' })
+  }
+  if (saleDiscount.saleEntry) {
+    await recordDiscount({
+      ...common,
+      entry: saleDiscount.saleEntry,
+      basis: saleDiscount.priceEntry ? 'remaining' : 'list',
+      source: 'package_sale',
+    })
+  }
+}
+
 function serializePackage(pkg) {
   return {
     id: String(pkg?._id || ''),
@@ -308,6 +390,9 @@ function serializePackage(pkg) {
     title: String(pkg?.title || ''),
     sessionsCount: Number(pkg?.sessionsCount) || 0,
     packageTotalSyp: Number(pkg?.packageTotalSyp) || 0,
+    listPriceSyp: Number(pkg?.listPriceSyp) || 0,
+    discountAmountSyp: Number(pkg?.discountAmountSyp) || 0,
+    discountPercent: Number(pkg?.discountPercent) || 0,
     paidAmountSyp: Number(pkg?.paidAmountSyp) || 0,
     settlementDeltaSyp: Number(pkg?.settlementDeltaSyp) || 0,
     notes: String(pkg?.notes || ''),
@@ -538,6 +623,40 @@ patientsRouter.get('/:id/clinical-history', async (req, res) => {
       dermatologyVisits,
       appointments,
       dentalPlan,
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/**
+ * الأسعار والخصومات لكل خدمة/جلسة/باكج — لعرضها في نظرة المريض العامة.
+ * قراءة فقط: لا يُنشئ أي حركة مالية. السعر النهائي من السجل المالي المعتمد.
+ * كل دور يرى أقسامه فقط (نفس منطق سجل الجلسات).
+ */
+patientsRouter.get('/:id/discount-overview', async (req, res) => {
+  try {
+    if (!canReadPatients(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const p = await Patient.findById(req.params.id).select('_id sessionPackages').lean()
+    if (!p) {
+      res.status(404).json({ error: 'المريض غير موجود' })
+      return
+    }
+    const departments = discountOverviewDepartmentsForRole(req.user.role)
+    /** طبيب الجلدية يرى إجراءاته فقط (كما في سجل الجلسات) */
+    const onlyProviderUserId = req.user.role === 'dermatology' ? req.user._id : null
+    const overview = await loadPatientDiscountOverview(p, { departments, onlyProviderUserId })
+    res.json({
+      ...overview,
+      departments: departments ? [...departments] : null,
     })
   } catch (e) {
     console.error(e)
@@ -1176,6 +1295,18 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         return
       }
 
+      let saleDiscount
+      try {
+        saleDiscount = resolvePackageSaleDiscount(req.body, packageTotalSyp)
+      } catch (discErr) {
+        if (discErr instanceof DiscountInputError) {
+          res.status(400).json({ error: discErr.message })
+          return
+        }
+        throw discErr
+      }
+      packageTotalSyp = saleDiscount.packageTotalSyp
+
       const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
       const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
       const settlementDeltaSyp = paidAmountSyp - packageTotalSyp
@@ -1203,6 +1334,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         title,
         sessionsCount,
         packageTotalSyp,
+        ...saleDiscount.packageFields,
         paidAmountSyp,
         settlementDeltaSyp,
         notes,
@@ -1246,12 +1378,13 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
             currency: 'SYP',
             businessDate,
             status: 'pending_payment',
+            packagePurchaseId: String(packageId),
           })
           cs.billingItemId = bi._id
           await cs.save()
 
           try {
-            payResult = await completeBillingItemPayment(bi, req.body, req.user, {
+            payResult = await completeBillingItemPayment(bi, packagePaymentBodyWithoutDiscount(req.body), req.user, {
               skipPatientDebtUpdate: true,
             })
           } catch (payErr) {
@@ -1273,6 +1406,15 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
             $addToSet: { departments: 'solarium' },
           },
         )
+
+        await recordPackageSaleDiscounts({
+          patient: p,
+          packageId,
+          department: 'solarium',
+          title,
+          saleDiscount,
+          user: req.user,
+        })
 
         const freshDebtCredit = await Patient.findById(p._id).select('outstandingDebtSyp prepaidCreditSyp').lean()
 
@@ -1350,8 +1492,8 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       return
     }
 
-    const packageTotalSyp = parseNonNegativeSypInteger(req.body?.packageTotalSyp)
-    if (packageTotalSyp == null) {
+    const enteredTotalSyp = parseNonNegativeSypInteger(req.body?.packageTotalSyp)
+    if (enteredTotalSyp == null) {
       res.status(400).json({ error: 'أدخل إجمالي سعر الباكج بالليرة' })
       return
     }
@@ -1360,12 +1502,6 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       res.status(400).json({ error: 'مبلغ المدفوع غير صالح' })
       return
     }
-
-    const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
-    const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
-    const settlementDeltaSyp = paidAmountSyp - packageTotalSyp
-    const debtAfter = debtBefore + Math.max(0, packageTotalSyp - paidAmountSyp)
-    const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
 
     const packageId = new mongoose.Types.ObjectId()
     let laserTplResolved
@@ -1381,7 +1517,26 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       procedureOptionIdsSnap,
       areaCountSnap,
       defaultTitle,
+      listPriceSum,
     } = laserTplResolved
+
+    let saleDiscount
+    try {
+      saleDiscount = resolvePackageSaleDiscount(req.body, enteredTotalSyp, { templateListPriceSyp: listPriceSum })
+    } catch (discErr) {
+      if (discErr instanceof DiscountInputError) {
+        res.status(400).json({ error: discErr.message })
+        return
+      }
+      throw discErr
+    }
+    const packageTotalSyp = saleDiscount.packageTotalSyp
+
+    const debtBefore = Math.round(Number(p.outstandingDebtSyp) || 0)
+    const creditBefore = Math.round(Number(p.prepaidCreditSyp) || 0)
+    const settlementDeltaSyp = paidAmountSyp - packageTotalSyp
+    const debtAfter = debtBefore + Math.max(0, packageTotalSyp - paidAmountSyp)
+    const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
     let title = String(req.body?.title || '').trim().slice(0, 160)
     if (!title) title = String(defaultTitle || '').trim().slice(0, 160)
     if (!title) title = `باكج ليزر (${sessionsCount} جلسة)`
@@ -1408,6 +1563,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       title,
       sessionsCount,
       packageTotalSyp,
+      ...saleDiscount.packageFields,
       paidAmountSyp,
       settlementDeltaSyp,
       notes,
@@ -1453,11 +1609,12 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
           currency: 'SYP',
           businessDate,
           status: 'pending_payment',
+          packagePurchaseId: String(packageId),
         })
         purchaseCs.billingItemId = purchaseBi._id
         await purchaseCs.save()
         try {
-          await completeBillingItemPayment(purchaseBi, req.body, req.user, {
+          await completeBillingItemPayment(purchaseBi, packagePaymentBodyWithoutDiscount(req.body), req.user, {
             skipPatientDebtUpdate: true,
           })
         } catch (payErr) {
@@ -1479,6 +1636,15 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
           $addToSet: { departments: 'laser' },
         },
       )
+
+      await recordPackageSaleDiscounts({
+        patient: p,
+        packageId,
+        department: 'laser',
+        title,
+        saleDiscount,
+        user: req.user,
+      })
 
       const fresh = await Patient.findById(p._id).select('outstandingDebtSyp prepaidCreditSyp').lean()
 

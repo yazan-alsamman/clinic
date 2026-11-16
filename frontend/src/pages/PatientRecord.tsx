@@ -12,6 +12,8 @@ import {
   type PaymentChannel,
 } from '../components/PaymentChannelFields'
 import { BillingPaymentModal } from '../components/BillingPaymentModal'
+import { PatientDiscountOverview } from '../components/PatientDiscountOverview'
+import { computeDiscountPreview, displayPercent, type DiscountMode } from '../utils/discountEntry'
 import { DentalOdontogram } from '../components/dental/DentalOdontogram'
 import { DentalTreatmentPlan } from '../components/dental/DentalTreatmentPlan'
 import { DentalGeneralProcedures } from '../components/dental/DentalGeneralProcedures'
@@ -383,6 +385,10 @@ type PatientPackage = {
   title: string
   sessionsCount: number
   packageTotalSyp: number
+  /** السعر قبل الخصم (0 في الباكجات القديمة) */
+  listPriceSyp?: number
+  discountAmountSyp?: number
+  discountPercent?: number
   paidAmountSyp: number
   settlementDeltaSyp: number
   notes: string
@@ -889,6 +895,8 @@ export function PatientRecord() {
   const [dermSessionFeeSyp, setDermSessionFeeSyp] = useState('')
   const [dermSessionFeeUsd, setDermSessionFeeUsd] = useState('')
   const [dermDiscountPercent, setDermDiscountPercent] = useState('')
+  /** خصم الجلدية: نسبة أو مبلغ ثابت (المبلغ بالليرة فقط) */
+  const [dermDiscountMode, setDermDiscountMode] = useState<DiscountMode>('percent')
   const [dermMaterialsCatalog, setDermMaterialsCatalog] = useState<DermatologyMaterialOption[]>([])
   const [dermSelectedMaterials, setDermSelectedMaterials] = useState<DermatologySelectedMaterial[]>([])
   const [dermSaving, setDermSaving] = useState(false)
@@ -1771,6 +1779,9 @@ export function PatientRecord() {
         title: String(x.title || ''),
         sessionsCount: Number(x.sessionsCount) || 0,
         packageTotalSyp: Number(x.packageTotalSyp) || 0,
+        listPriceSyp: Number(x.listPriceSyp) || 0,
+        discountAmountSyp: Number(x.discountAmountSyp) || 0,
+        discountPercent: Number(x.discountPercent) || 0,
         paidAmountSyp: Number(x.paidAmountSyp) || 0,
         settlementDeltaSyp: Number(x.settlementDeltaSyp) || 0,
         notes: String(x.notes || ''),
@@ -2993,6 +3004,8 @@ export function PatientRecord() {
             </>
           )}
 
+          {id ? <PatientDiscountOverview patientId={id} refreshKey={patient?.sessionPackages?.length} /> : null}
+
           <h3 className="card-title" style={{ fontSize: '0.95rem', marginTop: '1.5rem' }}>
             سجل الجلسات والمعاينات والمواعيد
           </h3>
@@ -3834,8 +3847,18 @@ export function PatientRecord() {
                       لا يمكن حذف الباكج بعد استهلاك جلسة. يمكن إيقافه مؤقتاً.
                     </p>
                   ) : null}
+                  {(pkg.discountAmountSyp ?? 0) > 0 && (pkg.listPriceSyp ?? 0) > pkg.packageTotalSyp ? (
+                    <p style={{ margin: '0.45rem 0 0', fontSize: '0.86rem' }}>
+                      السعر الأصلي: <strong>{renderMoneySyp(pkg.listPriceSyp ?? 0)}</strong> — الخصم:{' '}
+                      <strong style={{ color: 'var(--danger)' }}>
+                        {displayPercent(pkg.discountPercent ?? 0).toLocaleString('ar-SY')}% (−
+                        {renderMoneySyp(pkg.discountAmountSyp ?? 0)})
+                      </strong>
+                    </p>
+                  ) : null}
                   <p style={{ margin: '0.45rem 0', fontSize: '0.88rem' }}>
-                    إجمالي الباكج: <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
+                    {(pkg.discountAmountSyp ?? 0) > 0 ? 'السعر بعد الخصم' : 'إجمالي الباكج'}:{' '}
+                    <strong>{renderMoneySyp(pkg.packageTotalSyp)}</strong> — المدفوع:{' '}
                     <strong>{renderMoneySyp(pkg.paidAmountSyp)}</strong>
                   </p>
                   <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
@@ -5257,14 +5280,52 @@ export function PatientRecord() {
               )}
             </div>
             <div style={{ marginTop: '0.75rem' }}>
-              <label className="form-label">نسبة الخصم % (اختياري)</label>
-              <input
-                className="input"
-                inputMode="decimal"
-                value={dermDiscountPercent}
-                onChange={(e) => setDermDiscountPercent(e.target.value)}
-                placeholder="مثال: 10"
-              />
+              <label className="form-label">
+                {dermFeeCurrency === 'SYP' && dermDiscountMode === 'amount'
+                  ? 'مبلغ الخصم ل.س (اختياري)'
+                  : 'نسبة الخصم % (اختياري)'}
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {dermFeeCurrency === 'SYP' ? (
+                  <select
+                    className="select"
+                    style={{ maxWidth: 170 }}
+                    value={dermDiscountMode}
+                    onChange={(e) => {
+                      setDermDiscountMode(e.target.value === 'amount' ? 'amount' : 'percent')
+                      setDermDiscountPercent('')
+                    }}
+                  >
+                    <option value="percent">نسبة مئوية %</option>
+                    <option value="amount">مبلغ ثابت (ل.س)</option>
+                  </select>
+                ) : null}
+                <input
+                  className="input"
+                  inputMode="decimal"
+                  style={{ flex: 1, minWidth: 140 }}
+                  value={dermDiscountPercent}
+                  onChange={(e) => setDermDiscountPercent(e.target.value)}
+                  placeholder={dermFeeCurrency === 'SYP' && dermDiscountMode === 'amount' ? 'مثال: 30000' : 'مثال: 10'}
+                />
+              </div>
+              {(() => {
+                if (dermFeeCurrency !== 'SYP' || !dermDiscountPercent.trim()) return null
+                const pv = computeDiscountPreview({
+                  baseSyp: Math.max(0, Math.round(parseFloat(normalizeDecimalDigits(dermSessionFeeSyp)) || 0)),
+                  mode: dermDiscountMode,
+                  value: dermDiscountPercent,
+                  minPriceAfterSyp: 0,
+                })
+                if (pv.error) return <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--danger)' }}>{pv.error}</p>
+                if (!pv.valid) return null
+                return (
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                    الخصم: {displayPercent(pv.percent).toLocaleString('ar-SY')}% = −{pv.amountSyp.toLocaleString('ar-SY')} ل.س —
+                    السعر بعد الخصم: <strong>{pv.priceAfterSyp.toLocaleString('ar-SY')} ل.س</strong>
+                  </p>
+                )
+              })()}
             </div>
             {dermErr ? <p style={{ color: 'var(--danger)', marginTop: '0.65rem' }}>{dermErr}</p> : null}
             {dermOk ? <p style={{ color: 'var(--success)', marginTop: '0.65rem' }}>{dermOk}</p> : null}
@@ -5299,7 +5360,27 @@ export function PatientRecord() {
                   setDermErr('أدخل سعر الجلسة بالليرة (رقم صفر أو أكبر).')
                   return
                 }
-                const discountPercent = Math.max(0, Math.min(100, Number.parseFloat(dermDiscountPercent) || 0))
+                const dermAmountMode = dermFeeCurrency === 'SYP' && dermDiscountMode === 'amount'
+                let discountPercent = 0
+                let discountAmountSyp: number | undefined
+                if (dermAmountMode) {
+                  const pv = computeDiscountPreview({
+                    baseSyp: feeSyp,
+                    mode: 'amount',
+                    value: dermDiscountPercent,
+                    minPriceAfterSyp: 0,
+                  })
+                  if (pv.error) {
+                    setDermErr(pv.error)
+                    return
+                  }
+                  if (pv.valid) discountAmountSyp = pv.amountSyp
+                } else {
+                  discountPercent = Math.max(
+                    0,
+                    Math.min(100, Number.parseFloat(normalizeDecimalDigits(dermDiscountPercent)) || 0),
+                  )
+                }
                 const dermScheduleSlotId = /^[a-fA-F0-9]{24}$/.test(bookedDermSlotId) ? bookedDermSlotId : undefined
                 setDermSaving(true)
                 try {
@@ -5314,6 +5395,7 @@ export function PatientRecord() {
                       sessionFeeSyp: dermFeeCurrency === 'SYP' ? feeSyp : undefined,
                       sessionFeeUsd: dermFeeCurrency === 'USD' ? feeUsd : undefined,
                       discountPercent,
+                      ...(discountAmountSyp ? { discountAmountSyp } : {}),
                       procedureDescription: dermProcedureDescription.trim(),
                       notes: dermSessionNotes.trim(),
                       materials: payloadMaterials,

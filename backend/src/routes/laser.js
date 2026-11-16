@@ -30,6 +30,8 @@ import {
   normalizePackageAreaLabel,
 } from '../services/laserPackageAreaBreakdown.js'
 import { todayBusinessDate } from '../utils/date.js'
+import { DiscountInputError, resolveDiscountEntry } from '../services/discountMath.js'
+import { recordDiscount } from '../services/discountRecords.js'
 import { round2 } from '../utils/money.js'
 
 export const laserRouter = Router()
@@ -1726,7 +1728,6 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
      */
     const recordedPackageAreaCount = countLaserPackageNonAddonAreas({ lineItems: normalizedLineItems })
     const isPackageSession = Boolean(packageMatch) && recordedPackageAreaCount > 0
-    const discountPercent = isPackageSession ? 0 : Math.min(100, Math.max(0, Number(body.discountPercent) || 0))
 
     /** إضافة خارج الباكج بعدد الضربات: لا تُسعَّر صفراً بصمت */
     if (isPackageSession) {
@@ -1834,9 +1835,31 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       res.status(400).json({ error: 'أدخل المبلغ الإجمالي بالليرة (رقم صفر أو أكبر)' })
       return
     }
+    /** خصم الجلسة: نسبة أو مبلغ ثابت — يُحفظ كسجل خصم مستقل بعد إنشاء البند */
+    let laserDiscountEntry = null
+    if (!isPackageSession && costGrossSyp > 0) {
+      try {
+        laserDiscountEntry = resolveDiscountEntry({
+          baseSyp: Math.round(costGrossSyp),
+          percent: body.discountPercent,
+          amountSyp: body.discountAmountSyp,
+          /** خصم 100٪ (جلسة مجانية) كان مسموحاً وبقي كذلك */
+          minPriceAfterSyp: 0,
+        })
+      } catch (discErr) {
+        if (discErr instanceof DiscountInputError) {
+          res.status(400).json({ error: discErr.message })
+          return
+        }
+        throw discErr
+      }
+    }
+    const discountPercent = laserDiscountEntry ? laserDiscountEntry.discountPercent : 0
     const amountDueSyp = isPackageSession
       ? Math.round(packageAddOnGrossSyp)
-      : Math.round(costGrossSyp * (1 - discountPercent / 100))
+      : laserDiscountEntry
+        ? laserDiscountEntry.priceAfterSyp
+        : Math.round(costGrossSyp)
     if (!isPackageSession && amountDueSyp < 0) {
       res.status(400).json({ error: 'المبلغ بعد الحسم غير صالح' })
       return
@@ -2299,6 +2322,23 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
       console.error(inner)
       res.status(500).json({ error: 'تعذر حفظ الجلسة أو إنشاء بند الفوترة' })
       return
+    }
+
+    if (laserDiscountEntry && bi?._id && !isPackageSession) {
+      await recordDiscount({
+        patientId: patient._id,
+        department: 'laser',
+        targetType: 'billing_item',
+        billingItemId: bi._id,
+        clinicalSessionId: cs?._id || null,
+        laserSessionId: s._id,
+        serviceLabel: procedureLabel || 'ليزر',
+        entry: laserDiscountEntry,
+        listPriceSyp: Math.round(costGrossSyp),
+        basis: 'list',
+        source: 'laser_session',
+        user: req.user,
+      })
     }
 
     try {

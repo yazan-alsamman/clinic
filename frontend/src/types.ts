@@ -81,6 +81,9 @@ export interface Patient {
     title: string
     sessionsCount: number
     packageTotalSyp: number
+    listPriceSyp?: number
+    discountAmountSyp?: number
+    discountPercent?: number
     paidAmountSyp: number
     settlementDeltaSyp: number
     notes: string

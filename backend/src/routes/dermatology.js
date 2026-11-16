@@ -11,6 +11,8 @@ import { patientToDto } from '../utils/dto.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { writeAudit } from '../utils/audit.js'
 import { postDermatologyVisit } from '../services/postingService.js'
+import { amountFromPercent } from '../services/discountMath.js'
+import { recordDiscount } from '../services/discountRecords.js'
 import {
   applyDermatologyDebtSettlements,
   applyDermatologyProcedureItems,
@@ -347,6 +349,27 @@ dermatologyRouter.post('/visits', requireActiveDay, async (req, res) => {
       providerUserId: req.user._id,
       notes: String(body.notes ?? ''),
     })
+    if (Number(v.discountPercent) > 0 && costSyp > 0) {
+      const discAmount = amountFromPercent(costSyp, v.discountPercent)
+      await recordDiscount({
+        patientId: patient._id,
+        department: 'dermatology',
+        targetType: 'dermatology_visit',
+        dermatologyVisitId: v._id,
+        serviceLabel: v.areaTreatment || v.sessionType,
+        entry: {
+          entryMode: 'percent',
+          discountPercent: Number(v.discountPercent),
+          discountAmountSyp: discAmount,
+          priceBeforeSyp: costSyp,
+          priceAfterSyp: costSyp - discAmount,
+        },
+        listPriceSyp: costSyp,
+        basis: 'list',
+        source: 'dermatology_visit',
+        user: req.user,
+      })
+    }
     try {
       await postDermatologyVisit(v, req.user._id)
     } catch (postErr) {

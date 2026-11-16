@@ -15,41 +15,13 @@ import {
 import { writeAudit } from '../utils/audit.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
+import { DiscountInputError, combineSequentialDiscount, resolveDiscountEntry } from './discountMath.js'
+import { activeDiscountRecordsForBillingItem, recordDiscount } from './discountRecords.js'
 import { BILLING_PAYMENT_DUPLICATE_MSG, isMongoDuplicateKeyError } from '../utils/mongoErrors.js'
 
 /** توافق مع billing.js القديم */
 export function isZeroSypCollectionAllowed(_receivedSyp, netReceivedSyp, dueForSettlement) {
   return isZeroCollectionAllowed(netReceivedSyp, dueForSettlement)
-}
-
-function resolveBillingDiscount(listDueSyp, discountPercentBody) {
-  const list = Math.round(Number(listDueSyp) || 0)
-  if (!(list > 0)) {
-    return { discountPercent: 0, listAmountDueSyp: 0, effectiveAmountDueSyp: 0 }
-  }
-  const raw = Number(discountPercentBody)
-  if (discountPercentBody == null || discountPercentBody === '' || !Number.isFinite(raw) || raw <= 0) {
-    return { discountPercent: 0, listAmountDueSyp: list, effectiveAmountDueSyp: list }
-  }
-  if (raw > 100) {
-    const err = new Error('DISCOUNT_RANGE')
-    throw err
-  }
-  const eff = Math.round(list * (1 - raw / 100))
-  if (eff < 1) {
-    const err = new Error('DISCOUNT_TOO_DEEP')
-    throw err
-  }
-  if (eff >= list) {
-    return { discountPercent: 0, listAmountDueSyp: list, effectiveAmountDueSyp: list }
-  }
-  return { discountPercent: round6(raw), listAmountDueSyp: list, effectiveAmountDueSyp: eff }
-}
-
-function mapDiscountError(err) {
-  if (err && err.message === 'DISCOUNT_RANGE') return 'نسبة الخصم يجب أن تكون بين 0 و 100.'
-  if (err && err.message === 'DISCOUNT_TOO_DEEP') return 'الخصم كبير جداً — المستحق بعد الخصم أصبح أقل من 1 ل.س.'
-  return null
 }
 
 export { parseSypReceivedFromBody, isZeroCollectionAllowed, assertBillingCollectionAmountValid }
@@ -224,28 +196,68 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
 
   const reqBody = body ?? {}
-  let discountMeta
-  if (savedDiscountPercent > 0) {
-    discountMeta = {
-      discountPercent: savedDiscountPercent,
-      listAmountDueSyp: savedListDueSyp,
-      effectiveAmountDueSyp: savedEffectiveDueSyp,
+  /**
+   * خصم جديد عند التحصيل (نسبة أو مبلغ ثابت). إن كان على البند خصم سابق يُطبَّق الجديد بالتسلسل
+   * على السعر المتبقي، ويُحفظ كل خصم كسجل مستقل (DiscountRecord) — لا يُستبدل السابق.
+   */
+  const discountBaseSyp = savedDiscountPercent > 0 ? savedEffectiveDueSyp : savedListDueSyp
+  let discountEntry = null
+  if (discountBaseSyp > 0) {
+    if (isUsdBillingEarly && reqBody.discountAmountSyp != null && Number(reqBody.discountAmountSyp) > 0) {
+      const err = new Error('الخصم بمبلغ ثابت متاح للبنود المسعّرة بالليرة فقط — استخدم النسبة المئوية.')
+      err.code = 'DISCOUNT'
+      throw err
     }
-  } else {
     try {
-      discountMeta = resolveBillingDiscount(savedListDueSyp, reqBody.discountPercent)
+      discountEntry = resolveDiscountEntry({
+        baseSyp: discountBaseSyp,
+        percent: reqBody.discountPercent,
+        amountSyp: reqBody.discountAmountSyp,
+      })
     } catch (e) {
-      const msg = mapDiscountError(e)
-      if (msg) {
-        const err = new Error(msg)
+      if (e instanceof DiscountInputError) {
+        const err = new Error(e.message)
         err.code = 'DISCOUNT'
         throw err
       }
       throw e
     }
   }
+  let discountMeta
+  if (savedDiscountPercent > 0) {
+    if (discountEntry) {
+      const combined = combineSequentialDiscount({
+        listSyp: savedListDueSyp,
+        currentEffectiveSyp: savedEffectiveDueSyp,
+        entry: discountEntry,
+      })
+      discountMeta = {
+        discountPercent: combined.discountPercent,
+        listAmountDueSyp: combined.listAmountDueSyp,
+        effectiveAmountDueSyp: combined.effectiveAmountDueSyp,
+      }
+    } else {
+      discountMeta = {
+        discountPercent: savedDiscountPercent,
+        listAmountDueSyp: savedListDueSyp,
+        effectiveAmountDueSyp: savedEffectiveDueSyp,
+      }
+    }
+  } else if (discountEntry) {
+    discountMeta = {
+      discountPercent: discountEntry.discountPercent,
+      listAmountDueSyp: savedListDueSyp,
+      effectiveAmountDueSyp: discountEntry.priceAfterSyp,
+    }
+  } else {
+    discountMeta = {
+      discountPercent: 0,
+      listAmountDueSyp: savedListDueSyp > 0 ? savedListDueSyp : 0,
+      effectiveAmountDueSyp: savedListDueSyp > 0 ? savedListDueSyp : 0,
+    }
+  }
   const isCreditTopUp = bi.isCreditTopUp === true
-  if (isCreditTopUp && discountMeta.discountPercent > 0) {
+  if (isCreditTopUp && discountEntry) {
     const err = new Error('لا يمكن تطبيق خصم على شحن الرصيد الإضافي.')
     err.code = 'DISCOUNT'
     throw err
@@ -406,6 +418,24 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
   }
   await bi.save()
 
+  if (discountEntry) {
+    const ctx = await priorDiscountContext(bi, { savedListDueSyp, savedDiscountPercent })
+    await recordDiscount({
+      patientId: bi.patientId,
+      department: bi.department,
+      targetType: 'billing_item',
+      billingItemId: bi._id,
+      clinicalSessionId: bi.clinicalSessionId,
+      serviceLabel: bi.procedureLabel,
+      entry: discountEntry,
+      listPriceSyp: ctx.listPriceSyp,
+      basis: ctx.hasPrior ? 'remaining' : 'list',
+      source: 'payment',
+      user: receivedByUser,
+      appliedAt: payment.receivedAt || new Date(),
+    })
+  }
+
   if (bi.department === 'laser') {
     await LaserSession.updateOne({ billingItemId: bi._id }, { $set: { status: 'completed' } })
   }
@@ -565,4 +595,27 @@ export async function completeBillingItemPayment(bi, body, receivedByUser, opts 
       discountPercent: payment.discountPercent,
     },
   }
+}
+
+/**
+ * هل على البند خصم سابق (سجل فعّال، أو خصم قديم على البند/جلسة الليزر)؟ وما السعر الأصلي؟
+ * يُستخدم لتحديد أساس الخصم الجديد (من الأصلي أم من المتبقي).
+ */
+async function priorDiscountContext(bi, { savedListDueSyp, savedDiscountPercent }) {
+  const active = await activeDiscountRecordsForBillingItem(bi._id)
+  if (active.length) {
+    return { hasPrior: true, listPriceSyp: Math.round(Number(active[0].listPriceSyp || active[0].priceBeforeSyp) || 0) }
+  }
+  if (bi.department === 'laser') {
+    try {
+      const ls = await LaserSession.findOne({ billingItemId: bi._id }).select('costSyp discountPercent isPackageSession').lean()
+      const cost = Math.round(Number(ls?.costSyp) || 0)
+      if (ls && ls.isPackageSession !== true && Number(ls.discountPercent) > 0 && cost > savedListDueSyp) {
+        return { hasPrior: true, listPriceSyp: cost }
+      }
+    } catch (e) {
+      console.error('priorDiscountContext laser:', e)
+    }
+  }
+  return { hasPrior: savedDiscountPercent > 0, listPriceSyp: savedListDueSyp }
 }
