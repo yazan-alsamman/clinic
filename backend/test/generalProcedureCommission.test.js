@@ -33,7 +33,7 @@ import {
   applyDentalDebtAllocationsToChart,
 } from '../src/services/dentalChartBilling.js'
 import { mergePreviousGeneralBillingLinks } from '../src/routes/dental.js'
-import { computeLaserSpecialistShares } from '../src/routes/finance.js'
+import { computeLaserSpecialistShares, laserProfitSyp } from '../src/routes/finance.js'
 import {
   aggregateReceptionPaidItems,
   composeReceptionInventoryPayload,
@@ -375,6 +375,14 @@ describe('Test F — عمولات الأخصائيين والصندوق', () => 
     assert.equal(out.specialists[0].sharePercent, 10)
     assert.equal(out.specialists[0].shareSyp, 100_000)
     assert.equal(out.specialistSharesTotalSyp, 100_000)
+  })
+
+  test('ربح الليزر يطرح حصص الأخصائيين مرة واحدة', () => {
+    assert.equal(
+      laserProfitSyp({ revenueSyp: 1_000_000, expensesSyp: 200_000, specialistSharesSyp: 100_000 }),
+      700_000,
+    )
+    assert.equal(laserProfitSyp({ revenueSyp: 500_000, expensesSyp: 0, specialistSharesSyp: 0 }), 500_000)
   })
 
   test('الصندوق = التحصيل − المصاريف اليدوية + المقبوضات؛ لا خصم تلقائي للعمولات', () => {

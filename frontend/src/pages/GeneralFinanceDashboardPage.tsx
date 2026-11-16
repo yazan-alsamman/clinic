@@ -477,7 +477,8 @@ export function GeneralFinanceDashboardPage() {
             <h3 style={{ margin: 0, fontSize: '0.92rem' }}>إجمالي الربح</h3>
             <p style={{ margin: '0.35rem 0 0', fontWeight: 800 }}>{fmtSyp(data?.laser.totalProfitSyp || 0)}</p>
             <p className="page-desc" style={{ margin: '0.35rem 0 0', fontSize: '0.78rem' }}>
-              إيراد الليزر − مصاريف الليزر.
+              إيراد الليزر − مصاريف الليزر − حصص الأخصائيين ({fmtSyp(data?.laser.specialistSharesTotalSyp || 0)}). لا
+              تسجّل دفع الحصص كمصروف ليزر حتى لا تُطرح مرتين.
             </p>
           </div>
           <div className="card" style={{ borderColor: '#a78bfa' }}>
