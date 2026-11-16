@@ -93,6 +93,8 @@ export interface Patient {
     procedureOptionIds?: string[]
     areaCount?: number
     suspended?: boolean
+    /** ليزر: عدد إنقاصات المناطق الفعّالة */
+    activeAreaDeductionCount?: number
     sessions: Array<{
       id: string
       label: string
