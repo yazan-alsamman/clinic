@@ -3,8 +3,8 @@ import { BillingItem } from '../models/BillingItem.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { Patient } from '../models/Patient.js'
-import { buildPackageAreaBreakdown } from './laserPackageAreaBreakdown.js'
-import { computePackageAreaLedger, packageHasRemainingAreaSessions } from './packageAreaLedger.js'
+import { areaBelongsToLaserPackage, buildPackageAreaBreakdown } from './laserPackageAreaBreakdown.js'
+import { allocateVisitTreatedAreas, computePackageAreaLedger, packageHasRemainingAreaSessions } from './packageAreaLedger.js'
 
 function packageExpectedAreaCount(pkg) {
   const ids = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
@@ -198,6 +198,49 @@ export async function resolveLaserPackagesForBooking(patientLike, packageIds, sl
     matches.push(match)
   }
   return { matches, primary: matches[0], error: null }
+}
+
+/**
+ * عدة باكجات منفصلة في زيارة واحدة (مثلاً باكج يدين + باكج رجلين):
+ * حين يُحجز الموعد على باكج واحد ويعالج الأخصائي منطقة من باكج آخر فعّال للمريض،
+ * تُضاف تلك الباكجات للزيارة بدل أن تُعامل المنطقة كخدمة إضافية مدفوعة.
+ * - سطور «خارج الباكج» الصريحة (isAddon) لا تُمس.
+ * - يُضاف الباكج فقط إن كان لمنطقته المعالجة رصيد متبقٍ.
+ * @returns {{ pkg: object, session: null, mode: 'visit', expectedAreas: number }[]}
+ */
+export function findAdditionalVisitPackages({ patient, matchedPackageIds, lineItems, optionMetaById = new Map() }) {
+  const lines = (Array.isArray(lineItems) ? lineItems : []).filter(
+    (r) => r && r.isAddon !== true && (String(r.procedureOptionId || '').trim() || String(r.areaLabel || '').trim()),
+  )
+  if (!lines.length) return []
+  const matched = new Set((matchedPackageIds || []).map((x) => String(x || '')).filter(Boolean))
+  const laserPkgs = (Array.isArray(patient?.sessionPackages) ? patient.sessionPackages : []).filter(
+    (p) => String(p?.department || '') === 'laser' && p.suspended !== true,
+  )
+  const coveredIds = laserPkgs
+    .filter((p) => matched.has(String(p._id)))
+    .flatMap((p) => (Array.isArray(p.procedureOptionIds) ? p.procedureOptionIds : []))
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+  let pending = lines.filter(
+    (r) => !areaBelongsToLaserPackage(r.procedureOptionId, r.areaLabel, coveredIds, optionMetaById),
+  )
+  const out = []
+  for (const pkg of laserPkgs) {
+    if (!pending.length) break
+    if (matched.has(String(pkg._id))) continue
+    if (!packageHasRemainingAreaSessions(pkg)) continue
+    const ledger = computePackageAreaLedger(pkg, { optionMetaById })
+    const { byPackageId, uncoveredLineIndexes } = allocateVisitTreatedAreas([{ pkg, ledger }], pending, optionMetaById)
+    if (!(byPackageId.get(String(pkg._id))?.size > 0)) continue
+    const match = findFreshLaserPackageSession(patient, String(pkg._id))
+    if (!match) continue
+    out.push(match)
+    matched.add(String(pkg._id))
+    const still = new Set(uncoveredLineIndexes)
+    pending = pending.filter((_, i) => still.has(i))
+  }
+  return out
 }
 
 export async function attachPackageSessionsToLaserSession({ patientId, matches, laserSessionId, billingItemId }) {

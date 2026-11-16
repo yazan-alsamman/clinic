@@ -471,6 +471,8 @@ export function ToothTreatmentModal({
                   <strong>التحصيل: </strong>
                   {draft.billingStatus === 'paid' || (paid > 0 && remaining <= 0) ? (
                     <span style={{ color: 'var(--success)' }}>محصّل من الاستقبال</span>
+                  ) : draft.billingStatus === 'cancelled' ? (
+                    <span style={{ color: 'var(--text-muted)' }}>محذوف من التحصيل (بواسطة المدير)</span>
                   ) : draft.billingStatus === 'pending_payment' || draft.billingItemId ? (
                     <span style={{ color: 'var(--warning)' }}>بانتظار التحصيل في الاستقبال</span>
                   ) : (

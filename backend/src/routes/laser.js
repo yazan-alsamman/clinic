@@ -24,7 +24,7 @@ import {
   mergeLaserDebtSettlementsIntoPaymentBreakdown,
 } from '../services/patientDebtSettlementAllocation.js'
 import { allocateVisitTreatedAreas, computePackageAreaLedger } from '../services/packageAreaLedger.js'
-import { resolveLaserPackageSessionForBooking, resolveLaserPackagesForBooking, attachPackageSessionsToLaserSession, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas } from '../services/laserPackageBooking.js'
+import { resolveLaserPackageSessionForBooking, resolveLaserPackagesForBooking, attachPackageSessionsToLaserSession, normalizeLaserSlotPackageModeForResolve, countLaserPackageNonAddonAreas, findAdditionalVisitPackages } from '../services/laserPackageBooking.js'
 import { areaBelongsToLaserPackage } from '../services/laserPackageAreaBreakdown.js'
 import { todayBusinessDate } from '../utils/date.js'
 import { DiscountInputError, resolveDiscountEntry } from '../services/discountMath.js'
@@ -1561,12 +1561,21 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
           .filter(Boolean),
       ),
     ]
-    const packageOptionIdSet = new Set(packageIdList)
+    /** مناطق باكجات الليزر الأخرى للمريض — لاكتشاف منطقة عولجت من باكج آخر غير المحجوز */
+    const otherLaserPackageOptionIds =
+      packageMatch && !skipLaserPackage
+        ? (patient.sessionPackages || [])
+            .filter((p) => String(p?.department || '') === 'laser' && p.suspended !== true)
+            .flatMap((p) => (Array.isArray(p.procedureOptionIds) ? p.procedureOptionIds : []))
+            .map((x) => String(x || '').trim())
+            .filter((x) => /^[a-f0-9]{24}$/i.test(x))
+        : []
     const allProcedureOptionIds = [
       ...new Set([
         ...effectiveMainOptionIds,
         ...addonProcedureOptionIds,
         ...packageIdList,
+        ...otherLaserPackageOptionIds,
         ...rawLineItems.map((row) => String(row.procedureOptionId || '').trim()).filter(Boolean),
       ]),
     ]
@@ -1598,6 +1607,34 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         { name: String(row?.name || '').trim(), kind: String(row?.kind || 'area').trim() },
       ]),
     )
+
+    /**
+     * عدة باكجات منفصلة في نفس الزيارة: منطقة عولجت من باكج آخر فعّال للمريض (غير المحجوز)
+     * تُنقص من ذلك الباكج — لا تُحوَّل لخدمة إضافية مدفوعة.
+     */
+    if (packageMatch && !skipLaserPackage) {
+      const visitLines =
+        rawLineItems.length > 0
+          ? rawLineItems
+          : effectiveMainOptionIds.map((id) => ({ procedureOptionId: id, areaLabel: '', isAddon: false }))
+      const extraMatches = findAdditionalVisitPackages({
+        patient,
+        matchedPackageIds: (packageMatches.length ? packageMatches : [packageMatch]).map((m) => String(m.pkg._id)),
+        lineItems: visitLines,
+        optionMetaById,
+      })
+      if (extraMatches.length) {
+        if (!packageMatches.length) packageMatches = [packageMatch]
+        packageMatches = [...packageMatches, ...extraMatches]
+        for (const m of extraMatches) {
+          for (const id of m.pkg.procedureOptionIds || []) {
+            const sid = String(id || '').trim()
+            if (sid && !packageIdList.includes(sid)) packageIdList.push(sid)
+          }
+        }
+      }
+    }
+    const packageOptionIdSet = new Set(packageIdList)
 
     // تصنيف ضمن/خارج الباكج: مناطق الباكج (معرّف أو اسم) + ما اختاره الأخصائي في القسم الرئيسي
     if (packageMatch && packageOptionIdSet.size > 0) {
@@ -1742,7 +1779,15 @@ laserRouter.post('/sessions', requireActiveDay, requireRoles(...LASER_SESSION_CR
         pkg: m.pkg,
         ledger: computePackageAreaLedger(m.pkg, { optionMetaById }),
       }))
-      const { uncoveredLineIndexes } = allocateVisitTreatedAreas(ordered, normalizedLineItems, optionMetaById)
+      const { byPackageId, uncoveredLineIndexes } = allocateVisitTreatedAreas(ordered, normalizedLineItems, optionMetaById)
+      /** الباكج الأساسي للزيارة = أول باكج عولجت منه منطقة فعلاً (مثلاً رجلين فقط رغم الحجز على باكج اليدين) */
+      if (packageMatches.length > 1 && !(byPackageId.get(String(packageMatch.pkg._id))?.size > 0)) {
+        const firstUsed = packageMatches.find((m) => byPackageId.get(String(m.pkg._id))?.size > 0)
+        if (firstUsed) {
+          packageMatches = [firstUsed, ...packageMatches.filter((m) => m !== firstUsed)]
+          packageMatch = firstUsed
+        }
+      }
       if (uncoveredLineIndexes.length > 0) {
         const labels = uncoveredLineIndexes.map((i) => normalizedLineItems[i]?.areaLabel || 'منطقة')
         res.status(400).json({

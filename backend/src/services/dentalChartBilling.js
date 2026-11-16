@@ -11,6 +11,14 @@ import { todayBusinessDate } from '../utils/date.js'
 import { round6 } from '../utils/money.js'
 import { isCashSessionRule, sessionForIncomingPayment } from './generalProcedureSessions.js'
 
+/**
+ * بند حذفه المدير من شاشة التحصيل (إلغاء صريح مع سجل تدقيق) لا يُعاد إنشاؤه بصمت عند أي حفظ لاحق
+ * لمخطط الأسنان — كان هذا يُظهر البند «المحذوف» مجدداً في التحصيل. لإعادة الفوترة يُضاف الإجراء من جديد.
+ */
+export function isManuallyCancelledBillingItem(bi) {
+  return Boolean(bi) && bi.status === 'cancelled' && String(bi.cancelSource || '') === 'billing_delete'
+}
+
 function roundMoney(n) {
   return Math.round(Number(n) || 0)
 }
@@ -158,7 +166,7 @@ async function syncOneOrthoInstallment(patient, orthoCase, inst, { actorUserId, 
       updated += 1
       return { created, updated, cancelled, dirty }
     }
-    if (bi && bi.status === 'paid') {
+    if (bi && (bi.status === 'paid' || isManuallyCancelledBillingItem(bi))) {
       return { created, updated, cancelled, dirty }
     }
     inst.billingItemId = undefined
@@ -321,7 +329,7 @@ async function syncOneDentalTreatment(patient, tr, { actorUserId, fallbackDate, 
       updated += 1
       return { created, updated, cancelled, dirty }
     }
-    if (bi && bi.status === 'paid') {
+    if (bi && (bi.status === 'paid' || isManuallyCancelledBillingItem(bi))) {
       return { created, updated, cancelled, dirty }
     }
     tr.billingItemId = undefined

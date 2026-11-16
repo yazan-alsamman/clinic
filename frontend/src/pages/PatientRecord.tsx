@@ -4465,7 +4465,7 @@ export function PatientRecord() {
                         <td>{s.procedureDescription || '—'}</td>
                         <td>{s.providerName}</td>
                         <td>{Number(s.amountDueSyp || 0).toLocaleString('ar-SY')} ل.س</td>
-                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : 'معلّق'}</td>
+                        <td>{s.isPackagePrepaid ? 'مدفوعة مسبقاً (باكج)' : s.billingStatus === 'paid' ? 'مدفوع' : s.billingStatus === 'cancelled' ? 'محذوف من التحصيل' : 'معلّق'}</td>
                         <td>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                             <button
@@ -5145,7 +5145,9 @@ export function PatientRecord() {
                                   ? 'مدفوعة مسبقاً (باكج)'
                                   : s.billingStatus === 'paid'
                                     ? 'مدفوع'
-                                    : 'معلّق'}
+                                    : s.billingStatus === 'cancelled'
+                                      ? 'محذوف من التحصيل'
+                                      : 'معلّق'}
                               </td>
                               <td>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
@@ -5566,7 +5568,9 @@ export function PatientRecord() {
                             ? 'مدفوعة مسبقاً (باكج)'
                             : s.billingStatus === 'paid'
                               ? 'مدفوع'
-                              : 'بانتظار التحصيل'}
+                              : s.billingStatus === 'cancelled'
+                                ? 'محذوف من التحصيل'
+                                : 'بانتظار التحصيل'}
                         </div>
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
@@ -5722,7 +5726,9 @@ export function PatientRecord() {
                               ? 'مدفوعة مسبقاً (باكج)'
                               : s.billingStatus === 'paid'
                                 ? 'مدفوع'
-                                : 'معلّق'}
+                                : s.billingStatus === 'cancelled'
+                                  ? 'محذوف من التحصيل'
+                                  : 'معلّق'}
                           </td>
                           <td>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
@@ -5796,7 +5802,9 @@ export function PatientRecord() {
                   ? 'مدفوعة مسبقاً (باكج)'
                   : clinicalSessionDetail.billingStatus === 'paid'
                     ? 'مدفوع'
-                    : 'معلّق'}
+                    : clinicalSessionDetail.billingStatus === 'cancelled'
+                      ? 'محذوف من التحصيل'
+                      : 'معلّق'}
               </div>
             </div>
             <ClinicalSessionDetailExtras session={clinicalSessionDetail} />
