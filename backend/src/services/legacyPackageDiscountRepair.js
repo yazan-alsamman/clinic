@@ -16,6 +16,8 @@ import { Patient } from '../models/Patient.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { DiscountRecord } from '../models/DiscountRecord.js'
+/** يسجّل نموذج User لأن populate('receivedBy') يحتاجه حين يعمل السكربت خارج الخادم */
+import '../models/User.js'
 import { writeAudit } from '../utils/audit.js'
 import { amountFromPercent, percentFromAmount } from './discountMath.js'
 import { isLegacyPackagePurchaseItem, matchLegacyPurchaseToPackage } from './discountRecords.js'
