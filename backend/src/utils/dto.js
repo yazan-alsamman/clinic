@@ -49,6 +49,10 @@ export function patientToDto(p, opts = {}) {
           procedureOptionIds: Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : [],
           areaCount: Number(pkg?.areaCount) || 0,
           suspended: pkg?.suspended === true,
+          /** ليزر: عدد إنقاصات المناطق الفعّالة */
+          activeAreaDeductionCount: (Array.isArray(pkg?.areaDeductions) ? pkg.areaDeductions : []).filter(
+            (d) => !d?.reversedAt,
+          ).length,
           createdAt: pkg?.createdAt ? new Date(pkg.createdAt).toISOString() : null,
           sessions: Array.isArray(pkg?.sessions)
             ? pkg.sessions.map((s) => ({

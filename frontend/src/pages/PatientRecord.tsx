@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { canAccessSkinCareTab, canAccessTab } from '../data/nav'
 import { api, ApiError } from '../api/client'
+import { LaserAddonServicesList, LaserPackageAreaLedgerCard } from '../components/LaserPackageAreaLedger'
+import { useLaserPackageLedger } from '../utils/laserPackageLedger'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 import {
   PaymentChannelFields,
@@ -399,6 +401,7 @@ type PatientPackage = {
   procedureOptionIds?: string[]
   areaCount?: number
   suspended?: boolean
+  activeAreaDeductionCount?: number
 }
 
 type LaserPackageTemplateListItem = {
@@ -411,6 +414,7 @@ type LaserPackageTemplateListItem = {
 }
 
 function patientPackageHasUsedSession(pkg: PatientPackage): boolean {
+  if ((pkg.activeAreaDeductionCount ?? 0) > 0) return true
   return (pkg.sessions || []).some(
     (s) =>
       s.completedByReception ||
@@ -1795,6 +1799,7 @@ export function PatientRecord() {
         procedureOptionIds: Array.isArray(x.procedureOptionIds) ? x.procedureOptionIds.map(String) : undefined,
         areaCount: typeof x.areaCount === 'number' ? x.areaCount : undefined,
         suspended: (x as { suspended?: boolean }).suspended === true,
+        activeAreaDeductionCount: Number(x.activeAreaDeductionCount) || 0,
         sessions: Array.isArray(x.sessions)
           ? x.sessions.map((s) => ({
               id: String(s.id),
@@ -1817,6 +1822,8 @@ export function PatientRecord() {
           : [],
       }))
   }, [patient])
+  /** رصيد كل منطقة في باكجات الليزر + الخدمات خارج الباكج */
+  const laserLedger = useLaserPackageLedger(id, patient?.sessionPackages)
 
   const activeLaserPackage = useMemo(() => {
     const wantedId = bookedLaserPkgId
@@ -3687,7 +3694,7 @@ export function PatientRecord() {
                 const canPausePkg = pkg.department === 'laser' || pkg.department === 'solarium'
                 return (
                 <div key={pkg.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.8rem' }}>
-                  {(() => {
+                  {pkg.department === 'solarium' && (() => {
                     const remainingSessions = pkg.sessions.filter((s) => !s.completedByReception).length
                     return (
                       <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
@@ -3872,6 +3879,18 @@ export function PatientRecord() {
                       <> — المدفوع عند الإنشاء يظهر في الجرد المالي ضمن السولاريوم.</>
                     ) : null}
                   </p>
+                  {pkg.department === 'laser' && id ? (
+                    <LaserPackageAreaLedgerCard
+                      patientId={id}
+                      role={role}
+                      ledger={laserLedger.data?.packages.find((l) => l.packageId === pkg.id)}
+                      onChanged={(next) => laserLedger.setData(next)}
+                    />
+                  ) : null}
+                  {laserLedger.err && pkg.department === 'laser' ? (
+                    <p style={{ color: 'var(--danger)', fontSize: '0.84rem' }}>{laserLedger.err}</p>
+                  ) : null}
+                  {pkg.department === 'solarium' ? (
                   <div style={{ display: 'grid', gap: '0.4rem' }}>
                     {pkg.sessions.map((s) => (
                       <label
@@ -3967,6 +3986,7 @@ export function PatientRecord() {
                       </label>
                     ))}
                   </div>
+                  ) : null}
                   {pkg.notes ? (
                     <p style={{ margin: '0.55rem 0 0', color: 'var(--text-muted)', fontSize: '0.83rem' }}>
                       {pkg.notes}
@@ -3975,6 +3995,7 @@ export function PatientRecord() {
                 </div>
                 )
               })}
+              <LaserAddonServicesList services={laserLedger.data?.addonServices || []} />
             </div>
           )}
         </div>

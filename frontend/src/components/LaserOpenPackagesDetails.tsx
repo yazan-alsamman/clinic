@@ -16,6 +16,8 @@ export type LaserBookingOpenPackage = {
   isPartial: boolean
   isFreshTarget: boolean
   hasContinue?: boolean
+  /** رصيد كل منطقة على حدة */
+  areaBalances?: { key: string; label: string; sessionsTotal: number; usedSessions: number; remainingSessions: number }[]
 }
 
 export type LaserBookingContext = {
@@ -121,11 +123,26 @@ export function LaserOpenPackagesDetails({
                 </span>
               ) : null}
             </div>
-            <div>
-              الجلسات: اكتمل {pkg.sessionsCompleted} من {pkg.sessionsCount}
-              {pkg.sessionsAvailable > 0 ? ` — متاح للحجز الآن: ${pkg.sessionsAvailable}` : ''}
-              {pkg.sessionsLinkedOpen > 0 ? ` — جارية/مربوطة: ${pkg.sessionsLinkedOpen}` : ''}
-            </div>
+            {(pkg.areaBalances || []).length > 0 ? (
+              <div>
+                الرصيد لكل منطقة:{' '}
+                {(pkg.areaBalances || []).map((a, i) => (
+                  <span key={a.key}>
+                    {i > 0 ? '، ' : ''}
+                    {a.label}{' '}
+                    <strong style={{ color: a.remainingSessions > 0 ? undefined : 'var(--danger)' }}>
+                      {a.remainingSessions}/{a.sessionsTotal}
+                    </strong>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div>
+                الجلسات: اكتمل {pkg.sessionsCompleted} من {pkg.sessionsCount}
+                {pkg.sessionsAvailable > 0 ? ` — متاح للحجز الآن: ${pkg.sessionsAvailable}` : ''}
+                {pkg.sessionsLinkedOpen > 0 ? ` — جارية/مربوطة: ${pkg.sessionsLinkedOpen}` : ''}
+              </div>
+            )}
             <div>
               نوع الباكج / المناطق ({pkg.areaCount}):{' '}
               <strong>{pkg.areaLabels.length ? pkg.areaLabels.join('، ') : '—'}</strong>
