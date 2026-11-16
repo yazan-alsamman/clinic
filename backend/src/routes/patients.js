@@ -17,6 +17,14 @@ import { completeBillingItemPayment } from '../services/billingPaymentCompletion
 import { getClinicalBundleForPatientId } from '../services/patientClinicalBundle.js'
 import { getLaserBookingContextForPatient, demoteAddonOnlyLinkedPackageSession } from '../services/laserPackageBooking.js'
 import { buildPackageAreaBreakdown } from '../services/laserPackageAreaBreakdown.js'
+import { applyAreaSessionCounts, derivePackageAreaDefinitions, packageHasAreaDeductions } from '../services/packageAreaLedger.js'
+import {
+  AreaDeductionError,
+  applyLaserAreaDeductions,
+  buildPatientLaserPackageLedger,
+  buildVisitDeductionPreview,
+  reverseLaserAreaDeduction,
+} from '../services/laserAreaDeductions.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { provisionPortalCredentials, randomPasswordPlain } from '../utils/patientPortalCredentials.js'
 import { buildAdminOpenFinancialLines, buildLedgerEntriesFromBilling } from '../services/openFinancialBalanceLines.js'
@@ -199,6 +207,7 @@ function packageSessionWasUsed(sess) {
 }
 
 function packageHasAnyUsedSession(pkg) {
+  if (packageHasAreaDeductions(pkg)) return true
   return (Array.isArray(pkg?.sessions) ? pkg.sessions : []).some(packageSessionWasUsed)
 }
 
@@ -220,6 +229,16 @@ function packageSessionLabelAr(zeroBasedIndex) {
   ]
   if (n >= 1 && n <= 10) return `الجلسة ${ord[n]}`
   return `الجلسة ${n.toLocaleString('ar-SY')}`
+}
+
+/** مناطق باكج ليزر من خيارات المناطق (العرض متعدد المناطق = مناطق مستقلة) */
+async function laserAreaDefinitionsForOptions(procedureOptionIds, sessionsCount) {
+  const ids = (procedureOptionIds || []).filter((x) => mongoose.isValidObjectId(x))
+  const rows = ids.length ? await LaserProcedureOption.find({ _id: { $in: ids } }).select('name kind').lean() : []
+  return derivePackageAreaDefinitions(
+    { procedureOptionIds, sessionsCount },
+    new Map(rows.map((r) => [String(r._id), { name: String(r.name || '').trim(), kind: String(r.kind || 'area') }])),
+  )
 }
 
 /** دمج قالب أو أكثر لباكج ليزر واحد (مناطق + أسعار قائمة) */
@@ -423,7 +442,18 @@ function serializePackage(pkg) {
     procedureOptionIds: Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds.map(String) : [],
     areaCount: Number(pkg?.areaCount) || 0,
     suspended: pkg?.suspended === true,
+    /** ليزر: عدد إنقاصات المناطق الفعّالة (التفصيل في /laser-package-ledger) */
+    activeAreaDeductionCount: (Array.isArray(pkg?.areaDeductions) ? pkg.areaDeductions : []).filter((d) => !d?.reversedAt)
+      .length,
   }
+}
+
+function sendAreaDeductionError(res, e) {
+  if (e instanceof AreaDeductionError) {
+    res.status(e.status || 400).json({ error: e.message })
+    return true
+  }
+  return false
 }
 
 export const patientsRouter = Router()
@@ -1254,6 +1284,27 @@ patientsRouter.get('/:id/packages', async (req, res) => {
   }
 })
 
+/** مناطق الباكج قبل البيع — لتحديد عدد جلسات مختلف لكل منطقة */
+patientsRouter.post('/:id/packages/laser-area-preview', async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    const sessionsCount = Math.max(1, Math.min(200, Number.parseInt(String(req.body?.sessionsCount || '1'), 10) || 1))
+    const { procedureOptionIdsSnap } = await resolveLaserPackageTemplatesFromBody(req.body)
+    const areas = await laserAreaDefinitionsForOptions(procedureOptionIdsSnap, sessionsCount)
+    res.json({ areas })
+  } catch (e) {
+    if (e?.status) {
+      res.status(e.status).json({ error: String(e.message || e) })
+      return
+    }
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
   try {
     if (!canManagePackages(req.user.role)) {
@@ -1520,6 +1571,21 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
       listPriceSum,
     } = laserTplResolved
 
+    /** مناطق الباكج برصيد مستقل لكل منطقة — عدد الجلسات قابل للتحديد لكل منطقة (areaSessionCounts) */
+    let areaSessions
+    try {
+      areaSessions = applyAreaSessionCounts(
+        await laserAreaDefinitionsForOptions(procedureOptionIdsSnap, sessionsCount),
+        sessionsCount,
+        req.body?.areaSessionCounts,
+      )
+    } catch (areaErr) {
+      if (sendAreaDeductionError(res, areaErr)) return
+      throw areaErr
+    }
+    /** عدد جلسات الباكج = أكبر رصيد منطقة (للعرض والتوافق) */
+    const laserSessionsCount = Math.max(sessionsCount, ...areaSessions.map((a) => a.sessionsTotal))
+
     let saleDiscount
     try {
       saleDiscount = resolvePackageSaleDiscount(req.body, enteredTotalSyp, { templateListPriceSyp: listPriceSum })
@@ -1539,9 +1605,9 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     const creditAfter = creditBefore + Math.max(0, paidAmountSyp - packageTotalSyp)
     let title = String(req.body?.title || '').trim().slice(0, 160)
     if (!title) title = String(defaultTitle || '').trim().slice(0, 160)
-    if (!title) title = `باكج ليزر (${sessionsCount} جلسة)`
+    if (!title) title = `باكج ليزر (${laserSessionsCount} جلسة)`
     const notes = String(req.body?.notes || '').trim().slice(0, 1200)
-    const sessions = Array.from({ length: sessionsCount }, (_, idx) => ({
+    const sessions = Array.from({ length: laserSessionsCount }, (_, idx) => ({
       _id: new mongoose.Types.ObjectId(),
       label: packageSessionLabelAr(idx),
       completedByReception: false,
@@ -1555,13 +1621,15 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     const packageDoc = {
       _id: packageId,
       department: 'laser',
+      areaSessions,
+      areaDeductions: [],
       laserPackageTemplateId,
       laserPackageTemplateIds,
       procedureOptionIds: procedureOptionIdsSnap,
       areaCount: areaCountSnap,
       suspended: false,
       title,
-      sessionsCount,
+      sessionsCount: laserSessionsCount,
       packageTotalSyp,
       ...saleDiscount.packageFields,
       paidAmountSyp,
@@ -1580,7 +1648,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
     try {
       if (paidAmountSyp > 0 && hasPackagePaymentCollection(req.body)) {
         const patientName = String(p.name || '').trim()
-        const procedureDescription = `ليزر — باكج مسبق الدفع (${sessionsCount} جلسة)${title ? ` — ${title}` : ''}${
+        const procedureDescription = `ليزر — باكج مسبق الدفع (${laserSessionsCount} جلسة)${title ? ` — ${title}` : ''}${
           patientName ? ` — ${patientName}` : ''
         }`
         purchaseCs = await ClinicalSession.create({
@@ -1656,7 +1724,7 @@ patientsRouter.post('/:id/packages', requireActiveDay, async (req, res) => {
         details: {
           packageId: String(packageId),
           department: 'laser',
-          sessionsCount,
+          sessionsCount: laserSessionsCount,
           packageTotalSyp,
           paidAmountSyp,
           settlementDeltaSyp,
@@ -1789,7 +1857,10 @@ patientsRouter.delete('/:id/packages/:packageId', async (req, res) => {
       res.status(403).json({ error: 'حذف هذا الباكج متاح لمدير النظام فقط' })
       return
     }
-    if (packageHasAnyUsedSession(pkg)) {
+    const hasLinkedLaserVisit =
+      String(pkg.department || 'laser') === 'laser' &&
+      Boolean(await LaserSession.exists({ patientId: p._id, patientPackageId: String(pkg._id) }))
+    if (packageHasAnyUsedSession(pkg) || hasLinkedLaserVisit) {
       res.status(400).json({
         error:
           'لا يمكن حذف الباكج: وُجدت جلسة مُستهلكة أو مرتبطة بجلسة علاجية. أوقف الباكج مؤقتاً إن لزم.',
@@ -1846,6 +1917,143 @@ patientsRouter.delete('/:id/packages/:packageId', async (req, res) => {
   }
 })
 
+/** رصيد كل منطقة في باكجات الليزر + سجل الزيارات + الخدمات خارج الباكج */
+patientsRouter.get('/:id/laser-package-ledger', async (req, res) => {
+  try {
+    if (!canReadPatients(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    res.json(await buildPatientLaserPackageLedger(req.params.id))
+  } catch (e) {
+    if (sendAreaDeductionError(res, e)) return
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** معاينة: أي مناطق ستُنقص لهذه الزيارة (قبل التأكيد) */
+patientsRouter.get('/:id/laser-visits/:laserSessionId/area-deduction-preview', async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    if (!mongoose.isValidObjectId(req.params.id) || !mongoose.isValidObjectId(req.params.laserSessionId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    res.json(await buildVisitDeductionPreview(req.params.id, req.params.laserSessionId))
+  } catch (e) {
+    if (sendAreaDeductionError(res, e)) return
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** إنقاص جلسة واحدة من كل منطقة باكج مختارة عولجت في زيارة الليزر */
+patientsRouter.post('/:id/laser-visits/:laserSessionId/deduct-areas', requireActiveDay, async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    if (!mongoose.isValidObjectId(req.params.id) || !mongoose.isValidObjectId(req.params.laserSessionId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const result = await applyLaserAreaDeductions({
+      patientId: req.params.id,
+      laserSessionId: req.params.laserSessionId,
+      selections: req.body?.selections,
+      requestId: req.body?.requestId,
+      user: req.user,
+    })
+    if (!result.duplicateRequest) {
+      await writeAudit({
+        user: req.user,
+        action: 'إنقاص جلسات مناطق باكج ليزر (زيارة)',
+        entityType: 'Patient',
+        entityId: req.params.id,
+        details: { laserSessionId: req.params.laserSessionId, deducted: result.deducted },
+      })
+    }
+    res.json({ ...result, ledger: await buildPatientLaserPackageLedger(req.params.id) })
+  } catch (e) {
+    if (sendAreaDeductionError(res, e)) return
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** إنقاص يدوي لمناطق باكج (بدون زيارة مسجّلة) — يتطلب سبباً ومعرّف طلب */
+patientsRouter.post('/:id/packages/:packageId/area-deductions', requireActiveDay, async (req, res) => {
+  try {
+    if (!canManagePackages(req.user.role)) {
+      res.status(403).json({ error: 'لا صلاحية' })
+      return
+    }
+    if (!mongoose.isValidObjectId(req.params.id) || !mongoose.isValidObjectId(req.params.packageId)) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    const result = await applyLaserAreaDeductions({
+      patientId: req.params.id,
+      laserSessionId: null,
+      selections: [{ packageId: req.params.packageId, areaKeys: req.body?.areaKeys }],
+      requestId: req.body?.requestId,
+      note: req.body?.note,
+      user: req.user,
+    })
+    if (!result.duplicateRequest) {
+      await writeAudit({
+        user: req.user,
+        action: 'إنقاص يدوي لجلسات مناطق باكج ليزر',
+        entityType: 'Patient',
+        entityId: req.params.id,
+        details: { packageId: req.params.packageId, deducted: result.deducted, note: String(req.body?.note || '') },
+      })
+    }
+    res.json({ ...result, ledger: await buildPatientLaserPackageLedger(req.params.id) })
+  } catch (e) {
+    if (sendAreaDeductionError(res, e)) return
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
+/** تصحيح إنقاص منطقة (مدير النظام) — يبقى في السجل مع السبب */
+patientsRouter.post('/:id/packages/:packageId/area-deductions/:deductionId/reverse', async (req, res) => {
+  try {
+    if (req.user.role !== 'super_admin') {
+      res.status(403).json({ error: 'تصحيح الإنقاص لمدير النظام فقط' })
+      return
+    }
+    const { id, packageId, deductionId } = req.params
+    if (![id, packageId, deductionId].every((x) => mongoose.isValidObjectId(x))) {
+      res.status(400).json({ error: 'معرّف غير صالح' })
+      return
+    }
+    await reverseLaserAreaDeduction({ patientId: id, packageId, deductionId, reason: req.body?.reason, user: req.user })
+    await writeAudit({
+      user: req.user,
+      action: 'تصحيح إنقاص منطقة باكج ليزر',
+      entityType: 'Patient',
+      entityId: id,
+      details: { packageId, deductionId, reason: String(req.body?.reason || '') },
+    })
+    res.json({ ok: true, ledger: await buildPatientLaserPackageLedger(id) })
+  } catch (e) {
+    if (sendAreaDeductionError(res, e)) return
+    console.error(e)
+    res.status(500).json({ error: 'خطأ في الخادم' })
+  }
+})
+
 patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActiveDay, async (req, res) => {
   try {
     if (!canManagePackages(req.user.role)) {
@@ -1876,6 +2084,18 @@ patientsRouter.patch('/:id/packages/:packageId/sessions/:sessionId', requireActi
     const sess = sessIndex >= 0 ? packageSessions[sessIndex] : null
     if (!sess) {
       res.status(404).json({ error: 'جلسة الباكج غير موجودة' })
+      return
+    }
+
+    /**
+     * باكج الليزر: لم يعد إنقاص «جلسة» كاملة أو «منطقة» بعدّاد عام مسموحاً —
+     * كل منطقة لها رصيدها، والإنقاص للمناطق المعالجة فقط عبر area-deductions.
+     */
+    if (String(pkg.department || 'laser') === 'laser') {
+      res.status(400).json({
+        error:
+          'إنقاص باكج الليزر أصبح لكل منطقة على حدة: من التحصيل «إنقاص جلسات المناطق» لزيارة الليزر، أو من ملف المريض «إنقاص يدوي للمناطق».',
+      })
       return
     }
 

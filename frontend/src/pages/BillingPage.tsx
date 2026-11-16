@@ -12,6 +12,10 @@ import { BillingItemAdminEditModal } from '../components/BillingItemAdminEditMod
 import { mixedNetReceivedSyp, type PayCurrency } from '../utils/billingPaymentForm'
 import { computeDiscountPreview, discountRequestFields, type DiscountMode } from '../utils/discountEntry'
 import { DiscountEntryFields } from '../components/DiscountEntryFields'
+import {
+  LaserAreaDeductionModal,
+  type LaserVisitDeductionPreview,
+} from '../components/LaserAreaDeductionModal'
 
 type Item = {
   id: string
@@ -40,14 +44,12 @@ type Item = {
   isCreditTopUp?: boolean
   patientPackageId?: string
   patientPackageSessionId?: string
-  /** من باكج ليزر — لمنطق «إنقاص منطقة» مقابل «إنقاص جلسة» */
-  packageExpectedAreaCount?: number
-  laserRecordedPackageAreaCount?: number
-  packagePartialAreasAcknowledgedByReception?: number
-  /** يجب أن يكون true من الخادم قبل أي إنقاص جلسة */
+  /** يجب أن يكون true من الخادم قبل أي إنقاص لمناطق الباكج */
   laserPackageMetricsReady?: boolean
-  /** مناطق الباكج المتبقية غير المنجزة */
-  laserPackageRemainingAreaLabels?: string[]
+  /** جلسة الليزر لهذه الزيارة */
+  laserSessionId?: string
+  /** معاينة إنقاص مناطق الباكج لهذه الزيارة (رصيد كل منطقة وما عولج فيها) */
+  laserPackageDeduction?: LaserVisitDeductionPreview
   /** رصيد إضافي مخزّن على المريض */
   prepaidCreditSyp?: number
   outstandingDebtSyp?: number
@@ -216,56 +218,15 @@ function openPayModalForItem(
   setters.setPayOpen(true)
 }
 
-function hasLaserPackageAreaMetrics(item: Item): boolean {
+/** بند باكج ليزر جاهز لإنقاص المناطق المعالجة في الزيارة */
+function itemIsLaserPackageVisit(item: Item): boolean {
   return (
     item.isPackagePrepaid === true &&
     item.department === 'laser' &&
     item.laserPackageMetricsReady === true &&
-    item.packageExpectedAreaCount != null &&
-    item.laserRecordedPackageAreaCount != null
+    Boolean(item.laserSessionId) &&
+    Boolean(item.laserPackageDeduction)
   )
-}
-
-function itemHasRemainingPackageAreas(item: Item): boolean {
-  return (item.laserPackageRemainingAreaLabels?.length ?? 0) > 0
-}
-
-function itemPackageNeedsPartialAreaSettle(item: Item): boolean {
-  if (!hasLaserPackageAreaMetrics(item)) return false
-  if (itemHasRemainingPackageAreas(item) === false) {
-    const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
-    const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
-    if (rec >= exp) return false
-  }
-  const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
-  const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
-  const ack = Math.trunc(Number(item.packagePartialAreasAcknowledgedByReception) || 0)
-  return rec < exp && ack < rec
-}
-
-function itemPackageWaitingForMoreAreas(item: Item): boolean {
-  if (!hasLaserPackageAreaMetrics(item)) return false
-  const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
-  const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
-  const ack = Math.trunc(Number(item.packagePartialAreasAcknowledgedByReception) || 0)
-  return rec < exp && ack >= rec
-}
-
-/** لا يُسمح بإنقاص جلسة إلا بعد مقاييس جاهزة واكتمال كل مناطق الباكج بلا متبقي */
-function itemPackageReadyForSessionDecrement(item: Item): boolean {
-  if (!item.isPackagePrepaid) return false
-  if (!hasLaserPackageAreaMetrics(item)) return false
-  if (itemHasRemainingPackageAreas(item)) return false
-  const exp = Math.max(1, Math.trunc(Number(item.packageExpectedAreaCount) || 0))
-  const rec = Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0)
-  return rec >= exp
-}
-
-/** باكج مربوط لكن بدون أي منطقة من الباكج (خارج فقط) — تحصيلك عادي بلا إنقاص جلسة */
-function itemIsAddonOnlyOutsidePackage(item: Item): boolean {
-  if (!item.isPackagePrepaid) return false
-  if (!hasLaserPackageAreaMetrics(item)) return false
-  return Math.trunc(Number(item.laserRecordedPackageAreaCount) || 0) === 0
 }
 
 function itemPackageMetricsMissing(item: Item): boolean {
@@ -273,26 +234,14 @@ function itemPackageMetricsMissing(item: Item): boolean {
     item.isPackagePrepaid === true &&
     item.department === 'laser' &&
     Boolean(item.patientPackageId) &&
-    !hasLaserPackageAreaMetrics(item)
+    item.laserPackageMetricsReady !== true
   )
 }
 
-function packageSessionDecrementBlockedReason(item: Item): string {
-  if (!item.isPackagePrepaid) return ''
-  if (itemPackageMetricsMissing(item)) {
-    return 'تعذر قراءة مناطق الباكج لهذا البند. اضغط «تحديث» ثم أعد المحاولة — لن يُسمح بإنقاص جلسة قبل اكتمال المقاييس.'
-  }
-  if (itemHasRemainingPackageAreas(item)) {
-    return `لا يمكن إنقاص جلسة الباكج وما زالت مناطق غير منجزة: ${item.laserPackageRemainingAreaLabels!.join('، ')}`
-  }
-  if (!itemPackageReadyForSessionDecrement(item)) {
-    return 'لا يمكن إنقاص جلسة الباكج قبل إكمال كل المناطق وتثبيتها بـ«إنقاص منطقة».'
-  }
-  return ''
-}
-
-function itemShowsPackageDecrementActions(item: Item): boolean {
-  return item.isPackagePrepaid === true && !itemIsAddonOnlyOutsidePackage(item)
+function itemPendingAreaLabels(item: Item): string[] {
+  return (item.laserPackageDeduction?.packages || []).flatMap((p) =>
+    p.areas.filter((a) => a.treatedInVisit && !a.alreadyDeductedForVisit).map((a) => a.label),
+  )
 }
 
 export function BillingPage() {
@@ -308,7 +257,7 @@ export function BillingPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null)
   const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
-  const [partialPackageBusyId, setPartialPackageBusyId] = useState<string | null>(null)
+  const [deductItem, setDeductItem] = useState<Item | null>(null)
   const [payOpen, setPayOpen] = useState(false)
   const [payItem, setPayItem] = useState<Item | null>(null)
   const [adminEditItem, setAdminEditItem] = useState<Item | null>(null)
@@ -606,234 +555,6 @@ export function BillingPage() {
     }
   }
 
-  /** دفع إضافات خارج الباكج ثم إنقاص جلسة الباكج في خطوة واحدة */
-  async function completePackageAddonPayAndConsume() {
-    if (!payItem) return
-    const pkgId = payItem.patientPackageId
-    const sessId = payItem.patientPackageSessionId
-    const patientId = payItem.patientId
-    if (!pkgId || !sessId || !patientId) {
-      setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
-      return
-    }
-    const blocked = packageSessionDecrementBlockedReason(payItem)
-    if (blocked) {
-      setErr(blocked)
-      return
-    }
-    setErr('')
-    if (payDiscountEnabled && !discountPreview.valid) {
-      setErr(
-        discountPreview.error ||
-          (payDiscountMode === 'amount' ? 'أدخل مبلغ خصم صالحاً بالليرة.' : 'أدخل نسبة خصم صالحة بين 1 و 100%.'),
-      )
-      return
-    }
-    if (payChannel === 'bank') {
-      const sypCheck = Number(normalizeDecimalDigits(paySyp))
-      const usdCheck = parseFloat(normalizeDecimalDigits(payUsd))
-      const hasCollection =
-        payCurrency === 'SYP'
-          ? Number.isFinite(sypCheck) && sypCheck > 0
-          : payCurrency === 'MIXED'
-            ? (Number.isFinite(sypCheck) && sypCheck > 0) || (Number.isFinite(usdCheck) && usdCheck > 0)
-            : Number.isFinite(usdCheck) && usdCheck > 0
-      if (hasCollection && !payBankName.trim()) {
-        setErr('اختر البنك ثم أدخل المبلغ المستلم.')
-        return
-      }
-    }
-    if (payCurrency === 'SYP') {
-      const syp = Number(normalizeDecimalDigits(paySyp))
-      if (!Number.isFinite(syp) || syp < 0) {
-        setErr('أدخل مبلغاً صالحاً بالليرة السورية.')
-        return
-      }
-    } else if (payCurrency === 'MIXED') {
-      const syp = Number(normalizeDecimalDigits(paySyp))
-      const usdRaw = normalizeDecimalDigits(payUsd).trim()
-      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
-      if (!Number.isFinite(syp) || syp < 0) {
-        setErr('مبلغ الليرة في التحصيل المختلط غير صالح.')
-        return
-      }
-      if (!Number.isFinite(usd) || usd < 0) {
-        setErr('مبلغ الدولار في التحصيل المختلط غير صالح.')
-        return
-      }
-      if (usd > 0 && !(payPreviewRate && payPreviewRate > 0)) {
-        setErr('لا يتوفر سعر صرف لحساب جزء الدولار.')
-        return
-      }
-    } else {
-      const usdRaw = normalizeDecimalDigits(payUsd).trim()
-      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
-      if (!Number.isFinite(usd) || usd < 0) {
-        setErr('أدخل مبلغاً صالحاً بالدولار.')
-        return
-      }
-      if (usd > 0 && payRefundAmount.trim()) {
-        const ref =
-          payRefundCurrency === 'SYP'
-            ? Number(normalizeDecimalDigits(payRefundAmount))
-            : parseFloat(normalizeDecimalDigits(payRefundAmount))
-        if (!Number.isFinite(ref) || ref < 0) {
-          setErr('مبلغ الترجيع غير صالح — أدخل رقماً صحيحاً أو افرغ الحقل.')
-          return
-        }
-      }
-      if (usd > 0 && payPreviewRate && payPreviewRate > 0) {
-        const usdG = usd
-        const grossSyp = Math.round(usdG * payPreviewRate)
-        let refSyp = 0
-        let refUsd = 0
-        if (payRefundAmount.trim()) {
-          if (payRefundCurrency === 'SYP') {
-            refSyp = Math.round(Number(normalizeDecimalDigits(payRefundAmount)) || 0)
-          } else {
-            refUsd = parseFloat(normalizeDecimalDigits(payRefundAmount)) || 0
-          }
-        }
-        const refEquiv = refSyp + Math.round(refUsd * payPreviewRate)
-        if (refEquiv > grossSyp) {
-          setErr('إجمالي الترجيع (ليرة ومقابل دولار) لا يمكن أن يتجاوز المبلغ المستلم.')
-          return
-        }
-        const netSyp = netReceivedSypAfterUsdCollection({
-          amountUsd: usdG,
-          patientRefundSyp: refSyp,
-          patientRefundUsd: refUsd,
-          rate: payPreviewRate,
-        })
-        if (netSyp < 0) {
-          setErr('صافي المبلغ بعد الترجيع غير صالح.')
-          return
-        }
-      }
-    }
-    setBusyId(payItem.id)
-    try {
-      const syp = Number(normalizeDecimalDigits(paySyp))
-      const usdRaw = normalizeDecimalDigits(payUsd).trim()
-      const usd = usdRaw === '' ? 0 : parseFloat(usdRaw)
-      const refundTrim = payRefundAmount.trim()
-      const refundPayload =
-        payCurrency === 'USD' && refundTrim
-          ? {
-              refundCurrency: payRefundCurrency,
-              refundAmount:
-                payRefundCurrency === 'SYP'
-                  ? Number(normalizeDecimalDigits(payRefundAmount))
-                  : parseFloat(normalizeDecimalDigits(payRefundAmount)),
-            }
-          : payCurrency === 'USD'
-            ? { refundCurrency: payRefundCurrency }
-            : {}
-      /** خصم جديد (نسبة أو مبلغ). إن كان على البند خصم سابق يُطبَّق هذا على المتبقي ويُسجَّل سطراً مستقلاً */
-      const discountFields = payDiscountEnabled
-        ? payDiscountMode === 'amount'
-          ? discountRequestFields('amount', discountPreview)
-          : { discountPercent: parseDiscountPercentInput(true, payDiscountPercent) }
-        : { discountPercent: 0 }
-      await api(`/api/billing/${encodeURIComponent(payItem.id)}/complete-payment`, {
-        method: 'POST',
-        body: JSON.stringify({
-          payCurrency,
-          paymentChannel: payChannel,
-          bankName: payChannel === 'bank' ? payBankName.trim() : undefined,
-          amountSyp:
-            (payCurrency === 'SYP' || payCurrency === 'MIXED') && Number.isFinite(syp) && syp >= 0
-              ? Math.round(syp)
-              : undefined,
-          amountUsd:
-            (payCurrency === 'USD' || payCurrency === 'MIXED') && Number.isFinite(usd) && usd >= 0
-              ? usd
-              : undefined,
-          ...discountFields,
-          ...refundPayload,
-        }),
-      })
-      await api(
-        `/api/patients/${encodeURIComponent(patientId)}/packages/${encodeURIComponent(pkgId)}/sessions/${encodeURIComponent(sessId)}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ completed: true }),
-        },
-      )
-      setPayOpen(false)
-      setPayItem(null)
-      setPaySyp('')
-      setPayUsd('')
-      setPayCurrency('SYP')
-      setPayChannel('cash')
-      setPayBankName('')
-      setPayRefundCurrency('SYP')
-      setPayRefundAmount('')
-      setPayDiscountEnabled(false)
-      setPayDiscountPercent('')
-      await load()
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'فشل إنقاص الجلسة والدفع')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function consumePackageSession(item: Item) {
-    if (!item.patientId || !item.patientPackageId || !item.patientPackageSessionId) {
-      setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
-      return
-    }
-    const blocked = packageSessionDecrementBlockedReason(item)
-    if (blocked) {
-      setErr(blocked)
-      return
-    }
-    setPackageBusyId(item.id)
-    setErr('')
-    try {
-      await api(
-        `/api/patients/${encodeURIComponent(item.patientId)}/packages/${encodeURIComponent(
-          item.patientPackageId,
-        )}/sessions/${encodeURIComponent(item.patientPackageSessionId)}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ completed: true }),
-        },
-      )
-      await load()
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'تعذر إنقاص جلسة الباكج')
-    } finally {
-      setPackageBusyId(null)
-    }
-  }
-
-  async function acknowledgePartialPackageArea(item: Item) {
-    if (!item.patientId || !item.patientPackageId || !item.patientPackageSessionId) {
-      setErr('تعذر تحديد جلسة الباكج المرتبطة بهذا البند.')
-      return
-    }
-    setPartialPackageBusyId(item.id)
-    setErr('')
-    try {
-      await api(
-        `/api/patients/${encodeURIComponent(item.patientId)}/packages/${encodeURIComponent(
-          item.patientPackageId,
-        )}/sessions/${encodeURIComponent(item.patientPackageSessionId)}`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ acknowledgePartialPackageArea: true }),
-        },
-      )
-      await load()
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'تعذر إنقاص منطقة الباكج')
-    } finally {
-      setPartialPackageBusyId(null)
-    }
-  }
-
   async function deletePendingItem(item: Item) {
     if (user?.role !== 'super_admin') return
     const ok = window.confirm(
@@ -1013,8 +734,7 @@ export function BillingPage() {
                         disabled={
                           deleteBusyId === b.id ||
                           busyId === b.id ||
-                          packageBusyId === b.id ||
-                          partialPackageBusyId === b.id
+                          packageBusyId === b.id
                         }
                         onClick={() => setAdminEditItem(b)}
                       >
@@ -1026,8 +746,7 @@ export function BillingPage() {
                         disabled={
                           deleteBusyId === b.id ||
                           busyId === b.id ||
-                          packageBusyId === b.id ||
-                          partialPackageBusyId === b.id
+                          packageBusyId === b.id
                         }
                         onClick={() => void deletePendingItem(b)}
                         style={{ color: 'var(--danger)' }}
@@ -1036,62 +755,17 @@ export function BillingPage() {
                       </button>
                     </>
                   ) : null}
-                  {itemShowsPackageDecrementActions(b) &&
-                  itemEffectiveDueSyp(b) > 0 &&
-                  itemPackageReadyForSessionDecrement(b) ? (
+                  {itemIsLaserPackageVisit(b) && !b.laserPackageDeduction?.allDeducted ? (
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={busyId === b.id}
-                      onClick={() =>
-                        openPayModalForItem(b, {
-                          setPayItem,
-                          setPaySyp,
-                          setPayUsd,
-                          setPayCurrency,
-                          setPayChannel,
-                          setPayBankName,
-                          setPayRefundCurrency,
-                          setPayRefundAmount,
-                          setPayDiscountEnabled,
-                          setPayDiscountPercent,
-                          setPayOpen,
-                        })
-                      }
+                      disabled={packageBusyId === b.id || busyId === b.id}
+                      onClick={() => setDeductItem(b)}
                     >
-                      {busyId === b.id ? 'جاري المعالجة…' : 'إنقاص جلسة و دفع'}
+                      {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسات المناطق'}
                     </button>
                   ) : null}
-                  {itemShowsPackageDecrementActions(b) &&
-                  (itemEffectiveDueSyp(b) <= 0 || !itemPackageReadyForSessionDecrement(b)) ? (
-                    <>
-                      {itemPackageNeedsPartialAreaSettle(b) ? (
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          disabled={
-                            packageBusyId === b.id || partialPackageBusyId === b.id || busyId === b.id
-                          }
-                          onClick={() => void acknowledgePartialPackageArea(b)}
-                        >
-                          {partialPackageBusyId === b.id ? 'جاري المعالجة…' : 'إنقاص منطقة'}
-                        </button>
-                      ) : null}
-                      {itemEffectiveDueSyp(b) <= 0 && itemPackageReadyForSessionDecrement(b) ? (
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          disabled={
-                            packageBusyId === b.id || partialPackageBusyId === b.id || busyId === b.id
-                          }
-                          onClick={() => void consumePackageSession(b)}
-                        >
-                          {packageBusyId === b.id ? 'جاري الإنقاص…' : 'إنقاص جلسة'}
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {(!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) && itemHasCollectableDue(b) ? (
+                  {itemHasCollectableDue(b) ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1114,48 +788,28 @@ export function BillingPage() {
                     >
                       {busyId === b.id ? '…' : 'تأكيد استلام الدفع'}
                     </button>
-                  ) : (!b.isPackagePrepaid || itemIsAddonOnlyOutsidePackage(b)) &&
-                    !itemHasCollectableDue(b) ? (
+                  ) : !b.isPackagePrepaid ? (
                     <span className="chip" style={{ background: 'var(--warning-dim)', color: 'var(--amber)' }}>
                       مستحق ٠ — راجع الملف
                     </span>
                   ) : null}
                 </div>
-                {itemShowsPackageDecrementActions(b) ? (
-                  itemPackageMetricsMissing(b) ? (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--danger)', fontSize: '0.82rem' }}>
-                      تعذر تحميل مقاييس مناطق الباكج — اضغط «تحديث». لن يظهر «إنقاص جلسة» قبل اكتمال قراءة المناطق.
-                    </p>
-                  ) : itemPackageWaitingForMoreAreas(b) ? (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      تم تسوية كل المناطق المدخلة حالياً — يُكمِل الأخصائي منطقة/ات الباكج المتبقية
-                      {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
-                        ? ` (${b.laserPackageRemainingAreaLabels!.join('، ')})`
-                        : ''}{' '}
-                      في ملف المريض ثم يُعاد «إنقاص منطقة» حتى اكتمال العدد، وبعدها يظهر «إنقاص جلسة».
-                    </p>
-                  ) : itemPackageNeedsPartialAreaSettle(b) ? (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      باكج ليزر — مناطق غير مكتملة
-                      {(b.laserPackageRemainingAreaLabels?.length ?? 0) > 0
-                        ? ` (متبقي: ${b.laserPackageRemainingAreaLabels!.join('، ')})`
-                        : ''}
-                      . استخدم «إنقاص منطقة» لكل منطقة أنجزها الأخصائي قبل «إنقاص جلسة»
-                      {itemEffectiveDueSyp(b) > 0 ? ' أو «إنقاص جلسة و دفع»' : ''}.
-                    </p>
-                  ) : itemPackageReadyForSessionDecrement(b) && itemEffectiveDueSyp(b) > 0 ? (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      جلسة باكج مكتملة المناطق مع إضافات مستحقة — استخدم «إنقاص جلسة و دفع».
-                    </p>
-                  ) : itemPackageReadyForSessionDecrement(b) ? (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      هذه الجلسة مدفوعة مسبقاً — كل مناطق الباكج مكتملة. استخدم «إنقاص جلسة» لتثبيت الخصم من الباكج.
-                    </p>
-                  ) : (
-                    <p style={{ margin: '0.35rem 0 0', color: 'var(--warning)', fontSize: '0.82rem' }}>
-                      هذه الجلسة مدفوعة مسبقاً — أكمل مناطق الباكج ثم ثبّتها قبل إنقاص الجلسة.
-                    </p>
-                  )
+                {itemPackageMetricsMissing(b) ? (
+                  <p style={{ margin: '0.35rem 0 0', color: 'var(--danger)', fontSize: '0.82rem' }}>
+                    تعذر تحميل أرصدة مناطق الباكج — اضغط «تحديث». لن يظهر «إنقاص جلسات المناطق» قبل اكتمال قراءة المناطق.
+                  </p>
+                ) : itemIsLaserPackageVisit(b) ? (
+                  <p style={{ margin: '0.35rem 0 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                    {b.laserPackageDeduction?.allDeducted
+                      ? 'تم إنقاص مناطق الباكج لهذه الزيارة.'
+                      : itemPendingAreaLabels(b).length > 0
+                        ? `مناطق باكج عولجت في هذه الزيارة: ${itemPendingAreaLabels(b).join('، ')} — تُنقص جلسة واحدة من كل منطقة تختارها فقط.`
+                        : 'لا توجد منطقة باكج مسجّلة في هذه الزيارة.'}
+                    {(b.laserPackageDeduction?.uncoveredAreaLabels?.length ?? 0) > 0
+                      ? ` لا رصيد لـ: ${b.laserPackageDeduction!.uncoveredAreaLabels!.join('، ')}.`
+                      : ''}
+                    {itemHasCollectableDue(b) ? ' على البند مبلغ قديم مستحق — يُحصّل بـ«تأكيد استلام الدفع» منفصلاً عن الإنقاص.' : ''}
+                  </p>
                 ) : null}
               </div>
             </li>
@@ -1178,9 +832,7 @@ export function BillingPage() {
         >
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>
-              {itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
-                ? 'إنقاص جلسة باكج ودفع الإضافات'
-                : 'تأكيد استلام الدفع'}
+              تأكيد استلام الدفع
             </h3>
             <p style={{ color: 'var(--text-muted)', marginTop: '-0.2rem' }}>
               {payItem.patientName}
@@ -1777,21 +1429,28 @@ export function BillingPage() {
                 type="button"
                 className="btn btn-primary"
                 disabled={busyId === payItem.id || !itemHasCollectableDue(payItem)}
-                onClick={() =>
-                  void (itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
-                    ? completePackageAddonPayAndConsume()
-                    : completePay(payItem.id))
-                }
+                onClick={() => void completePay(payItem.id)}
               >
-                {busyId === payItem.id
-                  ? 'جاري الحفظ…'
-                  : itemShowsPackageDecrementActions(payItem) && itemEffectiveDueSyp(payItem) > 0
-                    ? 'تأكيد الدفع وإنقاص الجلسة'
-                    : 'تأكيد استلام الدفع'}
+                {busyId === payItem.id ? 'جاري الحفظ…' : 'تأكيد استلام الدفع'}
               </button>
             </div>
           </div>
         </div>
+      ) : null}
+
+      {deductItem && deductItem.laserPackageDeduction && deductItem.laserSessionId ? (
+        <LaserAreaDeductionModal
+          patientId={deductItem.patientId}
+          patientName={deductItem.patientName}
+          laserSessionId={deductItem.laserSessionId}
+          preview={deductItem.laserPackageDeduction}
+          onClose={() => setDeductItem(null)}
+          onBusy={(busy) => setPackageBusyId(busy ? deductItem.id : null)}
+          onDone={async () => {
+            setDeductItem(null)
+            await load()
+          }}
+        />
       ) : null}
 
       {adminEditItem && user?.role === 'super_admin' ? (

@@ -3,7 +3,7 @@ import { LaserSession } from '../models/LaserSession.js'
 import { LaserProcedureOption } from '../models/LaserProcedureOption.js'
 import { Patient } from '../models/Patient.js'
 import { demoteAddonOnlyLinkedPackageSession } from './laserPackageBooking.js'
-import { buildPackageAreaBreakdown } from './laserPackageAreaBreakdown.js'
+import { buildVisitDeductionPreviewFromData } from './laserAreaDeductions.js'
 
 function laserAreaNamesFromSession(ls) {
   const fromLines = []
@@ -45,18 +45,13 @@ function laserPulseChargeNotesFromSession(ls) {
 }
 
 function isLaserPackageBillingRow(b) {
-  return (
-    b?.isPackagePrepaid === true &&
-    String(b?.department || '') === 'laser' &&
-    Boolean(b?.patientPackageSessionId) &&
-    Boolean(b?.patientPackageId)
-  )
+  return b?.isPackagePrepaid === true && String(b?.department || '') === 'laser' && Boolean(b?.patientPackageId)
 }
 
 /**
- * يُرفق مقاييس باكج الليزر دفعة واحدة (بدون N+1) — إلزامي قبل إرسال أي قائمة تحصيل.
- * يضبط دائماً: packageExpectedAreaCount / laserRecordedPackageAreaCount /
- * packagePartialAreasAcknowledgedByReception / laserPackageMetricsReady
+ * يُرفق لكل بند باكج ليزر معاينة إنقاص المناطق (بدون N+1):
+ * المناطق ورصيدها، ما عولج في الزيارة (مُحدَّد مسبقاً)، وما أُنقص سابقاً لنفس الزيارة.
+ * laserPackageMetricsReady=true فقط بعد بناء المعاينة — لا يظهر زر الإنقاص قبلها.
  */
 export async function enrichLaserPackageAreaMetrics(billingItems, dtos) {
   const targets = []
@@ -76,112 +71,58 @@ export async function enrichLaserPackageAreaMetrics(billingItems, dtos) {
 
   const billIds = targets.map((t) => t.b._id)
   const patientIds = [...new Set(targets.map((t) => t.pid))]
-
   const [sessions, patients] = await Promise.all([
     LaserSession.find({ billingItemId: { $in: billIds } })
-      .select('_id billingItemId lineItems')
+      .select('_id billingItemId lineItems patientId patientPackageId')
       .lean(),
     Patient.find({ _id: { $in: patientIds } })
       .select('sessionPackages')
       .lean(),
   ])
-
   const sessionByBill = new Map(sessions.map((s) => [String(s.billingItemId), s]))
   const patientById = new Map(patients.map((p) => [String(p._id), p]))
 
   const optionIdSet = new Set()
-  for (const t of targets) {
-    const ls = sessionByBill.get(String(t.b._id))
-    const p = patientById.get(t.pid)
-    const pkg = (Array.isArray(p?.sessionPackages) ? p.sessionPackages : []).find(
-      (x) => String(x._id) === String(t.b.patientPackageId),
-    )
-    for (const id of pkg?.procedureOptionIds || []) {
-      if (id) optionIdSet.add(String(id))
-    }
-    for (const li of ls?.lineItems || []) {
-      if (li?.procedureOptionId) optionIdSet.add(String(li.procedureOptionId))
-    }
+  for (const p of patients) {
+    for (const pkg of p.sessionPackages || []) for (const id of pkg?.procedureOptionIds || []) if (id) optionIdSet.add(String(id))
   }
-
-  const optionRows =
-    optionIdSet.size > 0
-      ? await LaserProcedureOption.find({ _id: { $in: [...optionIdSet] } })
-          .select('name kind')
-          .lean()
-      : []
+  for (const ls of sessions) for (const li of ls.lineItems || []) if (li?.procedureOptionId) optionIdSet.add(String(li.procedureOptionId))
+  const validIds = [...optionIdSet].filter((id) => mongoose.isValidObjectId(id))
+  const optionRows = validIds.length
+    ? await LaserProcedureOption.find({ _id: { $in: validIds } }).select('name kind').lean()
+    : []
   const optionMetaById = new Map(
-    optionRows.map((r) => [
-      String(r._id),
-      { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() },
-    ]),
+    optionRows.map((r) => [String(r._id), { name: String(r.name || '').trim(), kind: String(r.kind || 'area').trim() }]),
   )
 
-  for (const t of targets) {
-    const { b, dto, pid } = t
+  for (const { b, dto, pid } of targets) {
     const ls = sessionByBill.get(String(b._id))
     const nonAddonLines = (Array.isArray(ls?.lineItems) ? ls.lineItems : []).filter((r) => !r.isAddon)
-
     if (nonAddonLines.length === 0) {
-      await demoteAddonOnlyLinkedPackageSession({
-        patientId: pid,
-        packageId: b.patientPackageId,
-        packageSessionId: b.patientPackageSessionId,
-        laserSessionId: ls?._id,
-        billingItemId: b._id,
-      })
-      dto.isPackagePrepaid = false
-      dto.patientPackageId = undefined
-      dto.patientPackageSessionId = undefined
+      /** بند قديم مربوط بباكج لكن بلا أي منطقة باكج — يُحوَّل لجلسة عادية (السلوك السابق) */
+      if (b.patientPackageSessionId) {
+        await demoteAddonOnlyLinkedPackageSession({
+          patientId: pid,
+          packageId: b.patientPackageId,
+          packageSessionId: b.patientPackageSessionId,
+          laserSessionId: ls?._id,
+          billingItemId: b._id,
+        })
+        dto.isPackagePrepaid = false
+        dto.patientPackageId = undefined
+        dto.patientPackageSessionId = undefined
+      }
       dto.laserPackageMetricsReady = false
-      delete dto.packageExpectedAreaCount
-      delete dto.laserRecordedPackageAreaCount
-      delete dto.packagePartialAreasAcknowledgedByReception
-      delete dto.laserPackageRemainingAreaLabels
       continue
     }
-
-    const p = patientById.get(pid)
-    const pkg = (Array.isArray(p?.sessionPackages) ? p.sessionPackages : []).find(
-      (x) => String(x._id) === String(b.patientPackageId),
-    )
-    const pkgIds = Array.isArray(pkg?.procedureOptionIds) ? pkg.procedureOptionIds : []
-    const fallbackExpected = Math.max(1, Math.trunc(Number(pkg?.areaCount) || 0), pkgIds.length, nonAddonLines.length)
-    const breakdown = pkg ? buildPackageAreaBreakdown(ls, pkg, optionMetaById) : null
-
-    let recorded
-    let expected
-    let remaining = []
-    if (breakdown) {
-      recorded = Math.max(0, Math.trunc(Number(breakdown.matchedPackageAreaCount) || 0))
-      expected = Math.max(1, Math.trunc(Number(breakdown.expectedAreaCount) || 0), fallbackExpected)
-      remaining = Array.isArray(breakdown.remainingAreas) ? breakdown.remainingAreas : []
-      /**
-       * إن وُجدت مناطق متبقية في تفكيك العرض/الباكج فلا يُسمح باعتبار العدد «مكتملاً»
-       * حتى لو تطابق العدّاد الرقمي بالخطأ.
-       */
-      if (remaining.length > 0 && recorded >= expected) {
-        expected = recorded + remaining.length
-      }
-    } else {
-      recorded = nonAddonLines.length
-      expected = Math.max(fallbackExpected, recorded + 1)
-      remaining = []
+    const patient = patientById.get(pid)
+    if (!ls || !patient) {
+      dto.laserPackageMetricsReady = false
+      continue
     }
-
-    const pkgSessions = Array.isArray(pkg?.sessions) ? pkg.sessions : []
-    const pSess = pkgSessions.find((s) => String(s._id) === String(b.patientPackageSessionId))
-    const ack = Math.max(0, Math.trunc(Number(pSess?.packagePartialAreasAcknowledgedByReception) || 0))
-
-    dto.packageExpectedAreaCount = expected
-    dto.laserRecordedPackageAreaCount = recorded
-    dto.packagePartialAreasAcknowledgedByReception = Math.min(ack, recorded)
+    dto.laserSessionId = String(ls._id)
+    dto.laserPackageDeduction = buildVisitDeductionPreviewFromData({ patient, laserSession: ls, optionMetaById })
     dto.laserPackageMetricsReady = true
-    if (remaining.length) {
-      dto.laserPackageRemainingAreaLabels = remaining
-    } else {
-      delete dto.laserPackageRemainingAreaLabels
-    }
   }
 }
 

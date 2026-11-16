@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext'
 import { useClinic } from '../context/ClinicContext'
 import { canAccessSkinCareTab, canAccessTab } from '../data/nav'
 import { api, ApiError } from '../api/client'
+import { LaserAddonServicesList, LaserPackageAreaLedgerCard } from '../components/LaserPackageAreaLedger'
+import { useLaserPackageLedger } from '../utils/laserPackageLedger'
 import { normalizeDecimalDigits } from '../utils/normalizeDigits'
 import {
   PaymentChannelFields,
@@ -399,6 +401,7 @@ type PatientPackage = {
   procedureOptionIds?: string[]
   areaCount?: number
   suspended?: boolean
+  activeAreaDeductionCount?: number
 }
 
 type LaserPackageTemplateListItem = {
@@ -411,6 +414,7 @@ type LaserPackageTemplateListItem = {
 }
 
 function patientPackageHasUsedSession(pkg: PatientPackage): boolean {
+  if ((pkg.activeAreaDeductionCount ?? 0) > 0) return true
   return (pkg.sessions || []).some(
     (s) =>
       s.completedByReception ||
@@ -980,6 +984,9 @@ export function PatientRecord() {
   const [packageOk, setPackageOk] = useState('')
   const [packageTitle, setPackageTitle] = useState('')
   const [packageSessionsCount, setPackageSessionsCount] = useState('6')
+  /** مناطق الباكج المختار — لتحديد عدد جلسات مختلف لكل منطقة */
+  const [laserSaleAreas, setLaserSaleAreas] = useState<{ key: string; label: string }[]>([])
+  const [laserSaleAreaCounts, setLaserSaleAreaCounts] = useState<Record<string, string>>({})
   const [packageTotalSyp, setPackageTotalSyp] = useState('')
   const [packageNotes, setPackageNotes] = useState('')
   const [pkgPayModal, setPkgPayModal] = useState<PendingPackagePayment | null>(null)
@@ -1795,6 +1802,7 @@ export function PatientRecord() {
         procedureOptionIds: Array.isArray(x.procedureOptionIds) ? x.procedureOptionIds.map(String) : undefined,
         areaCount: typeof x.areaCount === 'number' ? x.areaCount : undefined,
         suspended: (x as { suspended?: boolean }).suspended === true,
+        activeAreaDeductionCount: Number(x.activeAreaDeductionCount) || 0,
         sessions: Array.isArray(x.sessions)
           ? x.sessions.map((s) => ({
               id: String(s.id),
@@ -1817,6 +1825,28 @@ export function PatientRecord() {
           : [],
       }))
   }, [patient])
+  /** رصيد كل منطقة في باكجات الليزر + الخدمات خارج الباكج */
+  const laserLedger = useLaserPackageLedger(id, patient?.sessionPackages)
+
+  useEffect(() => {
+    if (!id || laserTplPickIds.length === 0) return
+    let alive = true
+    api<{ areas: { key: string; label: string }[] }>(
+      `/api/patients/${encodeURIComponent(id)}/packages/laser-area-preview`,
+      { method: 'POST', body: JSON.stringify({ laserPackageTemplateIds: laserTplPickIds }) },
+    )
+      .then((d) => {
+        if (!alive) return
+        setLaserSaleAreas(d.areas || [])
+        setLaserSaleAreaCounts({})
+      })
+      .catch(() => {
+        if (alive) setLaserSaleAreas([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [id, laserTplPickIds])
 
   const activeLaserPackage = useMemo(() => {
     const wantedId = bookedLaserPkgId
@@ -3519,6 +3549,30 @@ export function PatientRecord() {
               />
             </div>
           </div>
+          {laserTplPickIds.length > 0 && laserSaleAreas.length > 0 ? (
+            <div style={{ marginTop: '0.75rem' }}>
+              <label className="form-label">عدد الجلسات لكل منطقة</label>
+              <p style={{ margin: '0 0 0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                لكل منطقة رصيد مستقل. اتركه فارغاً ليأخذ «عدد الجلسات» أعلاه ({packageSessionsCount || '—'}).
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {laserSaleAreas.map((a) => (
+                  <label key={a.key} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.86rem' }}>
+                    {a.label}
+                    <input
+                      className="input"
+                      style={{ width: 70 }}
+                      inputMode="numeric"
+                      disabled={packageBusy || pkgPayModalBusy}
+                      placeholder={packageSessionsCount || ''}
+                      value={laserSaleAreaCounts[a.key] ?? ''}
+                      onChange={(e) => setLaserSaleAreaCounts((prev) => ({ ...prev, [a.key]: e.target.value }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div style={{ marginTop: '0.75rem' }}>
             <label className="form-label">ملاحظات</label>
             <textarea
@@ -3557,7 +3611,22 @@ export function PatientRecord() {
                 setPackageErr('أدخل إجمالي سعر الباكج بالليرة.')
                 return
               }
+              const areaSessionCounts: Record<string, number> = {}
+              for (const a of laserSaleAreas) {
+                const raw = (laserSaleAreaCounts[a.key] || '').trim()
+                if (!raw) continue
+                const n = Number(raw)
+                if (!Number.isInteger(n) || n < 1 || n > 200) {
+                  setPackageErr(`عدد جلسات منطقة «${a.label}» يجب أن يكون بين 1 و 200.`)
+                  return
+                }
+                areaSessionCounts[a.key] = n
+              }
+              const areaSummary = laserSaleAreas
+                .map((a) => `${a.label} ${areaSessionCounts[a.key] ?? sessionsCount}`)
+                .join('، ')
               const body: Record<string, unknown> = {
+                areaSessionCounts,
                 department: 'laser',
                 title: packageTitle.trim() || undefined,
                 sessionsCount,
@@ -3572,11 +3641,13 @@ export function PatientRecord() {
                 setPackageTotalSyp('')
                 setPackageNotes('')
                 setLaserTplPickIds([])
+                setLaserSaleAreas([])
+                setLaserSaleAreaCounts({})
               }
               openPackagePaymentModal({
                 kind: 'laser',
                 totalSyp,
-                subtitle: `${patient?.name || 'مريض'} — باكج ليزر (${sessionsCount} جلسة)`,
+                subtitle: `${patient?.name || 'مريض'} — باكج ليزر (${areaSummary || `${sessionsCount} جلسة`})`,
                 body,
                 onSuccess: resetLaserPackageForm,
               })
@@ -3687,7 +3758,7 @@ export function PatientRecord() {
                 const canPausePkg = pkg.department === 'laser' || pkg.department === 'solarium'
                 return (
                 <div key={pkg.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.8rem' }}>
-                  {(() => {
+                  {pkg.department === 'solarium' && (() => {
                     const remainingSessions = pkg.sessions.filter((s) => !s.completedByReception).length
                     return (
                       <p style={{ margin: '0 0 0.45rem', fontSize: '0.86rem', color: 'var(--text-muted)' }}>
@@ -3872,6 +3943,18 @@ export function PatientRecord() {
                       <> — المدفوع عند الإنشاء يظهر في الجرد المالي ضمن السولاريوم.</>
                     ) : null}
                   </p>
+                  {pkg.department === 'laser' && id ? (
+                    <LaserPackageAreaLedgerCard
+                      patientId={id}
+                      role={role}
+                      ledger={laserLedger.data?.packages.find((l) => l.packageId === pkg.id)}
+                      onChanged={(next) => laserLedger.setData(next)}
+                    />
+                  ) : null}
+                  {laserLedger.err && pkg.department === 'laser' ? (
+                    <p style={{ color: 'var(--danger)', fontSize: '0.84rem' }}>{laserLedger.err}</p>
+                  ) : null}
+                  {pkg.department === 'solarium' ? (
                   <div style={{ display: 'grid', gap: '0.4rem' }}>
                     {pkg.sessions.map((s) => (
                       <label
@@ -3967,6 +4050,7 @@ export function PatientRecord() {
                       </label>
                     ))}
                   </div>
+                  ) : null}
                   {pkg.notes ? (
                     <p style={{ margin: '0.55rem 0 0', color: 'var(--text-muted)', fontSize: '0.83rem' }}>
                       {pkg.notes}
@@ -3975,6 +4059,7 @@ export function PatientRecord() {
                 </div>
                 )
               })}
+              <LaserAddonServicesList services={laserLedger.data?.addonServices || []} />
             </div>
           )}
         </div>

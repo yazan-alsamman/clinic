@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 import { Patient } from '../models/Patient.js'
+import { reverseAreaDeductionsForLaserSessions } from './laserAreaDeductions.js'
 import { BillingItem } from '../models/BillingItem.js'
 import { BillingPayment } from '../models/BillingPayment.js'
 import { ClinicalSession } from '../models/ClinicalSession.js'
@@ -146,6 +147,8 @@ async function detachDebtSettlements(patientId, itemIds, clinicalSessionId) {
 
 /** يفك ربط جلسات الباكج بالجلسة المحذوفة ويعيدها متاحة للمريض */
 async function releasePackageSessions(patientId, cs, laserIds, itemIds) {
+  /** إنقاصات مناطق الباكج لهذه الزيارة تُعكس (تبقى في السجل مع السبب) فيعود رصيد المناطق */
+  await reverseAreaDeductionsForLaserSessions(patientId, laserIds)
   const patient = await Patient.findById(patientId).select('sessionPackages').lean()
   const packages = Array.isArray(patient?.sessionPackages) ? patient.sessionPackages : []
   if (!packages.length) return

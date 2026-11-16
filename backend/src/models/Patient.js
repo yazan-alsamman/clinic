@@ -32,6 +32,46 @@ const packageSessionSchema = new mongoose.Schema(
   { _id: true },
 )
 
+/**
+ * منطقة ضمن باكج ليزر برصيد جلسات مستقل (نسخة وقت البيع أو أول إنقاص).
+ * المفتاح ثابت: معرّف الخيار + ترتيب تكراره + ترتيب الجزء داخل العرض.
+ */
+const packageAreaSessionsSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, trim: true, maxlength: 120 },
+    procedureOptionId: { type: String, default: '', trim: true },
+    label: { type: String, default: '', trim: true, maxlength: 160 },
+    sessionsTotal: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false },
+)
+
+/**
+ * إنقاص جلسة واحدة من منطقة واحدة. لا يُحذف أبداً — التصحيح بعلامة reversedAt.
+ */
+const packageAreaDeductionSchema = new mongoose.Schema(
+  {
+    areaKey: { type: String, required: true, trim: true },
+    areaLabel: { type: String, default: '', trim: true, maxlength: 160 },
+    /** laser_visit = من زيارة ليزر مسجّلة، manual = إنقاص يدوي من ملف المريض */
+    source: { type: String, enum: ['laser_visit', 'manual'], default: 'laser_visit' },
+    laserSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'LaserSession', default: null },
+    billingItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillingItem', default: null },
+    /** تاريخ الزيارة (يوم العمل) */
+    visitDate: { type: String, default: '' },
+    deductedAt: { type: Date, default: null },
+    deductedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    deductedByName: { type: String, default: '' },
+    /** معرّف الطلب من الواجهة — إعادة الإرسال بنفس المعرّف لا تُنقص مرة ثانية */
+    requestId: { type: String, default: '', trim: true, maxlength: 80 },
+    note: { type: String, default: '', trim: true, maxlength: 500 },
+    reversedAt: { type: Date, default: null },
+    reversedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    reverseReason: { type: String, default: '', trim: true, maxlength: 500 },
+  },
+  { _id: true },
+)
+
 const patientPackageSchema = new mongoose.Schema(
   {
     department: { type: String, enum: ['laser', 'solarium'], default: 'laser' },
@@ -58,6 +98,10 @@ const patientPackageSchema = new mongoose.Schema(
     notes: { type: String, default: '' },
     createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     sessions: { type: [packageSessionSchema], default: [] },
+    /** ليزر: رصيد كل منطقة على حدة (فارغ في الباكجات القديمة حتى أول إنقاص بالمناطق) */
+    areaSessions: { type: [packageAreaSessionsSchema], default: [] },
+    /** ليزر: سجل إنقاص جلسات المناطق (جلسة لكل منطقة مُعالَجة) */
+    areaDeductions: { type: [packageAreaDeductionSchema], default: [] },
   },
   { _id: true, timestamps: true },
 )
@@ -334,6 +378,8 @@ const patientSchema = new mongoose.Schema(
     paperLaserEntries: { type: [paperLaserEntrySchema], default: [] },
     /** باقات جلسات مسبقة الدفع (حالياً: ليزر) */
     sessionPackages: { type: [patientPackageSchema], default: [] },
+    /** يزداد مع كل إنقاص مناطق باكج — يمنع الإنقاص المزدوج عند طلبين متزامنين */
+    laserAreaLedgerRev: { type: Number, default: 0 },
     /** مخطط الأسنان التفاعلي (FDI) */
     dentalChart: { type: dentalChartSchema, default: () => ({ teeth: [] }) },
     /** بوابة المريض — تسجيل دخول منفصل عن موظفي العيادة */
