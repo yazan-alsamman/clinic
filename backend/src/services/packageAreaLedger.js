@@ -373,3 +373,27 @@ export function packageHasRemainingAreaSessions(pkg) {
 export function packageHasAreaDeductions(pkg) {
   return (Array.isArray(pkg?.areaDeductions) ? pkg.areaDeductions : []).some(isActiveDeduction)
 }
+
+/**
+ * مناطق باكج جديد عند البيع: عدد جلسات مختلف لكل منطقة ممكن (overrides حسب المفتاح)،
+ * وما لم يُحدَّد يأخذ عدد جلسات الباكج الافتراضي.
+ * @param {PackageAreaDef[]} defs
+ * @param {number} defaultSessions
+ * @param {Record<string, unknown>|null|undefined} overrides
+ */
+export function applyAreaSessionCounts(defs, defaultSessions, overrides) {
+  const base = Math.max(1, Math.min(200, Math.trunc(Number(defaultSessions) || 0)))
+  const map = overrides && typeof overrides === 'object' ? overrides : {}
+  const known = new Set((defs || []).map((d) => d.key))
+  const unknown = Object.keys(map).filter((k) => !known.has(k))
+  if (unknown.length) throw new AreaDeductionError('منطقة غير موجودة في الباكج المختار — حدّث الصفحة وأعد المحاولة.')
+  return (defs || []).map((d) => {
+    const raw = map[d.key]
+    if (raw === undefined || raw === null || raw === '') return { ...d, sessionsTotal: base }
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < 1 || n > 200) {
+      throw new AreaDeductionError(`عدد جلسات منطقة «${d.label}» يجب أن يكون رقماً صحيحاً بين 1 و 200.`)
+    }
+    return { ...d, sessionsTotal: n }
+  })
+}

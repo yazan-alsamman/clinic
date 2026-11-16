@@ -13,6 +13,7 @@ import { BillingItem } from '../src/models/BillingItem.js'
 import { ClinicalSession } from '../src/models/ClinicalSession.js'
 import {
   allocateVisitTreatedAreas,
+  applyAreaSessionCounts,
   computePackageAreaLedger,
   derivePackageAreaDefinitions,
   groupPackageVisits,
@@ -206,6 +207,39 @@ describe('رصيد مستقل لكل منطقة', () => {
     const defs = derivePackageAreaDefinitions({ procedureOptionIds: [offer], sessionsCount: 6 }, meta)
     assert.deepEqual(defs.map((d) => [d.label, d.sessionsTotal]), [['إبطين', 6], ['بكيني', 6]])
     assert.notEqual(defs[0].key, defs[1].key)
+  })
+})
+
+describe('عدد جلسات مختلف لكل منطقة عند البيع', () => {
+  test('يدين 5 ورجلين 8: لكل منطقة رصيدها، وغير المحدد يأخذ العدد الافتراضي', () => {
+    const defs = derivePackageAreaDefinitions(newPackage(), META)
+    const k = Object.fromEntries(defs.map((d) => [d.label, d.key]))
+    const areas = applyAreaSessionCounts(defs, 5, { [k['رجلين']]: 8 })
+    assert.deepEqual(areas.map((a) => [a.label, a.sessionsTotal]), [['يدين', 5], ['رجلين', 8]])
+    const pkg = newPackage({ areaSessions: areas, sessionsCount: 8 })
+    pkg.areaDeductions = [{ _id: oid(), areaKey: k['رجلين'], deductedAt: new Date() }]
+    assert.deepEqual(remaining(pkg), { يدين: 5, رجلين: 7 })
+  })
+
+  test('عدد غير صالح أو منطقة غير موجودة يُرفض', () => {
+    const defs = derivePackageAreaDefinitions(newPackage(), META)
+    assert.throws(() => applyAreaSessionCounts(defs, 5, { [defs[0].key]: 0 }), /بين 1 و 200/)
+    assert.throws(() => applyAreaSessionCounts(defs, 5, { [defs[0].key]: 2.5 }), /بين 1 و 200/)
+    assert.throws(() => applyAreaSessionCounts(defs, 5, { 'x:0:0': 3 }), /غير موجودة/)
+  })
+
+  test('رصيد منطقة ينتهي بينما الأخرى مستمرة', () => {
+    const defs = derivePackageAreaDefinitions(newPackage(), META)
+    const k = Object.fromEntries(defs.map((d) => [d.label, d.key]))
+    const pkg = newPackage({ areaSessions: applyAreaSessionCounts(defs, 1, { [k['رجلين']]: 3 }) })
+    pkg.areaDeductions = [{ _id: oid(), areaKey: k['يدين'], deductedAt: new Date() }]
+    assert.throws(
+      () => planPackageAreaDeduction({ pkg, areaKeys: [k['يدين']], laserSessionId: oid(), optionMetaById: META }),
+      /لا يوجد رصيد متبقٍ/,
+    )
+    const ok = planPackageAreaDeduction({ pkg, areaKeys: [k['رجلين']], laserSessionId: oid(), optionMetaById: META })
+    assert.equal(ok.rows.length, 1)
+    assert.equal(packageHasRemainingAreaSessions(pkg), true)
   })
 })
 
