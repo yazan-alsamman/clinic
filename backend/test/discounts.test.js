@@ -560,3 +560,63 @@ describe('Test 10 — الصلاحيات وتتبّع التعديلات', () =>
     assert.equal(del.mock.callCount(), 0)
   })
 })
+
+describe('إصلاح الباكجات القديمة (ذمة ناتجة عن خصم الباكج)', async () => {
+  const { planLegacyPackageDiscountRepairs, applyLegacyPackageDiscountRepair } = await import(
+    '../src/services/legacyPackageDiscountRepair.js'
+  )
+  const created = new Date('2025-03-03T10:00:00Z')
+  function fixture({ debt = 100000 } = {}) {
+    const pkgId = oid()
+    const purchase = billingItem({ procedureLabel: 'ليزر — باكج مسبق الدفع (6 جلسة)', listAmountDueSyp: 400000, discountPercent: 20, effectiveAmountDueSyp: 320000, amountDueSyp: 320000, createdAt: created })
+    const pay = { _id: oid(), amountSyp: 320000, creditAppliedSyp: 0, discountPercent: 20, receivedAt: created, receivedBy: { _id: oid(), name: 'سارة' } }
+    const patient = { _id: PATIENT_ID, name: 'مريضة', fileNumber: '7', outstandingDebtSyp: debt, prepaidCreditSyp: 0, sessionPackages: [{ _id: pkgId, department: 'laser', title: 'باكج', packageTotalSyp: 500000, paidAmountSyp: 400000, settlementDeltaSyp: -100000, createdAt: created }] }
+    return { pkgId, purchase, pay, patient }
+  }
+
+  test('العرض: 500,000 − 20٪ = 400,000، الذمة الزائدة 100,000، إيراد غير مرحّل 80,000', () => {
+    const { purchase, pay, patient } = fixture()
+    const [p] = planLegacyPackageDiscountRepairs({ patient, billingItems: [purchase], paymentsByItemId: new Map([[String(purchase._id), pay]]) })
+    assert.equal(p.status, 'ready')
+    assert.equal(p.correctTotalSyp, 400000)
+    assert.equal(p.debtReductionSyp, 100000)
+    assert.equal(p.creditIncreaseSyp, 0)
+    assert.equal(p.revenueUnderstatedSyp, 80000)
+    assert.equal(p.appliedByName, 'سارة')
+  })
+
+  test('ذمة سُدّدت لاحقاً: مراجعة يدوية ولا تطبيق', () => {
+    const { purchase, pay, patient } = fixture({ debt: 20000 })
+    const [p] = planLegacyPackageDiscountRepairs({ patient, billingItems: [purchase], paymentsByItemId: new Map([[String(purchase._id), pay]]) })
+    assert.equal(p.status, 'manual_review')
+  })
+
+  test('باكج مُصلح أو جديد لا يظهر مرة ثانية', () => {
+    const { purchase, pay, patient, pkgId } = fixture()
+    const plans = planLegacyPackageDiscountRepairs({ patient, billingItems: [purchase], paymentsByItemId: new Map([[String(purchase._id), pay]]), packagesWithRecords: new Set([String(pkgId)]) })
+    assert.equal(plans.length, 0)
+  })
+
+  test('التطبيق: يصحّح الباكج والذمة ويضيف سجل خصم وتدقيقاً، ولا يلمس الدفعات أو القيود', async () => {
+    const { purchase, pay, patient } = fixture()
+    const [plan] = planLegacyPackageDiscountRepairs({ patient, billingItems: [purchase], paymentsByItemId: new Map([[String(purchase._id), pay]]) })
+    const doc = { ...patient, sessionPackages: patient.sessionPackages.map((x) => ({ ...x })), save: mock.fn(() => Promise.resolve()) }
+    mock.method(Patient, 'findById', () => Promise.resolve(doc))
+    const recs = mock.method(DiscountRecord, 'create', (d) => Promise.resolve(d))
+    const audits = mock.method(AuditLog, 'create', () => Promise.resolve({}))
+    const payCreate = mock.method(BillingPayment, 'create', () => assert.fail('لا دفعات جديدة'))
+    const fd = mock.method(FinancialDocument, 'create', () => assert.fail('لا قيود جديدة'))
+    const r = await applyLegacyPackageDiscountRepair(plan, { _id: null, name: 'سكربت' })
+    assert.equal(r.applied, true)
+    assert.equal(doc.outstandingDebtSyp, 0)
+    assert.equal(doc.sessionPackages[0].packageTotalSyp, 400000)
+    assert.equal(doc.sessionPackages[0].listPriceSyp, 500000)
+    assert.equal(doc.sessionPackages[0].settlementDeltaSyp, 0)
+    assert.equal(recs.mock.callCount(), 1)
+    assert.equal(recs.mock.calls[0].arguments[0].appliedByName, 'سارة')
+    assert.equal(audits.mock.callCount(), 1)
+    assert.equal(payCreate.mock.callCount() + fd.mock.callCount(), 0)
+    const again = await applyLegacyPackageDiscountRepair(plan, { name: 'سكربت' })
+    assert.equal(again.applied, false, 'لا يُطبَّق مرتين')
+  })
+})

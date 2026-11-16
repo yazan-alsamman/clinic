@@ -240,7 +240,7 @@ function finalizeService(svc) {
 
 const PACKAGE_PURCHASE_LABEL = 'باكج مسبق الدفع'
 
-function isLegacyPackagePurchaseItem(bi) {
+export function isLegacyPackagePurchaseItem(bi) {
   return (
     !bi.packagePurchaseId &&
     bi.isPackagePrepaid !== true &&
@@ -249,7 +249,7 @@ function isLegacyPackagePurchaseItem(bi) {
 }
 
 /** يربط بند شراء باكج قديم بالباكج الأقرب (نفس القسم والمبلغ وخلال 30 دقيقة) */
-function matchLegacyPurchaseToPackage(bi, packages, taken) {
+export function matchLegacyPurchaseToPackage(bi, packages, taken) {
   const biT = new Date(bi.createdAt || 0).getTime()
   let best = null
   let bestDiff = Infinity
